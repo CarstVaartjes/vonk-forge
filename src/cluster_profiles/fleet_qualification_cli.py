@@ -44,7 +44,8 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--fixture-manifest",
         type=Path,
-        help="Override the checked-in digest-bound artifact qualification fixtures",
+        required=True,
+        help="Recipe-library-owned qualification manifest",
     )
     parser.add_argument(
         "--jurisdiction",
@@ -104,7 +105,7 @@ def run(argv: list[str] | None = None) -> dict[str, object]:
         allowed_node_ids=frozenset(args.node_id),
     )
     policy = load_policy(args.policy)
-    fixtures = FixtureRegistry.packaged(args.fixture_manifest)
+    fixtures = FixtureRegistry.load(args.fixture_manifest)
     client = ControlClient.from_environment()
     with node_locks(args.node_id), ledger_lock(args.ledger):
         ledger = EvidenceLedger(args.ledger)

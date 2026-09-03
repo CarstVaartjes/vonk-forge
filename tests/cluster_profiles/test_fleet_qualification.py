@@ -23,7 +23,39 @@ from cluster_profiles.fleet_qualification import (
     legal_blockers,
     load_policy,
 )
-from cluster_profiles.qualification_fixtures import FixtureRegistry
+from cluster_profiles.qualification_fixtures import (
+    FixtureRegistry,
+    RecipeFixture,
+    ServiceRecipe,
+)
+
+
+def _fixture_registry(lane: str | None = None) -> FixtureRegistry:
+    key = "vonk/tiny"
+    artifact = (
+        {
+            key: RecipeFixture(
+                key,
+                "a" * 64,
+                "image-job",
+                {},
+                (),
+                {},
+                60,
+                (),
+            )
+        }
+        if lane == "artifact"
+        else {}
+    )
+    service = (
+        {key: ServiceRecipe(key, "a" * 64, "tiny", (), {})}
+        if lane == "service"
+        else {}
+    )
+    return FixtureRegistry(
+        {}, artifact, {}, manifest_sha256="b" * 64, service_recipes=service
+    )
 
 
 class _Client:
@@ -125,7 +157,7 @@ def _role_disk(
 def _campaign_plan(
     recipes: list[dict[str, object]], options: RunnerOptions
 ) -> dict[str, object]:
-    fixture_sha = FixtureRegistry.packaged().manifest_sha256
+    fixture_sha = _fixture_registry().manifest_sha256
     intent_recipes = []
     for item in recipes:
         blockers = item.get("blockers", [])
@@ -643,12 +675,8 @@ def test_disjoint_node_pins_bind_distinct_intents_without_changing_unpinned_inte
 def test_plan_blocks_fixture_digest_drift_before_import(
     lane: str, expected_code: str
 ) -> None:
-    fixtures = FixtureRegistry.packaged()
-    key = (
-        next(iter(fixtures.recipes))
-        if lane == "artifact"
-        else next(iter(fixtures.service_recipes))
-    )
+    fixtures = _fixture_registry(lane)
+    key = "vonk/tiny"
     publisher, slug = key.split("/", 1)
     recipe = _recipe(slug)
     recipe["publisher"] = publisher
@@ -2063,7 +2091,7 @@ class _Response:
 
 
 class _FailingServiceSmoke:
-    fixtures = FixtureRegistry.packaged()
+    fixtures = _fixture_registry()
 
     def preview(self, *_args: object, **_kwargs: object) -> dict[str, object]:
         return {"available": True, "kind": "openai-service"}

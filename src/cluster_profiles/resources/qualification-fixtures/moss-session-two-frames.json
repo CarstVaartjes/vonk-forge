@@ -1,1 +1,0 @@
-{"schema_version":1,"initial_prompt":"Describe the visible frames briefly.","frame_queue_size":4,"max_tokens_per_second":4,"max_new_tokens":32,"playback_speed":1.0,"settle_seconds":1.0,"do_sample":false,"events":[{"type":"frame","path":"frame-a.png","timestamp":0.0,"at_seconds":0.0},{"type":"frame","path":"frame-b.png","timestamp":1.0,"at_seconds":0.0}]}

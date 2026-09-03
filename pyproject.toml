@@ -35,7 +35,7 @@ packages = ["src/cluster_profiles"]
 "src/cluster_profiles/schemas/model-definition-evidence.schema.json" = "cluster_profiles/schemas/model-definition-evidence.schema.json"
 "src/cluster_profiles/schemas/cluster-profile-v2.schema.json" = "cluster_profiles/schemas/cluster-profile-v2.schema.json"
 "src/cluster_profiles/schemas/workload-v2.schema.json" = "cluster_profiles/schemas/workload-v2.schema.json"
-"src/cluster_profiles/qualification_authorities/nl-single-spark-e6a8e750.json" = "cluster_profiles/qualification_authorities/nl-single-spark-e6a8e750.json"
+"src/cluster_profiles/schemas/qualification-manifest-v2.schema.json" = "cluster_profiles/schemas/qualification-manifest-v2.schema.json"
 
 [tool.ruff]
 required-version = "==0.16.1"

@@ -22,6 +22,8 @@ from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
+from jsonschema import Draft202012Validator
+
 from cluster_profiles.glb_validation import validate_mesh_glb_bytes
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -39,7 +41,25 @@ _FORMATS = frozenset({"glb", "json", "jpeg", "mp4", "png", "wav", "zip"})
 
 
 class FixtureError(ValueError):
-    """A checked-in fixture or its recipe binding is unsafe or inconsistent."""
+    """A supplied qualification manifest is unsafe or violates the contract."""
+
+
+def _validate_manifest_contract(document: Mapping[str, object]) -> None:
+    schema = json.loads(
+        resources.files("cluster_profiles")
+        .joinpath("schemas", "qualification-manifest-v2.schema.json")
+        .read_text(encoding="utf-8")
+    )
+    errors = sorted(
+        Draft202012Validator(schema).iter_errors(document),
+        key=lambda error: tuple(str(part) for part in error.absolute_path),
+    )
+    if errors:
+        error = errors[0]
+        location = ".".join(str(part) for part in error.absolute_path) or "$"
+        raise FixtureError(
+            f"qualification manifest contract violation at {location}: {error.message}"
+        )
 
 
 class ArtifactTransferClient(Protocol):
@@ -563,13 +583,15 @@ def _safe_zip_entries(content: bytes) -> list[tuple[str, bytes]]:
         raise FixtureError("ZIP structure is invalid") from error
 
 
-def _validate_hunyuan_ocr_zip(content: bytes) -> None:
+def _validate_document_archive(content: bytes, assertion: Mapping[str, object]) -> None:
     entries = _safe_zip_entries(content)
-    expected_names = ["manifest.json", "documents/001-digit7.md"]
+    expected_names = assertion["exact_names"]
     if [name for name, _ in entries] != expected_names:
-        raise FixtureError("Hunyuan OCR ZIP file-name contract failed")
+        raise FixtureError("document archive file-name contract failed")
     payloads = dict(entries)
-    manifest = _parse_json_object(payloads["manifest.json"], "Hunyuan OCR manifest")
+    manifest = _parse_json_object(
+        payloads["manifest.json"], "document archive manifest"
+    )
     if set(manifest) != {
         "documents",
         "inference",
@@ -580,28 +602,16 @@ def _validate_hunyuan_ocr_zip(content: bytes) -> None:
         "schema_version",
         "task_type",
     }:
-        raise FixtureError("Hunyuan OCR manifest shape is invalid")
-    expected = {
-        "inference": "vllm-dflash",
-        "model": "tencent/HunyuanOCR",
-        "model_revision": "47644ecc4fc854efa4f505155158831f36773ee4",
-        "runtime_source_revision": "c55965d3da1e6f41987abec8068f2e70851318bc",
-        "schema_version": 1,
-        "task_type": "doc_parse",
-    }
+        raise FixtureError("document archive manifest shape is invalid")
+    expected = _object(assertion["manifest_equals"], "manifest_equals")
     if any(manifest.get(name) != value for name, value in expected.items()):
-        raise FixtureError("Hunyuan OCR manifest authority is invalid")
-    if manifest.get("sampling") != {
-        "repetition_penalty": 1.08,
-        "temperature": 0.0,
-        "top_k": -1,
-        "top_p": 1.0,
-    }:
-        raise FixtureError("Hunyuan OCR sampling receipt is invalid")
+        raise FixtureError("document archive manifest authority is invalid")
+    if manifest.get("sampling") != assertion["sampling_equals"]:
+        raise FixtureError("document archive sampling receipt is invalid")
     documents = manifest.get("documents")
     if not isinstance(documents, list) or len(documents) != 1:
-        raise FixtureError("Hunyuan OCR document receipt is invalid")
-    document = _object(documents[0], "Hunyuan OCR document receipt")
+        raise FixtureError("document archive receipt is invalid")
+    document = _object(documents[0], "document archive receipt")
     if (
         set(document)
         != {
@@ -610,31 +620,34 @@ def _validate_hunyuan_ocr_zip(content: bytes) -> None:
             "input",
             "output",
         }
-        or document.get("input") != "digit7.png"
-        or document.get("output") != "documents/001-digit7.md"
+        or document.get("input") != assertion["input_name"]
+        or document.get("output") != assertion["output_name"]
     ):
-        raise FixtureError("Hunyuan OCR document receipt shape is invalid")
+        raise FixtureError("document archive receipt shape is invalid")
     if not isinstance(document.get("early_stopped_tail_repetition"), bool):
-        raise FixtureError("Hunyuan OCR early-stop receipt is invalid")
+        raise FixtureError("document archive early-stop receipt is invalid")
     try:
-        markdown = payloads["documents/001-digit7.md"].decode("utf-8")
+        markdown = payloads[str(assertion["output_name"])].decode("utf-8")
     except UnicodeDecodeError as error:
-        raise FixtureError("Hunyuan OCR Markdown is not UTF-8") from error
+        raise FixtureError("document archive text is not UTF-8") from error
     characters = document.get("characters")
     if (
         not isinstance(characters, int)
         or isinstance(characters, bool)
         or characters != len(markdown)
-        or re.search(r"(?<!\d)7(?!\d)", markdown) is None
+        or re.search(str(assertion["text_pattern"]), markdown) is None
     ):
-        raise FixtureError("Hunyuan OCR Markdown semantic assertion failed")
+        raise FixtureError("document archive text semantic assertion failed")
 
 
-def _validate_moss_transcript(content: bytes, expected_frame_count: int = 1) -> None:
+def _validate_realtime_transcript(
+    content: bytes, assertion: Mapping[str, object]
+) -> None:
+    expected_frame_count = int(assertion.get("frame_count", 1))
     lines = content.splitlines()
     if not 3 <= len(lines) <= 4_096 or any(not line for line in lines):
-        raise FixtureError("MOSS transcript record count is invalid")
-    records = [_parse_json_object(line, "MOSS transcript record") for line in lines]
+        raise FixtureError("realtime transcript record count is invalid")
+    records = [_parse_json_object(line, "realtime transcript record") for line in lines]
     previous_elapsed = -1.0
     allowed_shapes = {
         "session-start": {"sequence", "elapsed_seconds", "type", "model_revision"},
@@ -655,7 +668,7 @@ def _validate_moss_transcript(content: bytes, expected_frame_count: int = 1) -> 
             record_type not in allowed_shapes
             or set(record) != allowed_shapes[record_type]
         ):
-            raise FixtureError("MOSS transcript record shape is invalid")
+            raise FixtureError("realtime transcript record shape is invalid")
         elapsed = record.get("elapsed_seconds")
         if (
             record.get("sequence") != sequence
@@ -664,7 +677,7 @@ def _validate_moss_transcript(content: bytes, expected_frame_count: int = 1) -> 
             or not 0 <= float(elapsed) <= 3_600
             or float(elapsed) < previous_elapsed
         ):
-            raise FixtureError("MOSS transcript ordering is invalid")
+            raise FixtureError("realtime transcript ordering is invalid")
         previous_elapsed = float(elapsed)
         if record_type == "output" and (
             record.get("kind")
@@ -672,13 +685,12 @@ def _validate_moss_transcript(content: bytes, expected_frame_count: int = 1) -> 
             or not isinstance(record.get("text"), str)
             or len(str(record.get("text"))) > 65_536
         ):
-            raise FixtureError("MOSS transcript output record is invalid")
+            raise FixtureError("realtime transcript output record is invalid")
     if (
         records[0].get("type") != "session-start"
-        or records[0].get("model_revision")
-        != "06b067617677661194cf837970fe3a10f1a0e56d"
+        or records[0].get("model_revision") != assertion["model_revision"]
     ):
-        raise FixtureError("MOSS transcript model authority is invalid")
+        raise FixtureError("realtime transcript model authority is invalid")
     frame_records = [record for record in records if record.get("type") == "frame-ack"]
     if len(frame_records) != expected_frame_count or any(
         record.get("event_index") != index
@@ -686,7 +698,7 @@ def _validate_moss_transcript(content: bytes, expected_frame_count: int = 1) -> 
         or not isinstance(record.get("dropped_oldest"), bool)
         for index, record in enumerate(frame_records)
     ):
-        raise FixtureError("MOSS transcript frame acknowledgement is invalid")
+        raise FixtureError("realtime transcript frame acknowledgement is invalid")
     stop_indexes = [
         index
         for index, record in enumerate(records)
@@ -699,18 +711,19 @@ def _validate_moss_transcript(content: bytes, expected_frame_count: int = 1) -> 
             record.get("type") != "output" for record in records[stop_indexes[0] + 1 :]
         )
     ):
-        raise FixtureError("MOSS transcript terminal ordering is invalid")
+        raise FixtureError("realtime transcript terminal ordering is invalid")
 
 
-def _validate_ltx25_receipt(
+def _validate_synchronized_media_receipt(
     content: bytes,
     output_contents: Mapping[str, bytes],
     expected_profile: str,
+    assertion: Mapping[str, object],
 ) -> None:
-    document = _parse_json_object(content, "LTX 2.5 receipt")
+    document = _parse_json_object(content, "synchronized media receipt")
     canonical = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     if content != canonical + b"\n":
-        raise FixtureError("LTX 2.5 receipt is not canonical JSON")
+        raise FixtureError("synchronized media receipt is not canonical JSON")
     if set(document) != {
         "media",
         "output_sha256",
@@ -720,80 +733,82 @@ def _validate_ltx25_receipt(
         "seed",
         "tensors",
     }:
-        raise FixtureError("LTX 2.5 receipt top-level shape is invalid")
-    output = output_contents.get("ltx-2.5.mp4")
+        raise FixtureError("synchronized media receipt top-level shape is invalid")
+    output = output_contents.get(str(assertion["output_name"]))
     if (
         output is None
         or document.get("output_sha256") != hashlib.sha256(output).hexdigest()
     ):
-        raise FixtureError("LTX 2.5 receipt output digest is invalid")
+        raise FixtureError("synchronized media receipt output digest is invalid")
     prompt_digest = document.get("prompt_sha256")
     if not isinstance(prompt_digest, str) or not _DIGEST.fullmatch(prompt_digest):
-        raise FixtureError("LTX 2.5 receipt prompt digest is invalid")
-    if document.get("profile") not in {
-        "bf16-model-offload",
-        "fp8-cast-model-offload",
-        "fp8-cast-sequential-offload",
-    }:
-        raise FixtureError("LTX 2.5 receipt profile is invalid")
+        raise FixtureError("synchronized media receipt prompt digest is invalid")
+    if document.get("profile") not in assertion["allowed_profiles"]:
+        raise FixtureError("synchronized media receipt profile is invalid")
     if document.get("profile") != expected_profile:
-        raise FixtureError("LTX 2.5 receipt does not match the requested profile")
+        raise FixtureError(
+            "synchronized media receipt does not match the requested profile"
+        )
     seed = document.get("seed")
     if (
         not isinstance(seed, int)
         or isinstance(seed, bool)
         or not 0 <= seed <= 9_223_372_036_854_775_807
     ):
-        raise FixtureError("LTX 2.5 receipt seed is invalid")
-    media = _object(document.get("media"), "LTX 2.5 receipt media")
-    expected_media = {
-        "audio_channels": 2,
-        "audio_codec": "aac",
-        "audio_sample_rate": 48000,
-        "duration_seconds": 2.7083333333333335,
-        "fps": 24,
-        "frames": 65,
-        "height": 512,
-        "video_codec": "h264",
-        "width": 768,
-    }
-    if set(media) != {*expected_media, "audio_samples"} or any(
+        raise FixtureError("synchronized media receipt seed is invalid")
+    media = _object(document.get("media"), "synchronized media receipt media")
+    expected_media = _object(assertion["media_equals"], "media_equals")
+    positive_media_fields = assertion["media_positive_integers"]
+    if set(media) != {*expected_media, *positive_media_fields} or any(
         media.get(key) != value for key, value in expected_media.items()
     ):
-        raise FixtureError("LTX 2.5 receipt media shape is invalid")
-    audio_samples = media.get("audio_samples")
-    if (
-        not isinstance(audio_samples, int)
-        or isinstance(audio_samples, bool)
-        or audio_samples < 1
-    ):
-        raise FixtureError("LTX 2.5 receipt audio sample count is invalid")
-    runtime = _object(document.get("runtime"), "LTX 2.5 receipt runtime")
+        raise FixtureError("synchronized media receipt shape is invalid")
+    for name in positive_media_fields:
+        value = media.get(name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise FixtureError(
+                f"synchronized media receipt {name} is not a positive integer"
+            )
+    runtime = _object(document.get("runtime"), "synchronized media receipt runtime")
+    runtime_equals = _object(assertion["runtime_equals"], "runtime_equals")
+    nullable_strings = assertion["runtime_nullable_strings"]
+    nullable_integers = assertion["runtime_nullable_integers"]
+    nonempty_strings = assertion["runtime_nonempty_strings"]
     if set(runtime) != {
-        "cuda",
-        "cudnn",
-        "diffusers_revision",
-        "model_revision",
-        "torch",
+        *runtime_equals,
+        *nullable_strings,
+        *nullable_integers,
+        *nonempty_strings,
     }:
-        raise FixtureError("LTX 2.5 receipt runtime shape is invalid")
-    if (
-        runtime.get("diffusers_revision") != "d035dcd7cc7c88e0a154609b62887d50bba9fdc2"
-        or runtime.get("model_revision") != "426936f8b22dc28e4def61e515478b0b7e4a53cc"
-    ):
-        raise FixtureError("LTX 2.5 receipt runtime revision is invalid")
-    if runtime.get("cuda") is not None and not isinstance(runtime.get("cuda"), str):
-        raise FixtureError("LTX 2.5 receipt CUDA version is invalid")
-    cudnn = runtime.get("cudnn")
-    if cudnn is not None and (not isinstance(cudnn, int) or isinstance(cudnn, bool)):
-        raise FixtureError("LTX 2.5 receipt cuDNN version is invalid")
-    if not isinstance(runtime.get("torch"), str) or not runtime.get("torch"):
-        raise FixtureError("LTX 2.5 receipt Torch version is invalid")
-    tensors = _object(document.get("tensors"), "LTX 2.5 receipt tensors")
-    if set(tensors) != {"audio", "video"}:
-        raise FixtureError("LTX 2.5 receipt tensor shape is invalid")
-    for name in ("audio", "video"):
-        tensor = _object(tensors.get(name), f"LTX 2.5 {name} tensor")
+        raise FixtureError("synchronized media receipt runtime shape is invalid")
+    if any(runtime.get(name) != value for name, value in runtime_equals.items()):
+        raise FixtureError("synchronized media receipt runtime revision is invalid")
+    for name in nullable_strings:
+        value = runtime.get(name)
+        if value is not None and not isinstance(value, str):
+            raise FixtureError(
+                f"synchronized media receipt {name} is not a nullable string"
+            )
+    for name in nullable_integers:
+        value = runtime.get(name)
+        if value is not None and (
+            not isinstance(value, int) or isinstance(value, bool)
+        ):
+            raise FixtureError(
+                f"synchronized media receipt {name} is not a nullable integer"
+            )
+    for name in nonempty_strings:
+        value = runtime.get(name)
+        if not isinstance(value, str) or not value:
+            raise FixtureError(
+                f"synchronized media receipt {name} is not a nonempty string"
+            )
+    tensors = _object(document.get("tensors"), "synchronized media receipt tensors")
+    tensor_shapes = _object(assertion["tensor_shapes"], "tensor_shapes")
+    if set(tensors) != set(tensor_shapes):
+        raise FixtureError("synchronized media receipt tensor shape is invalid")
+    for name, expected_shape in tensor_shapes.items():
+        tensor = _object(tensors.get(name), f"synchronized media {name} tensor")
         shape = tensor.get("shape")
         digest = tensor.get("sha256")
         if (
@@ -809,10 +824,11 @@ def _validate_ltx25_receipt(
             or not isinstance(digest, str)
             or not _DIGEST.fullmatch(digest)
         ):
-            raise FixtureError(f"LTX 2.5 {name} tensor metadata is invalid")
-    video = _object(tensors["video"], "LTX 2.5 video tensor")
-    if video.get("shape") != [65, 512, 768, 3]:
-        raise FixtureError("LTX 2.5 video tensor shape is invalid")
+            raise FixtureError(f"synchronized media {name} tensor metadata is invalid")
+        if expected_shape is not None and shape != expected_shape:
+            raise FixtureError(
+                f"synchronized media {name} tensor shape does not match the contract"
+            )
 
 
 def _fixture_format(media_type: str) -> str | None:
@@ -845,23 +861,19 @@ class FixtureRegistry:
         self.manifest_sha256 = manifest_sha256
 
     @classmethod
-    def packaged(cls, path: Path | None = None) -> FixtureRegistry:
-        package_root = resources.files("cluster_profiles").joinpath("resources")
+    def load(cls, path: Path) -> FixtureRegistry:
         try:
-            raw = (
-                path.read_bytes()
-                if path is not None
-                else package_root.joinpath("qualification-fixtures.json").read_bytes()
-            )
+            raw = path.read_bytes()
             value = _strict_json_loads(raw)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
             raise FixtureError(
                 "qualification fixture manifest is unreadable"
             ) from error
         document = _object(value, "qualification fixture manifest")
-        if document.get("schema_version") not in {1, 2}:
-            raise FixtureError("qualification fixture schema_version must be 1 or 2")
-        fixture_root = path.parent if path is not None else package_root
+        _validate_manifest_contract(document)
+        if document.get("schema_version") != 2:
+            raise FixtureError("qualification fixture schema_version must be 2")
+        fixture_root = path.resolve().parent
         raw_fixtures = _object(document.get("fixtures"), "fixtures")
         fixtures: dict[str, Fixture] = {}
         for fixture_id, raw_fixture in raw_fixtures.items():
@@ -945,11 +957,6 @@ class FixtureRegistry:
                 provenance,
             )
         raw_recipes = _object(document.get("recipes"), "recipes")
-        if document.get("schema_version") == 1 and any(
-            isinstance(raw_recipe, Mapping) and "cases" in raw_recipe
-            for raw_recipe in raw_recipes.values()
-        ):
-            raise FixtureError("qualification fixture cases require schema_version 2")
         recipes = {
             key: _parse_recipe_fixture(key, raw_recipe, fixtures)
             for key, raw_recipe in raw_recipes.items()
@@ -1212,9 +1219,9 @@ def _parse_recipe_case(
     if len(assertion_identities) != len(set(assertion_identities)):
         raise FixtureError(f"recipe fixture {key} has duplicate assertions")
     semantic_kind = {
-        "application/json": {"json-document", "semantic-receipt"},
-        "application/x-ndjson": {"jsonl-records", "moss-transcript"},
-        "application/zip": {"ocr-zip", "zip-entries"},
+        "application/json": {"json-document", "synchronized-media-receipt"},
+        "application/x-ndjson": {"jsonl-records", "realtime-transcript"},
+        "application/zip": {"document-archive", "zip-entries"},
         "audio/wav": {"audio-metadata"},
         "image/png": {"image-metadata"},
         "model/gltf-binary": {"glb-structure"},
@@ -1315,8 +1322,22 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
             "minimum_entries",
             "nonempty",
         },
-        "ocr-zip": {"kind", "media_type", "profile"},
-        "moss-transcript": {"kind", "media_type", "profile", "frame_count"},
+        "document-archive": {
+            "kind",
+            "media_type",
+            "exact_names",
+            "manifest_equals",
+            "sampling_equals",
+            "input_name",
+            "output_name",
+            "text_pattern",
+        },
+        "realtime-transcript": {
+            "kind",
+            "media_type",
+            "model_revision",
+            "frame_count",
+        },
         "json-document": {
             "kind",
             "media_type",
@@ -1330,7 +1351,22 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
             "equals",
             "minimum_records",
         },
-        "semantic-receipt": {"kind", "media_type", "profile"},
+        "synchronized-media-receipt": {
+            "kind",
+            "media_type",
+            "profile",
+            "profile_from_request",
+            "default_profile",
+            "allowed_profiles",
+            "output_name",
+            "media_equals",
+            "media_positive_integers",
+            "runtime_equals",
+            "runtime_nullable_strings",
+            "runtime_nullable_integers",
+            "runtime_nonempty_strings",
+            "tensor_shapes",
+        },
     }
     if kind not in allowed_fields or set(assertion) - allowed_fields[kind]:
         raise FixtureError(f"recipe fixture {key} assertion fields are invalid")
@@ -1470,13 +1506,37 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
         ):
             raise FixtureError(f"recipe fixture {key} ZIP suffixes are invalid")
         _integer(assertion.get("minimum_entries", 1), "minimum ZIP entries", 1, 10_000)
-    elif kind == "ocr-zip":
-        if assertion.get("profile") != "hunyuanocr-digit7-v1":
-            raise FixtureError(f"recipe fixture {key} OCR ZIP profile is invalid")
-    elif kind == "moss-transcript":
-        if assertion.get("profile") != "moss-realtime-v1":
-            raise FixtureError(f"recipe fixture {key} MOSS profile is invalid")
-        _integer(assertion.get("frame_count", 1), "MOSS frame count", 1, 128)
+    elif kind == "document-archive":
+        names = assertion.get("exact_names")
+        if (
+            not isinstance(names, list)
+            or len(names) < 2
+            or any(
+                not isinstance(name, str)
+                or not _NAME.fullmatch(PurePosixPath(name).name)
+                for name in names
+            )
+            or names[0] != "manifest.json"
+            or not isinstance(assertion.get("manifest_equals"), Mapping)
+            or not isinstance(assertion.get("sampling_equals"), Mapping)
+            or not isinstance(assertion.get("input_name"), str)
+            or not _NAME.fullmatch(str(assertion["input_name"]))
+            or assertion.get("output_name") not in names
+            or not isinstance(assertion.get("text_pattern"), str)
+        ):
+            raise FixtureError(f"recipe fixture {key} document archive is invalid")
+        try:
+            re.compile(str(assertion["text_pattern"]))
+        except re.error as error:
+            raise FixtureError(
+                f"recipe fixture {key} document archive regex is invalid"
+            ) from error
+    elif kind == "realtime-transcript":
+        if not isinstance(assertion.get("model_revision"), str) or not assertion.get(
+            "model_revision"
+        ):
+            raise FixtureError(f"recipe fixture {key} transcript authority is invalid")
+        _integer(assertion.get("frame_count", 1), "frame count", 1, 128)
     elif kind in {"json-document", "jsonl-records"}:
         required = assertion.get("required_keys", [])
         if not isinstance(required, list) or any(
@@ -1500,12 +1560,64 @@ def _parse_assertion(key: str, raw: object) -> dict[str, object]:
                 ) from error
             if not isinstance(equals, Mapping) or equals_size > 64 * 1024:
                 raise FixtureError(f"recipe fixture {key} JSON equals is invalid")
-    elif kind == "semantic-receipt":
-        if assertion.get("profile") not in {
-            "ltx-2.5",
-            "fp8-cast-sequential-offload",
-        }:
-            raise FixtureError(f"recipe fixture {key} receipt profile is invalid")
+    elif kind == "synchronized-media-receipt":
+        allowed_profiles = assertion.get("allowed_profiles")
+        list_fields = (
+            "media_positive_integers",
+            "runtime_nullable_strings",
+            "runtime_nullable_integers",
+            "runtime_nonempty_strings",
+        )
+        parsed_lists = [assertion.get(name) for name in list_fields]
+        tensor_shapes = assertion.get("tensor_shapes")
+        runtime_equals = assertion.get("runtime_equals")
+        media_equals = assertion.get("media_equals")
+        if (
+            not isinstance(assertion.get("profile"), str)
+            or not isinstance(assertion.get("profile_from_request"), bool)
+            or not isinstance(assertion.get("default_profile"), str)
+            or not isinstance(allowed_profiles, list)
+            or not allowed_profiles
+            or any(
+                not isinstance(value, str) or not value for value in allowed_profiles
+            )
+            or not isinstance(assertion.get("output_name"), str)
+            or not isinstance(media_equals, Mapping)
+            or not isinstance(runtime_equals, Mapping)
+            or any(
+                not isinstance(values, list)
+                or any(not isinstance(value, str) or not value for value in values)
+                or len(values) != len(set(values))
+                for values in parsed_lists
+            )
+            or len({value for values in parsed_lists for value in values})
+            != sum(len(values) for values in parsed_lists)
+            or any(
+                value in runtime_equals
+                for values in parsed_lists[1:]
+                for value in values
+            )
+            or any(value in media_equals for value in parsed_lists[0])
+            or not isinstance(tensor_shapes, Mapping)
+            or not tensor_shapes
+            or any(
+                not isinstance(name, str)
+                or not name
+                or shape is not None
+                and (
+                    not isinstance(shape, list)
+                    or not shape
+                    or any(
+                        not isinstance(value, int)
+                        or isinstance(value, bool)
+                        or value < 0
+                        for value in shape
+                    )
+                )
+                for name, shape in tensor_shapes.items()
+            )
+        ):
+            raise FixtureError(f"recipe fixture {key} receipt contract is invalid")
     else:
         raise FixtureError(f"recipe fixture {key} assertion kind is invalid")
     return assertion
@@ -1758,11 +1870,11 @@ def validate_outputs(
                     "video-metadata",
                     "glb-structure",
                     "zip-entries",
-                    "ocr-zip",
-                    "moss-transcript",
+                    "document-archive",
+                    "realtime-transcript",
                     "json-document",
                     "jsonl-records",
-                    "semantic-receipt",
+                    "synchronized-media-receipt",
                 }
                 and not selected
             ):
@@ -1959,14 +2071,12 @@ def validate_outputs(
                         not data for _, data in entries
                     ):
                         raise FixtureError("artifact ZIP empty-entry assertion failed")
-            if kind == "ocr-zip":
+            if kind == "document-archive":
                 for _, content, _ in selected:
-                    _validate_hunyuan_ocr_zip(content)
-            if kind == "moss-transcript":
+                    _validate_document_archive(content, assertion)
+            if kind == "realtime-transcript":
                 for _, content, _ in selected:
-                    _validate_moss_transcript(
-                        content, int(assertion.get("frame_count", 1))
-                    )
+                    _validate_realtime_transcript(content, assertion)
             if kind == "json-document":
                 for _, content, _ in selected:
                     document = _parse_json_object(content, "artifact JSON")
@@ -1984,7 +2094,7 @@ def validate_outputs(
                         )
                     for record in records:
                         _assert_required_keys(record, assertion)
-            if kind == "semantic-receipt":
+            if kind == "synchronized-media-receipt":
                 output_contents = {
                     str(item["name"]): content for item, content, _ in contents
                 }
@@ -1993,33 +2103,31 @@ def validate_outputs(
                     if slot != "request":
                         continue
                     request = _parse_json_object(
-                        input_fixture.content, "LTX 2.5 qualification request"
+                        input_fixture.content, "qualification request"
                     )
                     request_profiles.append(request.get("profile"))
                 declared_profile = str(assertion["profile"])
-                if declared_profile == "ltx-2.5":
+                if assertion["profile_from_request"]:
                     if len(request_profiles) > 1 or any(
-                        profile
-                        not in {
-                            "fp8-cast-model-offload",
-                            "fp8-cast-sequential-offload",
-                        }
+                        profile not in assertion["allowed_profiles"]
                         for profile in request_profiles
                     ):
-                        raise FixtureError("LTX 2.5 qualification profile is invalid")
+                        raise FixtureError("qualification profile is invalid")
                     expected_profile = (
                         str(request_profiles[0])
                         if request_profiles
-                        else "bf16-model-offload"
+                        else str(assertion["default_profile"])
                     )
                 else:
                     if request_profiles:
                         raise FixtureError(
-                            "immutable LTX 2.5 qualification profile cannot be overridden"
+                            "immutable qualification profile cannot be overridden"
                         )
                     expected_profile = declared_profile
                 for _, content, _ in selected:
-                    _validate_ltx25_receipt(content, output_contents, expected_profile)
+                    _validate_synchronized_media_receipt(
+                        content, output_contents, expected_profile, assertion
+                    )
     return {
         "assertions": list(recipe.assertions),
         "output_files": outputs,

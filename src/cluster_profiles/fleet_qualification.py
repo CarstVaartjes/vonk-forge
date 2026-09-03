@@ -1297,7 +1297,9 @@ class ArtifactJobSmokeAdapter:
     """Run exact digest-bound fixtures through the durable artifact-job lifecycle."""
 
     def __init__(self, fixtures: FixtureRegistry | None = None) -> None:
-        self.fixtures = fixtures or FixtureRegistry.packaged()
+        self.fixtures = fixtures or FixtureRegistry(
+            {}, {}, {}, manifest_sha256="b" * 64
+        )
 
     def preview(
         self,
@@ -1617,7 +1619,9 @@ class ServiceSmokeAdapter:
         timeout_seconds: float = 180,
         opener: Any = urllib.request.urlopen,
     ):
-        self.fixtures = fixtures or FixtureRegistry.packaged()
+        self.fixtures = fixtures or FixtureRegistry(
+            {}, {}, {}, manifest_sha256="b" * 64
+        )
         self.timeout_seconds = timeout_seconds
         self.opener = opener
 
@@ -1755,8 +1759,15 @@ class QualificationRunner:
         self.ledger = ledger
         self.options = options
         self.monitor = monitor or OperationMonitor(client, ledger, options)
-        self.artifact_smoke = artifact_smoke or ArtifactJobSmokeAdapter()
-        self.service_smoke = service_smoke or ServiceSmokeAdapter()
+        fixtures = (
+            artifact_smoke.fixtures
+            if artifact_smoke is not None
+            else service_smoke.fixtures
+            if service_smoke is not None
+            else FixtureRegistry({}, {}, {}, manifest_sha256="b" * 64)
+        )
+        self.artifact_smoke = artifact_smoke or ArtifactJobSmokeAdapter(fixtures)
+        self.service_smoke = service_smoke or ServiceSmokeAdapter(fixtures)
         self._capacity_remaining: dict[str, int] = {}
         self._capacity_artifacts: dict[str, set[str]] = {}
         self._prepared: dict[str, tuple[str, str, Mapping[str, object]]] = {}

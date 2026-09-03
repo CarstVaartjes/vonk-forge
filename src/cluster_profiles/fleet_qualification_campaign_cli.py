@@ -14,7 +14,6 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import ExitStack
 from dataclasses import dataclass
-from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -37,9 +36,6 @@ _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _RECIPE_KEY = re.compile(r"[^/\s]+/[^/\s]+\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_MANIFEST_BYTES = 1024 * 1024
-_AUTHORITY_FILES = {
-    "nl-single-spark-e6a8e750": "nl-single-spark-e6a8e750.json",
-}
 
 
 @dataclass(frozen=True)
@@ -78,7 +74,7 @@ class CampaignManifest:
     operation_timeout_seconds: float
     poll_interval_seconds: float
     policy: Path | None
-    fixture_manifest: Path | None
+    fixture_manifest: Path
 
 
 @dataclass(frozen=True)
@@ -149,9 +145,12 @@ def _bounded_number(
     return float(value)
 
 
-def _recipe_keys(value: object, label: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not value:
-        raise QualificationError(f"campaign manifest {label} must be a non-empty list")
+def _recipe_keys(
+    value: object, label: str, *, allow_empty: bool = False
+) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value and not allow_empty:
+        requirement = "a list" if allow_empty else "a non-empty list"
+        raise QualificationError(f"campaign manifest {label} must be {requirement}")
     result: list[str] = []
     for raw in value:
         key = _string(raw, f"{label} recipe")
@@ -173,30 +172,26 @@ def _manifest_path(root: Path, value: object, label: str) -> Path:
     )
 
 
-def _load_authority(authority_id: str) -> CampaignAuthority:
-    filename = _AUTHORITY_FILES.get(authority_id)
-    if filename is None:
+def _load_authority(path: Path) -> CampaignAuthority:
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
         raise QualificationError(
-            f"campaign qualification authority is not reviewed: {authority_id}"
-        )
-    raw = (
-        resources.files("cluster_profiles")
-        .joinpath("qualification_authorities", filename)
-        .read_bytes()
-    )
+            f"campaign qualification authority cannot be read: {path}"
+        ) from error
     try:
         document = json.loads(
             raw.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise QualificationError(
-            f"checked-in qualification authority is invalid: {authority_id}"
+            f"qualification authority is invalid: {path}"
         ) from error
     root = _object(document, "qualification authority")
     schema_version = root.get("schema_version")
     if schema_version != 2 or isinstance(schema_version, bool):
         raise QualificationError(
-            f"checked-in qualification authority identity is invalid: {authority_id}"
+            f"qualification authority identity is invalid: {path}"
         )
     category_fields = {
         "capacity_blocked_recipe_keys",
@@ -218,9 +213,10 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
         optional=set(),
         label="qualification authority",
     )
-    if root["authority_id"] != authority_id:
+    authority_id = _string(root["authority_id"], "authority_id")
+    if _LANE_NAME.fullmatch(authority_id) is None:
         raise QualificationError(
-            f"checked-in qualification authority identity is invalid: {authority_id}"
+            f"qualification authority identity is invalid: {path}"
         )
     catalog = _object(root["catalog"], "qualification authority catalog")
     _exact_keys(
@@ -248,7 +244,7 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
         or recipe_count < 1
     ):
         raise QualificationError(
-            f"checked-in qualification authority catalog is invalid: {authority_id}"
+            f"qualification authority catalog is invalid: {authority_id}"
         )
     jurisdiction = _string(root["jurisdiction"], "authority jurisdiction")
     if (
@@ -258,14 +254,14 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
         or jurisdiction != jurisdiction.upper()
     ):
         raise QualificationError(
-            f"checked-in qualification authority jurisdiction is invalid: {authority_id}"
+            f"qualification authority jurisdiction is invalid: {authority_id}"
         )
     recipe_keys = _recipe_keys(
         root["actionable_recipe_keys"], "authority actionable_recipe_keys"
     )
     if recipe_keys != tuple(sorted(recipe_keys)):
         raise QualificationError(
-            f"checked-in qualification authority recipe keys are not sorted: {authority_id}"
+            f"qualification authority recipe keys are not sorted: {authority_id}"
         )
     disposition = _object(
         root["reviewed_disposition"], "qualification authority disposition"
@@ -290,14 +286,14 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
         for field in disposition_fields
     ):
         raise QualificationError(
-            f"checked-in qualification authority counts are invalid: {authority_id}"
+            f"qualification authority counts are invalid: {authority_id}"
         )
     category_keys: dict[str, tuple[str, ...]] = {}
     for field in sorted(category_fields):
-        values = _recipe_keys(root[field], f"authority {field}")
+        values = _recipe_keys(root[field], f"authority {field}", allow_empty=True)
         if values != tuple(sorted(values)):
             raise QualificationError(
-                "checked-in qualification authority category keys are not "
+                "qualification authority category keys are not "
                 f"sorted: {authority_id} {field}"
             )
         category_keys[field] = values
@@ -306,7 +302,7 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
     duplicates = sorted(key for key in set(assigned) if assigned.count(key) > 1)
     if duplicates:
         raise QualificationError(
-            "checked-in qualification authority classifies recipe more than "
+            "qualification authority classifies recipe more than "
             f"once: {authority_id} {duplicates[0]}"
         )
     expected_counts = {
@@ -323,7 +319,7 @@ def _load_authority(authority_id: str) -> CampaignAuthority:
     closure_matches = len(assigned) == recipe_count
     if not counts_match or not closure_matches:
         raise QualificationError(
-            f"checked-in qualification authority closure is invalid: {authority_id}"
+            f"qualification authority closure is invalid: {authority_id}"
         )
     return CampaignAuthority(
         authority_id=authority_id,
@@ -363,8 +359,13 @@ def load_manifest(path: Path) -> CampaignManifest:
     root = _object(document, "root")
     _exact_keys(
         root,
-        required={"schema_version", "qualification_authority", "lanes"},
-        optional={"options", "policy", "fixture_manifest"},
+        required={
+            "schema_version",
+            "qualification_authority",
+            "fixture_manifest",
+            "lanes",
+        },
+        optional={"options", "policy"},
         label="root",
     )
     if (
@@ -374,14 +375,18 @@ def load_manifest(path: Path) -> CampaignManifest:
     ):
         raise QualificationError("campaign manifest schema_version must be 1")
 
+    manifest_root = path.resolve().parent
     authority = _load_authority(
-        _string(root["qualification_authority"], "qualification_authority")
+        _manifest_path(
+            manifest_root,
+            root["qualification_authority"],
+            "qualification_authority",
+        )
     )
     intended = authority.actionable_recipe_keys
     raw_lanes = root["lanes"]
     if not isinstance(raw_lanes, list) or len(raw_lanes) != 2:
         raise QualificationError("campaign manifest must contain exactly two lanes")
-    manifest_root = path.resolve().parent
     lanes: list[CampaignLane] = []
     for index, raw_lane in enumerate(raw_lanes):
         lane = _object(raw_lane, f"lanes[{index}]")
@@ -482,10 +487,8 @@ def load_manifest(path: Path) -> CampaignManifest:
         if "policy" in root
         else None
     )
-    fixture_manifest = (
-        _manifest_path(manifest_root, root["fixture_manifest"], "fixture_manifest")
-        if "fixture_manifest" in root
-        else None
+    fixture_manifest = _manifest_path(
+        manifest_root, root["fixture_manifest"], "fixture_manifest"
     )
     protected_inputs = {
         value
@@ -552,7 +555,7 @@ def _prepare_lanes(
     manifest: CampaignManifest, client_factory: Callable[[], Any]
 ) -> tuple[PreparedLane, PreparedLane]:
     policy = load_policy(manifest.policy)
-    fixtures = FixtureRegistry.packaged(manifest.fixture_manifest)
+    fixtures = FixtureRegistry.load(manifest.fixture_manifest)
     prepared: list[PreparedLane] = []
     for lane in manifest.lanes:
         options = RunnerOptions(
@@ -721,7 +724,7 @@ def run(
             raise QualificationError(
                 "--campaign-digest does not match the current two-lane plans"
             )
-        fixtures = FixtureRegistry.packaged(manifest.fixture_manifest)
+        fixtures = FixtureRegistry.load(manifest.fixture_manifest)
         results: dict[str, dict[str, object]] = {}
         failures: list[tuple[str, Exception]] = []
         with ThreadPoolExecutor(
