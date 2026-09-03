@@ -124,6 +124,8 @@ pub trait CommandRunner: Send + Sync {
 #[derive(Debug, Clone, Copy)]
 pub struct ProcessCommandRunner;
 
+const ROOT_COMMAND_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
 impl CommandRunner for ProcessCommandRunner {
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
         let timeout = if executable == Path::new("/usr/bin/dpkg") {
@@ -169,7 +171,7 @@ impl CommandRunner for ProcessCommandRunner {
             .env_clear()
             .env("LANG", "C.UTF-8")
             .env("LC_ALL", "C.UTF-8")
-            .env("PATH", "/usr/bin:/bin")
+            .env("PATH", ROOT_COMMAND_PATH)
             .current_dir("/")
             .stdin(Stdio::null())
             .stderr(Stdio::null())
@@ -214,6 +216,19 @@ impl CommandRunner for ProcessCommandRunner {
             stdout,
             exit_code: status.code(),
         })
+    }
+}
+
+#[cfg(test)]
+mod process_command_runner_tests {
+    use super::ROOT_COMMAND_PATH;
+
+    #[test]
+    fn privileged_command_path_includes_debian_administrative_binaries() {
+        let entries = ROOT_COMMAND_PATH.split(':').collect::<Vec<_>>();
+        assert!(entries.contains(&"/usr/sbin"));
+        assert!(entries.contains(&"/sbin"));
+        assert!(entries.iter().all(|entry| entry.starts_with('/')));
     }
 }
 
