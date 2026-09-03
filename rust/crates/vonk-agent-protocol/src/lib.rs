@@ -425,7 +425,7 @@ pub struct EnrollmentEvidence {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecipeOperationRequest {
-    Build(RecipeBuildRequest),
+    Build(Box<RecipeBuildRequest>),
     ImageImport(RecipeImageImportRequest),
     JobRun(RecipeJobRunRequest),
     Install(RecipeInstallRequest),
@@ -786,7 +786,7 @@ impl RecipeOperationRequest {
         let request = match claim.operation.as_str() {
             "recipe.build.v1" => {
                 validate_build_wire(&claim.payload)?;
-                Self::Build(serde_json::from_value(claim.payload.clone())?)
+                Self::Build(Box::new(serde_json::from_value(claim.payload.clone())?))
             }
             "recipe.image.import.v1" => {
                 Self::ImageImport(serde_json::from_value(claim.payload.clone())?)
