@@ -711,15 +711,23 @@ impl<R: BufRead, W: Write, S: SecretInput<R, W>> PromptIo<R, W, S> {
     }
 
     fn required(&mut self, prompt: &RequiredValuePrompt) -> Result<String, SetupError> {
-        let label = match &prompt.default {
+        self.required_with_default(prompt, prompt.default.as_deref())
+    }
+
+    fn required_with_default(
+        &mut self,
+        prompt: &RequiredValuePrompt,
+        default: Option<&str>,
+    ) -> Result<String, SetupError> {
+        let label = match default {
             Some(default) => format!("{} [{}]", prompt.prompt, default),
             None => prompt.prompt.clone(),
         };
         loop {
             let value = self.line(&label)?;
             let selected = if value.is_empty() {
-                if let Some(default) = &prompt.default {
-                    default.clone()
+                if let Some(default) = default {
+                    default.to_owned()
                 } else {
                     writeln!(self.writer, "A value is required.")?;
                     continue;
@@ -978,7 +986,11 @@ fn install<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
             .collect::<Vec<_>>();
         let mut secret_values = Vec::new();
         for value in &payload.required_values {
-            environment.push((value.env.clone(), prompt.required(value)?));
+            let default = required_value_default(value, &environment);
+            environment.push((
+                value.env.clone(),
+                prompt.required_with_default(value, default.as_deref())?,
+            ));
         }
         for secret in &payload.secrets {
             secret_values.push((secret.file.clone(), prompt.secret(secret, generator)?));
@@ -1514,7 +1526,8 @@ fn validate_pki_material_at(
             _ => None,
         })
         .collect::<Vec<_>>();
-    if actual_hostnames != expected_hostnames {
+    let controller_hostnames_changed = actual_hostnames != expected_hostnames;
+    if controller_hostnames_changed && !allow_expired_controller {
         return Err(invalid_pki(
             "controller certificate hostnames do not match the configured hostnames",
         ));
@@ -1581,8 +1594,8 @@ fn validate_pki_material_at(
         now + time::Duration::days(CONTROLLER_CERTIFICATE_RENEWAL_THRESHOLD_DAYS);
     Ok(ValidatedPkiMaterial {
         kid: public.kid,
-        controller_needs_renewal: server.validity().not_after.timestamp()
-            <= renewal_deadline.unix_timestamp(),
+        controller_needs_renewal: controller_hostnames_changed
+            || server.validity().not_after.timestamp() <= renewal_deadline.unix_timestamp(),
     })
 }
 
@@ -1716,7 +1729,11 @@ fn upgrade<R: BufRead, W: Write, S: SecretInput<R, W>, G: SecretGenerator>(
     let mut controller_leaf_replacement = None;
     for required in &payload.required_values {
         if environment_value(&environment, &required.env).is_none() {
-            environment.push((required.env.clone(), prompt.required(required)?));
+            let default = required_value_default(required, &environment);
+            environment.push((
+                required.env.clone(),
+                prompt.required_with_default(required, default.as_deref())?,
+            ));
         }
     }
     collect_missing_secrets(
@@ -1983,6 +2000,23 @@ fn environment_value<'a>(values: &'a [(String, String)], name: &str) -> Option<&
     values
         .iter()
         .find_map(|(key, value)| (key == name).then_some(value.as_str()))
+}
+
+fn required_value_default(
+    prompt: &RequiredValuePrompt,
+    environment: &[(String, String)],
+) -> Option<String> {
+    prompt.default.clone().or_else(|| {
+        let prefix = match prompt.env.as_str() {
+            "VONK_AGENT_ENROLL_HOSTNAME" => "enroll",
+            "VONK_AGENT_HOSTNAME" => "agents",
+            "VONK_REGISTRY_HOSTNAME" => "registry",
+            _ => return None,
+        };
+        let control = environment_value(environment, "VONK_CONTROL_HOSTNAME")?;
+        let tailnet = control.strip_prefix("vonk-forge.")?;
+        Some(format!("{prefix}.{tailnet}"))
+    })
 }
 
 fn set_environment_value(values: &mut Vec<(String, String)>, name: &str, value: String) {

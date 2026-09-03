@@ -227,7 +227,9 @@ def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
     replacements = run._controller_response_replacements()
 
     assert replacements["Trusted Spark management CIDRs: "] == "172.16.0.0/12"
-    assert replacements["Direct GPU fabric CIDRs []: "] == "198.19.42.0/24"
+    assert replacements[
+        "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: "
+    ] == "198.19.42.0/24"
 
 
 def test_synthetic_firewall_preparation_only_supplies_installer_inputs(

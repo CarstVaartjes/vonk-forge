@@ -199,16 +199,25 @@ def nas_responses(
     hermes_dashboard_hostname = tailscale_service_hostname(
         hermes_dashboard_service, tailnet_suffix
     )
+    enrollment_hostname = f"enroll.acceptance.{tailnet_suffix}"
+    agent_hostname = f"agents.acceptance.{tailnet_suffix}"
+    registry_hostname = f"registry.acceptance.{tailnet_suffix}"
+    derived_enrollment_hostname = f"enroll.{tailnet_suffix}"
+    derived_agent_hostname = f"agents.{tailnet_suffix}"
+    derived_registry_hostname = f"registry.{tailnet_suffix}"
     hostnames = {
         "Control hostname (vonk-forge.<tailnet>.ts.net)": control_hostname,
-        "Agent enrollment hostname": f"enroll.acceptance.{tailnet_suffix}",
-        "Agent controller hostname": f"agents.acceptance.{tailnet_suffix}",
-        "Registry hostname": f"registry.acceptance.{tailnet_suffix}",
+        f"Agent enrollment hostname (enroll.<tailnet>.ts.net) [{derived_enrollment_hostname}]": enrollment_hostname,
+        f"Agent controller hostname (agents.<tailnet>.ts.net) [{derived_agent_hostname}]": agent_hostname,
+        f"Registry hostname (registry.<tailnet>.ts.net) [{derived_registry_hostname}]": registry_hostname,
     }
     responses = [
         ("Reserved NAS LAN IP: ", nas_ip),
         ("Trusted Spark management CIDRs: ", "0.0.0.0/0"),
-        ("Direct GPU fabric CIDRs []: ", ""),
+        (
+            "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ",
+            "",
+        ),
         ("Operator jurisdiction (uppercase country code, or EU): ", "NL"),
         *((f"{label}: ", value) for label, value in hostnames.items()),
         ("Vonk Forge administrator password (leave blank to generate): ", ""),

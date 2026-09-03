@@ -181,6 +181,48 @@ fn fresh_install_prints_preflight_before_the_first_prompt() {
 }
 
 #[test]
+fn service_hostnames_default_to_the_control_tailnet() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "required_values": [
+            {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"},
+            {"env": "VONK_AGENT_ENROLL_HOSTNAME", "prompt": "Enrollment hostname", "validation": "hostname"},
+            {"env": "VONK_AGENT_HOSTNAME", "prompt": "Agent hostname", "validation": "hostname"},
+            {"env": "VONK_REGISTRY_HOSTNAME", "prompt": "Registry hostname", "validation": "hostname"}
+          ],
+          "secrets": []
+        }"#,
+    )
+    .expect("valid hostname payload");
+    let temporary = tempdir().expect("temporary directory");
+    let input = Cursor::new(b"vonk-forge.example-tailnet.ts.net\n\n\n\n".to_vec());
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(input, &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("derived hostnames accepted");
+
+    assert_eq!(
+        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
+        "VONK_CONTROL_HOSTNAME=vonk-forge.example-tailnet.ts.net\n\
+VONK_AGENT_ENROLL_HOSTNAME=enroll.example-tailnet.ts.net\n\
+VONK_AGENT_HOSTNAME=agents.example-tailnet.ts.net\n\
+VONK_REGISTRY_HOSTNAME=registry.example-tailnet.ts.net\n"
+    );
+    let output = String::from_utf8(output).expect("UTF-8 prompts");
+    assert!(output.contains("Enrollment hostname [enroll.example-tailnet.ts.net]: "));
+    assert!(output.contains("Agent hostname [agents.example-tailnet.ts.net]: "));
+    assert!(output.contains("Registry hostname [registry.example-tailnet.ts.net]: "));
+}
+
+#[test]
 fn payload_rejects_multiline_preflight_items() {
     let payload = serde_json::json!({
         "schema_version": 2,

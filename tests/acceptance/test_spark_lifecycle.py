@@ -850,12 +850,12 @@ class SparkLifecycle:
     def _controller_response_replacements(self) -> dict[str, str]:
         return {
             "Trusted Spark management CIDRs: ": "172.16.0.0/12",
-            "Direct GPU fabric CIDRs []: ": (
+            "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ": (
                 f"198.19.{self.synthetic_fabric_octet}.0/24"
             ),
-            "Agent enrollment hostname: ": ENROLLMENT_HOST,
-            "Agent controller hostname: ": AGENT_HOST,
-            "Registry hostname: ": REGISTRY_HOST,
+            f"Agent enrollment hostname (enroll.<tailnet>.ts.net) [{ENROLLMENT_HOST}]: ": ENROLLMENT_HOST,
+            f"Agent controller hostname (agents.<tailnet>.ts.net) [{AGENT_HOST}]: ": AGENT_HOST,
+            f"Registry hostname (registry.<tailnet>.ts.net) [{REGISTRY_HOST}]: ": REGISTRY_HOST,
         }
 
     def _start_controller(self) -> None:

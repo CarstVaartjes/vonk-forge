@@ -110,11 +110,17 @@ def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> 
     )
     payload = builder._payload(builder._read_compose(rendered), "stable")
     required = payload["required_values"]
+    derived_defaults = {
+        "VONK_AGENT_ENROLL_HOSTNAME": "enroll.acceptance.example.test",
+        "VONK_AGENT_HOSTNAME": "agents.acceptance.example.test",
+        "VONK_REGISTRY_HOSTNAME": "registry.acceptance.example.test",
+    }
     canonical_prompts = []
     for item in required:
         label = item["prompt"]
-        if item.get("default") is not None:
-            label = f"{label} [{item['default']}]"
+        default = item.get("default") or derived_defaults.get(item["env"])
+        if default is not None:
+            label = f"{label} [{default}]"
         canonical_prompts.append(f"{label}: ")
 
     responses = acceptance.nas_responses(

@@ -121,6 +121,20 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "VONK_AGENT_HOSTNAME": "hostname",
         "VONK_REGISTRY_HOSTNAME": "hostname",
     }
+    defaults = {item["env"]: item["default"] for item in payload["required_values"]}
+    assert defaults["VONK_DIRECT_FABRIC_CIDRS"] == (
+        "192.168.100.0/24,192.168.101.0/24"
+    )
+    prompts = {item["env"]: item["prompt"] for item in payload["required_values"]}
+    assert prompts["VONK_AGENT_ENROLL_HOSTNAME"] == (
+        "Agent enrollment hostname (enroll.<tailnet>.ts.net)"
+    )
+    assert prompts["VONK_AGENT_HOSTNAME"] == (
+        "Agent controller hostname (agents.<tailnet>.ts.net)"
+    )
+    assert prompts["VONK_REGISTRY_HOSTNAME"] == (
+        "Registry hostname (registry.<tailnet>.ts.net)"
+    )
     assert {item["file"] for item in payload["secrets"]} == {
         "admin-password",
         "tailscale-oauth-client-id",
