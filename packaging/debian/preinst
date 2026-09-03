@@ -291,6 +291,56 @@ agent_sha256=$expected_agent_sha256
 }
 
 inside_package_helper() {
+    # Check the immutable helper dpkg invocation before consulting cgroups or
+    # ancestry.  Those views can be hidden by a private systemd namespace on an
+    # already-running helper, while the reserved candidate paths remain
+    # visible and unambiguous.  Ordinary dpkg never receives a package from
+    # either reserved path.
+    helper_direct_command_file=$(/usr/bin/mktemp /tmp/.vonk-dpkg-direct.XXXXXX) \
+        || return 1
+    trap '/usr/bin/rm -f -- "$helper_direct_command_file"' EXIT HUP INT TERM
+    /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" \
+        > "$helper_direct_command_file" 2>/dev/null || return 1
+    [ "$(/usr/bin/wc -l < "$helper_direct_command_file")" -eq 4 ] \
+        && [ "$(/usr/bin/sed -n '1p' "$helper_direct_command_file")" = /usr/bin/dpkg ] \
+        && [ "$(/usr/bin/sed -n '2p' "$helper_direct_command_file")" = --install ] \
+        && [ "$(/usr/bin/sed -n '3p' "$helper_direct_command_file")" = --force-confold ] \
+        || { trap - EXIT HUP INT TERM; /usr/bin/rm -f -- "$helper_direct_command_file"; return 1; }
+    helper_direct_candidate=$(/usr/bin/sed -n '4p' "$helper_direct_command_file")
+    case "$helper_direct_candidate" in
+        /run/vonk-forge-package-candidates/*/*.deb)
+            helper_direct_invocation_dir=$(/usr/bin/dirname \
+                "$helper_direct_candidate") || return 1
+            [ "$(/usr/bin/dirname "$helper_direct_invocation_dir")" = \
+                /run/vonk-forge-package-candidates ] || return 1
+            helper_direct_invocation=${helper_direct_invocation_dir##*/}
+            case "$helper_direct_invocation" in
+                [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]* )
+                    [ "${#helper_direct_invocation}" -eq 32 ] || return 1 ;;
+                *) return 1 ;;
+            esac
+            ;;
+        /var/lib/vonk-forge/incoming/*.deb)
+            [ "$(/usr/bin/dirname "$helper_direct_candidate")" = \
+                /var/lib/vonk-forge/incoming ] || return 1
+            helper_direct_digest=${helper_direct_candidate##*/}
+            helper_direct_digest=${helper_direct_digest%.deb}
+            valid_digest "$helper_direct_digest" || return 1
+            ;;
+        *)
+            trap - EXIT HUP INT TERM
+            /usr/bin/rm -f -- "$helper_direct_command_file"
+            ;;
+    esac
+    if [ -n "${helper_direct_candidate:-}" ] \
+        && { case "$helper_direct_candidate" in
+            /run/vonk-forge-package-candidates/*/*.deb|/var/lib/vonk-forge/incoming/*.deb) true ;;
+            *) false ;;
+        esac; }; then
+        trap - EXIT HUP INT TERM
+        /usr/bin/rm -f -- "$helper_direct_command_file"
+        return 0
+    fi
     # The helper service normally identifies itself through the cgroup path.
     # Some systemd/container combinations expose a private cgroup namespace to
     # maintainer scripts, however, so /proc/self/cgroup can contain only the
