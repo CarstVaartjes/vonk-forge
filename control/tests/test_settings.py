@@ -12,7 +12,7 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     assert settings.database_host == "postgres"
     assert settings.global_catalog_url == "https://vonkforge.ai"
     assert settings.recipe_library_api_url == "https://api.github.com"
-    assert settings.recipe_library_sync_interval_seconds == 900
+    assert settings.recipe_library_sync_interval_seconds == 60
     assert settings.agent_release_api_url == "https://install.vonkforge.ai"
     assert settings.operator_jurisdiction is None
 

@@ -13,31 +13,32 @@ import type {
   VisualFleetNode,
   VisualFleetSnapshot,
 } from "../api/types";
-import {formatBytes} from "../lib/fleet";
+import {formatBytes, nodeDisplayName} from "../lib/fleet";
 import type {LibraryRoute} from "../lib/library-route";
-import {modelLibraryPath, modelVersionKey, recipeLibraryPath, unlinkedLibraryPath} from "../lib/library-route";
+import {modelVersionKey, recipeLibraryPath} from "../lib/library-route";
 import type {LibraryPlacementGroup} from "./library-action-types";
 import {LibraryActionDialog} from "./library-action-dialog";
 import {LibraryModelDeletionDialog} from "./library-model-deletion-dialog";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
 import {LibraryPlacementDialog} from "./library-placement-dialog";
 import type {LibraryPlacementInvocation} from "./library-placement-dialog";
-import {friendlyModelName, humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
+import {friendlyModelName, humanizeIdentifier} from "./library-technical-details";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 type SparkFilter = "" | "1" | "2" | "3" | "4+";
 type UpdatedFilter = "" | "7" | "30" | "90" | "365";
 type LocalFilter = "" | PublicRecipe["local"]["status"] | "needs-review" | "custom" | "withdrawn";
-type ModelType = "" | "language" | "vision" | "image" | "video" | "audio" | "3d";
+type BooleanFilter = "" | "true" | "false";
 
 export type ManagedCatalogWithdrawal = ManagedCatalogSyncSummary["withdrawn_recipes"][number];
 
 export type LibraryWorkcellFilters = {
+  abliterated: BooleanFilter;
   capabilities: PublicRecipeCapability[];
+  installedOn: string;
   local: LocalFilter;
   model: string;
-  modelType: ModelType;
-  modelVersion: string;
+  modelFamily: string;
   qualification: "" | PublicRecipe["qualification"];
   quantization: string;
   readiness: "" | PublicRecipe["execution_readiness"];
@@ -45,13 +46,12 @@ export type LibraryWorkcellFilters = {
   runtime: string;
   sourceOwner: string;
   sparks: SparkFilter;
-  topology: string;
   updated: UpdatedFilter;
 };
 
 export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {
-  capabilities: [], local: "", model: "", modelType: "", modelVersion: "", qualification: "", quantization: "", readiness: "",
-  repository: "", runtime: "", sourceOwner: "", sparks: "", topology: "", updated: "",
+  abliterated: "", capabilities: [], installedOn: "", local: "", model: "", modelFamily: "", qualification: "", quantization: "", readiness: "",
+  repository: "", runtime: "", sourceOwner: "", sparks: "", updated: "",
 };
 
 export type LibraryRecipeRecord = {
@@ -114,6 +114,20 @@ export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot, publicRecip
     const catalog = catalogByLocalId.get(recipe.recipe_id);
     records.push({catalog, custom: !catalog, key: recipe.recipe_id, managed: Boolean(catalog), modelKey: "unlinked", modelTitle: "Unlinked", recipe, title: recipe.title, withdrawnInstalled: false});
   }
+  const linkedCatalogUris = new Set(records.flatMap(record => record.catalog ? [record.catalog.uri] : []));
+  for (const catalog of publicRecipes) {
+    if (linkedCatalogUris.has(catalog.uri)) continue;
+    records.push({
+      catalog,
+      custom: false,
+      key: catalog.uri,
+      managed: true,
+      modelKey: `${catalog.model_version_publisher}/${catalog.model_version_slug}`,
+      modelTitle: catalog.model_version_title,
+      title: catalog.title,
+      withdrawnInstalled: false,
+    });
+  }
   return records;
 }
 
@@ -145,12 +159,18 @@ function recordCapabilities(record: LibraryRecipeRecord): PublicRecipeCapability
   return record.catalog?.capabilities ?? (record.recipe ? normalizedCapabilities(record.recipe) : []);
 }
 
-function modelTypeMatches(record: LibraryRecipeRecord, modelType: ModelType): boolean {
-  if (!modelType) return true;
-  const capabilities = recordCapabilities(record);
-  if (modelType === "language") return capabilities.includes("chat") || capabilities.includes("reasoning");
-  if (modelType === "image") return capabilities.includes("image-generation") || capabilities.includes("image-editing");
-  return capabilities.includes(modelType);
+function modelFamilyTitle(value: string): string {
+  const title = value.replace(/\s+[0-9a-f]{8}$/i, "").replace(/^NVIDIA\s+/i, "");
+  const variant = /\s+(?:NVFP4|BF16|FP16|FP8|FP4|INT8|INT4|EXL3|AQLM|AWQ|GPTQ|GGUF|TorchAO|DFlash\d*|Abliterated)(?:\s|$)/i.exec(title);
+  return (variant ? title.slice(0, variant.index) : title).trim();
+}
+
+function recordModelFamily(record: LibraryRecipeRecord): string {
+  return modelFamilyTitle(record.catalog?.model_title ?? record.modelTitle);
+}
+
+function recordIsAbliterated(record: LibraryRecipeRecord): boolean {
+  return record.catalog?.alignment === "abliterated";
 }
 
 function updatedMatches(record: LibraryRecipeRecord, days: UpdatedFilter, now: Date): boolean {
@@ -178,16 +198,15 @@ export function filterLibraryRecipeRecords(records: LibraryRecipeRecord[], filte
     const searchable = [record.title, record.modelTitle, recipe?.slug ?? "", recipe?.description ?? "", catalog?.description ?? "", catalog?.source_owner ?? "", catalog?.source_repository ?? "", catalog?.runtime_distribution ?? "", ...(catalog?.quantizations ?? []), ...capabilityValues].join(" ").toLocaleLowerCase();
     const sparks = catalog?.node_count ?? (recipe?.topology_name?.includes("dual") || recipe?.topology_name?.includes("pair") ? 2 : 1);
     return (!normalized || searchable.includes(normalized))
-      && modelTypeMatches(record, filters.modelType)
-      && (!filters.model || `${catalog?.model_publisher ?? record.model?.publisher ?? ""}/${catalog?.model_slug ?? record.model?.slug ?? ""}` === filters.model)
-      && (!filters.modelVersion || record.modelKey === filters.modelVersion)
+      && (!filters.modelFamily || recordModelFamily(record) === filters.modelFamily)
+      && (!filters.model || record.modelKey === filters.model)
+      && (!filters.abliterated || recordIsAbliterated(record) === (filters.abliterated === "true"))
       && (!filters.sourceOwner || catalog?.source_owner === filters.sourceOwner)
       && (!filters.repository || catalog?.source_repository === filters.repository)
       && (!filters.sparks || (filters.sparks === "4+" ? sparks >= 4 : sparks === Number(filters.sparks)))
       && (!filters.runtime || catalog?.runtime_distribution === filters.runtime)
       && (!filters.quantization || catalog?.quantizations.includes(filters.quantization))
       && updatedMatches(record, filters.updated, now)
-      && (!filters.topology || catalog?.topology_mode === filters.topology || recipe?.topology_name === filters.topology)
       && (!filters.qualification || catalog?.qualification === filters.qualification)
       && (!filters.readiness || catalog?.execution_readiness === filters.readiness)
       && localMatches(record, filters.local)
@@ -269,10 +288,6 @@ function stateLabel(state: SparkPlacementState): string {
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
 
-function modelPath(model: {key: string; model?: LibraryModel["model"]}): string {
-  return model.model ? modelLibraryPath(model.key) : model.key === "unlinked" ? unlinkedLibraryPath() : `/library?model_version=${encodeURIComponent(model.key)}`;
-}
-
 function valueOptions(values: Array<string | null | undefined>): string[] {
   return [...new Set(values.flatMap(value => value ? [value] : []))].sort();
 }
@@ -284,13 +299,22 @@ function formattedSyncTime(value: string | null): string {
   return new Intl.DateTimeFormat(undefined, {dateStyle: "medium", timeStyle: "short"}).format(date);
 }
 
-function FilterSelect({label, onChange, options, value}: {label: string; onChange(value: string): void; options: Array<{label: string; value: string}>; value: string}) {
-  return <label><span>{label}</span><select aria-label={label} value={value} onChange={event => onChange(event.target.value)}><option value="">All</option>{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+function installedNodeIds(record: LibraryRecipeRecord, fleet: VisualFleetSnapshot | undefined): string[] {
+  if (!record.recipe || !fleet) return [];
+  return fleet.nodes.flatMap(node =>
+    (node.installed ?? []).some(item => item.recipe_id === record.recipe?.recipe_id && item.rank_state === "installed")
+      || (node.loaded ?? []).some(item => item.recipe_id === record.recipe?.recipe_id)
+      ? [node.id] : [],
+  );
+}
+
+function repositoryLabel(value: string): string {
+  return value.replace(/^https?:\/\/(?:www\.)?github\.com\//, "").replace(/\/$/, "");
 }
 
 export function LibraryWorkcell({
   api, catalogCommit, catalogRepository, detail, detailContent, detailError, detailLoading, fleet, fleetError, filters, onBusyChange,
-  onFiltersChange, onNavigate, onRefresh, onRetryDetail, onRetryFleet, publicRecipes, query, route, snapshot, syncAvailable, syncError, syncing, syncSummary, onSyncNow, windowed,
+  onFiltersChange, onNavigate, onRefresh, onRetryDetail, onRetryFleet, publicRecipes, query, route, snapshot, syncError, syncSummary, windowed,
 }: {
   api: LibraryApi;
   catalogCommit?: string;
@@ -308,14 +332,11 @@ export function LibraryWorkcell({
   onRefresh(signal: AbortSignal): Promise<void>;
   onRetryFleet(): void;
   onRetryDetail(): void;
-  onSyncNow(): void;
   publicRecipes: PublicRecipe[];
   query: string;
   route: LibraryRoute;
   snapshot: LibrarySnapshot;
-  syncAvailable: boolean;
   syncError: string;
-  syncing: boolean;
   syncSummary?: ManagedCatalogSyncSummary;
   windowed: boolean;
 }) {
@@ -338,7 +359,9 @@ export function LibraryWorkcell({
     () => applyManagedCatalogWithdrawals(buildLibraryRecipeRecords(snapshot, publicRecipes), fleet, syncSummary?.withdrawn_recipes ?? []),
     [fleet, publicRecipes, snapshot, syncSummary?.withdrawn_recipes],
   );
-  const matchingRecords = useMemo(() => filterLibraryRecipeRecords(allRecords, filters, query), [allRecords, filters, query]);
+  const matchingRecords = useMemo(() => filterLibraryRecipeRecords(allRecords, filters, query)
+    .filter(record => !filters.installedOn
+      || (filters.installedOn === "not-installed" ? installedNodeIds(record, fleet).length === 0 : installedNodeIds(record, fleet).includes(filters.installedOn))), [allRecords, filters, fleet, query]);
   const models = useMemo(() => deriveLibraryModels(matchingRecords), [matchingRecords]);
   const selectedRecord = route.kind === "recipe" ? allRecords.find(record => record.recipe?.recipe_id === route.recipeId) : undefined;
   const selectedModelKey = route.kind === "model" ? (route.unlinked ? "unlinked" : route.modelKey) : selectedRecord?.modelKey;
@@ -363,21 +386,21 @@ export function LibraryWorkcell({
   const repositories = valueOptions(publicRecipes.map(recipe => recipe.source_repository));
   const runtimes = valueOptions(publicRecipes.map(recipe => recipe.runtime_distribution));
   const quantizations = valueOptions(publicRecipes.flatMap(recipe => recipe.quantizations));
-  const topologies = valueOptions(publicRecipes.map(recipe => recipe.topology_mode));
-  const modelFamilies = [...new Map(publicRecipes.map(recipe => [`${recipe.model_publisher}/${recipe.model_slug}`, recipe.model_title])).entries()];
-  const modelVersions = [...new Map(allRecords.map(record => [record.modelKey, record.modelTitle])).entries()];
+  const modelFamilies = valueOptions(allRecords.map(recordModelFamily));
+  const exactModels = [...new Map(allRecords
+    .filter(record => !filters.modelFamily || recordModelFamily(record) === filters.modelFamily)
+    .map(record => [record.modelKey, record.modelTitle])).entries()];
   const appliedFilterCount = Object.entries(filters).reduce((count, [, value]) => count + (Array.isArray(value) ? value.length : value ? 1 : 0), 0);
   const installedWithdrawalCount = new Set(allRecords.flatMap(record => record.withdrawnInstalled && record.recipe ? [record.recipe.recipe_id] : [])).size;
   const syncTime = formattedSyncTime(syncSummary?.completed_at ?? null);
   const staleInstallationCount = syncSummary?.stale_recipes.reduce((count, item) => count + item.stale_installation_count, 0) ?? 0;
   const staleRunCount = syncSummary?.stale_recipes.reduce((count, item) => count + item.stale_run_count, 0) ?? 0;
-  const syncState = syncing ? "Updating…"
-    : syncError ? "Update needs attention"
-      : syncSummary?.state === "partial" ? "Updated with items to review"
-        : syncSummary?.state === "failed" ? "Automatic update failed"
-          : syncSummary?.state === "syncing" ? "Automatic update in progress"
-            : syncSummary?.state === "current" ? "Vonk Forge remote is current"
-              : syncAvailable ? "Automatic updates enabled" : "Catalog discovery only";
+  const syncState = syncError ? "Repository sync needs attention"
+    : syncSummary?.state === "partial" ? "Repository synced with items to review"
+      : syncSummary?.state === "failed" ? "Automatic repository sync failed"
+        : syncSummary?.state === "syncing" ? "Repository sync in progress"
+          : syncSummary?.state === "current" ? "Recipe repository is current"
+            : "Automatic repository sync enabled";
 
   useEffect(() => {
     setRecipeRemovalId("");
@@ -475,63 +498,52 @@ export function LibraryWorkcell({
   const railRecord = draggedRecipe ?? placementRecipe ?? selectedRecord;
   return <>
     <section className="library-sync-strip" aria-label="Managed catalog synchronization">
-      <div><strong>Managed recipes update automatically</strong><span>{catalogRepository ? `${catalogRepository}${catalogCommit ? ` · ${catalogCommit.slice(0, 8)}` : ""}` : "Waiting for Vonk Forge remote"}</span></div>
-      <div className="library-sync-status"><span>{syncState}</span><button type="button" className="button secondary" disabled={!syncAvailable || syncing || syncSummary?.state === "syncing"} title={!syncAvailable ? "The Controller does not expose managed recipe synchronization." : undefined} onClick={onSyncNow}>{syncing ? "Updating from remote…" : "Update from Vonk Forge remote"}</button></div>
-      {syncSummary && <p role="status">Last update: {syncSummary.imported_count} imported · {syncSummary.updated_count} updated · {syncSummary.unchanged_count} unchanged{syncTime ? ` · ${syncTime}` : ""}</p>}
+      <div><strong>Recipes stay synchronized automatically</strong><span>{catalogRepository ? `${catalogRepository}${catalogCommit ? ` · ${catalogCommit.slice(0, 8)}` : ""}` : "Waiting for the recipe repository"}</span></div>
+      <div className="library-sync-status"><span>{syncState}</span></div>
+      {syncSummary && <p role="status">Last repository sync: {syncSummary.imported_count} added · {syncSummary.updated_count} updated · {syncSummary.unchanged_count} unchanged{syncTime ? ` · ${syncTime}` : ""}</p>}
       {(staleInstallationCount > 0 || staleRunCount > 0) && <p className="is-warning" role="status">{staleInstallationCount} installed placement{staleInstallationCount === 1 ? " uses" : "s use"} an older recipe revision · {staleRunCount} active run{staleRunCount === 1 ? " needs" : "s need"} review.</p>}
       {syncSummary && syncSummary.problems.length > 0 && <details className="library-sync-problems"><summary>{syncSummary.problems.length} update item{syncSummary.problems.length === 1 ? "" : "s"} need review</summary><ul>{syncSummary.problems.map((problem, index) => <li key={`${problem.recipe_uri}-${problem.code}-${index}`}><strong>{problem.code}</strong><span>{problem.detail}</span></li>)}</ul></details>}
       {installedWithdrawalCount > 0 && <p className="is-warning" role="status">{installedWithdrawalCount} installed recipe{installedWithdrawalCount === 1 ? " is" : "s are"} withdrawn upstream. Installed content remains pinned until you review its removal.</p>}
       {syncError && <p className="is-error" role="alert">{syncError}</p>}
     </section>
-    <details className="library-filter-board" open={appliedFilterCount > 0}>
-      <summary><span><strong>Recipe filters</strong><small>{appliedFilterCount ? `${appliedFilterCount} applied · models derive from matching recipes` : "Model, creator, topology, runtime, status, and capability"}</small></span><span aria-hidden="true" className="library-filter-disclosure">Expand</span></summary>
-      <div className="library-filter-grid">
-        <FilterSelect label="Model type" value={filters.modelType} onChange={value => updateFilter("modelType", value as ModelType)} options={[
-          {value: "language", label: "Language / chat"}, {value: "vision", label: "Vision / multimodal"}, {value: "image", label: "Image"}, {value: "video", label: "Video"}, {value: "audio", label: "Audio"}, {value: "3d", label: "3D"},
-        ]}/>
-        <FilterSelect label="Model" value={filters.model} onChange={value => updateFilter("model", value)} options={modelFamilies.map(([value, label]) => ({value, label}))}/>
-        <FilterSelect label="Model version" value={filters.modelVersion} onChange={value => updateFilter("modelVersion", value)} options={modelVersions.map(([value, label]) => ({value, label}))}/>
-        <FilterSelect label="Recipe creator" value={filters.sourceOwner} onChange={value => updateFilter("sourceOwner", value)} options={creators.map(value => ({value, label: value}))}/>
-        <FilterSelect label="Repository" value={filters.repository} onChange={value => updateFilter("repository", value)} options={repositories.map(value => ({value, label: value.replace(/^https?:\/\//, "")}))}/>
-        <FilterSelect label="Spark count" value={filters.sparks} onChange={value => updateFilter("sparks", value as SparkFilter)} options={[{value: "1", label: "1 Spark"}, {value: "2", label: "2 Sparks"}, {value: "3", label: "3 Sparks"}, {value: "4+", label: "4+ Sparks"}]}/>
-        <FilterSelect label="Runtime" value={filters.runtime} onChange={value => updateFilter("runtime", value)} options={runtimes.map(value => ({value, label: humanizeIdentifier(value)}))}/>
-        <FilterSelect label="Quantization" value={filters.quantization} onChange={value => updateFilter("quantization", value)} options={quantizations.map(value => ({value, label: value}))}/>
-        <FilterSelect label="Updated" value={filters.updated} onChange={value => updateFilter("updated", value as UpdatedFilter)} options={[{value: "7", label: "Last 7 days"}, {value: "30", label: "Last 30 days"}, {value: "90", label: "Last 90 days"}, {value: "365", label: "Last year"}]}/>
-        <FilterSelect label="Topology" value={filters.topology} onChange={value => updateFilter("topology", value)} options={topologies.map(value => ({value, label: humanizeIdentifier(value)}))}/>
-        <FilterSelect label="Qualification" value={filters.qualification} onChange={value => updateFilter("qualification", value as LibraryWorkcellFilters["qualification"])} options={[{value: "cataloged", label: "Accepted"}, {value: "candidate", label: "Candidate"}]}/>
-        <FilterSelect label="Execution readiness" value={filters.readiness} onChange={value => updateFilter("readiness", value as LibraryWorkcellFilters["readiness"])} options={[{value: "executable", label: "Executable"}, {value: "integration-required", label: "Integration required"}, {value: "not-executable", label: "Not executable"}, {value: "not-declared", label: "Not declared"}]}/>
-        <FilterSelect label="Local status" value={filters.local} onChange={value => updateFilter("local", value as LocalFilter)} options={[{value: "current", label: "Current"}, {value: "update-available", label: "Update available"}, {value: "withdrawn", label: "Withdrawn · installed"}, {value: "not-imported", label: "Pending sync"}, {value: "needs-review", label: "Needs review"}, {value: "custom", label: "Custom recipes"}]}/>
-      </div>
-      <fieldset className="library-capability-filters"><legend>Capabilities</legend>{CAPABILITIES.map(capability => <label key={capability.value}><input type="checkbox" checked={filters.capabilities.includes(capability.value)} onChange={() => updateFilter("capabilities", filters.capabilities.includes(capability.value) ? filters.capabilities.filter(value => value !== capability.value) : [...filters.capabilities, capability.value])}/><span>{capability.label}</span></label>)}</fieldset>
-      {appliedFilterCount > 0 && <button type="button" className="button secondary library-clear-filters" onClick={() => onFiltersChange(EMPTY_LIBRARY_WORKCELL_FILTERS)}>Clear recipe filters</button>}
-    </details>
     <div className={`library-workcell route-${route.kind}`}>
-      <section className="library-pane library-models" aria-label="Models">
-        <div className="library-pane-heading"><div><h3>Models</h3></div><small>{models.length} from {matchingRecords.length} recipes</small></div>
-        <div className="library-list">
-          {models.map(model => {
-            const withdrawalCount = matchingRecords.filter(record => record.modelKey === model.key && record.withdrawnInstalled).length;
-            return <article className="library-row-shell library-model-row" key={model.key}><a href={modelPath(model)} className="library-row" aria-current={selectedModelKey === model.key ? "page" : undefined} onClick={event => onNavigate(event, modelPath(model))}><strong>{model.title}</strong><span>Model version</span><small>{model.count} recipe{model.count === 1 ? "" : "s"}{windowed ? " shown" : ""}</small>{withdrawalCount > 0 && <span className="library-withdrawn-label">Installed recipe withdrawn upstream</span>}</a>{model.model && <div className="library-row-tools"><TechnicalDetails compact items={[{label: "Publisher", value: model.model.publisher}, {label: "Model slug", value: model.model.slug}, {label: "Model digest", value: model.model.content_sha256}]}/></div>}</article>;
-          })}
-          {models.length === 0 && <p className="library-placeholder">No models have recipes matching these filters.</p>}
-        </div>
-      </section>
-      <section className="library-pane library-recipes" aria-label={selectedModelKey === "unlinked" ? "Unlinked recipes" : selectedModelKey ? `Recipes for ${models.find(model => model.key === selectedModelKey)?.title ?? selectedRecord?.modelTitle ?? "selected model"}` : "Recipe inventory"}>
-        {route.kind === "model" && <a className="library-back" href="/library" onClick={event => onNavigate(event, "/library")}>Back to Models</a>}
-        {route.kind === "recipe" && <a className="library-back" href={selectedModelKey === "unlinked" ? unlinkedLibraryPath() : selectedRecord?.model ? modelLibraryPath(selectedRecord.modelKey) : "/library"} onClick={event => onNavigate(event, selectedModelKey === "unlinked" ? unlinkedLibraryPath() : selectedRecord?.model ? modelLibraryPath(selectedRecord.modelKey) : "/library")}>Back to {selectedModelKey === "unlinked" ? "Unlinked" : selectedRecord?.modelTitle ?? "Model"} recipes</a>}
-        <div className="library-pane-heading"><div><h3>{selectedModelKey ? selectedRecord?.modelTitle ?? models.find(model => model.key === selectedModelKey)?.title ?? "Recipes" : "Recipe work surface"}</h3></div><small>{visibleRecords.length} shown</small></div>
-        <div className="library-recipe-worklist" role="list" aria-label="Filtered recipes">
-          {visibleRecords.map(record => {
-            const active = selectedRecord?.key === record.key;
-            return <article role="listitem" key={record.key} className={`library-workcell-recipe${active ? " is-selected" : ""}${record.custom ? " is-custom" : ""}`} draggable={Boolean(record.recipe)} onDragStart={event => onDragStart(event, record)} onDragEnd={() => { setDraggedRecipe(undefined); setDropNodeId(""); }}>
-              <div className="library-workcell-recipe-main">
-                {record.recipe ? <a className="library-row" aria-current={active ? "page" : undefined} href={recipeLibraryPath(record.recipe.recipe_id)} onClick={event => onNavigate(event, recipeLibraryPath(record.recipe!.recipe_id))}><strong>{record.title}</strong><span>{record.recipe.description}</span></a> : <a className="library-row" href={`/library/import?recipe=${encodeURIComponent(record.catalog!.uri)}`} onClick={event => onNavigate(event, `/library/import?recipe=${encodeURIComponent(record.catalog!.uri)}`)}><strong>{record.title}</strong><span>{record.catalog?.description}</span></a>}
-                <div className="library-workcell-recipe-signals"><span className={`recipe-origin ${record.custom ? "is-custom" : "is-managed"}`}>{record.custom ? "Custom" : "Managed"}</span>{record.withdrawnInstalled && <span className="is-withdrawn">Withdrawn upstream · installed</span>}{record.catalog && <span className={`library-qualification qualification-${record.catalog.qualification}`}>{record.catalog.qualification === "cataloged" ? "Accepted" : "Candidate"}</span>}<span>{releaseStatus(record)}</span><span>{recipeStatus(record)}</span>{record.catalog && <span>{record.catalog.node_count} Spark{record.catalog.node_count === 1 ? "" : "s"}</span>}</div>
-              </div>
-              <div className="library-workcell-recipe-actions">{record.catalog?.local.status === "update-available" && <a aria-label={`Review update for ${record.title}`} className="library-release-link" href={`/library/import?recipe=${encodeURIComponent(record.catalog.uri)}`} onClick={event => onNavigate(event, `/library/import?recipe=${encodeURIComponent(record.catalog!.uri)}`)}>Review update</a>}<button type="button" className="button secondary" disabled={!record.recipe} title={!record.recipe ? "Automatic catalog sync must create the local immutable revision first." : undefined} onClick={event => { placementTrigger.current = event.currentTarget; void preparePlacement(record); }}>{placementRecipe?.key === record.key ? (placementLoading ? "Checking Sparks…" : "Choose a Spark") : "Place on Spark"}</button>{record.recipe && <span className="drag-hint">Drag to a compatible Spark</span>}</div>
-            </article>;
-          })}
-          {visibleRecords.length === 0 && <div className="library-workcell-empty"><strong>No recipes match</strong><p>Clear a filter or choose another model. Custom recipes remain available under Local status.</p></div>}
+      <section className="library-pane library-catalog" aria-label="Recipe catalog">
+        <div className="library-pane-heading"><div><h3>Recipes</h3><span>Repository catalog with live Controller placement state</span></div><small>{visibleRecords.length} of {allRecords.length}{windowed ? " shown" : ""}</small></div>
+        {appliedFilterCount > 0 && <button type="button" className="button secondary library-clear-filters" onClick={() => onFiltersChange(EMPTY_LIBRARY_WORKCELL_FILTERS)}>Clear filters</button>}
+        <div className="library-catalog-table-wrap" tabIndex={0}>
+          <table className="library-catalog-table">
+            <caption>Recipes synchronized from the repository with live installation locations.</caption>
+            <thead><tr>
+              <th scope="col"><span>Installed on</span><select aria-label="Installed on" value={filters.installedOn} onChange={event => updateFilter("installedOn", event.target.value)}><option value="">All locations</option><option value="not-installed">Not installed</option>{fleet?.nodes.map(node => <option key={node.id} value={node.id}>{nodeDisplayName(node)}</option>)}</select></th>
+              <th scope="col"><span>Recipe</span></th>
+              <th scope="col"><span>Model family</span><select aria-label="Model family" value={filters.modelFamily} onChange={event => onFiltersChange({...filters, modelFamily: event.target.value, model: ""})}><option value="">All families</option>{modelFamilies.map(value => <option key={value} value={value}>{value}</option>)}</select></th>
+              <th scope="col"><span>Model</span><select aria-label="Model" value={filters.model} onChange={event => updateFilter("model", event.target.value)}><option value="">All models</option>{exactModels.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></th>
+              <th scope="col"><span>Format</span><select aria-label="Format" value={filters.quantization} onChange={event => updateFilter("quantization", event.target.value)}><option value="">Any format</option>{quantizations.map(value => <option key={value} value={value}>{value}</option>)}</select></th>
+              <th scope="col"><span>Runtime</span><select aria-label="Runtime" value={filters.runtime} onChange={event => updateFilter("runtime", event.target.value)}><option value="">All runtimes</option>{runtimes.map(value => <option key={value} value={value}>{humanizeIdentifier(value)}</option>)}</select></th>
+              <th scope="col"><span>Abliterated</span><select aria-label="Abliterated" value={filters.abliterated} onChange={event => updateFilter("abliterated", event.target.value as BooleanFilter)}><option value="">True or False</option><option value="true">True</option><option value="false">False</option></select></th>
+              <th scope="col"><span>Sparks</span><select aria-label="Sparks" value={filters.sparks} onChange={event => updateFilter("sparks", event.target.value as SparkFilter)}><option value="">Any count</option><option value="1">1 Spark</option><option value="2">2 Sparks</option><option value="3">3 Sparks</option><option value="4+">4+ Sparks</option></select></th>
+              <th scope="col"><span>Creator</span><select aria-label="Creator" value={filters.sourceOwner} onChange={event => updateFilter("sourceOwner", event.target.value)}><option value="">All creators</option>{creators.map(value => <option key={value} value={value}>{value}</option>)}</select></th>
+              <th scope="col"><span>Updated</span><select aria-label="Updated" value={filters.updated} onChange={event => updateFilter("updated", event.target.value as UpdatedFilter)}><option value="">Any time</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select></th>
+              <th scope="col"><span>Readiness</span><select aria-label="Readiness" value={filters.readiness} onChange={event => updateFilter("readiness", event.target.value as LibraryWorkcellFilters["readiness"])}><option value="">Any readiness</option><option value="executable">Executable</option><option value="integration-required">Integration required</option><option value="not-executable">Not executable</option><option value="not-declared">Not declared</option></select></th>
+              <th scope="col"><span>Capabilities</span><select aria-label="Capabilities" value="" onChange={event => { const value = event.target.value as PublicRecipeCapability; if (value && !filters.capabilities.includes(value)) updateFilter("capabilities", [...filters.capabilities, value]); }}><option value="">{filters.capabilities.length ? `${filters.capabilities.length} selected · add…` : "Any capability"}</option>{CAPABILITIES.map(option => <option key={option.value} value={option.value} disabled={filters.capabilities.includes(option.value)}>{option.label}</option>)}</select></th>
+              <th scope="col"><span>Qualification</span><select aria-label="Qualification" value={filters.qualification} onChange={event => updateFilter("qualification", event.target.value as LibraryWorkcellFilters["qualification"])}><option value="">Any status</option><option value="cataloged">Accepted</option><option value="candidate">Candidate</option></select></th>
+              <th scope="col"><span>Repository</span><select aria-label="Repository" value={filters.repository} onChange={event => updateFilter("repository", event.target.value)}><option value="">All repositories</option>{repositories.map(value => <option key={value} value={value}>{repositoryLabel(value)}</option>)}</select></th>
+              <th scope="col"><span>Download</span></th><th scope="col"><span>Disk / Spark</span></th><th scope="col"><span>Memory / Spark</span></th><th scope="col"><span>Action</span></th>
+            </tr></thead>
+            <tbody>{visibleRecords.map(record => {
+              const catalog = record.catalog;
+              const locations = installedNodeIds(record, fleet).map(nodeId => { const node = fleet?.nodes.find(item => item.id === nodeId); return node ? nodeDisplayName(node) : nodeId; });
+              return <tr className={selectedRecord?.key === record.key ? "is-selected" : ""} key={record.key} draggable={Boolean(record.recipe)} onDragStart={event => onDragStart(event, record)} onDragEnd={() => { setDraggedRecipe(undefined); setDropNodeId(""); }}>
+                <td>{locations.length ? locations.join(" · ") : "Not installed"}</td>
+                <td>{record.recipe ? <a aria-current={selectedRecord?.key === record.key ? "page" : undefined} href={recipeLibraryPath(record.recipe.recipe_id)} onClick={event => onNavigate(event, recipeLibraryPath(record.recipe!.recipe_id))}>{record.title}</a> : <strong>{record.title}</strong>}<small>{releaseStatus(record)}</small></td>
+                <td>{recordModelFamily(record)}</td><td>{record.modelTitle}</td><td>{catalog?.quantizations.join(" · ") || "—"}</td><td>{catalog ? humanizeIdentifier(catalog.runtime_distribution) : "—"}</td><td>{recordIsAbliterated(record) ? "True" : "False"}</td><td>{catalog?.node_count ?? "—"}</td><td>{catalog?.source_owner ?? "—"}</td><td>{catalog?.release_released_at ?? "—"}</td>
+                <td>{catalog ? humanizeIdentifier(catalog.execution_readiness) : "—"}</td><td>{recordCapabilities(record).map(value => CAPABILITIES.find(option => option.value === value)?.label ?? value).join(" · ") || "—"}</td><td>{catalog ? (catalog.qualification === "cataloged" ? "Accepted" : "Candidate") : "Custom"}</td><td>{catalog?.source_repository ? <a href={catalog.source_repository} target="_blank" rel="noreferrer">{repositoryLabel(catalog.source_repository)}<span className="visually-hidden"> opens in a new tab</span></a> : "—"}</td>
+                <td>{catalog ? formatBytes(catalog.expected_download_bytes) : "—"}</td><td>{catalog ? formatBytes(catalog.maximum_installed_bytes_per_node) : "—"}</td><td>{catalog ? formatBytes(catalog.maximum_runtime_memory_bytes_per_node) : "—"}</td>
+                <td><button type="button" className="button secondary" disabled={!record.recipe} title={!record.recipe ? "Waiting for automatic repository synchronization." : undefined} onClick={event => { placementTrigger.current = event.currentTarget; void preparePlacement(record); }}>{placementRecipe?.key === record.key ? (placementLoading ? "Checking Sparks…" : "Choose a Spark") : record.recipe ? "Place on Spark" : "Syncing…"}</button></td>
+              </tr>;
+            })}</tbody>
+          </table>
+          {visibleRecords.length === 0 && <div className="library-workcell-empty"><strong>No recipes match</strong><p>Clear one or more filters to broaden the repository list.</p></div>}
         </div>
       </section>
       <aside className="library-pane library-spark-rail" aria-label="Sparks">
