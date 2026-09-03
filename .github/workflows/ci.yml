@@ -174,7 +174,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            aptly fuse-overlayfs podman uidmap
+            aptly crun fuse-overlayfs podman uidmap
       - parallel:
           - name: Test bounded aptly state compaction
             run: >-
@@ -637,7 +637,7 @@ jobs:
           test "$(uname -m)" = x86_64
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            acl iproute2 iptables podman shellcheck slirp4netns uidmap
+            acl crun iproute2 iptables podman shellcheck slirp4netns uidmap
           package="accepted/$AMD64_PACKAGE"
           scripts/verify-agent-deb --json "$package"
           sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"

@@ -1021,6 +1021,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         "--property=TasksMax=4096",
         "/usr/bin/podman",
         "--cgroup-manager=cgroupfs",
+        "--runtime=/usr/bin/crun",
         "--no-cache",
         "--pull=never",
         "--cap-drop=all",

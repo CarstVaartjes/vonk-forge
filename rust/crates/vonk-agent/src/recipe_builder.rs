@@ -289,6 +289,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         let mut podman_arguments =
             podman_storage_arguments_with_cgroup_manager(&storage, runroot.path(), "cgroupfs");
         podman_arguments.extend([
+            "--runtime=/usr/bin/crun".to_owned(),
             "build".to_owned(),
             "--no-cache".to_owned(),
             "--pull=never".to_owned(),
