@@ -618,7 +618,6 @@ def _public_recipe_metadata(
     model_slug = model_version_slug
     model_title = model_slug
     model_reference: Mapping[str, object] | None = None
-    model_version_document: Mapping[str, object] | None = None
     for dependency in dependencies:
         identity = dependency.get("identity")
         if (
@@ -627,7 +626,6 @@ def _public_recipe_metadata(
             and identity.get("publisher") == model_version_publisher
             and identity.get("slug") == model_version_slug
         ):
-            model_version_document = dependency
             value = dependency.get("model")
             model_reference = value if isinstance(value, Mapping) else None
             metadata = dependency.get("metadata")
@@ -709,7 +707,7 @@ def _public_recipe_metadata(
     ]
     precision = quantizations[0] if quantizations else None
     source_owner, source_repository = _public_recipe_source(document)
-    alignment = _public_recipe_alignment(document, model_version_document)
+    alignment = _public_recipe_alignment(document)
     qualification, qualification_basis, qualification_detail = (
         _public_recipe_qualification(tags)
     )
@@ -916,18 +914,12 @@ _PUBLIC_RECIPE_ALIGNMENTS = frozenset(
 )
 
 
-def _public_recipe_alignment(
-    document: Mapping[str, object], model_version: Mapping[str, object] | None = None
-) -> str:
-    """Return only an explicit alignment declaration; never infer it from names or tags."""
+def _public_recipe_alignment(document: Mapping[str, object]) -> str:
+    """Return recipe-owned alignment only; model lineage must not imply recipe behavior."""
 
     metadata = document.get("metadata")
     metadata = metadata if isinstance(metadata, Mapping) else {}
     raw = metadata.get("alignment")
-    if raw is None and isinstance(model_version, Mapping):
-        model_metadata = model_version.get("metadata")
-        if isinstance(model_metadata, Mapping):
-            raw = model_metadata.get("alignment")
     return raw if isinstance(raw, str) and raw in _PUBLIC_RECIPE_ALIGNMENTS else "unspecified"
 
 

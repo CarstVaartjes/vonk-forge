@@ -5,7 +5,7 @@ import type {CatalogApi, PublicRecipe, PublicRecipePreview} from "../api/types";
 import {PublicRecipeImportPage, parsePublicRecipeImportUrl, publicRecipeImportUrl, publicRecipeMatches, type PublicRecipeFilters} from "./public-recipe-import";
 
 const EMPTY_FILTERS: PublicRecipeFilters = {
-  query: "", modelType: "", model: "", modelVersion: "", alignment: "", sourceOwner: "", repository: "", sparks: "", runtime: "", quantization: "", updated: "", topology: "",
+  query: "", modelFamily: "", model: "", abliterated: "", sourceOwner: "", repository: "", sparks: "", runtime: "", quantization: "", updated: "",
   qualification: "", readiness: "", local: "", sort: "catalog", capabilities: [],
 };
 
@@ -70,10 +70,10 @@ async function advanceRequestTime(milliseconds: number) {
 }
 
 it("round-trips the shared catalog filter vocabulary", () => {
-  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&model_type=vision&model=models%2Fglm&model_version=models%2Fglm-v1&alignment=abliterated&creator=MiaLabs&quantization=NVFP4&updated=30&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
-  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", modelType: "vision", model: "models/glm", modelVersion: "models/glm-v1", alignment: "abliterated", sourceOwner: "MiaLabs", quantization: "NVFP4", updated: "30", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
-  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&model_type=vision&model=models%2Fglm&model_version=models%2Fglm-v1&alignment=abliterated&creator=MiaLabs&sparks=4%2B&quantization=NVFP4&updated=30&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
-  expect(parsePublicRecipeImportUrl("/library/import?model_type=bogus").filters.modelType).toBe("");
+  const parsed = parsePublicRecipeImportUrl("/library/import?q=glm&model_family=GLM+5.3+Flash&model=models%2Fglm-v1&abliterated=true&creator=MiaLabs&quantization=NVFP4&updated=30&sparks=4%2B&qualification=candidate&readiness=integration-required&local=bogus&sort=bogus&capability=chat&capability=vision&capability=chat&capability=bogus&more=1&recipe=immutable&step=confirm");
+  expect(parsed).toMatchObject({more: true, recipe: "immutable", step: "confirm", filters: {query: "glm", modelFamily: "GLM 5.3 Flash", model: "models/glm-v1", abliterated: "true", sourceOwner: "MiaLabs", quantization: "NVFP4", updated: "30", sparks: "4+", qualification: "candidate", readiness: "integration-required", local: "", sort: "catalog", capabilities: ["chat", "vision"]}});
+  expect(publicRecipeImportUrl(parsed.filters, {more: parsed.more, recipe: parsed.recipe, step: parsed.step})).toBe("/library/import?q=glm&model_family=GLM+5.3+Flash&model=models%2Fglm-v1&abliterated=true&creator=MiaLabs&sparks=4%2B&quantization=NVFP4&updated=30&qualification=candidate&readiness=integration-required&capability=chat&capability=vision&more=1&recipe=immutable&step=confirm");
+  expect(parsePublicRecipeImportUrl("/library/import?abliterated=unknown").filters.abliterated).toBe("");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=executable").filters.readiness).toBe("executable");
   expect(parsePublicRecipeImportUrl("/library/import?readiness=ready").filters.readiness).toBe("");
   expect(parsePublicRecipeImportUrl("/library/import?step=confirm").step).toBe("catalog");
@@ -83,9 +83,10 @@ it("uses exactly 1, 2, 3 and 4+ Spark facets and ANDs capability selections", as
   const both = recipe("both", {node_count: 4, capabilities: ["chat", "vision"]});
   const chat = recipe("chat", {node_count: 3, capabilities: ["chat"]});
   render(<Harness api={apiFor([both, chat])}/>);
-  expect(await screen.findByRole("combobox", {name: "Filter by model version"})).toBeVisible();
+  expect(await screen.findByRole("combobox", {name: "Filter by model family"})).toBeVisible();
+  expect(screen.getByRole("combobox", {name: "Filter by model"})).toBeVisible();
   expect(screen.getByRole("combobox", {name: "Filter by quantization"})).toBeVisible();
-  expect(screen.getByRole("combobox", {name: "Filter by alignment"})).toBeVisible();
+  expect(screen.getByRole("combobox", {name: "Filter by abliterated"})).toBeVisible();
   expect(screen.getByRole("combobox", {name: "Filter by recipe creator"})).toBeVisible();
   expect(screen.getByRole("combobox", {name: "Filter by updated date"})).toBeVisible();
   await userEvent.click(await screen.findByRole("button", {name: "More filters"}));
@@ -98,37 +99,27 @@ it("uses exactly 1, 2, 3 and 4+ Spark facets and ANDs capability selections", as
   expect(screen.queryByRole("heading", {name: "chat", level: 3})).not.toBeInTheDocument();
 });
 
-it("keeps alignment variants independently selectable", () => {
+it("treats abliterated as a recipe-owned boolean", () => {
   const standard = recipe("standard", {alignment: "standard"});
   const abliterated = recipe("abliterated", {alignment: "abliterated"});
-  expect(publicRecipeMatches(standard, {...EMPTY_FILTERS, alignment: "standard"})).toBe(true);
-  expect(publicRecipeMatches(abliterated, {...EMPTY_FILTERS, alignment: "standard"})).toBe(false);
+  expect(publicRecipeMatches(standard, {...EMPTY_FILTERS, abliterated: "false"})).toBe(true);
+  expect(publicRecipeMatches(abliterated, {...EMPTY_FILTERS, abliterated: "false"})).toBe(false);
 });
 
-it("puts broad model type first and limits model identities without hiding overlapping categories", async () => {
-  const language = recipe("language", {model_publisher: "acme", model_slug: "language", model_title: "Language model", capabilities: ["chat", "reasoning"]});
-  const image = recipe("image", {model_publisher: "acme", model_slug: "image", model_title: "Image model", capabilities: ["image-generation"]});
-  const multimodal = recipe("multimodal", {model_publisher: "acme", model_slug: "multimodal", model_title: "Multimodal model", capabilities: ["chat", "vision", "image-editing"]});
-  render(<Harness api={apiFor([language, image, multimodal])}/>);
+it("groups downloadable models beneath a human model family", async () => {
+  const nvfp4 = recipe("glm-nvfp4", {model_title: "GLM 5.3 Flash NVFP4", model_version_publisher: "libertai", model_version_slug: "glm-nvfp4-caca", model_version_title: "GLM 5.3 Flash NVFP4 caca4e6a"});
+  const exl3 = recipe("glm-exl3", {model_title: "GLM 5.3 Flash EXL3 TR3 with DFlash2", model_version_publisher: "mia", model_version_slug: "glm-exl3-024d", model_version_title: "GLM 5.3 Flash EXL3 TR3 4bpw plus DFlash2 024db9f7"});
+  const qwen = recipe("qwen", {model_title: "Qwen3.5 9B", model_version_publisher: "qwen", model_version_slug: "qwen3-5-9b", model_version_title: "Qwen3.5 9B 71e3ab2c"});
+  render(<Harness api={apiFor([nvfp4, exl3, qwen])}/>);
 
-  const modelType = await screen.findByRole("combobox", {name: "Filter by model type"});
+  const family = await screen.findByRole("combobox", {name: "Filter by model family"});
   const model = screen.getByRole("combobox", {name: "Filter by model"});
-  expect(modelType.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(within(modelType).getByRole("option", {name: "Language / chat (2)"})).toBeEnabled();
-  expect(within(modelType).getByRole("option", {name: "Image (2)"})).toBeEnabled();
-
-  await userEvent.selectOptions(modelType, "image");
-  const imageModels = screen.getByRole("combobox", {name: "Filter by model"});
-  expect(within(imageModels).queryByRole("option", {name: /Language model/})).not.toBeInTheDocument();
-  expect(within(imageModels).getByRole("option", {name: /Image model/})).toBeVisible();
-  expect(within(imageModels).getByRole("option", {name: /Multimodal model/})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: "Language model", level: 3})).not.toBeInTheDocument();
-
-  await userEvent.selectOptions(imageModels, "acme/image");
-  await userEvent.selectOptions(screen.getByRole("combobox", {name: "Filter by model type"}), "language");
-  expect(screen.getByRole("combobox", {name: "Filter by model"})).toHaveValue("");
-  expect(screen.getByRole("heading", {name: "Language model", level: 3})).toBeVisible();
-  expect(screen.getByRole("heading", {name: "Multimodal model", level: 3})).toBeVisible();
+  expect(family.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(within(family).getByRole("option", {name: "GLM 5.3 Flash (2)"})).toBeEnabled();
+  await userEvent.selectOptions(family, "GLM 5.3 Flash");
+  expect(within(model).getByRole("option", {name: /GLM 5.3 Flash NVFP4 caca4e6a/})).toBeVisible();
+  expect(within(model).getByRole("option", {name: /GLM 5.3 Flash EXL3/})).toBeVisible();
+  expect(within(model).queryByRole("option", {name: /Qwen3.5/})).not.toBeInTheDocument();
 });
 
 it("keeps sorting with the result controls instead of treating it as an applied filter", async () => {
@@ -140,14 +131,14 @@ it("keeps sorting with the result controls instead of treating it as an applied 
   expect(screen.getAllByRole("heading", {level: 3}).map(element => element.textContent)).toEqual(["Alpha", "Zulu"]);
 });
 
-it("disambiguates distinct model identities that share a display title", async () => {
-  const mova360 = recipe("mova-360p-recipe", {model_publisher: "openmoss", model_slug: "mova-360p", model_title: "MOVA"});
-  const mova720 = recipe("mova-720p-recipe", {model_publisher: "openmoss", model_slug: "mova-720p", model_title: "MOVA"});
+it("disambiguates distinct downloadable models that share a display title", async () => {
+  const mova360 = recipe("mova-360p-recipe", {model_title: "MOVA", model_version_publisher: "openmoss", model_version_slug: "mova-360p", model_version_title: "MOVA checkpoint"});
+  const mova720 = recipe("mova-720p-recipe", {model_title: "MOVA", model_version_publisher: "openmoss", model_version_slug: "mova-720p", model_version_title: "MOVA checkpoint"});
   render(<Harness api={apiFor([mova360, mova720])}/>);
 
   const models = await screen.findByRole("combobox", {name: "Filter by model"});
-  expect(within(models).getByRole("option", {name: "MOVA · openmoss/mova-360p (1)"})).toBeVisible();
-  expect(within(models).getByRole("option", {name: "MOVA · openmoss/mova-720p (1)"})).toBeVisible();
+  expect(within(models).getByRole("option", {name: "MOVA checkpoint · openmoss/mova-360p (1)"})).toBeVisible();
+  expect(within(models).getByRole("option", {name: "MOVA checkpoint · openmoss/mova-720p (1)"})).toBeVisible();
 
   await userEvent.selectOptions(models, "openmoss/mova-360p");
   expect(screen.getByRole("heading", {name: "MOVA", level: 3})).toBeVisible();
