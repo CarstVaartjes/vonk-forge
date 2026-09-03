@@ -175,6 +175,26 @@ pending_is_safe() {
             | grep -Eq '^agent_sha256=[0-9a-f]{64}$'
 }
 
+# A pre-schema-2 install may leave an old helper receipt behind after the
+# helper transaction has already completed.  It is not input to the current
+# protocol and must not block the first current-schema upgrade.  Only retire a
+# root-owned, mode-0600 receipt when no current pending/intent state exists;
+# any receipt participating in an active recovery remains fail-closed below.
+retire_stale_helper_receipt() {
+    if [ ! -e "$helper_receipt" ] && [ ! -L "$helper_receipt" ]; then
+        return 0
+    fi
+    [ "$pending_present" -eq 0 ] && [ "$durable_recovery" -eq 0 ] \
+        || return 0
+    [ -f "$helper_receipt" ] && [ ! -L "$helper_receipt" ] \
+        && [ "$(/usr/bin/stat -c %u:%a:%h "$helper_receipt" 2>/dev/null \
+            || true)" = 0:600:1 ] || return 1
+    [ "$(/usr/bin/wc -l < "$helper_receipt" 2>/dev/null || true)" -eq 10 ] \
+        && return 0
+    /usr/bin/rm -f -- "$helper_receipt" || return 1
+    /usr/bin/sync -f /var/lib/vonk-forge
+}
+
 activate_permanent_helper_unit() {
     [ -f "$helper_unit_path" ] && [ ! -L "$helper_unit_path" ] \
         && grep -Fq \
@@ -501,6 +521,10 @@ elif [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then
     echo 'vonk-forge-agent: package recovery intent is missing' >&2
     exit 1
 fi
+retire_stale_helper_receipt || {
+    echo 'vonk-forge-agent: stale helper receipt cannot be retired safely' >&2
+    exit 1
+}
 needs_finisher=0
 if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ] \
     && [ "$durable_recovery" -ne 1 ] \
