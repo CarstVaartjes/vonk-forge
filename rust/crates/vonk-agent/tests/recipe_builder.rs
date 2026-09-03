@@ -647,8 +647,16 @@ impl PrivateContainerd {
 }
 
 fn bounded_text(bytes: &[u8], maximum_bytes: usize) -> String {
-    let end = bytes.len().min(maximum_bytes);
-    String::from_utf8_lossy(&bytes[..end]).into_owned()
+    let start = bytes.len().saturating_sub(maximum_bytes);
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
+}
+
+#[test]
+fn bounded_containerd_diagnostic_keeps_the_failure_tail() {
+    assert_eq!(
+        bounded_text(b"startup-noise-fatal-cause", 11),
+        "fatal-cause"
+    );
 }
 
 impl Drop for PrivateContainerd {
