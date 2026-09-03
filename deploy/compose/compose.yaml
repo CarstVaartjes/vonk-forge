@@ -18,7 +18,7 @@ x-api-environment: &api-environment
   # The API remains on internal networks. Caddy relays only read-only requests
   # to the explicitly scoped public recipe and agent-release authorities.
   VONK_RECIPE_LIBRARY_API_URL: http://caddy:8083
-  VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS: ${VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS:-60}
+  VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS: ${VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS:-900}
   VONK_AGENT_RELEASE_API_URL: http://caddy:8084
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}

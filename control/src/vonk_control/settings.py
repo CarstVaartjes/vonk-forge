@@ -153,7 +153,7 @@ class Settings:
     host_runtime_grant_private_key_path: Path | None = None
     global_catalog_url: str = "https://vonkforge.ai"
     recipe_library_api_url: str = "https://api.github.com"
-    recipe_library_sync_interval_seconds: int = 60
+    recipe_library_sync_interval_seconds: int = 900
     agent_release_api_url: str = "https://install.vonkforge.ai"
     agent_controller_address: str | None = None
     agent_service_hostnames: tuple[str, ...] = ()
@@ -279,7 +279,7 @@ class Settings:
                 )
             )
             recipe_library_sync_interval_seconds = int(
-                os.environ.get("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "60")
+                os.environ.get("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "900")
             )
         except ValueError as error:
             raise SettingsError(
