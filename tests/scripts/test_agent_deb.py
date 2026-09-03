@@ -836,7 +836,12 @@ def test_recovery_binds_exact_root_custody_dpkg_invocation_and_candidate() -> No
     assert '"$(/usr/bin/readlink -f "/proc/$PPID/exe")" = /usr/bin/dpkg' in preinst
     assert "= --install" in preinst
     assert "= --force-confold" in preinst
-    assert "/var/lib/vonk-forge/incoming/[0-9a-f]*.deb" not in preinst
+    # A still-running pre-509 helper can dispatch from the agent-owned
+    # incoming directory; the maintainer script must immediately re-home that
+    # exact candidate into the current root-only custody protocol.
+    assert "/var/lib/vonk-forge/incoming/[0-9a-f]*.deb" in preinst
+    assert "inside_package_helper proved the root helper ancestry" in preinst
+    assert "incoming-copy-changed" in preinst
     assert "custody_root=/run/vonk-forge-package-candidates" in preinst
     assert '[ "${#invocation}" -eq 32 ]' in preinst
     assert '= 0:0:600:1 ]' in preinst
