@@ -65,7 +65,7 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
     assert 'repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")' in harness
     assert "0:0:755:1" in harness
     assert "binary_revision=$packaging_revision" in harness
-    assert "source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}" in harness
+    assert "source_version=0.1.1~dev.1788260440+g${binary_revision:0:12}" in harness
     assert '"$test_root/target-dist" "$repo_root" "$binary_revision"' in harness
     assert "source_capsule_unit_file=$repo_root/packaging/systemd/" in harness
 
@@ -179,8 +179,8 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
 
     _assert_frozen_schema2_runtime()
 
-    assert "0.1.0~dev.335+g2eaaf4d9b2b5" in harness
-    assert "source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}" in harness
+    assert "0.1.1~dev.335+g2eaaf4d9b2b5" in harness
+    assert "source_version=0.1.1~dev.1788260440+g${binary_revision:0:12}" in harness
     assert "binary_revision=$packaging_revision" in harness
     assert 'rev-parse HEAD)"' in harness
     assert "spk_2818d189042b4c77aefa7796f4befd23" in harness

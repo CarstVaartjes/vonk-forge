@@ -21,11 +21,11 @@ def run(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_stable_tag_emits_exact_public_package_metadata() -> None:
-    result = run("tag", "v0.1.0", SHA)
+    result = run("tag", "v0.1.1", SHA)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "version=0.1.0",
-        "image_version_tag=v0.1.0",
+        "version=0.1.1",
+        "image_version_tag=v0.1.1",
         f"commit_tag=sha-{SHA}",
         f"dev_tag=dev-sha-{SHA}",
         "latest_alias=latest",
