@@ -349,7 +349,7 @@ def generate_bundle(
         cwd=root,
         environment=child_environment,
         responses=responses,
-        timeout=180,
+        timeout=300,
         require_all_prompts=require_all_prompts,
     )
     bundle = root / "vonk-forge"

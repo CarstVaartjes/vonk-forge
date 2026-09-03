@@ -119,7 +119,10 @@ def run_interactive(
             _assert_process_values_absent(pid, forbidden)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise AcceptanceError("interactive command timed out")
+                waiting = pending[0][0] if pending else "process completion"
+                raise AcceptanceError(
+                    f"interactive command timed out waiting for {waiting!r}"
+                )
             readable, _, _ = select.select([terminal], [], [], min(remaining, 0.2))
             if readable:
                 try:

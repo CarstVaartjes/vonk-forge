@@ -10,6 +10,18 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_native_bootstraps_bound_and_retry_every_download() -> None:
+    contract = (
+        "--retry 10 --retry-all-errors --retry-delay 2 --retry-max-time 45",
+        "--connect-timeout 10 --max-time 60",
+    )
+
+    for kind in ("nas", "spark"):
+        source = (ROOT / "install" / kind).read_text()
+        assert all(value in source for value in contract)
+        assert source.count("download \"") == (2 if kind == "nas" else 3)
+
+
 def _fake_command(directory: Path, name: str, body: str) -> None:
     path = directory / name
     path.write_text("#!/bin/sh\nset -eu\n" + body)
