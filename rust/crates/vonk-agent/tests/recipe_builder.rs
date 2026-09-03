@@ -574,8 +574,18 @@ impl PrivateContainerd {
         )
         .unwrap();
         let socket = root.path().join("containerd.sock");
-        let mut child = Command::new("/usr/bin/containerd")
+        let stderr_path = root.path().join("containerd.stderr");
+        let stderr = File::create(&stderr_path).unwrap();
+        // containerd owns host-global plugin resources even when its root,
+        // state, and sockets are isolated. The runner-wide flock serializes
+        // real-daemon fixtures across test binaries and concurrent CI jobs;
+        // --no-fork keeps the returned child bound to the daemon lifecycle.
+        let mut child = Command::new("/usr/bin/flock")
             .args([
+                "--exclusive",
+                "--no-fork",
+                "/tmp/vonk-agent-private-containerd.lock",
+                "/usr/bin/containerd",
                 "--config",
                 config.to_str().unwrap(),
                 "--root",
@@ -587,13 +597,14 @@ impl PrivateContainerd {
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr))
             .spawn()
             .expect("the local containerd integration fixture must be installed");
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(status) = child.try_wait().unwrap() {
-                panic!("private containerd exited before readiness: {status}");
+                let diagnostic = bounded_text(&fs::read(&stderr_path).unwrap_or_default(), 8_192);
+                panic!("private containerd exited before readiness: {status}: {diagnostic}");
             }
             let ready = Command::new("/usr/bin/ctr")
                 .args(["--address", socket.to_str().unwrap(), "version"])
@@ -605,10 +616,12 @@ impl PrivateContainerd {
             if ready {
                 break;
             }
-            assert!(
-                Instant::now() < deadline,
-                "private containerd did not become ready"
-            );
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                let diagnostic = bounded_text(&fs::read(&stderr_path).unwrap_or_default(), 8_192);
+                panic!("private containerd did not become ready: {diagnostic}");
+            }
             thread::sleep(Duration::from_millis(25));
         }
         Self {
@@ -631,6 +644,11 @@ impl PrivateContainerd {
             .output()
             .expect("the local ctr integration fixture must be installed")
     }
+}
+
+fn bounded_text(bytes: &[u8], maximum_bytes: usize) -> String {
+    let end = bytes.len().min(maximum_bytes);
+    String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
 impl Drop for PrivateContainerd {
@@ -671,9 +689,14 @@ fn docker(arguments: &[&str]) -> Output {
 }
 
 fn local_oci_integration_fixture_available() -> bool {
-    ["/usr/bin/containerd", "/usr/bin/ctr", "/usr/bin/docker"]
-        .iter()
-        .all(|path| Path::new(path).is_file())
+    [
+        "/usr/bin/containerd",
+        "/usr/bin/ctr",
+        "/usr/bin/docker",
+        "/usr/bin/flock",
+    ]
+    .iter()
+    .all(|path| Path::new(path).is_file())
 }
 
 #[test]
