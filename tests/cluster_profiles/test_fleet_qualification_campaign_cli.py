@@ -16,10 +16,7 @@ from cluster_profiles.qualification_locking import node_locks
 
 NODE_A = "spk_" + "1" * 32
 NODE_B = "spk_" + "2" * 32
-PACKAGED_AUTHORITY_LOADER = campaign_cli._load_authority
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-
-
+REAL_AUTHORITY_LOADER = campaign_cli._load_authority
 @pytest.fixture(autouse=True)
 def _reviewed_test_authority(monkeypatch: pytest.MonkeyPatch) -> None:
     authority = campaign_cli.CampaignAuthority(
@@ -33,9 +30,7 @@ def _reviewed_test_authority(monkeypatch: pytest.MonkeyPatch) -> None:
         actionable_recipe_keys=("vonk/a", "vonk/b", "vonk/c"),
     )
 
-    def load(authority_id: str) -> campaign_cli.CampaignAuthority:
-        if authority_id != authority.authority_id:
-            raise QualificationError("qualification authority is not reviewed")
+    def load(_path: Path) -> campaign_cli.CampaignAuthority:
         return authority
 
     monkeypatch.setattr(campaign_cli, "_load_authority", load)
@@ -118,7 +113,8 @@ def _recipe(slug: str) -> dict[str, object]:
 def _document() -> dict[str, object]:
     return {
         "schema_version": 1,
-        "qualification_authority": "test-nl-single",
+        "qualification_authority": "authority.json",
+        "fixture_manifest": "qualification-index.json",
         "options": {
             "jurisdiction": "NL",
             "cleanup": "stop",
@@ -145,6 +141,19 @@ def _document() -> dict[str, object]:
 
 
 def _write_manifest(tmp_path: Path, document: object | None = None) -> Path:
+    (tmp_path / "qualification-index.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "fixtures": {},
+                "recipes": {},
+                "special_fixtures": {},
+                "service_case_templates": {},
+                "service_recipes": {},
+            }
+        ),
+        encoding="utf-8",
+    )
     path = tmp_path / "campaign.json"
     path.write_text(json.dumps(document or _document()), encoding="utf-8")
     return path
@@ -192,11 +201,50 @@ def test_manifest_requires_an_exact_disjoint_complete_partition(tmp_path: Path) 
 def test_manifest_rejects_duplicate_json_keys(tmp_path: Path) -> None:
     path = tmp_path / "campaign.json"
     path.write_text(
-        '{"schema_version":1,"schema_version":1,"qualification_authority":"test-nl-single","lanes":[]}',
+        '{"schema_version":1,"schema_version":1,"qualification_authority":"authority.json","fixture_manifest":"qualification-index.json","lanes":[]}',
         encoding="utf-8",
     )
     with pytest.raises(QualificationError, match="duplicate key: schema_version"):
         campaign_cli.load_manifest(path)
+
+
+def test_external_authority_contract_is_loaded_from_the_manifest_owner(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "authority.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "authority_id": "test-nl-single",
+                "catalog": {
+                    "repository": "test/recipes",
+                    "commit": "b" * 40,
+                    "catalog_index_sha256": "e" * 64,
+                    "recipe_count": 3,
+                },
+                "jurisdiction": "NL",
+                "reviewed_disposition": {
+                    "actionable_single_spark_count": 3,
+                    "capacity_blocked_single_spark_count": 0,
+                    "legal_blocked_single_spark_count": 0,
+                    "dual_spark_count": 0,
+                    "unsupported_topology_count": 0,
+                },
+                "actionable_recipe_keys": ["vonk/a", "vonk/b", "vonk/c"],
+                "capacity_blocked_recipe_keys": [],
+                "legal_blocked_recipe_keys": [],
+                "dual_spark_recipe_keys": [],
+                "unsupported_topology_recipe_keys": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    authority = REAL_AUTHORITY_LOADER(path)
+
+    assert authority.authority_id == "test-nl-single"
+    assert authority.actionable_recipe_keys == ("vonk/a", "vonk/b", "vonk/c")
 
 
 def test_node_lock_is_shared_across_independent_ledgers(tmp_path: Path) -> None:
@@ -264,89 +312,6 @@ except QualificationError as error:
             text=True,
         )
     assert completed.returncode == 0, completed.stderr
-
-
-def test_packaged_authority_binds_only_current_e6a8_catalog_closure() -> None:
-    authority = PACKAGED_AUTHORITY_LOADER("nl-single-spark-e6a8e750")
-
-    assert authority.authority_sha256 == (
-        "94b308b39c10d5e853fdfd8a6c4c61394dc6e44c229788716839368790b3cbd2"
-    )
-    assert authority.repository == "CarstVaartjes/vonk-forge-recipes"
-    assert authority.commit == "e6a8e75029ad85216b22e2d5e41d26a5689fcf6b"
-    assert (
-        authority.catalog_index_sha256
-        == "24a57e7d89e7a07708fe960c400a85546ae9de2d45da6b879061109bb967d352"
-    )
-    assert authority.catalog_recipe_count == 84
-    assert authority.jurisdiction == "NL"
-    assert [
-        len(authority.actionable_recipe_keys),
-        len(authority.capacity_blocked_recipe_keys),
-        len(authority.legal_blocked_recipe_keys),
-        len(authority.dual_spark_recipe_keys),
-        len(authority.unsupported_topology_recipe_keys),
-    ] == [58, 5, 9, 8, 4]
-
-
-def test_packaged_authority_rejects_schema_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    authority_root = tmp_path / "qualification_authorities"
-    authority_root.mkdir()
-    document = json.loads(
-        (
-            REPOSITORY_ROOT
-            / "src/cluster_profiles/qualification_authorities/nl-single-spark-e6a8e750.json"
-        ).read_text(encoding="utf-8")
-    )
-    document["schema_version"] = 1
-    (authority_root / "nl-single-spark-e6a8e750.json").write_text(
-        json.dumps(document), encoding="utf-8"
-    )
-    monkeypatch.setattr(campaign_cli.resources, "files", lambda _package: tmp_path)
-
-    with pytest.raises(QualificationError, match="authority identity is invalid"):
-        PACKAGED_AUTHORITY_LOADER("nl-single-spark-e6a8e750")
-
-
-def test_checked_in_e6a8_campaign_is_the_exact_current_partition(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(campaign_cli, "_load_authority", PACKAGED_AUTHORITY_LOADER)
-    manifest = campaign_cli.load_manifest(
-        REPOSITORY_ROOT / "config/qualification/nl-single-spark-e6a8e750.json"
-    )
-
-    assert manifest.manifest_sha256 == (
-        "951522a6ca644931c6c35d279e88fd30d8aa822b6d5ae313bc1eec46eb3d1ca5"
-    )
-    assert manifest.cleanup == "stop"
-    assert manifest.jurisdiction == "NL"
-    assert [
-        (lane.name, lane.node_id, len(lane.recipes)) for lane in manifest.lanes
-    ] == [
-        ("spark-3542", "spk_2818d189042b4c77aefa7796f4befd23", 29),
-        ("spark-2297", "spk_9a86fdbab116442ab6707bf4181a3c1c", 29),
-    ]
-    assigned = [recipe for lane in manifest.lanes for recipe in lane.recipes]
-    assert len(assigned) == len(set(assigned)) == 58
-    assert set(assigned) == set(manifest.authority.actionable_recipe_keys)
-    state_root = (
-        REPOSITORY_ROOT / ".state/qualification/nl-single-spark-e6a8e750"
-    ).resolve()
-    for lane in manifest.lanes:
-        assert lane.ledger.is_relative_to(state_root)
-        assert lane.plan_output.is_relative_to(state_root)
-
-
-def test_every_packaged_authority_is_explicitly_mapped() -> None:
-    authority_directory = (
-        Path(campaign_cli.__file__).resolve().parent / "qualification_authorities"
-    )
-    assert set(campaign_cli._AUTHORITY_FILES.values()) == {
-        path.name for path in authority_directory.glob("*.json")
-    }
 
 
 def test_preview_rejects_catalog_commit_drift_before_writing_plans(

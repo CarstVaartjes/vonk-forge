@@ -13,7 +13,6 @@ STANDALONE_SCHEMAS = {
     "workload-artifact-build.schema.json",
 }
 WEB_RECIPE_PRESETS = ROOT / "control/web/src/pages/custom-recipe-presets.json"
-QUALIFICATION_AUTHORITIES = ROOT / "src/cluster_profiles/qualification_authorities"
 
 
 def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
@@ -56,10 +55,3 @@ def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
             archive.read("cluster_profiles/resources/custom-recipe-presets.json")
             == WEB_RECIPE_PRESETS.read_bytes()
         )
-        for authority in sorted(QUALIFICATION_AUTHORITIES.glob("*.json")):
-            assert (
-                archive.read(
-                    f"cluster_profiles/qualification_authorities/{authority.name}"
-                )
-                == authority.read_bytes()
-            )

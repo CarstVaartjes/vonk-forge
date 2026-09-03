@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vonk-forge.ai/schemas/qualification-manifest-v2.schema.json",
+  "title": "Vonk recipe qualification manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixtures",
+    "recipes",
+    "special_fixtures",
+    "service_case_templates",
+    "service_recipes"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "fixtures": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/name"},
+      "additionalProperties": {"$ref": "#/$defs/fixture"}
+    },
+    "recipes": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/recipeKey"},
+      "additionalProperties": {"$ref": "#/$defs/artifactRecipe"}
+    },
+    "special_fixtures": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/recipeKey"},
+      "additionalProperties": {"$ref": "#/$defs/specialFixture"}
+    },
+    "service_case_templates": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/name"},
+      "additionalProperties": {"$ref": "#/$defs/serviceCase"}
+    },
+    "service_recipes": {
+      "type": "object",
+      "propertyNames": {"$ref": "#/$defs/recipeKey"},
+      "additionalProperties": {"$ref": "#/$defs/serviceRecipe"}
+    }
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "recipeKey": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}/[a-z0-9][a-z0-9-]{0,62}$"
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "source_url", "source_revision", "license_spdx", "attribution"],
+      "properties": {
+        "origin": {"enum": ["generated", "upstream"]},
+        "source_url": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "source_revision": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "license_spdx": {"enum": ["CC-BY-4.0", "CC0-1.0"]},
+        "attribution": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "encoding", "name", "media_type", "size_bytes", "sha256", "provenance"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 512},
+        "encoding": {"enum": ["base64", "identity"]},
+        "name": {"$ref": "#/$defs/name"},
+        "media_type": {"type": "string", "minLength": 3, "maxLength": 128},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "provenance": {"$ref": "#/$defs/provenance"}
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slot", "fixture"],
+      "properties": {
+        "slot": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"},
+        "fixture": {"$ref": "#/$defs/name"}
+      }
+    },
+    "outputLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_files", "max_file_bytes", "max_total_bytes", "allowed_media_types"],
+      "properties": {
+        "max_files": {"type": "integer", "minimum": 1, "maximum": 32},
+        "max_file_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "max_total_bytes": {"type": "integer", "minimum": 1, "maximum": 2147483648},
+        "allowed_media_types": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 3, "maxLength": 128}
+        }
+      }
+    },
+    "assertion": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {"kind": {"type": "string", "minLength": 1, "maxLength": 64}}
+    },
+    "artifactCase": {
+      "type": "object",
+      "minProperties": 2,
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"},
+        "parameters": {"type": "object"},
+        "inputs": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/input"}},
+        "output_limits": {"$ref": "#/$defs/outputLimits"},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "assertions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/assertion"}}
+      }
+    },
+    "artifactRecipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_sha256", "interface", "parameters", "inputs", "output_limits", "timeout_seconds", "assertions"],
+      "properties": {
+        "content_sha256": {"$ref": "#/$defs/digest"},
+        "interface": {"enum": ["artifact-job", "audio-job", "image-job", "mesh-job", "video-job"]},
+        "parameters": {"type": "object"},
+        "inputs": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/input"}},
+        "output_limits": {"$ref": "#/$defs/outputLimits"},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+        "assertions": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/assertion"}},
+        "cases": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/artifactCase"}}
+      }
+    },
+    "specialFixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_sha256", "detail"],
+      "properties": {
+        "content_sha256": {"$ref": "#/$defs/digest"},
+        "code": {"type": "string", "minLength": 1, "maxLength": 128},
+        "detail": {"type": "string", "minLength": 1, "maxLength": 512}
+      }
+    },
+    "serviceCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "path", "body", "timeout_seconds", "max_response_bytes", "assertions"],
+      "properties": {
+        "method": {"enum": ["GET", "POST"]},
+        "path": {"type": "string", "pattern": "^/[^?#]*$", "maxLength": 128},
+        "body": {},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 900},
+        "max_response_bytes": {"type": "integer", "minimum": 1, "maximum": 1048576},
+        "assertions": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/$defs/assertion"}}
+      }
+    },
+    "serviceRecipe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_sha256", "alias", "smoke_cases"],
+      "properties": {
+        "content_sha256": {"$ref": "#/$defs/digest"},
+        "alias": {"$ref": "#/$defs/name"},
+        "smoke_cases": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/name"}
+        },
+        "higher_tiers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "stress": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+            "recovery": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 512}}
+          }
+        }
+      }
+    }
+  }
+}

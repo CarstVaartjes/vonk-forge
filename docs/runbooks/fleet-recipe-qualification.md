@@ -25,6 +25,7 @@ export VONK_CONTROL_TOKEN_FILE="$PWD/.dev/admin-token"
 export VONK_OPERATOR_JURISDICTION=NL
 
 vonk-fleet-qualify \
+  --fixture-manifest /path/to/vonk-forge-recipes/qualification/qualification-index.json \
   --ledger qualification-evidence.jsonl \
   > qualification-plan.json
 ```
@@ -47,44 +48,16 @@ is selected when the option is omitted.
 One runner remains sequential within a lane, but the campaign coordinator runs
 two explicitly disjoint single-Spark lanes concurrently. Use the coordinator
 instead of maintaining two command lines by hand. Its manifest is the global
-partition, but it cannot declare its own completeness. It names a checked-in,
-reviewed qualification authority. Every recipe in that authority must occur in
-exactly one lane, and no other recipe is accepted. The two lane names, exact
+partition and references both a reviewed authority document and a generated
+qualification manifest owned by the recipe library. Every actionable recipe in
+that authority must occur in exactly one lane. The two lane names, exact
 `spk_...` node IDs, ledgers, and plan outputs must all be distinct. Unknown
 fields and duplicate JSON keys fail closed.
 
-The sole current `nl-single-spark-e6a8e750` authority is bound to jurisdiction
-`NL`, merged recipe-library commit
-`e6a8e75029ad85216b22e2d5e41d26a5689fcf6b`, and
-catalog-index SHA-256
-`24a57e7d89e7a07708fe960c400a85546ae9de2d45da6b879061109bb967d352`.
-The canonical authority SHA-256 is
-`94b308b39c10d5e853fdfd8a6c4c61394dc6e44c229788716839368790b3cbd2`.
-Its reviewed 84-recipe closure classifies every recipe exactly once: 58
-actionable single-Spark recipes, five single-Spark recipes retained as original
-above-envelope controls, nine single-Spark recipes blocked in NL, eight
-dual-Spark recipes, and four recipes wider than the present fleet. The v2
-authority names every non-actionable key, so an omission or overlap fails
-closed instead of disappearing behind aggregate counts. The NL legal set
-includes Hunyuan3D-Omni, HunyuanOCR, the five Hunyuan video/Foley recipes, and
-both MiniMax H3 variants. Superseded authority snapshots and campaign manifests
-are deliberately not shipped: a greenfield Controller can select only the
-current reviewed catalog closure.
-
-A later catalog, recipe, or license update requires a new reviewed authority
-file and ID; do not edit an authority already named by evidence. The coordinator
-rejects catalog repository or commit drift before publishing plans or applying
-work.
-
-The executable reviewed partition is
-`config/qualification/nl-single-spark-e6a8e750.json`: 29 recipes on Spark3542
-and 29 on Spark2297. It excludes every v2 legal- and capacity-blocked key while
-keeping shared artifact families together. Lower-cost controls precede their
-larger variants, MOVA 360p precedes 720p, and Step1X geometry precedes labeled
-geometry and texture. Both lanes retain stopped installations and caches, but
-the apply-time capacity plan remains authoritative for current disk fit.
-The canonical manifest SHA-256 is
-`951522a6ca644931c6c35d279e88fd30d8aa822b6d5ae313bc1eec46eb3d1ca5`.
+A later catalog, recipe, or license update requires a new recipe-library-owned
+authority file. Do not edit an authority already named by evidence. The
+coordinator rejects catalog repository or commit drift before publishing plans
+or applying work.
 
 The authority document and campaign manifest are different contracts. The
 authority is schema 2 because it classifies the complete catalog by disposition.
@@ -100,7 +73,8 @@ with an explicitly reviewed partition of every key in the named authority:
 ```jsonc
 {
   "schema_version": 1,
-  "qualification_authority": "nl-single-spark-e6a8e750",
+  "qualification_authority": "../authorities/reviewed-campaign.json",
+  "fixture_manifest": "../qualification-index.json",
   "options": {
     "jurisdiction": "NL",
     "cleanup": "stop",
@@ -134,7 +108,7 @@ Preview both lane plans in one operation:
 
 ```bash
 vonk-fleet-qualify-campaign \
-  --manifest config/qualification/nl-single-spark-e6a8e750.json \
+  --manifest /path/to/vonk-forge-recipes/qualification/campaigns/reviewed-campaign.json \
   > campaign-preview.json
 ```
 
@@ -145,7 +119,7 @@ single `campaign_digest` from the preview:
 
 ```bash
 vonk-fleet-qualify-campaign \
-  --manifest config/qualification/nl-single-spark-e6a8e750.json \
+  --manifest /path/to/vonk-forge-recipes/qualification/campaigns/reviewed-campaign.json \
   --campaign-digest 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
   --apply
 ```
@@ -182,6 +156,7 @@ Review `qualification-plan.json`, then pass its exact `plan_digest`:
 PLAN_DIGEST=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 vonk-fleet-qualify \
+  --fixture-manifest /path/to/vonk-forge-recipes/qualification/qualification-index.json \
   --ledger qualification-evidence.jsonl \
   --plan-digest "$PLAN_DIGEST" \
   --apply
@@ -220,12 +195,6 @@ install. The runner never silently evicts another retained installation:
 capacity evidence reports `automatic_eviction: false` and a concrete per-node
 shortfall/alternative-plan disposition for operator review.
 
-For scale, a documented fleet snapshot contained 3,275.9 GiB and 3,250.4 GiB
-free on two 3,755.0 GiB nodes. The current one/two-Spark catalog is roughly
-4.499 TB raw per-recipe installed bytes and 3.926 TB unique artifacts before
-images and build temporary space. Those numbers are only an example: apply
-always binds refreshed controller telemetry and the exact imported revisions.
-
 The ledger records an operation ID before monitoring its durable controller
 state. Rerun the same command after a process interruption: successful recipes
 are skipped and a submitted operation is polled instead of submitted again.
@@ -246,10 +215,14 @@ the retained installation ID and ownership. A forced uninstall is explicit:
 
 ```bash
 # Remove runner-owned installs as well as stopping runtime capacity.
-vonk-fleet-qualify --cleanup uninstall --plan-digest "$PLAN_DIGEST" --apply
+vonk-fleet-qualify \
+  --fixture-manifest /path/to/vonk-forge-recipes/qualification/qualification-index.json \
+  --cleanup uninstall --plan-digest "$PLAN_DIGEST" --apply
 
 # Keep the recipe loaded only for an attended diagnostic session.
-vonk-fleet-qualify --cleanup none --plan-digest "$PLAN_DIGEST" --apply
+vonk-fleet-qualify \
+  --fixture-manifest /path/to/vonk-forge-recipes/qualification/qualification-index.json \
+  --cleanup none --plan-digest "$PLAN_DIGEST" --apply
 ```
 
 `--cleanup none` is not appropriate for an unattended full-catalog run.
@@ -272,7 +245,9 @@ optional policy can add manual, legal, license, security blocks:
 ```
 
 ```bash
-vonk-fleet-qualify --policy qualification-policy.json
+vonk-fleet-qualify \
+  --fixture-manifest /path/to/vonk-forge-recipes/qualification/qualification-index.json \
+  --policy qualification-policy.json
 ```
 
 ## Evidence captured
@@ -294,33 +269,18 @@ without masking an earlier campaign error.
 
 The runner has a typed artifact-job smoke boundary and uses the dedicated
 `/api/v1/recipes/job-runs` activation route. A job recipe still requires an
-exact qualification-matrix fixture: typed input slots with path, MIME type,
-SHA-256 and bytes; parameters; output limits; timeout; and output assertions.
+exact recipe-library qualification entry: typed input slots with path, MIME
+type, SHA-256 and bytes; parameters; output limits; timeout; and output assertions.
 Until that recipe-specific contract is supplied, the recipe is recorded as
 `artifact_job.fixture_contract_required`, cleaned up, and not reported as
 successful. This is intentional: activating an artifact worker without proving
 an output is not qualification.
 
-The checked-in schema-v2 qualification manifest currently binds all 42 artifact recipes
-to executable fixtures with immutable provenance and no unresolved
-special-artifact dispositions. Artifact fixtures can declare multiple named
-cases; every case receives its own durable controller job, idempotency key,
-ledger event namespace, semantic output validation, and warm-redeploy rerun.
-The current 56 cases cover one- and two-reference Qwen edits, MOVA with and
-without a reference, one- and two-frame MOSS sessions, MiniMax FL2VA text and
-keyframe modes, both optional LTX 2.5 FP8 profiles, Wan-Dancer controls, and an
-explicit HunyuanOCR config bound. SkinTokens uses a deterministic mesh-only
-derivative of Khronos' CC-BY-4.0 RiggedFigure with its transformation pinned;
-Step1X texture uses a deterministic CC0 triangle cube and reference image.
-Wan-Dancer uses a deterministic, digest-pinned one-second PCM music fixture.
-Hunyuan Foley uses a deterministic one-second, 25-frame, 25 fps H.264 fixture,
-so SyncFormer is exercised rather than special-blocked. HunyuanOCR uses the
-digest-pinned digit-7 PNG and validates the exact safe ZIP members, closed
-manifest authority, sampling receipt, UTF-8 Markdown, character count, and OCR
-semantic result.
-MOSS realtime uses closed one- and two-frame schema-v1 sessions whose events
-reference authenticated `frames`-slot PNGs; acceptance checks each exact replay
-MP4 and its ordered model-revision/frame-ack/session-stop JSONL transcript.
+Artifact qualification entries can declare multiple named cases; every case
+receives its own durable controller job, idempotency key, ledger event
+namespace, semantic output validation, and warm-redeploy rerun. The recipe
+library owns those entries and their input assets. Forge owns only their schema,
+parser, and assertion implementations.
 
 Artifact acceptance is physical, not extension-based. PNG validation checks
 CRC, exact dimensions, bit depth/color type, and bounded decoded scanlines; WAV
@@ -332,11 +292,8 @@ JSON/JSONL reject duplicate keys and non-finite numbers; semantic receipts use
 closed schemas and cross-file digest checks. If a required parser is unavailable
 or an allowed media type lacks a semantic assertion, qualification fails closed.
 
-Service acceptance is also digest-bound. The 27 one- or two-Spark service
-recipes select reviewed cases from a runner-owned template registry. Cases
-verify the exact `/models` alias and then capability-specific arithmetic,
-structured tool calls, reasoning separation, vision, OCR, or inert GUI-action
-contracts. Request paths, response bounds, fixture data URIs, assertions, and
-recipe digests are operator-invariant. Stress and recovery tiers remain
-explicitly separate from the safe base smoke; a generic nonempty chat can never
-qualify a service recipe.
+Service acceptance is also digest-bound. Recipes select reviewed cases from a
+recipe-library-owned template registry. Request paths, response bounds, fixture
+data URIs, assertions, and recipe identities are operator-invariant. Stress and
+recovery tiers remain explicitly separate from the safe base smoke; a generic
+nonempty chat can never qualify a service recipe.
