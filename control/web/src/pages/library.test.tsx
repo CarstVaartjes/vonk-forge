@@ -1000,7 +1000,7 @@ test("loads the current default catalog recipes when public import opens", async
   expect(screen.queryByText(/Qwen Vision · two Sparks/)).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", {name: "Clear all"}));
-  await user.selectOptions(screen.getByRole("combobox", {name: "Filter by model"}), "qwen/qwen-audio");
+  await user.selectOptions(screen.getByRole("combobox", {name: "Filter by model"}), "qwen/qwen-audio-bf16");
   expect(screen.getByRole("heading", {name: /Qwen Audio/, level: 3})).toBeVisible();
   expect(screen.queryByRole("heading", {name: /Wan 2\.2/, level: 3})).not.toBeInTheDocument();
 
@@ -1010,10 +1010,10 @@ test("loads the current default catalog recipes when public import opens", async
   expect(screen.queryByRole("heading", {name: /Qwen Audio/, level: 3})).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", {name: "Clear all"}));
-  await user.selectOptions(screen.getByRole("combobox", {name: "Filter by topology"}), "distributed");
-  expect(screen.getByRole("heading", {name: /Wan 2\.2/, level: 3})).toBeVisible();
-  expect(screen.getByRole("heading", {name: /Qwen Audio/, level: 3})).toBeVisible();
-  expect(screen.queryByRole("heading", {name: /Qwen 3\.5/, level: 3})).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByRole("combobox", {name: "Filter by required Sparks"}), "2");
+  expect(screen.getByRole("button", {name: /Review update for Qwen Vision · two Sparks/})).toBeVisible();
+  expect(screen.queryByRole("heading", {name: /Wan 2\.2/, level: 3})).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", {name: /Qwen Audio/, level: 3})).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", {name: "Clear all"}));
   const sort = screen.getByRole("combobox", {name: "Sort recipes"});

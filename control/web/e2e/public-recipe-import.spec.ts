@@ -88,7 +88,7 @@ test("compact preference, comparison and graphical requirements stay human-reada
   await page.getByRole("checkbox", {name: /Compare.*DeepSeek/}).check();
   await page.getByRole("checkbox", {name: /Compare.*GLM 5.2 3/}).check();
   await page.getByRole("button", {name: "Compare 2 recipes"}).click();
-  await expect(page.getByRole("table", {name: "Selected public recipe comparison"})).toContainText("Tensor parallel");
+  await expect(page.getByRole("table", {name: "Selected public recipe comparison"})).toContainText("AbliteratedFalseFalse");
   await expect(page.getByText("a".repeat(40))).toBeHidden();
 
   await page.getByRole("button", {name: /Review update for DeepSeek V3.1/}).click();

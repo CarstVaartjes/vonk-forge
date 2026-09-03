@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from "react";
-import type {CatalogApi, PublicRecipe, PublicRecipeAlignment, PublicRecipeCapability, PublicRecipeExecutionReadiness, PublicRecipePreview} from "../api/types";
+import type {CatalogApi, PublicRecipe, PublicRecipeCapability, PublicRecipeExecutionReadiness, PublicRecipePreview} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import "./public-recipe-import.css";
 
@@ -21,32 +21,15 @@ const PUBLIC_RECIPE_READINESS: Array<{value: PublicRecipeExecutionReadiness; lab
   {value: "not-declared", label: "Readiness not declared"},
 ];
 
-const PUBLIC_RECIPE_ALIGNMENTS: Array<{value: PublicRecipeAlignment; label: string}> = [
-  {value: "standard", label: "Standard"},
-  {value: "abliterated", label: "Abliterated"},
-  {value: "derisked", label: "Derisked"},
-  {value: "other-modified", label: "Other modified"},
-  {value: "unspecified", label: "Unspecified"},
-];
-
 type SparkFilter = "" | "1" | "2" | "3" | "4+";
+type BooleanFilter = "" | "true" | "false";
 type RecipeSort = "catalog" | "model" | "sparks" | "download";
 type LocalFilter = "" | "not-imported" | "update-available" | "current" | "needs-review";
-type ModelType = "" | "language" | "vision" | "image" | "video" | "audio" | "3d";
 type UpdatedFilter = "" | "7" | "30" | "90" | "365";
 type ImportStep = "catalog" | "review" | "confirm";
 type CatalogView = "cards" | "compact";
-type Facet = "modelType" | "model" | "modelVersion" | "alignment" | "sourceOwner" | "repository" | "sparks" | "runtime" | "quantization" | "updated" | "topology" | "qualification" | "readiness" | "local" | "capability";
+type Facet = "modelFamily" | "model" | "abliterated" | "sourceOwner" | "repository" | "sparks" | "runtime" | "quantization" | "updated" | "qualification" | "readiness" | "local" | "capability";
 type ImportCompletion = {recipeId: string; title: string};
-
-const MODEL_TYPE_OPTIONS: Array<{value: Exclude<ModelType, "">; label: string}> = [
-  {value: "language", label: "Language / chat"},
-  {value: "vision", label: "Vision / multimodal"},
-  {value: "image", label: "Image"},
-  {value: "video", label: "Video"},
-  {value: "audio", label: "Audio"},
-  {value: "3d", label: "3D"},
-];
 
 const CATALOG_VIEW_STORAGE_KEY = "vonk.public-recipe-catalog.view";
 const PUBLIC_RECIPE_URI_PATTERN = /^vonk:\/\/catalog\/[a-z0-9][a-z0-9-]{1,62}\/[a-z0-9][a-z0-9-]{1,62}@sha256:[0-9a-f]{64}$/;
@@ -82,17 +65,15 @@ function runBoundedRequest<T>(controller: AbortController, onSlow: () => void, t
 
 export type PublicRecipeFilters = {
   query: string;
-  modelType: ModelType;
+  modelFamily: string;
   model: string;
-  modelVersion: string;
-  alignment: "" | PublicRecipeAlignment;
+  abliterated: BooleanFilter;
   sourceOwner: string;
   repository: string;
   sparks: SparkFilter;
   runtime: string;
   quantization: string;
   updated: UpdatedFilter;
-  topology: string;
   qualification: "" | PublicRecipe["qualification"];
   readiness: "" | PublicRecipeExecutionReadiness;
   local: LocalFilter;
@@ -101,17 +82,15 @@ export type PublicRecipeFilters = {
 };
 
 const EMPTY_FILTERS: PublicRecipeFilters = {
-  query: "", modelType: "", model: "", modelVersion: "", alignment: "", sourceOwner: "", repository: "", sparks: "", runtime: "", quantization: "", updated: "", topology: "",
+  query: "", modelFamily: "", model: "", abliterated: "", sourceOwner: "", repository: "", sparks: "", runtime: "", quantization: "", updated: "",
   qualification: "", readiness: "", local: "", sort: "catalog", capabilities: [],
 };
 
 const VALID_SPARKS = new Set<SparkFilter>(["", "1", "2", "3", "4+"]);
-const VALID_MODEL_TYPES = new Set<ModelType>(["", ...MODEL_TYPE_OPTIONS.map(option => option.value)]);
 const VALID_SORTS = new Set<RecipeSort>(["catalog", "model", "sparks", "download"]);
 const VALID_LOCAL = new Set<LocalFilter>(["", "not-imported", "update-available", "current", "needs-review"]);
 const VALID_UPDATED = new Set<UpdatedFilter>(["", "7", "30", "90", "365"]);
 const VALID_READINESS = new Set<PublicRecipeFilters["readiness"]>(["", ...PUBLIC_RECIPE_READINESS.map(option => option.value)]);
-const VALID_ALIGNMENTS = new Set<PublicRecipeFilters["alignment"]>(["", ...PUBLIC_RECIPE_ALIGNMENTS.map(option => option.value)]);
 const VALID_CAPABILITIES = new Set(PUBLIC_RECIPE_CAPABILITIES.map(option => option.value));
 
 function storedCatalogView(): CatalogView {
@@ -133,30 +112,27 @@ function saveCatalogView(view: CatalogView) {
 export function parsePublicRecipeImportUrl(url: string): {filters: PublicRecipeFilters; more: boolean; recipe: string; step: ImportStep} {
   const search = new URL(url, "https://vonk.invalid").searchParams;
   const sparks = search.get("sparks") as SparkFilter | null;
-  const modelType = search.get("model_type") as ModelType | null;
   const sort = search.get("sort") as RecipeSort | null;
   const local = search.get("local") as LocalFilter | null;
   const updated = search.get("updated") as UpdatedFilter | null;
   const qualification = search.get("qualification");
   const readiness = search.get("readiness") as PublicRecipeFilters["readiness"] | null;
-  const alignment = search.get("alignment") as PublicRecipeFilters["alignment"] | null;
+  const abliterated = search.get("abliterated") as BooleanFilter | null;
   const requestedStep = search.get("step");
   const recipe = search.get("recipe") ?? "";
   const step: ImportStep = recipe && requestedStep === "confirm" ? "confirm" : recipe ? "review" : "catalog";
   return {
     filters: {
       query: search.get("q") ?? "",
-      modelType: modelType && VALID_MODEL_TYPES.has(modelType) ? modelType : "",
+      modelFamily: search.get("model_family") ?? "",
       model: search.get("model") ?? "",
-      modelVersion: search.get("model_version") ?? "",
-      alignment: alignment && VALID_ALIGNMENTS.has(alignment) ? alignment : "",
+      abliterated: abliterated === "true" || abliterated === "false" ? abliterated : "",
       sourceOwner: search.get("creator") ?? "",
       repository: search.get("repository") ?? "",
       sparks: sparks && VALID_SPARKS.has(sparks) ? sparks : "",
       runtime: search.get("runtime") ?? "",
       quantization: search.get("quantization") ?? "",
       updated: updated && VALID_UPDATED.has(updated) ? updated : "",
-      topology: search.get("topology") ?? "",
       qualification: qualification === "candidate" || qualification === "cataloged" ? qualification : "",
       readiness: readiness && VALID_READINESS.has(readiness) ? readiness : "",
       local: local && VALID_LOCAL.has(local) ? local : "",
@@ -172,17 +148,15 @@ export function parsePublicRecipeImportUrl(url: string): {filters: PublicRecipeF
 export function publicRecipeImportUrl(filters: PublicRecipeFilters, options: {more?: boolean; recipe?: string; step?: ImportStep} = {}): string {
   const search = new URLSearchParams();
   if (filters.query) search.set("q", filters.query);
-  if (filters.modelType) search.set("model_type", filters.modelType);
+  if (filters.modelFamily) search.set("model_family", filters.modelFamily);
   if (filters.model) search.set("model", filters.model);
-  if (filters.modelVersion) search.set("model_version", filters.modelVersion);
-  if (filters.alignment) search.set("alignment", filters.alignment);
+  if (filters.abliterated) search.set("abliterated", filters.abliterated);
   if (filters.sourceOwner) search.set("creator", filters.sourceOwner);
   if (filters.repository) search.set("repository", filters.repository);
   if (filters.sparks) search.set("sparks", filters.sparks);
   if (filters.runtime) search.set("runtime", filters.runtime);
   if (filters.quantization) search.set("quantization", filters.quantization);
   if (filters.updated) search.set("updated", filters.updated);
-  if (filters.topology) search.set("topology", filters.topology);
   if (filters.qualification) search.set("qualification", filters.qualification);
   if (filters.readiness) search.set("readiness", filters.readiness);
   if (filters.local) search.set("local", filters.local);
@@ -207,20 +181,14 @@ function localMatches(recipe: PublicRecipe, local: LocalFilter): boolean {
   return recipe.local.status === local;
 }
 
-function modelTypeMatches(recipe: PublicRecipe, modelType: ModelType): boolean {
-  if (!modelType) return true;
-  if (modelType === "language") return recipe.capabilities.includes("chat") || recipe.capabilities.includes("reasoning");
-  if (modelType === "vision") return recipe.capabilities.includes("vision");
-  if (modelType === "image") return recipe.capabilities.includes("image-generation") || recipe.capabilities.includes("image-editing");
-  return recipe.capabilities.includes(modelType);
+function modelFamilyTitle(recipe: PublicRecipe): string {
+  const title = recipe.model_title.replace(/\s+[0-9a-f]{8}$/i, "").replace(/^NVIDIA\s+/i, "");
+  const variant = /\s+(?:NVFP4|BF16|FP16|FP8|FP4|INT8|INT4|EXL3|AQLM|AWQ|GPTQ|GGUF|TorchAO|DFlash\d*|Abliterated)(?:\s|$)/i.exec(title);
+  return (variant ? title.slice(0, variant.index) : title).trim();
 }
 
-function modelTypeLabel(modelType: Exclude<ModelType, "">): string {
-  return MODEL_TYPE_OPTIONS.find(option => option.value === modelType)?.label ?? modelType;
-}
-
-function alignmentLabel(alignment: PublicRecipeAlignment | undefined): string {
-  return PUBLIC_RECIPE_ALIGNMENTS.find(option => option.value === alignment)?.label ?? "Unspecified";
+function recipeIsAbliterated(recipe: PublicRecipe): boolean {
+  return recipe.alignment === "abliterated";
 }
 
 function modelVersionKey(recipe: PublicRecipe): string {
@@ -245,19 +213,17 @@ function updatedMatches(recipe: PublicRecipe, updated: UpdatedFilter, now = new 
 
 export function publicRecipeMatches(recipe: PublicRecipe, filters: PublicRecipeFilters, omitted?: Facet): boolean {
   const normalized = filters.query.trim().toLowerCase();
-  const queryMatches = !normalized || [recipe.title, recipe.slug, recipe.description, recipe.model_title, recipe.model_slug, modelVersionTitle(recipe), recipe.model_version_slug, recipe.source_owner ?? "", recipe.source_repository ?? "", recipe.runtime_distribution, alignmentLabel(recipe.alignment), ...recipeQuantizations(recipe), ...recipe.capabilities, ...recipe.tags].some(value => value.toLowerCase().includes(normalized));
+  const queryMatches = !normalized || [recipe.title, recipe.slug, recipe.description, modelFamilyTitle(recipe), recipe.model_title, recipe.model_slug, modelVersionTitle(recipe), recipe.model_version_slug, recipe.source_owner ?? "", recipe.source_repository ?? "", recipe.runtime_distribution, ...recipeQuantizations(recipe), ...recipe.capabilities, ...recipe.tags].some(value => value.toLowerCase().includes(normalized));
   return queryMatches
-    && (omitted === "modelType" || modelTypeMatches(recipe, filters.modelType))
-    && (omitted === "model" || !filters.model || `${recipe.model_publisher}/${recipe.model_slug}` === filters.model)
-    && (omitted === "modelVersion" || !filters.modelVersion || modelVersionKey(recipe) === filters.modelVersion)
-    && (omitted === "alignment" || !filters.alignment || recipe.alignment === filters.alignment)
+    && (omitted === "modelFamily" || !filters.modelFamily || modelFamilyTitle(recipe) === filters.modelFamily)
+    && (omitted === "model" || !filters.model || modelVersionKey(recipe) === filters.model)
+    && (omitted === "abliterated" || !filters.abliterated || recipeIsAbliterated(recipe) === (filters.abliterated === "true"))
     && (omitted === "sourceOwner" || !filters.sourceOwner || recipe.source_owner === filters.sourceOwner)
     && (omitted === "repository" || !filters.repository || recipe.source_repository === filters.repository)
     && (omitted === "sparks" || sparkMatches(recipe, filters.sparks))
     && (omitted === "runtime" || !filters.runtime || recipe.runtime_distribution === filters.runtime)
     && (omitted === "quantization" || !filters.quantization || recipeQuantizations(recipe).includes(filters.quantization))
     && (omitted === "updated" || updatedMatches(recipe, filters.updated))
-    && (omitted === "topology" || !filters.topology || recipe.topology_mode === filters.topology)
     && (omitted === "qualification" || !filters.qualification || recipe.qualification === filters.qualification)
     && (omitted === "readiness" || !filters.readiness || recipe.execution_readiness === filters.readiness)
     && (omitted === "local" || localMatches(recipe, filters.local))
@@ -395,22 +361,22 @@ function RecipeComparisonTray({recipes, onRemove, onClear}: {recipes: PublicReci
       <div><span className="public-import-kicker">Compare tray</span><h3 id="public-import-compare-title">{recipes.length} of 3 recipes</h3></div>
       <button type="button" className="public-import-text-button" onClick={onClear}>Clear</button>
     </header>
-    <div className="public-import-compare-chips" aria-label="Recipes selected for comparison">{recipes.map(recipe => <span key={recipe.uri}>{recipe.model_title}<button type="button" onClick={() => onRemove(recipe.uri)} aria-label={`Remove ${recipe.title} from comparison`}>×</button></span>)}</div>
+    <div className="public-import-compare-chips" aria-label="Recipes selected for comparison">{recipes.map(recipe => <span key={recipe.uri}>{modelFamilyTitle(recipe)}<button type="button" onClick={() => onRemove(recipe.uri)} aria-label={`Remove ${recipe.title} from comparison`}>×</button></span>)}</div>
     <button type="button" className="button secondary" disabled={recipes.length < 2} aria-expanded={expanded} aria-controls="public-import-comparison-table" onClick={() => setExpanded(value => !value)}>{expanded ? "Hide comparison" : `Compare ${recipes.length} recipes`}</button>
     {recipes.length < 2 && <p>Select one more recipe to compare.</p>}
     {expanded && <div className="public-import-comparison-table-wrap" id="public-import-comparison-table" tabIndex={0}>
       <table>
         <caption>Selected public recipe comparison</caption>
-        <thead><tr><th scope="col">Attribute</th>{recipes.map(recipe => <th scope="col" key={recipe.uri}>{recipe.model_title}</th>)}</tr></thead>
+        <thead><tr><th scope="col">Attribute</th>{recipes.map(recipe => <th scope="col" key={recipe.uri}>{modelFamilyTitle(recipe)}</th>)}</tr></thead>
         <tbody>
           <tr><th scope="row">Recipe</th>{recipes.map(recipe => <td key={recipe.uri}>{recipe.title}</td>)}</tr>
+          <tr><th scope="row">Model</th>{recipes.map(recipe => <td key={recipe.uri}>{modelVersionTitle(recipe)}</td>)}</tr>
           <tr><th scope="row">Execution readiness</th>{recipes.map(recipe => <td key={recipe.uri}>{readinessLabel(recipe.execution_readiness)}</td>)}</tr>
           <tr><th scope="row">Qualification</th>{recipes.map(recipe => <td key={recipe.uri}>{qualificationLabel(recipe)}</td>)}</tr>
           <tr><th scope="row">Sparks</th>{recipes.map(recipe => <td key={recipe.uri}>{sparkLabel(recipe.node_count)}</td>)}</tr>
-          <tr><th scope="row">Topology</th>{recipes.map(recipe => <td key={recipe.uri}>{topologyModeLabel(recipe.topology_mode)}</td>)}</tr>
           <tr><th scope="row">Memory / Spark</th>{recipes.map(recipe => <td key={recipe.uri}>{formatBytes(recipe.maximum_runtime_memory_bytes_per_node)}</td>)}</tr>
           <tr><th scope="row">Download</th>{recipes.map(recipe => <td key={recipe.uri}>{formatBytes(recipe.expected_download_bytes)}</td>)}</tr>
-      <tr><th scope="row">Quantization / format</th>{recipes.map(recipe => <td key={recipe.uri}>{recipeQuantizations(recipe).join(" · ") || "Not specified"}</td>)}</tr><tr><th scope="row">Alignment</th>{recipes.map(recipe => <td key={recipe.uri}>{alignmentLabel(recipe.alignment)}</td>)}</tr>
+      <tr><th scope="row">Quantization / format</th>{recipes.map(recipe => <td key={recipe.uri}>{recipeQuantizations(recipe).join(" · ") || "Not specified"}</td>)}</tr><tr><th scope="row">Runtime</th>{recipes.map(recipe => <td key={recipe.uri}>{runtimeLabel(recipe.runtime_distribution)}</td>)}</tr><tr><th scope="row">Abliterated</th>{recipes.map(recipe => <td key={recipe.uri}>{recipeIsAbliterated(recipe) ? "True" : "False"}</td>)}</tr>
           <tr><th scope="row">Recipe creator</th>{recipes.map(recipe => <td key={recipe.uri}>{recipe.source_owner ?? "Not specified"}</td>)}</tr>
         </tbody>
       </table>
@@ -433,17 +399,15 @@ function activeFilters(filters: PublicRecipeFilters): ActiveFilter[] {
   const items: ActiveFilter[] = [];
   const add = (key: string, label: string, patch: Partial<PublicRecipeFilters>) => items.push({key, label, remove: current => ({...current, ...patch})});
   if (filters.query) add("query", `Search: ${filters.query}`, {query: ""});
-  if (filters.modelType) add("modelType", `Model type: ${modelTypeLabel(filters.modelType)}`, {modelType: ""});
+  if (filters.modelFamily) add("modelFamily", `Model family: ${filters.modelFamily}`, {modelFamily: ""});
   if (filters.model) add("model", `Model: ${filters.model.split("/").at(-1)}`, {model: ""});
-  if (filters.modelVersion) add("modelVersion", `Model version: ${filters.modelVersion.split("/").at(-1)}`, {modelVersion: ""});
-  if (filters.alignment) add("alignment", `Alignment: ${PUBLIC_RECIPE_ALIGNMENTS.find(option => option.value === filters.alignment)?.label ?? filters.alignment}`, {alignment: ""});
+  if (filters.abliterated) add("abliterated", `Abliterated: ${filters.abliterated === "true" ? "True" : "False"}`, {abliterated: ""});
   if (filters.sourceOwner) add("sourceOwner", `Creator: ${filters.sourceOwner}`, {sourceOwner: ""});
   if (filters.repository) add("repository", `Repository: ${repositoryLabel(filters.repository)}`, {repository: ""});
   if (filters.sparks) add("sparks", `Sparks: ${filters.sparks}`, {sparks: ""});
   if (filters.runtime) add("runtime", `Runtime: ${runtimeLabel(filters.runtime)}`, {runtime: ""});
   if (filters.quantization) add("quantization", `Quantization: ${filters.quantization}`, {quantization: ""});
   if (filters.updated) add("updated", `Updated: last ${filters.updated} days`, {updated: ""});
-  if (filters.topology) add("topology", `Topology: ${runtimeLabel(filters.topology)}`, {topology: ""});
   if (filters.qualification) add("qualification", `Qualification: ${filters.qualification === "candidate" ? "Candidate" : "Accepted"}`, {qualification: ""});
   if (filters.readiness) add("readiness", `Execution readiness: ${readinessLabel(filters.readiness)}`, {readiness: ""});
   if (filters.local) add("local", `Local: ${filters.local.replaceAll("-", " ")}`, {local: ""});
@@ -475,7 +439,7 @@ function Preview({preview, saving, importError, importOutcomeUnknown, status, on
   return <section className={`public-import-preview${status === "confirm" ? " is-confirming" : ""}`} aria-labelledby="public-import-preview-title" aria-busy={saving}>
     <button type="button" className="button secondary public-import-mobile-back" disabled={saving} onClick={onBack}>Back to catalog</button>
     <header className="public-import-preview-header">
-      <div><span className="public-import-kicker">{status === "confirm" ? "Confirm import" : "Review recipe"}</span><h2 id="public-import-preview-title" ref={heading} tabIndex={-1}>{preview.title}</h2><p>{preview.model_title}{recipeQuantizations(preview).length ? ` · ${recipeQuantizations(preview).join(" · ")}` : ""}</p></div>
+      <div><span className="public-import-kicker">{status === "confirm" ? "Confirm import" : "Review recipe"}</span><h2 id="public-import-preview-title" ref={heading} tabIndex={-1}>{preview.title}</h2><p>{modelFamilyTitle(preview)} · {modelVersionTitle(preview)}</p></div>
       <div className="public-import-preview-signals"><span className={`public-import-readiness readiness-${preview.execution_readiness}`}>{readinessLabel(preview.execution_readiness)}</span><span className={`public-import-qualification qualification-${preview.qualification}`}>{qualificationLabel(preview)}</span></div>
     </header>
     <div className={`public-import-trust qualification-${preview.qualification}`}><strong>{qualificationLabel(preview)} qualification</strong><p>{preview.qualification_detail}</p></div>
@@ -503,7 +467,7 @@ function Preview({preview, saving, importError, importOutcomeUnknown, status, on
       {preview.local.status === "update-available" && <p className="public-import-note">Existing installations and running services remain pinned to their current revision until you rebuild or reinstall them.</p>}
       {["different-revision", "conflict", "local-ahead"].includes(preview.local.status) && <p className="public-import-warning" role="alert">{preview.local.status === "different-revision" ? "The local digest is not in catalog history, so an exact change list cannot be proven." : preview.local.status === "conflict" ? "A different local recipe owns this slug. Resolve the conflict before importing." : "The local release is newer than this catalog snapshot. Import is disabled to avoid a downgrade."}</p>}
       {preview.changes_since_local.length > 0 && <section className="public-import-changelog" aria-labelledby="public-import-changelog-title"><header><span className="public-import-kicker">Release notes</span><h3 id="public-import-changelog-title">{preview.local.status === "update-available" ? `Changes since local v${preview.local.release_version}` : "Catalog changelog"}</h3></header>{preview.changes_since_local.map((release, releaseIndex) => <details open={releaseIndex === 0} key={`${release.version}:${release.content_sha256}`}><summary><strong>v{release.version}</strong><span>{release.released_at} · {upgradeEffectLabel(release.upgrade_effect)}</span></summary><ul>{release.changes.map((change, index) => <li key={`${change.kind}:${index}`}><span>{change.kind}</span><strong>{change.summary}</strong>{change.details && <p>{change.details}</p>}{change.references.length > 0 && <div>{change.references.map((reference, referenceIndex) => <a href={reference} target="_blank" rel="noreferrer" key={reference}>Source {referenceIndex + 1}<span className="sr-only"> (opens in a new tab)</span></a>)}</div>}</li>)}</ul></details>)}</section>}
-      <details className="public-import-technical"><summary>Technical details</summary><dl><div><dt>Catalog identity</dt><dd>{preview.publisher}/{preview.slug}</dd></div><div><dt>Qualification evidence</dt><dd>{preview.qualification_basis.replaceAll("-", " ")}</dd></div><div><dt>Readiness evidence</dt><dd>{preview.execution_readiness_basis.replaceAll("-", " ")}</dd></div><div><dt>Runtime</dt><dd>{runtimeLabel(preview.runtime_distribution)}</dd></div><div><dt>Execution</dt><dd>{runtimeLabel(preview.execution_harness)}</dd></div><div><dt>Topology</dt><dd>{preview.topology_mode}</dd></div><div><dt>Installed / Spark</dt><dd>{formatBytes(preview.maximum_installed_bytes_per_node)}</dd></div><div><dt>Artifacts</dt><dd>{preview.artifact_count}</dd></div>{preview.source_repository && <div><dt>Original repository</dt><dd><a href={preview.source_repository} target="_blank" rel="noreferrer">View source<span className="sr-only"> (opens in a new tab)</span></a></dd></div>}<div><dt>Immutable digest</dt><dd><code>sha256:{preview.content_sha256}</code></dd></div></dl></details>
+      <details className="public-import-technical"><summary>Technical details</summary><dl><div><dt>Catalog identity</dt><dd>{preview.publisher}/{preview.slug}</dd></div><div><dt>Qualification evidence</dt><dd>{preview.qualification_basis.replaceAll("-", " ")}</dd></div><div><dt>Readiness evidence</dt><dd>{preview.execution_readiness_basis.replaceAll("-", " ")}</dd></div><div><dt>Runtime</dt><dd>{runtimeLabel(preview.runtime_distribution)}</dd></div><div><dt>Execution</dt><dd>{runtimeLabel(preview.execution_harness)}</dd></div><div><dt>Installed / Spark</dt><dd>{formatBytes(preview.maximum_installed_bytes_per_node)}</dd></div><div><dt>Artifacts</dt><dd>{preview.artifact_count}</dd></div>{preview.source_repository && <div><dt>Original repository</dt><dd><a href={preview.source_repository} target="_blank" rel="noreferrer">View source<span className="sr-only"> (opens in a new tab)</span></a></dd></div>}<div><dt>Immutable digest</dt><dd><code>sha256:{preview.content_sha256}</code></dd></div></dl></details>
     </>}
     {status === "confirm" && <span className="sr-only">Confirm the selected immutable recipe before importing.</span>}
   </section>;
@@ -635,29 +599,20 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
     setSaving(false);
   }, [selectedUri, step]);
 
+  const modelFamilies = useMemo(() => Array.from(new Set(recipes.map(modelFamilyTitle))).sort(), [recipes]);
   const models = useMemo(() => {
-    const identities = Array.from(new Map(recipes.filter(recipe => modelTypeMatches(recipe, filters.modelType)).map(recipe => [`${recipe.model_publisher}/${recipe.model_slug}`, recipe.model_title])).entries());
-    const titleCounts = identities.reduce((counts, [, title]) => counts.set(title, (counts.get(title) ?? 0) + 1), new Map<string, number>());
-    return identities
-      .map(([value, title]) => [value, titleCounts.get(title) === 1 ? title : `${title} · ${value}`] as const)
-      .sort((a, b) => a[1].localeCompare(b[1]));
-  }, [filters.modelType, recipes]);
-  const modelVersions = useMemo(() => {
     const identities = Array.from(new Map(recipes
-      .filter(recipe => modelTypeMatches(recipe, filters.modelType) && (!filters.model || `${recipe.model_publisher}/${recipe.model_slug}` === filters.model))
+      .filter(recipe => !filters.modelFamily || modelFamilyTitle(recipe) === filters.modelFamily)
       .map(recipe => [modelVersionKey(recipe), modelVersionTitle(recipe)])).entries());
     const titleCounts = identities.reduce((counts, [, title]) => counts.set(title, (counts.get(title) ?? 0) + 1), new Map<string, number>());
     return identities.map(([value, title]) => [value, titleCounts.get(title) === 1 ? title : `${title} · ${value}`] as const).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [filters.model, filters.modelType, recipes]);
+  }, [filters.modelFamily, recipes]);
   const sourceOwners = useMemo(() => Array.from(new Set(recipes.flatMap(recipe => recipe.source_owner ? [recipe.source_owner] : []))).sort(), [recipes]);
   const repositories = useMemo(() => Array.from(new Set(recipes.flatMap(recipe => recipe.source_repository ? [recipe.source_repository] : []))).sort(), [recipes]);
   const runtimes = useMemo(() => Array.from(new Set(recipes.map(recipe => recipe.runtime_distribution))).sort(), [recipes]);
   const quantizations = useMemo(() => Array.from(new Set(recipes.flatMap(recipeQuantizations))).sort(), [recipes]);
-  const alignments = useMemo(() => PUBLIC_RECIPE_ALIGNMENTS.filter(option => recipes.some(recipe => recipe.alignment === option.value)), [recipes]);
-  const topologies = useMemo(() => Array.from(new Set(recipes.map(recipe => recipe.topology_mode))).sort(), [recipes]);
   const filtered = useMemo(() => sortRecipes(recipes.filter(recipe => publicRecipeMatches(recipe, filters)), filters.sort), [filters, recipes]);
   const count = (facet: Facet, predicate: (recipe: PublicRecipe) => boolean) => recipes.filter(recipe => publicRecipeMatches(recipe, filters, facet) && predicate(recipe)).length;
-  const modelTypeCount = (modelType: ModelType) => recipes.filter(recipe => publicRecipeMatches(recipe, {...filters, model: ""}, "modelType") && modelTypeMatches(recipe, modelType)).length;
   const capabilityCount = (capability: PublicRecipeCapability) => recipes.filter(recipe => publicRecipeMatches(recipe, filters, "capability") && filters.capabilities.filter(value => value !== capability).every(value => recipe.capabilities.includes(value)) && recipe.capabilities.includes(capability)).length;
   const applied = activeFilters(filters);
   const comparedRecipes = compareUris.flatMap(uri => recipes.find(recipe => recipe.uri === uri) ?? []);
@@ -671,14 +626,9 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
     onNavigate(publicRecipeImportUrl(filters, {more, recipe: uri, step: "review"}));
   }
 
-  function updateModelType(modelType: ModelType) {
-    const selectedModelMatches = !filters.model || recipes.some(recipe => `${recipe.model_publisher}/${recipe.model_slug}` === filters.model && modelTypeMatches(recipe, modelType));
-    navigateFilters({...filters, modelType, model: selectedModelMatches ? filters.model : "", modelVersion: selectedModelMatches ? filters.modelVersion : ""});
-  }
-
-  function updateModel(model: string) {
-    const selectedVersionMatches = !filters.modelVersion || recipes.some(recipe => `${recipe.model_publisher}/${recipe.model_slug}` === model && modelVersionKey(recipe) === filters.modelVersion);
-    navigateFilters({...filters, model, modelVersion: selectedVersionMatches ? filters.modelVersion : ""});
+  function updateModelFamily(modelFamily: string) {
+    const selectedModelMatches = !filters.model || recipes.some(recipe => modelFamilyTitle(recipe) === modelFamily && modelVersionKey(recipe) === filters.model);
+    navigateFilters({...filters, modelFamily, model: selectedModelMatches ? filters.model : ""});
   }
 
   function reviewManualUri() {
@@ -800,11 +750,11 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
       <aside id="public-import-filter-rail" className={`public-import-filter-rail${mobileFiltersOpen ? " is-mobile-open" : ""}`} aria-label="Recipe filters">
         <div className="public-import-filter-heading"><div><span className="public-import-kicker">Narrow the catalog</span><h2>Filters</h2></div>{applied.length > 0 && <button type="button" className="public-import-text-button" onClick={() => navigateFilters(EMPTY_FILTERS)}>Clear all</button>}</div>
         <label className="public-import-search"><span>Find a recipe</span><input type="search" value={filters.query} onChange={event => updateFilter("query", event.target.value)} placeholder="Model, modality, runtime…" /></label>
-        <label><span>Model type</span><select aria-label="Filter by model type" value={filters.modelType} onChange={event => updateModelType(event.target.value as ModelType)}><option value="">All types ({modelTypeCount("")})</option>{MODEL_TYPE_OPTIONS.map(option => { const available = modelTypeCount(option.value); return <option value={option.value} disabled={available === 0} key={option.value}>{option.label} ({available})</option>; })}</select></label>
-        <label><span>Model</span><select aria-label="Filter by model" value={filters.model} onChange={event => updateModel(event.target.value)}><option value="">All models ({count("model", () => true)})</option>{models.map(([value, label]) => { const available = count("model", recipe => `${recipe.model_publisher}/${recipe.model_slug}` === value); return <option value={value} disabled={available === 0} key={value}>{label} ({available})</option>; })}</select></label>
-        <label><span>Model version</span><select aria-label="Filter by model version" value={filters.modelVersion} onChange={event => updateFilter("modelVersion", event.target.value)}><option value="">All versions ({count("modelVersion", () => true)})</option>{modelVersions.map(([value, label]) => { const available = count("modelVersion", recipe => modelVersionKey(recipe) === value); return <option value={value} disabled={available === 0} key={value}>{label} ({available})</option>; })}</select></label>
+        <label><span>Model family</span><select aria-label="Filter by model family" value={filters.modelFamily} onChange={event => updateModelFamily(event.target.value)}><option value="">All families ({count("modelFamily", () => true)})</option>{modelFamilies.map(value => { const available = count("modelFamily", recipe => modelFamilyTitle(recipe) === value); return <option value={value} disabled={available === 0} key={value}>{value} ({available})</option>; })}</select></label>
+        <label><span>Model</span><select aria-label="Filter by model" value={filters.model} onChange={event => updateFilter("model", event.target.value)}><option value="">All models ({count("model", () => true)})</option>{models.map(([value, label]) => { const available = count("model", recipe => modelVersionKey(recipe) === value); return <option value={value} disabled={available === 0} key={value}>{label} ({available})</option>; })}</select></label>
         <label><span>Quantization / format</span><select aria-label="Filter by quantization" value={filters.quantization} onChange={event => updateFilter("quantization", event.target.value)}><option value="">Any format</option>{quantizations.map(value => <option key={value} value={value} disabled={count("quantization", recipe => recipeQuantizations(recipe).includes(value)) === 0}>{value} ({count("quantization", recipe => recipeQuantizations(recipe).includes(value))})</option>)}</select></label>
-        <label><span>Alignment</span><select aria-label="Filter by alignment" value={filters.alignment} onChange={event => updateFilter("alignment", event.target.value as PublicRecipeFilters["alignment"])}><option value="">Any alignment ({count("alignment", () => true)})</option>{alignments.map(option => <option key={option.value} value={option.value} disabled={count("alignment", recipe => recipe.alignment === option.value) === 0}>{option.label} ({count("alignment", recipe => recipe.alignment === option.value)})</option>)}</select></label>
+        <label><span>Runtime</span><select aria-label="Filter by runtime" value={filters.runtime} onChange={event => updateFilter("runtime", event.target.value)}><option value="">All runtimes</option>{runtimes.map(value => <option key={value} value={value} disabled={count("runtime", recipe => recipe.runtime_distribution === value) === 0}>{runtimeLabel(value)} ({count("runtime", recipe => recipe.runtime_distribution === value)})</option>)}</select></label>
+        <label><span>Abliterated</span><select aria-label="Filter by abliterated" value={filters.abliterated} onChange={event => updateFilter("abliterated", event.target.value as BooleanFilter)}><option value="">True or False ({count("abliterated", () => true)})</option><option value="true" disabled={count("abliterated", recipeIsAbliterated) === 0}>True ({count("abliterated", recipeIsAbliterated)})</option><option value="false" disabled={count("abliterated", recipe => !recipeIsAbliterated(recipe)) === 0}>False ({count("abliterated", recipe => !recipeIsAbliterated(recipe))})</option></select></label>
         <label><span>Required Sparks</span><select aria-label="Filter by required Sparks" value={filters.sparks} onChange={event => updateFilter("sparks", event.target.value as SparkFilter)}><option value="">Any count ({count("sparks", () => true)})</option>{(["1", "2", "3", "4+"] as SparkFilter[]).map(value => { const available = count("sparks", recipe => sparkMatches(recipe, value)); return <option value={value} disabled={available === 0} key={value}>{value}{value === "1" ? " Spark" : " Sparks"} ({available})</option>; })}</select></label>
         <label><span>Recipe creator</span><select aria-label="Filter by recipe creator" value={filters.sourceOwner} onChange={event => updateFilter("sourceOwner", event.target.value)}><option value="">All creators</option>{sourceOwners.map(value => <option key={value} value={value} disabled={count("sourceOwner", recipe => recipe.source_owner === value) === 0}>{value} ({count("sourceOwner", recipe => recipe.source_owner === value)})</option>)}</select></label>
         <label><span>Updated</span><select aria-label="Filter by updated date" value={filters.updated} onChange={event => updateFilter("updated", event.target.value as UpdatedFilter)}><option value="">Any time ({count("updated", () => true)})</option>{(["7", "30", "90", "365"] as UpdatedFilter[]).map(value => <option key={value} value={value} disabled={count("updated", recipe => updatedMatches(recipe, value)) === 0}>Last {value} days ({count("updated", recipe => updatedMatches(recipe, value))})</option>)}</select></label>
@@ -815,8 +765,6 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
         <div id="public-import-more-filters" hidden={!more} className="public-import-more-filters">
           <label><span>Qualification</span><select aria-label="Filter by qualification" value={filters.qualification} onChange={event => updateFilter("qualification", event.target.value as PublicRecipeFilters["qualification"])}><option value="">Any status ({count("qualification", () => true)})</option><option value="cataloged" disabled={count("qualification", recipe => recipe.qualification === "cataloged") === 0}>Accepted ({count("qualification", recipe => recipe.qualification === "cataloged")})</option><option value="candidate" disabled={count("qualification", recipe => recipe.qualification === "candidate") === 0}>Candidate ({count("qualification", recipe => recipe.qualification === "candidate")})</option></select></label>
           <label><span>Original repository</span><select aria-label="Filter by original repository" value={filters.repository} onChange={event => updateFilter("repository", event.target.value)}><option value="">All repositories</option>{repositories.map(value => <option key={value} value={value} disabled={count("repository", recipe => recipe.source_repository === value) === 0}>{repositoryLabel(value)} ({count("repository", recipe => recipe.source_repository === value)})</option>)}</select></label>
-          <label><span>Runtime</span><select aria-label="Filter by runtime" value={filters.runtime} onChange={event => updateFilter("runtime", event.target.value)}><option value="">All runtimes</option>{runtimes.map(value => <option key={value} value={value} disabled={count("runtime", recipe => recipe.runtime_distribution === value) === 0}>{runtimeLabel(value)} ({count("runtime", recipe => recipe.runtime_distribution === value)})</option>)}</select></label>
-          <label><span>Topology</span><select aria-label="Filter by topology" value={filters.topology} onChange={event => updateFilter("topology", event.target.value)}><option value="">Any topology</option>{topologies.map(value => <option key={value} value={value} disabled={count("topology", recipe => recipe.topology_mode === value) === 0}>{runtimeLabel(value)} ({count("topology", recipe => recipe.topology_mode === value)})</option>)}</select></label>
         </div>
         <details className="public-import-manual"><summary>Advanced: import URI</summary><div><label><span>Public recipe URI</span><input value={manualUri} aria-invalid={manualUriError ? "true" : undefined} aria-describedby={manualUriError ? "public-recipe-uri-error" : undefined} onChange={event => { setManualUri(event.target.value); setManualUriError(""); }} placeholder="vonk://catalog/…@sha256:…" /></label>{manualUriError && <small id="public-recipe-uri-error" role="alert">{manualUriError}</small>}<button type="button" className="button secondary" disabled={!manualUri.trim()} onClick={reviewManualUri}>Review URI</button></div></details>
       </aside>
@@ -840,7 +788,7 @@ export function PublicRecipeImportPage({api, url, onNavigate, onBusyChange}: {ap
         {applied.length > 0 && <div className="public-import-applied" aria-label="Applied filters">{applied.map(item => <button type="button" key={item.key} onClick={() => navigateFilters(item.remove(filters))}>{item.label}<span aria-hidden="true">×</span><span className="sr-only"> Remove filter</span></button>)}</div>}
         {!loading && recipes.length > 0 && filtered.length === 0 && <div className="public-import-state"><div><strong>No matching recipes</strong><p>Remove one or more filters to broaden the catalog.</p></div><button type="button" className="button secondary" onClick={() => navigateFilters(EMPTY_FILTERS)}>Clear filters</button></div>}
         <div className={`public-import-recipe-list is-${catalogView}`} role="list" aria-label="Public recipes">{filtered.map(recipe => { const compared = compareUris.includes(recipe.uri); return <article role="listitem" className={selectedUri === recipe.uri ? "is-selected" : ""} key={recipe.uri}>
-          <header><div><span className={`public-import-readiness readiness-${recipe.execution_readiness}`}>{readinessLabel(recipe.execution_readiness)}</span><span className={`public-import-qualification qualification-${recipe.qualification}`}>{qualificationLabel(recipe)}{recipe.release_version ? ` · v${recipe.release_version}` : ""}</span><span className={`public-import-local status-${recipe.local.status}`}>{localStatusLabel(recipe)}</span></div><h3>{recipe.model_title}</h3><p>{recipe.title}{recipeQuantizations(recipe).length ? ` · ${recipeQuantizations(recipe).join(" · ")}` : ""} · {alignmentLabel(recipe.alignment)}</p></header>
+          <header><div><span className={`public-import-readiness readiness-${recipe.execution_readiness}`}>{readinessLabel(recipe.execution_readiness)}</span><span className={`public-import-qualification qualification-${recipe.qualification}`}>{qualificationLabel(recipe)}{recipe.release_version ? ` · v${recipe.release_version}` : ""}</span><span className={`public-import-local status-${recipe.local.status}`}>{localStatusLabel(recipe)}</span></div><h3>{modelFamilyTitle(recipe)}</h3><p>{modelVersionTitle(recipe)} · {recipe.title} · Abliterated: {recipeIsAbliterated(recipe) ? "True" : "False"}</p></header>
           <dl><div><dt>Sparks</dt><dd>{sparkLabel(recipe.node_count)}</dd></div><div><dt>Download</dt><dd>{formatBytes(recipe.expected_download_bytes)}</dd></div><div><dt>Memory / Spark</dt><dd>{formatBytes(recipe.maximum_runtime_memory_bytes_per_node)}</dd></div></dl>
           <div className="public-import-tags" aria-label={`${recipe.title} capabilities`}>{recipe.capabilities.map(capability => <span key={capability}>{PUBLIC_RECIPE_CAPABILITIES.find(option => option.value === capability)?.label ?? capability}</span>)}</div>
           <footer><label className="public-import-compare-toggle"><input type="checkbox" checked={compared} disabled={!compared && compareUris.length >= 3} onChange={() => toggleComparison(recipe.uri)}/><span>Compare<span className="sr-only"> {recipe.title}</span></span></label>{recipe.source_owner && <span>Source: {recipe.source_owner}</span>}<button type="button" className="button secondary" data-recipe-uri={recipe.uri} aria-current={selectedUri === recipe.uri ? "true" : undefined} onClick={() => selectRecipe(recipe.uri)}>{catalogView === "compact" ? <>Review<span className="sr-only">{recipe.local.status === "update-available" ? ` update for ${recipe.title}` : ` ${recipe.title}`}</span></> : recipe.local.status === "update-available" ? `Review update for ${recipe.title}` : `Review ${recipe.title}`}</button></footer>
