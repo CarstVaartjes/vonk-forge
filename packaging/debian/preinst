@@ -357,6 +357,7 @@ inside_package_helper() {
         && [ "$(/usr/bin/sed -n '3p' "$helper_dpkg_command_file")" = --force-confold ] \
         || return 1
     helper_candidate=$(/usr/bin/sed -n '4p' "$helper_dpkg_command_file")
+    helper_legacy_incoming=0
     case "$helper_candidate" in
         /run/vonk-forge-package-candidates/*/*.deb) ;;
         /var/lib/vonk-forge/incoming/[0-9a-f]*.deb)
@@ -369,11 +370,28 @@ inside_package_helper() {
                 '$1 == "vonk-agent" { print $3; exit }' /etc/passwd)
             [ -n "$agent_uid" ] && [ "$incoming_uid" = "$agent_uid" ] \
                 || return 1
+            [ "$(/usr/bin/dirname "$helper_candidate")" = \
+                /var/lib/vonk-forge/incoming ] || return 1
+            helper_incoming_digest=${helper_candidate##*/}
+            helper_incoming_digest=${helper_incoming_digest%.deb}
+            valid_digest "$helper_incoming_digest" || return 1
             [ "$(/usr/bin/stat -Lc '%u:%a:%h' "$helper_candidate" \
                 2>/dev/null || true)" = "$agent_uid:600:1" ] || return 1
+            helper_legacy_incoming=1
             ;;
         *) return 1 ;;
     esac
+    if [ "$helper_legacy_incoming" -eq 1 ]; then
+        # The pre-509 helper invokes dpkg directly from the agent-owned
+        # incoming directory.  That path is intentionally accepted only after
+        # the owner, mode, and digest-shaped filename checks above; it has no
+        # per-invocation root custody directory to validate here.  The
+        # controller recovery preflight below immediately re-homes it before
+        # recording durable state.
+        trap - EXIT HUP INT TERM
+        /usr/bin/rm -f -- "$helper_dpkg_command_file"
+        return 0
+    fi
     helper_invocation_dir=$(/usr/bin/dirname "$helper_candidate") || return 1
     [ "$(/usr/bin/dirname "$helper_invocation_dir")" = \
         /run/vonk-forge-package-candidates ] || return 1
