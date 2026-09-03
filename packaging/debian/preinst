@@ -341,7 +341,42 @@ inside_package_helper() {
         helper_pid=$helper_parent
         helper_depth=$((helper_depth + 1))
     done
-    return 1
+    # A private cgroup namespace can hide both the helper service name and
+    # the helper's ancestry from the maintainer script.  The helper always
+    # invokes dpkg with the root-owned, per-request custody path below; use
+    # that immutable shape as a final bounded signal.  Ordinary package-manager
+    # upgrades never receive a candidate from this directory.
+    helper_dpkg_command_file=$(/usr/bin/mktemp /tmp/.vonk-dpkg-helper.XXXXXX) \
+        || return 1
+    trap '/usr/bin/rm -f -- "$helper_dpkg_command_file"' EXIT HUP INT TERM
+    /usr/bin/tr '\000' '\n' < "/proc/$PPID/cmdline" \
+        > "$helper_dpkg_command_file" 2>/dev/null || return 1
+    [ "$(/usr/bin/wc -l < "$helper_dpkg_command_file")" -eq 4 ] \
+        && [ "$(/usr/bin/sed -n '1p' "$helper_dpkg_command_file")" = /usr/bin/dpkg ] \
+        && [ "$(/usr/bin/sed -n '2p' "$helper_dpkg_command_file")" = --install ] \
+        && [ "$(/usr/bin/sed -n '3p' "$helper_dpkg_command_file")" = --force-confold ] \
+        || return 1
+    helper_candidate=$(/usr/bin/sed -n '4p' "$helper_dpkg_command_file")
+    case "$helper_candidate" in
+        /run/vonk-forge-package-candidates/*/*.deb) ;;
+        *) return 1 ;;
+    esac
+    helper_invocation_dir=$(/usr/bin/dirname "$helper_candidate") || return 1
+    [ "$(/usr/bin/dirname "$helper_invocation_dir")" = \
+        /run/vonk-forge-package-candidates ] || return 1
+    helper_invocation=${helper_invocation_dir##*/}
+    case "$helper_invocation" in
+        [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\
+[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+        *) return 1 ;;
+    esac
+    [ "$(/usr/bin/stat -Lc '%u:%g:%a:%h' "$helper_candidate" \
+        2>/dev/null || true)" = 0:0:600:1 ] || return 1
+    trap - EXIT HUP INT TERM
+    /usr/bin/rm -f -- "$helper_dpkg_command_file"
+    return 0
 }
 
 package_directory_is_safe() {

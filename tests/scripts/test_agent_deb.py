@@ -1501,6 +1501,19 @@ def test_upgrade_finisher_budget_covers_slow_agent_and_helper_stops() -> None:
     assert 240 >= 120 + helper_timeout + agent_timeout + 60
 
 
+def test_package_helper_detection_accepts_private_cgroup_custody_invocation() -> None:
+    preinst = PREINST.read_text()
+
+    # A helper launched in a private cgroup namespace may not expose its
+    # service name to the maintainer script.  The fallback must therefore bind
+    # recovery only to the exact root-owned custody dpkg command emitted by the
+    # signed helper, never to a generic administrator dpkg invocation.
+    assert "/run/vonk-forge-package-candidates/*/*.deb" in preinst
+    assert "--force-confold" in preinst
+    assert "0:0:600:1" in preinst
+    assert "Ordinary package-manager" in preinst
+
+
 def test_package_helper_restart_waits_for_verified_exec_identity() -> None:
     helper_unit = (
         ROOT / "packaging/systemd/vonk-forge-package-helper.service"
