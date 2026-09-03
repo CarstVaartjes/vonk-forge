@@ -31,7 +31,6 @@ from tests.acceptance.runtime import (
     assert_compose_services_healthy,
     bootstrap_command,
     https_over_command,
-    run_interactive,
 )
 
 DEFAULT_SERVICES = {
@@ -344,14 +343,21 @@ def generate_bundle(
     except FileExistsError as error:
         if root.is_symlink() or not root.is_dir():
             raise AcceptanceError("NAS acceptance target is unsafe") from error
-    run_interactive(
-        bootstrap_command(candidate_url),
-        cwd=root,
-        environment=child_environment,
-        responses=responses,
-        timeout=300,
-        require_all_prompts=require_all_prompts,
-    )
+    answers = root / ".installer-answers"
+    if any("\n" in answer or "\r" in answer or "\0" in answer for _, answer in responses):
+        raise AcceptanceError("installer answer is not a single line")
+    descriptor = os.open(answers, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write("".join(f"{answer}\n" for _, answer in responses))
+        run(
+            bootstrap_command(candidate_url, "--answers-file", os.fspath(answers)),
+            cwd=root,
+            environment=child_environment,
+            timeout=300,
+        )
+    finally:
+        answers.unlink(missing_ok=True)
     bundle = root / "vonk-forge"
     assert_bundle_contract(bundle)
     return bundle
@@ -370,11 +376,12 @@ def run(
     cwd: Path,
     timeout: int = 300,
     allow_output: bool = True,
+    environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         command,
         cwd=cwd,
-        env=host_command_environment(),
+        env=environment if environment is not None else host_command_environment(),
         text=True,
         capture_output=True,
         timeout=timeout,

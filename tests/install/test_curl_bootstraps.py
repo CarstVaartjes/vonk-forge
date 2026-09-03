@@ -227,6 +227,29 @@ def test_nas_bootstrap_passes_only_the_explicit_hermes_toggle(
     assert not forbidden.exists()
 
 
+def test_nas_bootstrap_passes_a_private_answers_file(tmp_path: Path) -> None:
+    answers = tmp_path / "answers.txt"
+    answers.write_text("\n", encoding="utf-8")
+    answers.chmod(0o600)
+
+    result, receipt, forbidden = _run_bootstrap(
+        tmp_path,
+        "nas",
+        system="Linux",
+        machine="x86_64",
+        arguments=("--answers-file", os.fspath(answers), "--disable-hermes"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    invocation = receipt.read_text().splitlines()[0].split("|", 1)[1].split()
+    assert invocation[2:] == [
+        "--answers-file",
+        os.fspath(answers),
+        "--disable-hermes",
+    ]
+    assert not forbidden.exists()
+
+
 def test_nas_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
     result, receipt, forbidden = _run_bootstrap(
         tmp_path,
@@ -237,7 +260,7 @@ def test_nas_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "accepts only --enable-hermes or --disable-hermes" in result.stderr
+    assert "accepts only a Hermes mode and --answers-file PATH" in result.stderr
     assert not receipt.exists()
     assert not forbidden.exists()
 
