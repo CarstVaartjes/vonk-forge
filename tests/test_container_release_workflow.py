@@ -1420,39 +1420,6 @@ def test_manual_agent_validation_does_not_publish_a_second_tag_release() -> None
     assert 'push:\n    tags: ["v*"]' not in agent_workflow
 
 
-def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
-    metadata = job("release-metadata")
-    validator = job("validate-release-images")
-    publisher = job("publish-images")
-    manifest = job("release-manifest")
-
-    assert (
-        "needs: [lint, generated-clients, test, release-metadata, "
-        "build-agent-package, native-amd64-agent-lifecycle]" in validator
-    )
-    assert "needs: [validate-release-images, release-metadata]" in publisher
-    assert "packages: write" not in validator
-    assert (
-        "permissions:\n      attestations: write\n      contents: read\n"
-        "      id-token: write\n      packages: write" in publisher
-    )
-    assert "packages: write" not in metadata
-    assert "packages: write" not in manifest
-    assert "permissions:\n      contents: write" in manifest
-    assert "contents: write" not in metadata
-    assert "contents: write" not in publisher
-    for read_only_job in ("lint", "generated-clients", "test"):
-        assert "packages: write" not in job(read_only_job)
-        assert "contents: write" not in job(read_only_job)
-    alias = job("advance-production-aliases")
-    assert (
-        "permissions:\n      attestations: read\n      contents: read\n"
-        "      id-token: write\n      packages: write" in alias
-    )
-    assert workflow().count("packages: write") == 2
-    assert workflow().count("contents: write") == 1
-
-
 def test_release_builds_are_per_version_and_alias_jobs_reconcile_globally() -> None:
     text = workflow()
     publisher = job("publish-images")

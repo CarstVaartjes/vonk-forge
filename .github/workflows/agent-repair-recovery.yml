@@ -15,22 +15,6 @@ on:
       - scripts/verify-agent-deb
       - tests/nodes/test_agent_upgrade_repair_matrix.sh
       - tests/nodes/test_agent_upgrade_repair_systemd.sh
-      - tests/test_agent_repair_workflow.py
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/agent-repair-recovery.yml
-      - Cargo.lock
-      - Cargo.toml
-      - packaging/debian/postinst-repair
-      - packaging/debian/preinst-repair
-      - rust/crates/vonk-build-egress/**
-      - rust/crates/vonk-repair-helper-probe/**
-      - scripts/build-agent-deb
-      - scripts/verify-agent-deb
-      - tests/nodes/test_agent_upgrade_repair_matrix.sh
-      - tests/nodes/test_agent_upgrade_repair_systemd.sh
-      - tests/test_agent_repair_workflow.py
   workflow_dispatch:
 
 permissions:

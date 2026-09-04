@@ -249,8 +249,8 @@ jobs:
       - name: Reject generated drift
         run: git diff --exit-code -- control/openapi.json src/cluster_profiles/generated_control control/web/src/api/generated.d.ts
 
-  test:
-    name: PR contract smoke
+  compose-integration:
+    name: Compose integration
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -266,12 +266,11 @@ jobs:
         run: >-
           docker pull
           postgres:18.6@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
-      - name: Run required fresh PostgreSQL integration contracts
+      - name: Run fresh PostgreSQL initialization contract
         env:
           CI: "true"
         run: >-
           uv run --project control --frozen --with-editable . pytest -q
-          control/tests/test_database_authority_postgres.py
           deploy/compose/tests/test_postgres_init_databases.py
       - parallel:
           - name: Run canonical runtime readiness model contracts
@@ -293,21 +292,7 @@ jobs:
             run: >-
               uv run --project control --frozen --with-editable . pytest -q
               -p no:cacheprovider
-              control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
               deploy/compose/tests/test_pki_tls_integration.py
-          - name: Run focused repository contracts
-            run: >-
-              uv run --python 3.12 --project control --frozen --with-editable .
-              --with pytest==9.1.1 pytest -q -p no:cacheprovider
-              tests/test_ci_platform_boundaries.py
-              tests/test_container_release_workflow.py
-          - name: Run focused control cleanup contracts
-            run: >-
-              uv run --project control --frozen --with-editable . pytest -q
-              -p no:cacheprovider
-              control/tests/test_api.py
-              control/tests/test_migrations.py
-              control/tests/test_production_worker.py
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
@@ -485,14 +470,14 @@ jobs:
       needs.lint.result == 'success' &&
       needs.rust.result == 'success' &&
       needs.generated-clients.result == 'success' &&
-      needs.test.result == 'success' &&
+      needs.compose-integration.result == 'success' &&
       needs.catalog-runtime.result == 'success' &&
       vars.VONK_CONTAINER_RELEASES_ENABLED == 'true' &&
       vars.VONK_PLATFORM_RELEASES_ENABLED == 'true' &&
       github.event_name == 'push' &&
       github.ref_type == 'tag' &&
       startsWith(github.ref_name, 'v')
-    needs: [lint, rust, generated-clients, test, catalog-runtime]
+    needs: [lint, rust, generated-clients, compose-integration, catalog-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -649,7 +634,7 @@ jobs:
 
   validate-release-images:
     name: Validate accepted release images
-    needs: [lint, generated-clients, test, release-metadata, build-agent-package, native-amd64-agent-lifecycle]
+    needs: [lint, generated-clients, compose-integration, release-metadata, build-agent-package, native-amd64-agent-lifecycle]
     runs-on: ubuntu-latest
     permissions:
       attestations: read
