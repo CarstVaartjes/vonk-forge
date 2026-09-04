@@ -502,7 +502,22 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         ],
     }
     selects = [statement for statement in statements if statement.startswith("select")]
-    assert len(selects) == 11
+    # Rich telemetry performs one bounded Controller join for the latest
+    # sample. Keep the query budget tied to that query identity so a future
+    # read cannot silently add unbounded per-node work.
+    controller_telemetry_reads = [
+        statement
+        for statement in selects
+        if (
+            "from run_nodes" in statement
+            and "join recipe_runs" in statement
+            and "run_nodes.node_id = ?" in statement
+        )
+    ]
+    assert len(controller_telemetry_reads) == 1
+    assert "run_nodes.node_id" in controller_telemetry_reads[0]
+    assert "recipe_runs.updated_at" in controller_telemetry_reads[0]
+    assert len(selects) == 11 + len(controller_telemetry_reads)
     certificate_reads = [
         statement for statement in selects if "agent_certificates" in statement
     ]

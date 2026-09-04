@@ -94,6 +94,7 @@ from .telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
+from .telemetry_contract import TelemetryMetrics, empty_telemetry_metrics
 from .workload_helper_authority import (
     WorkloadHelperAuthorityError,
     WorkloadHelperAuthorityService,
@@ -612,6 +613,10 @@ class TelemetrySampleRequest(BaseModel):
     )
     gap_samples: int = Field(ge=0, le=2**63 - 1, strict=True)
     details: TelemetryDetailsRequest = Field(default_factory=TelemetryDetailsRequest)
+    # ``metrics`` is additive to the active telemetry wire contract.  A
+    # scalar-only sample remains valid for an already enrolled agent while
+    # native agents progressively publish the richer contract.
+    metrics: TelemetryMetrics = Field(default_factory=empty_telemetry_metrics)
 
     @field_validator("boot_id")
     @classmethod
@@ -1786,6 +1791,7 @@ def install_agent_routes(
                                 sample.details.accelerator_performance_state
                             ),
                         ),
+                        metrics=sample.metrics,
                     )
                     for sample in body.samples
                 ),

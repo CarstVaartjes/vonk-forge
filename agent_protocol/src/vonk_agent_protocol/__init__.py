@@ -45,6 +45,7 @@ from .distribution import (
     DistributionAssignment,
     DistributionObject,
 )
+from .telemetry import TelemetryReport
 from .workload_packages import (
     ComponentDescriptor,
     OciBundleMetadata,
@@ -94,6 +95,7 @@ __all__ = [
     "DistributionAssignment",
     "DistributionObject",
     "RecipeRunObservationReceiptClaims",
+    "TelemetryReport",
     "RestartUnit",
     "SignedHostHelperGrant",
     "SignedPackageHelperGrant",

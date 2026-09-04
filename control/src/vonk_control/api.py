@@ -74,7 +74,10 @@ from .fleet_profile_api import install_fleet_profile_routes
 from .fleet_projection import (
     FleetNodeIdentity,
     FleetSnapshot,
+    TelemetryCapabilitiesResponse,
+    TelemetryCurrentResponse,
     TelemetryHistoryResponse,
+    TelemetryWorkloadsResponse,
 )
 from .fleet_stream import parse_last_event_id
 from .global_catalog import GlobalCatalogClient
@@ -932,17 +935,32 @@ def create_app(
         end: Annotated[datetime, Query()],
         resolution: Annotated[TelemetryResolution, Query()],
         maximum_points: Annotated[int, Query(ge=1, le=3_000)] = 1_500,
+        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
+        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated_actor,
     ) -> TelemetryHistoryResponse:
         if fleet_projection is None:
             raise HTTPException(status_code=503, detail="Fleet projection unavailable")
         try:
+            filters = {
+                name: value
+                for name, value in {
+                    "key": key,
+                    "device_id": device_id,
+                    "interface_name": interface_name,
+                    "run_id": run_id,
+                }.items()
+                if value is not None
+            }
             return fleet_projection.telemetry_history(
                 node_id,
                 start=start,
                 end=end,
                 maximum_points=maximum_points,
                 resolution=resolution,
+                **filters,
             )
         except KeyError:
             raise HTTPException(
@@ -954,6 +972,99 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="Telemetry history unavailable"
             ) from None
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/telemetry/current",
+        response_model=TelemetryCurrentResponse,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getNodeTelemetryCurrent",
+    )
+    def node_telemetry_current(
+        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
+        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
+        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        _actor: Actor = authenticated_actor,
+    ) -> TelemetryCurrentResponse:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            filters = {
+                name: value
+                for name, value in {
+                    "key": key,
+                    "device_id": device_id,
+                    "interface_name": interface_name,
+                    "run_id": run_id,
+                }.items()
+                if value is not None
+            }
+            return fleet_projection.telemetry_current(node_id, **filters)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Telemetry sample not found") from None
+        except (OSError, RuntimeError, TypeError):
+            raise HTTPException(status_code=503, detail="Telemetry unavailable") from None
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/telemetry/capabilities",
+        response_model=TelemetryCapabilitiesResponse,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getNodeTelemetryCapabilities",
+    )
+    def node_telemetry_capabilities(
+        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
+        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
+        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        _actor: Actor = authenticated_actor,
+    ) -> TelemetryCapabilitiesResponse:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            filters = {
+                name: value
+                for name, value in {
+                    "key": key,
+                    "device_id": device_id,
+                    "interface_name": interface_name,
+                    "run_id": run_id,
+                }.items()
+                if value is not None
+            }
+            return fleet_projection.telemetry_capabilities(node_id, **filters)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Telemetry sample not found") from None
+        except (OSError, RuntimeError, TypeError):
+            raise HTTPException(status_code=503, detail="Telemetry unavailable") from None
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/telemetry/workloads",
+        response_model=TelemetryWorkloadsResponse,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="listNodeTelemetryWorkloads",
+    )
+    def node_telemetry_workloads(
+        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
+        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        state: Annotated[str | None, Query(min_length=1, max_length=32)] = None,
+        _actor: Actor = authenticated_actor,
+    ) -> TelemetryWorkloadsResponse:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            return fleet_projection.telemetry_workloads(
+                node_id,
+                run_id=run_id,
+                state=state,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Telemetry sample not found") from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except (OSError, RuntimeError, TypeError):
+            raise HTTPException(status_code=503, detail="Telemetry unavailable") from None
 
     @app.get(
         "/api/v1/endpoints/{alias}",

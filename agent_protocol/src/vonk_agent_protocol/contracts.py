@@ -1206,6 +1206,7 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         "agent-result.schema.json",
         "agent-directive.schema.json",
         "recipe-job-run.schema.json",
+        "telemetry-report.schema.json",
     }:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}")
     try:
@@ -1228,6 +1229,10 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         "agent-result.schema.json": AgentResult.parse,
         "agent-directive.schema.json": AgentDirective.parse,
     }
+    if schema_name == "telemetry-report.schema.json":
+        from .telemetry import TelemetryReport
+
+        parsers[schema_name] = TelemetryReport.parse
     if schema_name == "recipe-job-run.schema.json":
         from .recipe_jobs import RecipeJobRunRequest
 
