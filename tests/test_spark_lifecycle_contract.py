@@ -32,8 +32,6 @@ AMD64_PHASES = [
     "controller-ready",
     "candidate-installed",
     "paired",
-    "synthetic-device-ready",
-    "canary-completed",
     "direct-rust-agent-healthy",
 ]
 
@@ -140,10 +138,6 @@ def _amd64_proof() -> dict[str, object]:
     graph["baseline_package_sha256"] = "1" * 64
     graph["candidate_package_sha256"] = "2" * 64
     return {
-        "canary": {
-            "completed_states": spark_lifecycle_contract.CANARY_STATES,
-            "deterministic_response_sha256": "5" * 64,
-        },
         "controller_generation": GENERATION,
         "direct_agent_health": {
             "healthy": True,
@@ -152,20 +146,16 @@ def _amd64_proof() -> dict[str, object]:
         },
         "installation": {
             "architecture": "amd64",
-            "package_sha256": "2" * 64,
-            "version": "1.2.3",
+            "identity": {
+                "binary_sha256": "7" * 64,
+                "build_sha256": "8" * 64,
+                "package_sha256": "2" * 64,
+                "version": "1.2.3",
+            },
         },
         "node_id": "spk_0123456789abcdef0123456789abcdef",
         "pairing_grant_use_count": 1,
         "publication_graph": graph,
-        "synthetic_device": {
-            "architecture": "linux-amd64",
-            "cdi_name": "nvidia.com/gpu=all",
-            "fixture_sha256": "e" * 64,
-            "physical_gpu": False,
-            "provenance": "ci-only-synthetic-cdi",
-            "synthetic": True,
-        },
     }
 
 
@@ -176,7 +166,7 @@ def _amd64_proof() -> dict[str, object]:
         ("linux-arm64", ARM64_PHASES, _arm64_proof),
     ],
 )
-def test_each_architecture_requires_the_same_executable_canary(
+def test_each_architecture_requires_its_supported_lifecycle_boundary(
     platform: str,
     phases: list[str],
     proof,
@@ -192,11 +182,9 @@ def test_each_architecture_requires_the_same_executable_canary(
         generation=GENERATION,
     )
 
-    del value["proof"]["canary"]
-    with pytest.raises(
-        spark_lifecycle_contract.ContractError,
-        match=f"{platform.removeprefix('linux-').upper()} lifecycle proof",
-    ):
+    required = "canary" if platform == "linux-arm64" else "direct_agent_health"
+    del value["proof"][required]
+    with pytest.raises(spark_lifecycle_contract.ContractError):
         spark_lifecycle_contract.validate_lifecycle(
             value,
             platform=platform,
