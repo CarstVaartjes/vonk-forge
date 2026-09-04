@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import select
+from vonk_control.auth import CursorCodec
 from vonk_control.models import (
     ClusterMapping,
     ClusterMappingNode,
@@ -25,6 +29,7 @@ from vonk_control.run_switch_contract import (
 from vonk_control.run_switch_operations import (
     ArtifactInspection,
     PhaseExecution,
+    RunSwitchOperationProvider,
     RunSwitchOperationService,
 )
 
@@ -517,3 +522,111 @@ def test_invocation_metadata_does_not_change_plan_digest(tmp_path: Path) -> None
     assert service.preview(web_request, actor="admin").plan_digest == service.preview(
         cli_request, actor="admin"
     ).plan_digest
+
+
+def test_activity_provider_preserves_group_and_canonical_nested_progress(tmp_path: Path) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    provider = RunSwitchOperationProvider(service)
+    page = provider.list_operations(
+        SimpleNamespace(after=None, limit=10, state=None, node_id=None)
+    )
+    assert page.total == 1
+    item = page.items[0]
+    assert item["id"] == operation.operation_id
+    assert item["job_id"] == operation.operation_id
+    assert item["node_ids"] == list(nodes)
+    assert item["node_id"] == nodes[0]
+    assert item["attempt"] >= 1
+    assert item["supported_actions"] == []
+    assert item["progress"]["total_bytes_known"] is True
+    assert item["progress"]["members"][0]["member_id"] == nodes[0]
+    assert "phase_index" not in item["progress"]
+    assert item["progress"]["checkpoint"]["digest"] == operation.plan_digest
+    assert datetime.fromisoformat(item["created_at"]).tzinfo == UTC
+    assert provider.get_operation(operation.operation_id)["id"] == operation.operation_id
+
+
+def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
+    tmp_path: Path,
+) -> None:
+    try:
+        from vonk_control.operation_api import (
+            OperationProvider,
+            get_operation_from_providers,
+            merge_operation_providers,
+            operation_detail_response,
+        )
+    except ImportError:
+        pytest.skip("global Activity provider seam is supplied by the integration branch")
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+    request = _request(sessions, nodes[0])
+    operations = [
+        service.apply(
+            RunSwitchApplyRequest(
+                **request.model_dump(),
+                request_key=str(uuid.uuid4()),
+            ),
+            actor="admin",
+        )
+        for _ in range(3)
+    ]
+    provider = RunSwitchOperationProvider(service)
+    shared = OperationProvider(
+        family=provider.family,
+        list_operations=provider.list_operations,
+        get_operation=provider.get_operation,
+    )
+    cursors = CursorCodec(hashlib.sha256(b"run-switch-activity").digest())
+    first = merge_operation_providers(
+        [shared],
+        cursor=None,
+        limit=2,
+        state="queued",
+        node_id=nodes[0],
+        cursors=cursors,
+    )
+    assert len(first.items) == 2
+    assert first.total == 3
+    assert first.next_cursor is not None
+    second = merge_operation_providers(
+        [shared],
+        cursor=first.next_cursor,
+        limit=2,
+        state="queued",
+        node_id=nodes[0],
+        cursors=cursors,
+    )
+    assert len(second.items) == 1
+    assert second.total == 3
+    detail = operation_detail_response(first.items[0])
+    assert detail.node_ids == list(nodes)
+    assert detail.progress is not None
+    assert detail.progress.members[0].member_id == nodes[0]
+    assert detail.recovery is not None
+    assert detail.recovery.actions[0].value == "inspect"
+    assert get_operation_from_providers([shared], operations[0].operation_id)["id"] == (
+        operations[0].operation_id
+    )

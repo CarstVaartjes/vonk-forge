@@ -205,6 +205,10 @@ def _now(clock: Any) -> datetime:
     return value.astimezone(UTC)
 
 
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 def _digest(value: object) -> str:
     return hashlib.sha256(canonical_message(value)).hexdigest()
 
@@ -1084,6 +1088,17 @@ class RunSwitchOperationService:
             if job is None or job.kind not in _OPERATION_KINDS:
                 raise KeyError(operation_id)
             return self._operation_view(job)
+
+    def activity_provider(self) -> RunSwitchOperationProvider:
+        """Return the Run/Switch family adapter for global Activity.
+
+        ``operation_api`` owns the shared provider dataclass.  Keeping the
+        adapter's data projection here lets the global registry bind it by
+        duck type while that API evolves (and keeps Activity from reading the
+        high-level job payload directly).
+        """
+
+        return RunSwitchOperationProvider(self)
 
     def tick(self) -> bool:
         """Advance at most one high-level phase, safely after a restart."""
@@ -2999,6 +3014,183 @@ class RunSwitchOperationService:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ActivityOperationListPage:
+    """Fallback page value used before the global Activity seam is imported."""
+
+    items: tuple[Mapping[str, object], ...]
+    next_cursor: str | None
+    total: int
+
+
+class RunSwitchOperationProvider:
+    """Project high-level jobs into the global Activity provider contract."""
+
+    family = "run-switch"
+
+    def __init__(self, service: RunSwitchOperationService) -> None:
+        self._service = service
+
+    def list_operations(self, query: object) -> object:
+        limit = getattr(query, "limit", None)
+        if type(limit) is not int or not 1 <= limit <= 101:
+            raise ValueError("operation provider page limit is invalid")
+        state = getattr(query, "state", None)
+        if state is not None and not isinstance(state, str):
+            raise ValueError("operation provider state filter is invalid")
+        node_id = getattr(query, "node_id", None)
+        if node_id is not None and not isinstance(node_id, str):
+            raise ValueError("operation provider node filter is invalid")
+        after = getattr(query, "after", None)
+        with self._service._sessions() as session:
+            statement = select(Job).where(Job.kind.in_(_OPERATION_KINDS))
+            if state is not None:
+                statement = statement.where(Job.state == state)
+            jobs = list(
+                session.scalars(
+                    statement.order_by(Job.created_at.desc(), Job.id.desc())
+                )
+            )
+        if node_id is not None:
+            jobs = [job for job in jobs if node_id in job.targets]
+        total = len(jobs)
+        if after is not None:
+            if (
+                not isinstance(after, tuple)
+                or len(after) != 2
+                or not isinstance(after[0], datetime)
+                or not isinstance(after[1], str)
+            ):
+                raise ValueError("operation provider cursor is invalid")
+            boundary = (_aware(after[0]), after[1])
+            jobs = [
+                job
+                for job in jobs
+                if (_aware(job.created_at), str(job.id)) < boundary
+            ]
+        items = tuple(self._item(job) for job in jobs[:limit])
+        return _activity_page(items, None, total)
+
+    def get_operation(self, operation_id: str) -> Mapping[str, object]:
+        with self._service._sessions() as session:
+            job = session.get(Job, operation_id)
+            if job is None or job.kind not in _OPERATION_KINDS:
+                raise KeyError(operation_id)
+            return self._item(job)
+
+    def _item(self, job: Job) -> Mapping[str, object]:
+        operation = self._service._operation_view(job)
+        node_ids = [str(node_id) for node_id in job.targets]
+        endpoint_node = node_ids[0]
+        raw_plan = job.payload.get("plan") if isinstance(job.payload, Mapping) else None
+        if isinstance(raw_plan, Mapping):
+            raw_group = raw_plan.get("spark_group")
+            raw_nodes = raw_group.get("nodes") if isinstance(raw_group, Mapping) else None
+            if isinstance(raw_nodes, list):
+                endpoint_node = next(
+                    (
+                        str(node.get("node_id"))
+                        for node in raw_nodes
+                        if isinstance(node, Mapping) and node.get("endpoint_owner") is True
+                    ),
+                    endpoint_node,
+                )
+        return {
+            "id": operation.operation_id,
+            "job_id": operation.operation_id,
+            "parent_id": None,
+            # The singular field is retained for older Activity readers; the
+            # complete group is authoritative in node_ids and progress.members.
+            "node_id": endpoint_node,
+            "node_ids": node_ids,
+            "kind": operation.kind,
+            "state": operation.state,
+            "attempt": max(1, int(getattr(job, "current_attempt", 0) or 0)),
+            "progress": _activity_progress(operation),
+            "created_at": _aware(job.created_at).isoformat(),
+            "updated_at": _aware(job.updated_at).isoformat(),
+            # No retry/cancel action is exposed until a callable high-level
+            # operation exists; inspect/poll are reads, not mutation actions.
+            "supported_actions": [],
+            "result": _activity_result(operation),
+            "detail": operation.status_reason,
+        }
+
+
+def _activity_progress(operation: RunSwitchOperation) -> dict[str, object]:
+    """Normalize the family DTO into the generic Activity progress vocabulary."""
+
+    raw = operation.progress.model_dump(mode="json")
+    phase = raw.get("phase")
+    generic_phase = phase if isinstance(phase, str) and phase else "unknown"
+    members: list[dict[str, object]] = []
+    for raw_member in raw.get("members", []):
+        if not isinstance(raw_member, Mapping):
+            continue
+        node_id = raw_member.get("node_id")
+        if not isinstance(node_id, str) or not node_id:
+            continue
+        member_phase = raw_member.get("phase")
+        member: dict[str, object] = {
+            "member_id": node_id,
+            "phase": (
+                member_phase
+                if isinstance(member_phase, str) and member_phase
+                else generic_phase
+            ),
+            "completed_bytes": int(raw_member.get("completed_bytes", 0) or 0),
+            "state": str(raw_member.get("state", "unknown")),
+        }
+        if raw_member.get("total_bytes") is not None:
+            member["total_bytes"] = int(raw_member["total_bytes"])
+        members.append(member)
+    progress: dict[str, object] = {
+        "phase": generic_phase,
+        "completed_bytes": int(raw.get("completed_bytes", 0) or 0),
+        "total_bytes_known": bool(raw.get("total_bytes_known", False)),
+        "members": members,
+        "checkpoint": {
+            "key": "run-switch-phase",
+            "sequence": int(raw.get("phase_index", 0) or 0),
+            "digest": operation.plan_digest,
+        },
+    }
+    if raw.get("total_bytes") is not None:
+        progress["total_bytes"] = int(raw["total_bytes"])
+    return progress
+
+
+def _activity_result(operation: RunSwitchOperation) -> dict[str, object] | None:
+    """Keep family result data and add bounded generic failure evidence."""
+
+    result = dict(operation.result) if operation.result is not None else {}
+    if operation.state == "failed":
+        result.update(
+            {
+                "error_code": "run_switch_failed",
+                "summary": operation.status_reason or "Run/Switch operation failed",
+                "detail": operation.status_reason,
+                "retryable": False,
+                "uncertain": False,
+            }
+        )
+    return result or None
+
+
+def _activity_page(
+    items: tuple[Mapping[str, object], ...],
+    next_cursor: str | None,
+    total: int,
+) -> object:
+    """Construct whichever shared page DTO is available in the host branch."""
+
+    try:
+        from .operation_api import OperationListPage
+    except ImportError:
+        return ActivityOperationListPage(items, next_cursor, total)
+    return OperationListPage(items, next_cursor, total)
+
+
 def _planned_transfer_bytes(
     plan: RunSwitchPlan,
 ) -> tuple[int | None, dict[str, int | None]]:
@@ -3499,6 +3691,7 @@ def _load_plan(value: object) -> RunSwitchPlan:
 
 
 __all__ = [
+    "ActivityOperationListPage",
     "ArtifactInspection",
     "DatabaseRunSwitchArtifactInspector",
     "PhaseExecution",
@@ -3506,6 +3699,7 @@ __all__ = [
     "RunSwitchArtifactInspector",
     "RunSwitchArtifactPhaseExecutor",
     "RunSwitchOperationConflict",
+    "RunSwitchOperationProvider",
     "RunSwitchOperationService",
     "RunSwitchPhaseExecutor",
 ]
