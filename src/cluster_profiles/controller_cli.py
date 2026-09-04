@@ -784,6 +784,18 @@ def add_controller_commands(
     model_compare = model_commands.add_parser("compare")
     model_compare.add_argument("model_id", nargs="+", metavar="MODEL_ID")
     _add_json(model_compare)
+    model_download = model_commands.add_parser(
+        "download", help="Download an exact model to the Library"
+    )
+    model_download.add_argument("--model-version-sha256", required=True)
+    model_download.add_argument("--recipe-revision-id")
+    model_download.add_argument("--recipe-revision-sha256")
+    model_download.add_argument("--request-key")
+    model_download.add_argument("--dry-run", action="store_true")
+    model_download.add_argument("--detach", action="store_true")
+    model_download.add_argument("--timeout-seconds", type=int, default=30)
+    model_download.add_argument("--interval-seconds", type=float, default=1.0)
+    _add_json(model_download)
     model_run = model_commands.add_parser("run", help="Preview or start a model run")
     _structured_input(model_run, required=False, prefix="run")
     model_run.add_argument("--request-key", dest="run_request_key")
@@ -3000,7 +3012,11 @@ def _model_supports_capabilities(
     return all(capability in supported for capability in requested)
 
 
-def _run_models(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
+def _run_models(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
     command = args.models_command
     if command in {"list", "discover"}:
         result = _load_library_snapshot(client, args)
@@ -3031,6 +3047,20 @@ def _run_models(args: argparse.Namespace, client: ControllerClient) -> dict[str,
                     )
                 ]
         return result
+    if command == "download":
+        if _LOWER_SHA256.fullmatch(args.model_version_sha256) is None:
+            raise ValueError("model version identity must be a lowercase SHA-256 digest")
+        model_version_sha256 = args.model_version_sha256
+        payload: dict[str, object] = {
+            "model_version_sha256": model_version_sha256,
+        }
+        if args.recipe_revision_id is not None:
+            payload["recipe_revision_id"] = args.recipe_revision_id
+        if args.recipe_revision_sha256 is not None:
+            if _LOWER_SHA256.fullmatch(args.recipe_revision_sha256) is None:
+                raise ValueError("recipe revision identity must be a lowercase SHA-256 digest")
+            payload["recipe_revision_sha256"] = args.recipe_revision_sha256
+        return _run_cache_download_flow(args, client, request_id_factory, payload)
     if command == "show":
         snapshot = _load_library_snapshot(client, args)
         return _find_model(snapshot, args.model_id)
@@ -3208,6 +3238,37 @@ def _artifact_set_sha256(value: str) -> str:
     return value
 
 
+def _run_cache_download_flow(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+    payload: dict[str, object],
+) -> dict[str, object]:
+    preview = client.request(
+        "POST", "/api/v1/model-cache/download-preview", dict(payload)
+    )
+    if args.dry_run:
+        return preview
+    plan_digest = preview.get("plan_digest")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        raise ValueError("automatic cache download preview did not return plan_digest")
+    request_key = _explicit_request_key(args.request_key or request_id_factory())
+    args.request_key = request_key
+    apply_payload = dict(payload)
+    apply_payload.update(plan_digest=plan_digest, request_key=request_key)
+    result = _follow_submitted_operation(
+        args,
+        client,
+        client.request("POST", "/api/v1/model-cache/download", apply_payload),
+    )
+    return {
+        "plan": preview,
+        "result": result,
+        "plan_digest": plan_digest,
+        "request_key": request_key,
+    }
+
+
 def _run_cache(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -3266,29 +3327,7 @@ def _run_cache(
         if not payload:
             raise ValueError("cache download requires an exact artifact input")
         if args.download_mode is None:
-            preview = client.request(
-                "POST", "/api/v1/model-cache/download-preview", dict(payload)
-            )
-            if args.dry_run:
-                return preview
-            plan_digest = preview.get("plan_digest")
-            if not isinstance(plan_digest, str) or not plan_digest:
-                raise ValueError("automatic cache download preview did not return plan_digest")
-            request_key = _explicit_request_key(args.request_key or request_id_factory())
-            args.request_key = request_key
-            apply_payload = dict(payload)
-            apply_payload.update(plan_digest=plan_digest, request_key=request_key)
-            result = _follow_submitted_operation(
-                args,
-                client,
-                client.request("POST", "/api/v1/model-cache/download", apply_payload),
-            )
-            return {
-                "plan": preview,
-                "result": result,
-                "plan_digest": plan_digest,
-                "request_key": request_key,
-            }
+            return _run_cache_download_flow(args, client, request_id_factory, payload)
         variant = args.download_mode
         if variant == "preview":
             if args.apply:
@@ -3489,7 +3528,7 @@ def run_controller(
     if args.command == "models":
         if args.models_command == "run":
             return _run_model_run(args, client, request_id_factory)
-        return _run_models(args, client)
+        return _run_models(args, client, request_id_factory)
     if args.command == "cache":
         return _run_cache(args, client, request_id_factory)
     if args.command == "profiles":

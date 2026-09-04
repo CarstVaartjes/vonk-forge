@@ -1804,6 +1804,41 @@ def test_simple_cache_download_previews_then_applies_exact_artifacts() -> None:
     }
 
 
+def test_models_download_uses_the_same_exact_cache_routes() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/model-cache/download-preview"): {
+                "plan_digest": "d" * 64
+            },
+            ("POST", "/api/v1/model-cache/download"): {"operation_id": "op-1"},
+            ("GET", "/api/v1/operations/op-1"): {"state": "succeeded"},
+        }
+    )
+    result, _payload = _invoke(
+        client,
+        "--json",
+        "models",
+        "download",
+        "--model-version-sha256",
+        "a" * 64,
+        "--recipe-revision-id",
+        "recipe-1",
+        "--request-key",
+        "11111111-1111-4111-8111-111111111111",
+    )
+
+    assert result == 0
+    assert [call[1] for call in client.calls] == [
+        "/api/v1/model-cache/download-preview",
+        "/api/v1/model-cache/download",
+        "/api/v1/operations/op-1",
+    ]
+    assert client.calls[0][2] == {
+        "model_version_sha256": "a" * 64,
+        "recipe_revision_id": "recipe-1",
+    }
+
+
 def test_simple_profile_switch_previews_then_applies_without_manual_digest() -> None:
     client = _Client(
         {

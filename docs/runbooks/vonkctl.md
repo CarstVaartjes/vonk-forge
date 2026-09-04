@@ -2,9 +2,10 @@
 
 `vonkctl` is the local command-line alternative to the browser controller. It
 uses the same authenticated control API and persisted projections as the Fleet,
-Library, and Activity pages. Read commands are safe by default. Every mutation
-requires both an explicit `apply` subcommand where applicable and the `--apply`
-flag.
+Library, and Activity pages. Read commands are safe by default. Common
+Download, Run, and Switch commands preview, bind, and execute their Controller
+plan automatically; advanced plan/apply commands remain available for precise
+automation.
 
 ## Connect to a controller
 
@@ -95,6 +96,8 @@ bounded JSON object with `--input JSON`, `--input-file FILE`, or `--stdin`.
 vonkctl models discover --search qwen --all --json
 vonkctl models show MODEL_ID --json
 vonkctl models compare MODEL_ID MODEL_ID --json
+vonkctl models download --model-version-sha256 MODEL_VERSION_SHA256 \
+  --recipe-revision-id RECIPE_REVISION_ID --json
 vonkctl models run --input-file run.json --json
 vonkctl models run --input-file run.json --dry-run --json
 vonkctl models run preview --input-file run.json --json
