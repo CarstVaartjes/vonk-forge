@@ -94,6 +94,8 @@ from .operation_api import (
     OperationDetailResponse,
     OperationPage,
     OperationsResponse,
+    _global_get_operation,
+    _global_list_operations,
     bounded_error_responses,
     decode_offset,
     fleet_response,
@@ -1110,13 +1112,13 @@ def create_app(
         node_id: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
         _actor: Actor = authenticated_actor,
     ) -> OperationsResponse:
-        if operations is None or operations.list_operations is None:
+        if operations is None:
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             )
         try:
-            page = operations.list_operations(
-                cursor, limit, operation_state, node_id
+            page = _global_list_operations(
+                operations, cursor, limit, operation_state, node_id
             )
         except ValueError:
             raise HTTPException(
@@ -1142,12 +1144,12 @@ def create_app(
         operation_id: str = ApiPath(min_length=1, max_length=128),
         _actor: Actor = authenticated_actor,
     ) -> OperationDetailResponse:
-        if operations is None or operations.get_operation is None:
+        if operations is None:
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             )
         try:
-            item = operations.get_operation(operation_id)
+            item = _global_get_operation(operations, operation_id)
         except KeyError:
             raise HTTPException(status_code=404, detail="operation not found") from None
         except RuntimeError:
@@ -1636,7 +1638,12 @@ def production_app() -> FastAPI:
         while not automatic_sync_stop.is_set():
             try:
                 await asyncio.to_thread(managed_catalog_sync.automatic)
-            except (CatalogError, CatalogSyncError, RecipeLibraryError, OSError) as error:
+            except (
+                CatalogError,
+                CatalogSyncError,
+                RecipeLibraryError,
+                OSError,
+            ) as error:
                 _LOGGER.warning(
                     "automatic managed recipe catalog sync failed: %s",
                     type(error).__name__,

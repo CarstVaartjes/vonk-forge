@@ -10,7 +10,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer
 from sqlalchemy import func, or_, select, update
@@ -241,10 +241,12 @@ class JobOperationResponse(StrictModel):
 
 
 class OperationDetailResponse(JobOperationResponse):
+    schema_version: Literal[2] = 2
     job_id: str = Field(min_length=1, max_length=128)
 
 
 class OperationsResponse(StrictModel):
+    schema_version: Literal[2] = 2
     operations: list[OperationDetailResponse] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=512)
     total: int = Field(ge=0)
@@ -335,6 +337,8 @@ class OperationApiServices:
         Callable[[str | None, int, str | None, str | None], OperationListPage] | None
     ) = None
     get_operation: Callable[[str], Mapping[str, object]] | None = None
+    operation_providers: tuple[OperationProvider, ...] = ()
+    cursor_codec: CursorCodec | None = None
 
 
 @dataclass(frozen=True)
@@ -350,6 +354,157 @@ class OperationListPage:
     items: Sequence[Mapping[str, object]]
     next_cursor: str | None
     total: int
+
+
+@dataclass(frozen=True)
+class OperationQuery:
+    """Shared boundary query understood by every global activity provider."""
+
+    after: tuple[datetime, str] | None
+    limit: int
+    state: str | None
+    node_id: str | None
+
+
+@dataclass(frozen=True)
+class OperationProvider:
+    """Composable typed operation family for the global activity projection."""
+
+    family: str
+    list_operations: Callable[[OperationQuery], OperationListPage]
+    get_operation: Callable[[str], Mapping[str, object]]
+
+
+def _operation_boundary(item: Mapping[str, object]) -> tuple[datetime, str]:
+    created_at = item.get("created_at")
+    if not isinstance(created_at, str):
+        raise OperationProjectionError("operation created_at is invalid")
+    try:
+        parsed = datetime.fromisoformat(created_at)
+    except ValueError:
+        raise OperationProjectionError("operation created_at is invalid") from None
+    operation_id = item.get("id")
+    if not isinstance(operation_id, str) or not operation_id:
+        raise OperationProjectionError("operation id is invalid")
+    return _aware(parsed), operation_id
+
+
+def merge_operation_providers(
+    providers: Sequence[OperationProvider],
+    *,
+    cursor: str | None,
+    limit: int,
+    state: str | None,
+    node_id: str | None,
+    cursors: CursorCodec,
+) -> OperationListPage:
+    """Merge provider rows using one deterministic newest-first cursor."""
+
+    if not 1 <= limit <= 100:
+        raise ValueError("operation page limit is invalid")
+    context = {"state": state, "node_id": node_id}
+    after: tuple[datetime, str] | None = None
+    if cursor is not None:
+        try:
+            decoded = cursors.decode(
+                cursor,
+                resource="operations",
+                order="created-at-desc/id-desc/v1",
+                context=context,
+            )
+            if (
+                not isinstance(decoded, list)
+                or len(decoded) != 2
+                or not all(isinstance(item, str) for item in decoded)
+            ):
+                raise ValueError
+            after = (_aware(datetime.fromisoformat(decoded[0])), decoded[1])
+        except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+            raise ValueError("operation cursor is invalid") from None
+    query = OperationQuery(after=after, limit=limit + 1, state=state, node_id=node_id)
+    rows: list[Mapping[str, object]] = []
+    total = 0
+    seen: set[str] = set()
+    for provider in providers:
+        page = provider.list_operations(query)
+        total += page.total
+        for item in page.items:
+            boundary = _operation_boundary(item)
+            if after is not None and boundary >= after:
+                raise OperationProjectionError(
+                    f"{provider.family} provider returned a stale operation row"
+                )
+            operation_id = boundary[1]
+            if operation_id in seen:
+                raise OperationProjectionError("operation ids are not globally unique")
+            seen.add(operation_id)
+            rows.append(item)
+    rows.sort(key=_operation_boundary, reverse=True)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    next_cursor = None
+    if has_more and rows:
+        created_at, operation_id = _operation_boundary(rows[-1])
+        next_cursor = cursors.encode(
+            resource="operations",
+            order="created-at-desc/id-desc/v1",
+            context=context,
+            boundary=[created_at.isoformat(), operation_id],
+        )
+    return OperationListPage(items=rows, next_cursor=next_cursor, total=total)
+
+
+def get_operation_from_providers(
+    providers: Sequence[OperationProvider], operation_id: str
+) -> Mapping[str, object]:
+    """Resolve one operation without coupling the Controller to provider modules."""
+
+    match: Mapping[str, object] | None = None
+    for provider in providers:
+        try:
+            item = provider.get_operation(operation_id)
+        except KeyError:
+            continue
+        if match is not None:
+            raise OperationProjectionError("operation ids are not globally unique")
+        match = item
+    if match is None:
+        raise KeyError(operation_id)
+    _operation_boundary(match)
+    return match
+
+
+def _global_list_operations(
+    services: OperationApiServices,
+    cursor: str | None,
+    limit: int,
+    state: str | None,
+    node_id: str | None,
+) -> OperationListPage:
+    if services.operation_providers:
+        if services.cursor_codec is None:
+            raise OperationProjectionError("operation cursor projection unavailable")
+        return merge_operation_providers(
+            services.operation_providers,
+            cursor=cursor,
+            limit=limit,
+            state=state,
+            node_id=node_id,
+            cursors=services.cursor_codec,
+        )
+    if services.list_operations is None:
+        raise OperationProjectionError("operation projection unavailable")
+    return services.list_operations(cursor, limit, state, node_id)
+
+
+def _global_get_operation(
+    services: OperationApiServices, operation_id: str
+) -> Mapping[str, object]:
+    if services.operation_providers:
+        return get_operation_from_providers(services.operation_providers, operation_id)
+    if services.get_operation is None:
+        raise OperationProjectionError("operation projection unavailable")
+    return services.get_operation(operation_id)
 
 
 def job_response(
@@ -1155,6 +1310,75 @@ class _DurableOperationProjection:
             )
         return OperationListPage(items=items, next_cursor=next_cursor, total=total)
 
+    def list_operation_provider(self, query: OperationQuery) -> OperationListPage:
+        """Return AgentOperation rows after the shared global boundary."""
+
+        if not 1 <= query.limit <= 101:
+            raise ValueError("operation provider page limit is invalid")
+        filters = []
+        if query.state is not None:
+            filters.append(AgentOperation.state == query.state)
+        if query.node_id is not None:
+            filters.append(AgentOperation.node_id == query.node_id)
+        if query.after is not None:
+            created_at, operation_id = query.after
+            filters.append(
+                or_(
+                    AgentOperation.created_at < created_at,
+                    (AgentOperation.created_at == created_at)
+                    & (AgentOperation.id < operation_id),
+                )
+            )
+        with self._sessions() as session:
+            rows = list(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(*filters)
+                    .order_by(
+                        AgentOperation.created_at.desc(), AgentOperation.id.desc()
+                    )
+                    .limit(query.limit)
+                )
+            )
+            total_filters = []
+            if query.state is not None:
+                total_filters.append(AgentOperation.state == query.state)
+            if query.node_id is not None:
+                total_filters.append(AgentOperation.node_id == query.node_id)
+            total = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(AgentOperation)
+                    .where(*total_filters)
+                )
+                or 0
+            )
+            attempts = {
+                attempt.operation_id: attempt
+                for attempt in session.scalars(
+                    select(AgentOperationAttempt).where(
+                        AgentOperationAttempt.operation_id.in_([row.id for row in rows])
+                    )
+                )
+                if any(
+                    row.id == attempt.operation_id
+                    and row.current_attempt == attempt.attempt
+                    for row in rows
+                )
+            }
+        return OperationListPage(
+            items=[
+                {
+                    **_operation_item(row, attempts.get(row.id)),
+                    "created_at": _aware(row.created_at).isoformat(),
+                    "job_id": row.parent_job_id,
+                }
+                for row in rows
+            ],
+            next_cursor=None,
+            total=total,
+        )
+
     def get_operation(self, operation_id: str) -> Mapping[str, object]:
         with self._sessions() as session:
             operation = session.get(AgentOperation, operation_id)
@@ -1209,6 +1433,7 @@ def durable_operation_services(
     cursors: CursorCodec,
     stale_after_seconds: int = 150,
     resume_agent_upgrade: Callable[[str], None] | None = None,
+    operation_providers: Sequence[OperationProvider] = (),
 ) -> OperationApiServices:
     """Build bounded projections over database state and the active route bundle."""
 
@@ -1240,6 +1465,15 @@ def durable_operation_services(
         resume_job=resume_job,
         list_operations=projection.list_operations,
         get_operation=projection.get_operation,
+        operation_providers=(
+            OperationProvider(
+                family="agent",
+                list_operations=projection.list_operation_provider,
+                get_operation=projection.get_operation,
+            ),
+            *operation_providers,
+        ),
+        cursor_codec=cursors,
     )
 
 

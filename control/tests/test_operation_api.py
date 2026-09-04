@@ -33,7 +33,14 @@ from vonk_control.models import (
     RoutePublication,
     RoutePublicationOwner,
 )
-from vonk_control.operation_api import JobProgress, OperationApiServices, OperationPage
+from vonk_control.operation_api import (
+    JobProgress,
+    OperationApiServices,
+    OperationListPage,
+    OperationPage,
+    OperationProvider,
+    OperationQuery,
+)
 
 COMMIT = "a" * 64
 DIGEST = "d" * 64
@@ -237,8 +244,10 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     detail = client.get(f"/api/v1/operations/{item['id']}", headers=operator)
 
     assert listed.status_code == 200
+    assert listed.json()["schema_version"] == 2
     assert listed.json()["total"] == 1
     assert listed.json()["operations"][0]["job_id"] == item["job_id"]
+    assert listed.json()["operations"][0]["schema_version"] == 2
     assert listed.json()["operations"][0]["recovery"] == {
         "uncertain": True,
         "actions": ["inspect"],
@@ -260,6 +269,88 @@ def test_generic_operation_read_contract_is_unavailable_without_projection() -> 
         ).status_code
         == 503
     )
+
+
+def test_global_operation_projection_merges_typed_provider_families() -> None:
+    rows = {
+        "cache-1": {
+            "id": "cache-1",
+            "job_id": "job-cache",
+            "node_id": NODE_ID,
+            "kind": "cache-download",
+            "state": "running",
+            "attempt": 1,
+            "progress": {"phase": "download", "total_unknown": True},
+            "updated_at": "2026-08-15T12:01:00Z",
+            "created_at": "2026-08-15T12:01:00Z",
+            "supported_actions": [],
+        },
+        "run-1": {
+            "id": "run-1",
+            "job_id": "job-run",
+            "node_id": NODE_ID,
+            "kind": "run",
+            "state": "succeeded",
+            "attempt": 1,
+            "progress": {"phase": "final_verify"},
+            "updated_at": "2026-08-15T12:00:00Z",
+            "created_at": "2026-08-15T12:00:00Z",
+            "supported_actions": [],
+        },
+    }
+
+    def provider_for(ids: tuple[str, ...]) -> OperationProvider:
+        def list_rows(query: OperationQuery) -> OperationListPage:
+            selected = [rows[row_id] for row_id in ids]
+            if query.after is not None:
+                selected = [
+                    row
+                    for row in selected
+                    if operation_api._operation_boundary(row) < query.after
+                ]
+            selected.sort(key=operation_api._operation_boundary, reverse=True)
+            return OperationListPage(selected[: query.limit], None, len(ids))
+
+        def get_row(operation_id: str) -> dict[str, object]:
+            for row_id in ids:
+                if row_id == operation_id:
+                    return rows[row_id]
+            raise KeyError(operation_id)
+
+        return OperationProvider(
+            family=ids[0].split("-", 1)[0],
+            list_operations=list_rows,
+            get_operation=get_row,
+        )
+
+    services = OperationApiServices(
+        endpoint=lambda _alias: {},
+        agents=lambda: (),
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        ),
+        resume_job=lambda _job_id: None,
+        operation_providers=(provider_for(("cache-1",)), provider_for(("run-1",))),
+        cursor_codec=TokenCodec(b"p" * 32).cursor_codec(),
+    )
+    client, operator, *_ = _client(operations=services)
+
+    first = client.get("/api/v1/operations", headers=operator, params={"limit": "1"})
+    second = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"limit": "1", "cursor": first.json()["next_cursor"]},
+    )
+    detail = client.get("/api/v1/operations/run-1", headers=operator)
+
+    assert first.status_code == 200
+    assert first.json()["schema_version"] == 2
+    assert first.json()["total"] == 2
+    assert first.json()["operations"][0]["id"] == "cache-1"
+    assert second.status_code == 200
+    assert second.json()["operations"][0]["id"] == "run-1"
+    assert detail.status_code == 200
+    assert detail.json()["kind"] == "run"
 
 
 def test_fleet_exposes_visual_state_and_node_evidence() -> None:
