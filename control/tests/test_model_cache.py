@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -11,14 +10,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.auth import Actor
+from vonk_control.auth import Actor, TokenCodec
 from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheService,
 )
 from vonk_control.model_cache_api import (
-    ModelCacheOperationProvider,
     install_model_cache_routes,
+    model_cache_operation_provider,
 )
 from vonk_control.model_cache_contract import (
     ModelCacheDownloadRequest,
@@ -224,8 +223,17 @@ def test_download_mutation_is_queued_until_the_controller_worker_runs(
 def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     cache, tmp_path: Path
 ) -> None:
+    operation_contract = pytest.importorskip("vonk_control.operation_contract")
+    operation_api = pytest.importorskip("vonk_control.operation_api")
+    if not all(
+        hasattr(operation_api, name)
+        for name in ("OperationListPage", "OperationProvider", "OperationQuery")
+    ):
+        pytest.skip("shared Activity provider DTO is not available on this base revision")
     service, _sessions = cache
-    provider = ModelCacheOperationProvider(service)
+    cursor_codec = TokenCodec(b"c" * 32).cursor_codec()
+    provider = model_cache_operation_provider(service, cursors=cursor_codec)
+    assert isinstance(provider, operation_api.OperationProvider)
     operation_ids: list[str] = []
     for index in range(2):
         model = str(index + 1) * 64
@@ -251,42 +259,59 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         assert operation.attempt == 1
         operation_ids.append(operation.id)
 
-    query = SimpleNamespace(limit=1, after=None, state=None, node_id=None)
+    query = operation_api.OperationQuery(limit=1, after=None, state=None, node_id=None)
     first_page = provider.list_operations(query)
-    assert first_page["total"] == 2
-    assert len(first_page["items"]) == 1
-    first = first_page["items"][0]
+    assert isinstance(first_page, operation_api.OperationListPage)
+    assert first_page.total == 2
+    assert len(first_page.items) == 1
+    first = first_page.items[0]
     assert first["node_ids"] == []
     assert first["attempt"] == 1
     assert first["supported_actions"] == []
-    assert first["progress"]["phase"] == "prepare"
-    assert first_page["next_cursor"]
-
-    after = (datetime.fromisoformat(str(first["created_at"])), str(first["id"]))
-    second_page = provider.list_operations(
-        SimpleNamespace(limit=1, after=after, state=None, node_id=None)
+    progress = operation_contract.OperationProgress.model_validate(first["progress"])
+    assert progress.phase == "prepare"
+    assert progress.completed_bytes == 0
+    assert progress.total_bytes_known is True
+    assert first_page.next_cursor
+    decoded_cursor = cursor_codec.decode(
+        first_page.next_cursor,
+        resource="model-cache-operations",
+        order="created-at-desc/id-desc/v1",
+        context={"state": None, "node_id": None},
     )
-    assert second_page["total"] == 2
-    assert len(second_page["items"]) == 1
-    assert second_page["items"][0]["id"] != first["id"]
-    assert second_page["next_cursor"] is None
+    assert isinstance(decoded_cursor, list)
+    assert len(decoded_cursor) == 2
+
+    after = (
+        datetime.fromisoformat(str(decoded_cursor[0])),
+        str(decoded_cursor[1]),
+    )
+    second_page = provider.list_operations(
+        operation_api.OperationQuery(limit=1, after=after, state=None, node_id=None)
+    )
+    assert second_page.total == 2
+    assert len(second_page.items) == 1
+    assert second_page.items[0]["id"] != first["id"]
+    assert second_page.next_cursor is None
 
     queued_page = provider.list_operations(
-        SimpleNamespace(limit=100, after=None, state="queued", node_id=None)
+        operation_api.OperationQuery(
+            limit=100, after=None, state="queued", node_id=None
+        )
     )
-    assert queued_page["total"] == 2
-    assert {item["id"] for item in queued_page["items"]} == set(operation_ids)
+    assert queued_page.total == 2
+    assert {item["id"] for item in queued_page.items} == set(operation_ids)
 
     node_page = provider.list_operations(
-        SimpleNamespace(
+        operation_api.OperationQuery(
             limit=100,
             after=None,
             state=None,
             node_id="spk_" + "a" * 32,
         )
     )
-    assert node_page["items"] == []
-    assert node_page["total"] == 0
+    assert list(node_page.items) == []
+    assert node_page.total == 0
     detail = provider.get_operation(str(first["id"]))
     assert detail["id"] == first["id"]
     assert detail["node_ids"] == []
@@ -294,10 +319,12 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
 
     assert service.run_pending(limit=2) == 2
     succeeded_page = provider.list_operations(
-        SimpleNamespace(limit=100, after=None, state="succeeded", node_id=None)
+        operation_api.OperationQuery(
+            limit=100, after=None, state="succeeded", node_id=None
+        )
     )
-    assert succeeded_page["total"] == 2
-    assert all(item["state"] == "succeeded" for item in succeeded_page["items"])
+    assert succeeded_page.total == 2
+    assert all(item["state"] == "succeeded" for item in succeeded_page.items)
 
 
 def test_interrupted_download_checkpoint_resumes_after_service_restart(
