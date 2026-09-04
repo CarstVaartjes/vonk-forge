@@ -1,15 +1,10 @@
 name: Installer publication
 
 on:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_run:
     workflows:
       - CI
-      - Development images
       - Installer publication source
-      - Installer setup programs
-      - Rust Vonk Forge agent development
     types: [completed]
 
 permissions:
@@ -24,9 +19,8 @@ concurrency:
        github.event.workflow_run.head_sha) ||
       github.run_id
     }}
-  # Every changed producer emits a completion event. Keep only the newest
-  # fan-in attempt for one source generation; it has at least as much completed
-  # evidence as the attempt it replaces.
+  # One source anchor emits exactly one development fan-in event per main
+  # generation. Stable publication remains anchored to the completed CI tag.
   cancel-in-progress: true
 
 jobs:
@@ -34,10 +28,7 @@ jobs:
     name: Accept one complete source generation
     if: >-
       github.event.workflow_run.event == 'push' &&
-      (((github.event.workflow_run.name == 'Rust Vonk Forge agent development' ||
-         github.event.workflow_run.name == 'Development images' ||
-         github.event.workflow_run.name == 'Installer publication source' ||
-         github.event.workflow_run.name == 'Installer setup programs') &&
+      ((github.event.workflow_run.name == 'Installer publication source' &&
        github.event.workflow_run.head_branch == 'main') ||
        github.event.workflow_run.name == 'CI')
     runs-on: ubuntu-24.04
@@ -103,6 +94,14 @@ jobs:
                 [.id, .run_number, .head_sha, .status, (.conclusion // "")] | @tsv
               ' "$exact_runs")
               if test -z "$candidate"; then
+                # The source anchor is intentionally tiny and can finish before
+                # GitHub has materialized a changed producer run. Give the
+                # scheduler one minute before concluding that path filtering
+                # omitted this producer and selecting accepted ancestry.
+                if ((attempt < 13)); then
+                  sleep 5
+                  continue
+                fi
                 break
               fi
               IFS=$'\t' read -r run_id run_number run_sha run_status run_conclusion \
@@ -154,7 +153,7 @@ jobs:
           git fetch --force --tags origin
 
           case "$TRIGGER_NAME" in
-            'Rust Vonk Forge agent development'|'Development images'|'Installer publication source'|'Installer setup programs')
+            'Installer publication source')
               channel=dev
               authority_ref=refs/heads/main
               tag_oid=

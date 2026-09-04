@@ -58,3 +58,21 @@ def test_non_pr_execution_is_conservative() -> None:
 def test_unknown_product_input_runs_general_repository_suite() -> None:
     selected = _module().select(["install/channel"], "pull_request")
     assert selected["repository"] is True
+
+
+def test_generated_supply_chain_manifest_does_not_broaden_its_source_change() -> None:
+    selected = _module().select(
+        [
+            ".github/workflows/installer-publication.yml",
+            "inventory/sbom/manifest.json",
+        ],
+        "pull_request",
+    )
+    assert selected == {
+        "rust": False,
+        "repository": True,
+        "control": False,
+        "web": False,
+        "compose": False,
+        "generated": False,
+    }
