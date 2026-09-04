@@ -270,6 +270,10 @@ class ModelCacheVerifiedObjectSource:
         expected = tuple(item for item in objects if item.kind == "model")
         return declared == expected
 
+    def objects_for_set(self, artifact_set_sha256: str) -> tuple[DistributionObject, ...]:
+        """Return the verified complete model manifest for assignment creation."""
+        return self._manifests.get(artifact_set_sha256) or self._load_manifest(artifact_set_sha256)
+
 
 class CompositeVerifiedObjectSource:
     """Join the NAS model cache and Controller OCI archive boundaries."""
