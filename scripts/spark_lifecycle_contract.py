@@ -11,21 +11,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-PLATFORMS = ("linux-amd64", "linux-arm64")
+PLATFORMS = ("linux-arm64",)
 GATES = {
-    "linux-amd64": ["spark_amd64", "spark_pairing"],
-    "linux-arm64": ["spark_arm64", "spark_job", "spark_renewal"],
+    "linux-arm64": ["spark_arm64", "spark_job", "spark_pairing", "spark_renewal"],
 }
 PHASES = {
-    # AMD64 is a package-portability boundary. Recipe and workload contracts are
-    # intentionally linux/arm64 because the managed target is DGX Spark.
-    "linux-amd64": [
-        "publication-graph-verified",
-        "controller-ready",
-        "candidate-installed",
-        "paired",
-        "direct-rust-agent-healthy",
-    ],
     "linux-arm64": [
         "publication-graph-verified",
         "controller-ready",
@@ -578,41 +568,6 @@ def _validate_install_identity(
     return identity
 
 
-def _validate_amd64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
-    _exact(
-        proof,
-        {
-            "controller_generation",
-            "direct_agent_health",
-            "installation",
-            "node_id",
-            "pairing_grant_use_count",
-            "publication_graph",
-        },
-        "AMD64 lifecycle proof",
-    )
-    installation = _object(proof.get("installation"), "AMD64 installation proof")
-    _exact(
-        installation,
-        {"architecture", "identity"},
-        "AMD64 installation proof",
-    )
-    selected = graph["packages"]["linux-amd64"]
-    if installation.get("architecture") != "amd64":
-        raise ContractError("AMD64 installation architecture is invalid")
-    _validate_install_identity(
-        installation.get("identity"),
-        label="AMD64 candidate installation identity",
-        version=graph["candidate_version"],
-        package_digest=selected["candidate_sha256"],
-    )
-    if (
-        not isinstance(proof.get("node_id"), str)
-        or NODE_ID.fullmatch(proof["node_id"]) is None
-    ):
-        raise ContractError("AMD64 node identity proof is invalid")
-
-
 def _validate_canary(proof: dict[str, Any], *, platform: str) -> None:
     architecture = platform.removeprefix("linux-").upper()
     canary = _object(proof.get("canary"), f"{architecture} canary proof")
@@ -773,8 +728,5 @@ def validate_lifecycle(
     if proof.get("pairing_grant_use_count") != 1:
         raise ContractError("pairing grant was not used exactly once")
     _validate_direct_agent(proof.get("direct_agent_health"))
-    if platform == "linux-amd64":
-        _validate_amd64(proof, graph)
-    else:
-        _validate_arm64(proof, graph)
+    _validate_arm64(proof, graph)
     return lifecycle

@@ -57,7 +57,7 @@ from tests.acceptance.test_fresh_nas_install import (
     tailscale_service_hostname,
 )
 
-PLATFORMS = ("linux-amd64", "linux-arm64")
+PLATFORMS = ("linux-arm64",)
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 SOURCE_SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -68,7 +68,7 @@ VERSION = re.compile(
 SAFE_HTTPS_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
-PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-(?:amd64|arm64)\Z")
+PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-arm64\Z")
 # Exercise the production-supported lower bound.  The agent renews at two thirds
 # of a certificate lifetime and checks renewal on its 60-second inventory tick,
 # so 90 seconds preserves a real scheduled rotation while avoiding three idle
@@ -586,10 +586,7 @@ class SparkLifecycle:
         if self.origin != "https://install.vonkforge.ai":
             raise LifecycleError("installer public origin is invalid")
         self.machine = platform.machine()
-        expected_machine = {
-            "linux-amd64": {"x86_64", "amd64"},
-            "linux-arm64": {"aarch64", "arm64"},
-        }[arguments.platform]
+        expected_machine = {"aarch64", "arm64"}
         if self.machine not in expected_machine or os.geteuid() == 0:
             raise LifecycleError(
                 "Spark lifecycle is not running natively as an ordinary user"
@@ -1344,21 +1341,7 @@ class SparkLifecycle:
             package_version=str(self.graph["candidate_version"]), timeout=180
         )
         use_count = self._pairing_grant_use_count(grant_id)
-        direct_health = self._direct_agent_health()
         node_id = str(candidate["node_id"])
-        if self.arguments.platform == "linux-amd64":
-            return {
-                "controller_generation": self.arguments.generation,
-                "direct_agent_health": direct_health,
-                "installation": {
-                    "architecture": "amd64",
-                    "identity": self._installation_identity(candidate),
-                },
-                "node_id": node_id,
-                "pairing_grant_use_count": use_count,
-                "publication_graph": self.graph,
-            }
-
         canary = self._run_synthetic_canary(node_id)
         synthetic_device = {
             "architecture": self.arguments.platform,

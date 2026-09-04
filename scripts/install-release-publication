@@ -31,7 +31,7 @@ NAS_PLATFORMS = (
     "darwin-amd64",
     "darwin-arm64",
 )
-SPARK_PLATFORMS = ("linux-amd64", "linux-arm64")
+SPARK_PLATFORMS = ("linux-arm64",)
 PHASE_ORDER = {"immutable": 0, "endpoint": 1, "pointer": 2}
 MUTABLE_TAGS = frozenset({"edge", "latest", "main", "dev"})
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -56,7 +56,6 @@ ACCEPTANCE_GATES = {
     "compose_hermes",
     "nas_site_secret_preservation",
     "nas_workstation",
-    "spark_amd64",
     "spark_arm64",
     "spark_job",
     "spark_pairing",
@@ -983,10 +982,7 @@ def accept(arguments: argparse.Namespace) -> None:
                 ) from error
             observed_spark_platforms.add(platform)
         observed.update(gates)
-    if observed != ACCEPTANCE_GATES or observed_spark_platforms != {
-        "linux-amd64",
-        "linux-arm64",
-    }:
+    if observed != ACCEPTANCE_GATES or observed_spark_platforms != {"linux-arm64"}:
         raise PublicationError("behavioral acceptance gates are incomplete")
 
     receipt = {

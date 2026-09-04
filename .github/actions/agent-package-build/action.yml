@@ -1,5 +1,5 @@
 name: ARM64-native agent package build and acceptance
-description: Build, sign, attest, and upload AMD64 and ARM64 packages with native ARM64 lifecycle acceptance
+description: Build, sign, attest, and upload the ARM64 DGX Spark agent package
 
 inputs:
   channel:
@@ -20,14 +20,8 @@ inputs:
   arm64_package:
     description: Exact ARM64 Debian package filename
     required: true
-  amd64_package:
-    description: Exact AMD64 Debian package filename
-    required: true
   arm64_baseline_package:
     description: Exact acceptance-only ARM64 Debian package filename
-    required: true
-  amd64_baseline_package:
-    description: Exact acceptance-only AMD64 Debian package filename
     required: true
   artifact_name:
     description: Immutable GitHub Actions artifact name
@@ -70,9 +64,6 @@ outputs:
   arm64_package:
     description: Accepted ARM64 Debian package filename
     value: ${{ steps.accepted.outputs.arm64_package }}
-  amd64_package:
-    description: Accepted AMD64 Debian package filename
-    value: ${{ steps.accepted.outputs.amd64_package }}
   artifact_name:
     description: Immutable Actions artifact name
     value: ${{ steps.accepted.outputs.artifact_name }}
@@ -82,18 +73,9 @@ outputs:
   arm64_baseline_package:
     description: Acceptance-only ARM64 package filename
     value: ${{ steps.accepted.outputs.arm64_baseline_package }}
-  amd64_baseline_package:
-    description: Acceptance-only AMD64 package filename
-    value: ${{ steps.accepted.outputs.amd64_baseline_package }}
   baseline_artifact_name:
     description: Acceptance-only baseline artifact name
     value: ${{ steps.accepted.outputs.baseline_artifact_name }}
-  amd64_lifecycle_package:
-    description: Short-lived next-version AMD64 package filename for stable lifecycle acceptance
-    value: ${{ steps.accepted.outputs.amd64_lifecycle_package }}
-  amd64_lifecycle_artifact_name:
-    description: Short-lived AMD64 lifecycle Actions artifact name
-    value: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}
 
 runs:
   using: composite
@@ -114,9 +96,7 @@ runs:
         ARTIFACT_NAME: ${{ inputs.artifact_name }}
         CHANNEL: ${{ inputs.channel }}
         ARM64_PACKAGE: ${{ inputs.arm64_package }}
-        AMD64_PACKAGE: ${{ inputs.amd64_package }}
         ARM64_BASELINE_PACKAGE: ${{ inputs.arm64_baseline_package }}
-        AMD64_BASELINE_PACKAGE: ${{ inputs.amd64_baseline_package }}
         BASELINE_ARTIFACT_NAME: ${{ inputs.baseline_artifact_name }}
         BASELINE_VERSION: ${{ inputs.baseline_version }}
         PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
@@ -152,27 +132,19 @@ runs:
           "next_version=$NEXT_VERSION" \
           "baseline_version=$BASELINE_VERSION" \
           "arm64_package=$ARM64_PACKAGE" \
-          "amd64_package=$AMD64_PACKAGE" \
           "arm64_baseline_package=$ARM64_BASELINE_PACKAGE" \
-          "amd64_baseline_package=$AMD64_BASELINE_PACKAGE" \
           "artifact_name=$ARTIFACT_NAME" \
           "baseline_artifact_name=$BASELINE_ARTIFACT_NAME" \
           "channel=$CHANNEL" \
           "snapshot=$CHANNEL-$VERSION")
         test "$actual" = "$expected"
-        amd64_lifecycle_package="vonk-forge-agent_${NEXT_VERSION}_amd64.deb"
-        amd64_lifecycle_artifact_name="${ARTIFACT_NAME}-amd64-lifecycle"
         printf '%s\n' \
           "version=$VERSION" \
           "arm64_package=$ARM64_PACKAGE" \
-          "amd64_package=$AMD64_PACKAGE" \
           "artifact_name=$ARTIFACT_NAME" \
           "baseline_version=$BASELINE_VERSION" \
           "arm64_baseline_package=$ARM64_BASELINE_PACKAGE" \
-          "amd64_baseline_package=$AMD64_BASELINE_PACKAGE" \
           "baseline_artifact_name=$BASELINE_ARTIFACT_NAME" \
-          "amd64_lifecycle_package=$amd64_lifecycle_package" \
-          "amd64_lifecycle_artifact_name=$amd64_lifecycle_artifact_name" \
           >> "$GITHUB_OUTPUT"
 
     - name: Install pinned Rust toolchain
@@ -182,13 +154,10 @@ runs:
         set -euo pipefail
         test "$(uname -m)" = aarch64
         sudo apt-get update
-        sudo apt-get install --no-install-recommends -y \
-          binutils-x86-64-linux-gnu gcc-x86-64-linux-gnu \
-          libc6-dev-amd64-cross
         rustup set profile minimal
         rustup toolchain install 1.97.1 --component clippy,rustfmt
         rustup default 1.97.1
-        rustup target add aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu
+        rustup target add aarch64-unknown-linux-gnu
 
     - name: Restore Rust dependency cache
       if: inputs.binary_source_mode == 'compile'
@@ -241,14 +210,6 @@ runs:
       run: |
         set -euo pipefail
         expected=$(printf '%s\n' \
-          prebuilt/amd64/baseline.json \
-          prebuilt/amd64/baseline/vonk-agent \
-          prebuilt/amd64/baseline/vonk-agent-helper \
-          prebuilt/amd64/baseline/vonk-build-egress \
-          prebuilt/amd64/candidate.json \
-          prebuilt/amd64/candidate/vonk-agent \
-          prebuilt/amd64/candidate/vonk-agent-helper \
-          prebuilt/amd64/candidate/vonk-build-egress \
           prebuilt/arm64/baseline.json \
           prebuilt/arm64/baseline/vonk-agent \
           prebuilt/arm64/baseline/vonk-agent-helper \
@@ -264,8 +225,8 @@ runs:
         lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
         candidate_semantic_version=${VERSION%%~*}
         baseline_semantic_version=${BASELINE_VERSION%%~*}
-        for architecture in arm64 amd64; do
-          platform="linux-$architecture"
+        for architecture in arm64; do
+          platform=linux-arm64
           candidate_build_digest="sha256:$(
             printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
               "$GITHUB_SHA" "$platform" "$lock_digest" \
@@ -294,9 +255,7 @@ runs:
           cmp --silent \
             "prebuilt/$architecture/baseline.json" \
             "$RUNNER_TEMP/$architecture-baseline.json"
-          target=$([ "$architecture" = arm64 ] \
-            && printf aarch64-unknown-linux-gnu \
-            || printf x86_64-unknown-linux-gnu)
+          target=aarch64-unknown-linux-gnu
           for set in candidate baseline; do
             install -m 0555 "target/$target/release/oras" \
               "prebuilt/$architecture/$set/oras"
@@ -349,19 +308,11 @@ runs:
           printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
             "$GITHUB_SHA" linux-arm64 "$lock_digest" | sha256sum | cut -d' ' -f1
         )"
-        amd64_build_digest="sha256:$(
-          printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-            "$GITHUB_SHA" linux-amd64 "$lock_digest" | sha256sum | cut -d' ' -f1
-        )"
         arm64_initial_args=()
-        amd64_initial_args=()
         arm64_reproducible_args=(--binaries-dir target/aarch64-unknown-linux-gnu/release)
-        amd64_reproducible_args=(--binaries-dir target/x86_64-unknown-linux-gnu/release)
         if [[ "${{ inputs.binary_source_mode }}" == prebuilt ]]; then
           arm64_initial_args=(--binaries-dir prebuilt/arm64/candidate)
-          amd64_initial_args=(--binaries-dir prebuilt/amd64/candidate)
           arm64_reproducible_args=(--binaries-dir prebuilt/arm64/candidate)
-          amd64_reproducible_args=(--binaries-dir prebuilt/amd64/candidate)
         fi
         build_package() {
           local architecture=$1 build_digest=$2 output_dir=$3
@@ -392,30 +343,17 @@ runs:
           build_package linux-arm64 "$arm64_build_digest" reproducible \
             "${arm64_reproducible_args[@]}" &
           package_pids+=("$!")
-          build_package linux-amd64 "$amd64_build_digest" dist \
-            "${amd64_initial_args[@]}" &
-          package_pids+=("$!")
-          build_package linux-amd64 "$amd64_build_digest" reproducible \
-            "${amd64_reproducible_args[@]}" &
-          package_pids+=("$!")
           wait_for_packages "${package_pids[@]}"
         else
           build_package linux-arm64 "$arm64_build_digest" dist \
             "${arm64_initial_args[@]}"
           build_package linux-arm64 "$arm64_build_digest" reproducible \
             "${arm64_reproducible_args[@]}"
-          build_package linux-amd64 "$amd64_build_digest" dist \
-            "${amd64_initial_args[@]}"
-          build_package linux-amd64 "$amd64_build_digest" reproducible \
-            "${amd64_reproducible_args[@]}"
         fi
         cmp --silent \
           "dist/vonk-forge-agent_${VERSION}_arm64.deb" \
           "reproducible/vonk-forge-agent_${VERSION}_arm64.deb"
-        cmp --silent \
-          "dist/vonk-forge-agent_${VERSION}_amd64.deb" \
-          "reproducible/vonk-forge-agent_${VERSION}_amd64.deb"
-        for architecture in arm64 amd64; do
+        for architecture in arm64; do
           cmp --silent \
             "dist/vonk-forge-agent_${VERSION}_${architecture}.deb.host.sig" \
             "reproducible/vonk-forge-agent_${VERSION}_${architecture}.deb.host.sig"
@@ -447,19 +385,12 @@ runs:
         epoch=$(git show -s --format=%ct "$GITHUB_SHA")
         lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
         arm64_baseline_args=()
-        amd64_baseline_args=()
         if [[ "$BINARY_SOURCE_MODE" == prebuilt ]]; then
           arm64_baseline_args=(--binaries-dir prebuilt/arm64/baseline)
-          amd64_baseline_args=(--binaries-dir prebuilt/amd64/baseline)
         fi
         arm64_baseline_digest="sha256:$(
           printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
             "$GITHUB_SHA" linux-arm64 "$lock_digest" "$BASELINE_VERSION" \
-            | sha256sum | cut -d' ' -f1
-        )"
-        amd64_baseline_digest="sha256:$(
-          printf 'vonk-agent-acceptance-baseline-v1\0%s\0%s\0%s\0%s' \
-            "$GITHUB_SHA" linux-amd64 "$lock_digest" "$BASELINE_VERSION" \
             | sha256sum | cut -d' ' -f1
         )"
         build_baseline() {
@@ -500,9 +431,6 @@ runs:
           build_baseline linux-arm64 "$arm64_baseline_digest" \
             "${arm64_baseline_args[@]}" &
           package_pids+=("$!")
-          build_baseline linux-amd64 "$amd64_baseline_digest" \
-            "${amd64_baseline_args[@]}" &
-          package_pids+=("$!")
           wait_for_packages "${package_pids[@]}"
         else
           arm64_build_digest="sha256:$(
@@ -510,28 +438,15 @@ runs:
               "$GITHUB_SHA" linux-arm64 "$lock_digest" \
               | sha256sum | cut -d' ' -f1
           )"
-          amd64_build_digest="sha256:$(
-            printf 'vonk-agent-build-v2\0%s\0%s\0%s' \
-              "$GITHUB_SHA" linux-amd64 "$lock_digest" \
-              | sha256sum | cut -d' ' -f1
-          )"
           build_lifecycle linux-arm64 "$arm64_build_digest" \
             target/aarch64-unknown-linux-gnu/release
-          build_lifecycle linux-amd64 "$amd64_build_digest" \
-            target/x86_64-unknown-linux-gnu/release
           scripts/verify-agent-deb --json \
             "lifecycle/vonk-forge-agent_${NEXT_VERSION}_arm64.deb"
-          scripts/verify-agent-deb --json \
-            "lifecycle/vonk-forge-agent_${NEXT_VERSION}_amd64.deb"
           build_baseline linux-arm64 "$arm64_baseline_digest" \
             "${arm64_baseline_args[@]}"
-          build_baseline linux-amd64 "$amd64_baseline_digest" \
-            "${amd64_baseline_args[@]}"
         fi
         scripts/verify-agent-deb --json \
           "baseline/vonk-forge-agent_${BASELINE_VERSION}_arm64.deb"
-        scripts/verify-agent-deb --json \
-          "baseline/vonk-forge-agent_${BASELINE_VERSION}_amd64.deb"
         rm -f "$RUNNER_TEMP/vonk-agent-release.pem"
         test ! -e "$RUNNER_TEMP/vonk-agent-release.pem"
 
@@ -576,18 +491,6 @@ runs:
           "$(realpath "dist/vonk-forge-agent_${VERSION}_arm64.deb")" \
           "$BASELINE_VERSION" "$VERSION"
 
-    - name: Upload short-lived AMD64 lifecycle package
-      if: inputs.lifecycle_gate_mode == 'inline'
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      with:
-        name: ${{ steps.accepted.outputs.amd64_lifecycle_artifact_name }}
-        if-no-files-found: error
-        overwrite: false
-        retention-days: 1
-        path: |
-          lifecycle/vonk-forge-agent_${{ inputs.next_version }}_amd64.deb
-          lifecycle/vonk-forge-agent_${{ inputs.next_version }}_amd64.deb.sha256
-
     - name: Upload immutable acceptance baseline packages
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
@@ -599,9 +502,6 @@ runs:
           baseline/vonk-forge-agent_${{ inputs.baseline_version }}_arm64.deb
           baseline/vonk-forge-agent_${{ inputs.baseline_version }}_arm64.deb.sha256
           baseline/vonk-forge-agent_${{ inputs.baseline_version }}_arm64.deb.host.sig
-          baseline/vonk-forge-agent_${{ inputs.baseline_version }}_amd64.deb
-          baseline/vonk-forge-agent_${{ inputs.baseline_version }}_amd64.deb.sha256
-          baseline/vonk-forge-agent_${{ inputs.baseline_version }}_amd64.deb.host.sig
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -650,7 +550,7 @@ runs:
             identity="^https://github\.com/${GITHUB_REPOSITORY}/\.github/workflows/ci\.yml@refs/tags/v${VERSION//./\\.}$"
             ;;
         esac
-        for architecture in arm64 amd64; do
+        for architecture in arm64; do
           package="vonk-forge-agent_${VERSION}_${architecture}.deb"
           cosign sign-blob --yes --bundle \
             "dist/${package}.sigstore.json" "dist/$package"
@@ -695,11 +595,6 @@ runs:
       with:
         subject-path: dist/vonk-forge-agent_${{ inputs.version }}_arm64.deb
 
-    - name: Attest amd64 package provenance
-      uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-      with:
-        subject-path: dist/vonk-forge-agent_${{ inputs.version }}_amd64.deb
-
     - name: Revalidate source before SBOM attestation
       shell: bash
       env:
@@ -734,12 +629,6 @@ runs:
       with:
         subject-path: dist/vonk-forge-agent_${{ inputs.version }}_arm64.deb
         sbom-path: dist/vonk-forge-agent_${{ inputs.version }}_arm64.sbom.spdx.json
-
-    - name: Attest amd64 package SBOM
-      uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-      with:
-        subject-path: dist/vonk-forge-agent_${{ inputs.version }}_amd64.deb
-        sbom-path: dist/vonk-forge-agent_${{ inputs.version }}_amd64.sbom.spdx.json
 
     - name: Revalidate source before artifact publication
       shell: bash

@@ -482,9 +482,7 @@ jobs:
       next_version: ${{ steps.release.outputs.next_version }}
       baseline_version: ${{ steps.release.outputs.baseline_version }}
       arm64_package: ${{ steps.release.outputs.arm64_package }}
-      amd64_package: ${{ steps.release.outputs.amd64_package }}
       arm64_baseline_package: ${{ steps.release.outputs.arm64_baseline_package }}
-      amd64_baseline_package: ${{ steps.release.outputs.amd64_baseline_package }}
       artifact_name: ${{ steps.release.outputs.artifact_name }}
       baseline_artifact_name: ${{ steps.release.outputs.baseline_artifact_name }}
       channel: ${{ steps.release.outputs.channel }}
@@ -543,7 +541,7 @@ jobs:
             >> "$GITHUB_OUTPUT"
 
   build-agent-package:
-    name: Build and attest AMD64 and ARM64; lifecycle-test ARM64
+    name: Build, attest, and lifecycle-test ARM64 Spark agent
     if: needs.release-metadata.result == 'success'
     needs: [release-metadata]
     runs-on: ubuntu-24.04-arm
@@ -557,11 +555,9 @@ jobs:
     outputs:
       version: ${{ steps.package.outputs.version }}
       arm64_package: ${{ steps.package.outputs.arm64_package }}
-      amd64_package: ${{ steps.package.outputs.amd64_package }}
       artifact_name: ${{ steps.package.outputs.artifact_name }}
       baseline_version: ${{ steps.package.outputs.baseline_version }}
       arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
-      amd64_baseline_package: ${{ steps.package.outputs.amd64_baseline_package }}
       baseline_artifact_name: ${{ steps.package.outputs.baseline_artifact_name }}
     steps:
       - name: Check out exact package source
@@ -569,7 +565,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Build and attest AMD64 and ARM64 release agent packages
+      - name: Build and attest ARM64 release agent package
         id: package
         uses: ./.github/actions/agent-package-build
         with:
@@ -579,9 +575,7 @@ jobs:
           next_version: ${{ needs.release-metadata.outputs.next_version }}
           baseline_version: ${{ needs.release-metadata.outputs.baseline_version }}
           arm64_package: ${{ needs.release-metadata.outputs.arm64_package }}
-          amd64_package: ${{ needs.release-metadata.outputs.amd64_package }}
           arm64_baseline_package: ${{ needs.release-metadata.outputs.arm64_baseline_package }}
-          amd64_baseline_package: ${{ needs.release-metadata.outputs.amd64_baseline_package }}
           artifact_name: ${{ needs.release-metadata.outputs.artifact_name }}
           baseline_artifact_name: ${{ needs.release-metadata.outputs.baseline_artifact_name }}
           environment: agent-release
@@ -594,43 +588,9 @@ jobs:
           binary_source_mode: compile
           lifecycle_gate_mode: inline
 
-  native-amd64-agent-lifecycle:
-    name: Lifecycle-test accepted AMD64 release package on AMD64
-    needs: [release-metadata, build-agent-package]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Check out exact package acceptance source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Download accepted dual-architecture package set
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.build-agent-package.outputs.artifact_name }}
-          path: accepted
-      - name: Exercise accepted AMD64 package natively
-        shell: bash
-        env:
-          AMD64_PACKAGE: ${{ needs.build-agent-package.outputs.amd64_package }}
-        run: |
-          set -euo pipefail
-          test "$(uname -m)" = x86_64
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
-            acl crun iproute2 iptables podman shellcheck slirp4netns uidmap
-          package="accepted/$AMD64_PACKAGE"
-          scripts/verify-agent-deb --json "$package"
-          sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"
-          test "$(/usr/lib/vonk-forge/vonk-agent --version)" = \
-            "vonk-agent $(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
-          sudo env SYSTEMD_OFFLINE=1 dpkg --remove vonk-forge-agent
-
   validate-release-images:
     name: Validate accepted release images
-    needs: [lint, generated-clients, compose-integration, release-metadata, build-agent-package, native-amd64-agent-lifecycle]
+    needs: [lint, generated-clients, compose-integration, release-metadata, build-agent-package]
     runs-on: ubuntu-latest
     permissions:
       attestations: read
@@ -1094,7 +1054,7 @@ jobs:
 
   release-manifest:
     name: Publish container release manifest
-    needs: [release-metadata, publish-images, build-agent-package, native-amd64-agent-lifecycle]
+    needs: [release-metadata, publish-images, build-agent-package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1148,19 +1108,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARM64_PACKAGE: ${{ needs.build-agent-package.outputs.arm64_package }}
-          AMD64_PACKAGE: ${{ needs.build-agent-package.outputs.amd64_package }}
           SOURCE_SHA: ${{ github.sha }}
           VERSION: ${{ needs.build-agent-package.outputs.version }}
         run: |
           set -euo pipefail
           [[ "$ARM64_PACKAGE" == "vonk-forge-agent_${VERSION}_arm64.deb" ]]
-          [[ "$AMD64_PACKAGE" == "vonk-forge-agent_${VERSION}_amd64.deb" ]]
           release_assets=(
             "release-output/agent-package/$ARM64_PACKAGE"
-            "release-output/agent-package/$AMD64_PACKAGE"
             "release-output/agent-package/vonk-forge-systemd-security.json"
           )
-          for package in "$ARM64_PACKAGE" "$AMD64_PACKAGE"; do
+          for package in "$ARM64_PACKAGE"; do
             architecture=${package%.deb}
             architecture=${architecture##*_}
             release_assets+=(
@@ -1489,8 +1446,8 @@ jobs:
             "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
 
   publish-apt:
-    name: Publish verified AMD64 and ARM64 agent packages to apt
-    needs: [release-metadata, build-agent-package, native-amd64-agent-lifecycle, release-manifest]
+    name: Publish verified ARM64 Spark agent package to apt
+    needs: [release-metadata, build-agent-package, release-manifest]
     if: needs.release-manifest.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1506,13 +1463,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Publish verified AMD64 and ARM64 agent packages
+      - name: Publish verified ARM64 Spark agent package
         uses: ./.github/actions/agent-apt-publish
         with:
           channel: stable
           version: ${{ needs.build-agent-package.outputs.version }}
           arm64_package: ${{ needs.build-agent-package.outputs.arm64_package }}
-          amd64_package: ${{ needs.build-agent-package.outputs.amd64_package }}
           artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}
           environment: apt-release
           source_sha: ${{ github.sha }}

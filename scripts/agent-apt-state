@@ -111,7 +111,7 @@ def _validate_receipt(value: object) -> dict[str, Any]:
         raise StateError("publication receipt is invalid")
     receipt = {key: value[key] for key in RECEIPT_KEYS}
     packages = receipt["packages"]
-    if not isinstance(packages, dict) or set(packages) != {"amd64", "arm64"}:
+    if not isinstance(packages, dict) or set(packages) != {"arm64"}:
         raise StateError("publication receipt is invalid")
     for architecture, package in packages.items():
         if (
@@ -861,7 +861,7 @@ def _parse_aptly_package_records(
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.+-]*", fields[0]) is None
             or not fields[1]
             or any(character.isspace() for character in fields[1])
-            or fields[2] not in {"amd64", "arm64"}
+            or fields[2] != "arm64"
             or SHA256_RE.fullmatch(fields[3]) is None
             or fields in records
         ):
@@ -911,9 +911,9 @@ def _group_complete_versions(
             raise StateError("aptly repository package identity is invalid")
         versions.setdefault(version, set()).add(record)
     for version_records in versions.values():
-        if len(version_records) != 2 or {
+        if len(version_records) != 1 or {
             record[2] for record in version_records
-        } != {"amd64", "arm64"}:
+        } != {"arm64"}:
             raise StateError("aptly repository has an incomplete package version")
     return versions
 
@@ -932,7 +932,7 @@ def _expected_current_records(
             architecture,
             publication["packages"][architecture]["sha256"],
         )
-        for architecture in ("amd64", "arm64")
+        for architecture in ("arm64",)
     }
 
 
@@ -991,7 +991,7 @@ def _public_package_records(
         raise StateError("aptly public directory is invalid")
     records: set[tuple[str, str, str, str]] = set()
     required = {"Package", "Version", "Architecture", "Filename", "SHA256"}
-    for architecture in ("amd64", "arm64"):
+    for architecture in ("arm64",):
         index = _validated_regular_file(
             root
             / "dists"
@@ -1064,7 +1064,7 @@ def compact_aptly_state(
 
     package_paths: dict[str, Path] = {}
     expected_current = _expected_current_records(publication)
-    for architecture in ("amd64", "arm64"):
+    for architecture in ("arm64",):
         package = publication["packages"][architecture]
         path = _validated_regular_file(
             package_directory / package["filename"], "agent package"
@@ -1106,7 +1106,7 @@ def compact_aptly_state(
         if remaining != expected:
             raise StateError("aptly repository pruning did not match retention policy")
         if current not in versions:
-            for architecture in ("amd64", "arm64"):
+            for architecture in ("arm64",):
                 _run_aptly(
                     config,
                     "repo",

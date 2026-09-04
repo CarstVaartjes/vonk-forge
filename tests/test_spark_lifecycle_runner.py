@@ -22,61 +22,6 @@ def _module():
     return module
 
 
-def test_amd64_observation_proves_the_installed_agent_without_an_arm64_recipe(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    lifecycle = _module()
-    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
-    run.arguments = SimpleNamespace(
-        channel="dev",
-        generation="a" * 64,
-        platform="linux-amd64",
-    )
-    run.control = object()
-    run.bundle = object()
-    run.temporary_root = tmp_path
-    run.graph = {
-        "candidate_package_sha256": "b" * 64,
-        "candidate_version": "1.2.3",
-    }
-    run.synthetic_fixture_sha256 = "c" * 64
-    run.agent_installed = False
-    run._create_grant = lambda: ("grant", "https://enroll", "d" * 64, "token")
-    run._bootstrap_url = lambda *, baseline: "https://install/spark"
-    run._installer_environment = lambda *, baseline: {}
-    run._prepare_podman_apparmor_profile = lambda: None
-    run._wait_for_agent_identity = lambda **_kwargs: {
-        "node_id": "spk_0123456789abcdef0123456789abcdef",
-        "binary_sha256": "e" * 64,
-        "build_sha256": "f" * 64,
-        "package_sha256": "b" * 64,
-        "version": "1.2.3",
-    }
-    run._pairing_grant_use_count = lambda _grant: 1
-    run._direct_agent_health = lambda: {
-        "healthy": True,
-        "implementation": "rust",
-        "transport": "direct",
-    }
-    run._run_synthetic_canary = lambda _node_id: pytest.fail(
-        "AMD64 must not execute the ARM64-only recipe contract"
-    )
-    monkeypatch.setattr(lifecycle, "_run_spark_bootstrap", lambda *_args, **_kw: None)
-
-    proof = run.observe()
-
-    assert proof["node_id"] == "spk_0123456789abcdef0123456789abcdef"
-    assert proof["installation"] == {
-        "architecture": "amd64",
-        "identity": {
-            "binary_sha256": "e" * 64,
-            "build_sha256": "f" * 64,
-            "package_sha256": "b" * 64,
-            "version": "1.2.3",
-        },
-    }
-
-
 @pytest.mark.parametrize(
     ("platform", "architecture", "image_digest"),
     (
@@ -249,11 +194,10 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     assert "{http.request.remote.host}" not in caddy_path.read_text()
 
 
-def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
+def test_synthetic_device_fixture_supports_the_arm64_spark_runner() -> None:
     lifecycle = _module()
 
     arm64_raw, arm64_digest = lifecycle._synthetic_device_fixture("linux-arm64")
-    amd64_raw, amd64_digest = lifecycle._synthetic_device_fixture("linux-amd64")
 
     document = json.loads(arm64_raw)
     assert document["kind"] == "nvidia.com/gpu"
@@ -263,11 +207,10 @@ def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
             "name": "all",
         }
     ]
-    assert amd64_raw == arm64_raw
     assert len(arm64_digest) == 64
-    assert amd64_digest == arm64_digest
-    with pytest.raises(lifecycle.LifecycleError, match="platform"):
-        lifecycle._synthetic_device_fixture("linux-riscv64")
+    for platform in ("linux-amd64", "linux-riscv64"):
+        with pytest.raises(lifecycle.LifecycleError, match="platform"):
+            lifecycle._synthetic_device_fixture(platform)
 
 
 def test_synthetic_device_is_resolved_by_the_native_docker_daemon(
@@ -522,7 +465,7 @@ def test_local_browser_port_is_discovered_from_the_isolated_project(
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.bundle = tmp_path
-    run.project = "vonk-spark-42-amd64"
+    run.project = "vonk-spark-42-arm64"
     observed: list[list[str]] = []
 
     def command(argv, *, cwd, timeout=300):
@@ -538,7 +481,7 @@ def test_local_browser_port_is_discovered_from_the_isolated_project(
             "docker",
             "compose",
             "--project-name",
-            "vonk-spark-42-amd64",
+            "vonk-spark-42-arm64",
             "port",
             "caddy",
             "8080",
@@ -598,17 +541,15 @@ def test_parallel_spark_controller_start_cannot_create_tailscale_services() -> N
     assert not lifecycle.TAILSCALE_CONTROLLER_SERVICES & set(command)
 
 
-def test_parallel_spark_architectures_have_distinct_compose_projects() -> None:
+def test_spark_project_identity_is_arm64_only() -> None:
     lifecycle = _module()
 
-    amd64 = lifecycle._spark_project_identity(42, "linux-amd64")
     arm64 = lifecycle._spark_project_identity(42, "linux-arm64")
 
-    assert amd64 == "vonk-spark-42-amd64"
     assert arm64 == "vonk-spark-42-arm64"
-    assert amd64 != arm64
-    with pytest.raises(lifecycle.LifecycleError, match="project identity"):
-        lifecycle._spark_project_identity(42, "linux-unknown")
+    for platform in ("linux-amd64", "linux-unknown"):
+        with pytest.raises(lifecycle.LifecycleError, match="project identity"):
+            lifecycle._spark_project_identity(42, platform)
 
 
 def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
@@ -813,7 +754,7 @@ def test_installer_error_survives_bounded_controller_diagnostics(
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.bundle = tmp_path
-    run.project = "vonk-spark-42-amd64"
+    run.project = "vonk-spark-42-arm64"
     run._diagnostic_command = lambda command: subprocess.CompletedProcess(
         command,
         0,

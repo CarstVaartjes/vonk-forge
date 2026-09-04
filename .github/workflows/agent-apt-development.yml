@@ -33,7 +33,6 @@ jobs:
       source_sha: ${{ steps.run.outputs.source_sha }}
       version: ${{ steps.accepted.outputs.version }}
       arm64_package: ${{ steps.accepted.outputs.arm64_package }}
-      amd64_package: ${{ steps.accepted.outputs.amd64_package }}
       artifact_name: ${{ steps.accepted.outputs.artifact_name }}
       baseline_artifact_name: ${{ steps.accepted.outputs.baseline_artifact_name }}
     steps:
@@ -135,7 +134,7 @@ jobs:
             development branch main "$SOURCE_SHA" "$RUN_NUMBER")
           while IFS='=' read -r name value; do
             case "$name" in
-              version|arm64_package|amd64_package|artifact_name|baseline_artifact_name)
+              version|arm64_package|artifact_name|baseline_artifact_name)
                 printf '%s=%s\n' "$name" "$value" >> "$GITHUB_OUTPUT"
                 printf -v "$name" '%s' "$value"
                 ;;
@@ -153,17 +152,14 @@ jobs:
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             "/repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
             --jq '.artifacts[]' | jq -s . > "$artifacts"
-          test "$(jq 'length' "$jobs")" = 9
+          test "$(jq 'length' "$jobs")" = 6
           for required_job in \
             'Derive development package metadata' \
             'Compile ARM64 candidate package binaries' \
             'Compile ARM64 baseline package binaries' \
-            'Compile AMD64 candidate package binaries' \
-            'Compile AMD64 baseline package binaries' \
-            'Build and sign AMD64 and ARM64; lifecycle-test ARM64' \
+            'Build, sign, and lifecycle-test ARM64 Spark agent' \
             'Run Rust and package security gates' \
-            'Lifecycle-test accepted ARM64 package on ARM64' \
-            'Lifecycle-test accepted AMD64 package on AMD64'; do
+            'Lifecycle-test accepted ARM64 package on ARM64'; do
             jq -e \
               --arg name "$required_job" \
               --arg source_sha "$SOURCE_SHA" \
@@ -186,7 +182,7 @@ jobs:
           done
 
   publish-apt:
-    name: Publish accepted AMD64 and ARM64 development packages to apt dev
+    name: Publish accepted ARM64 Spark agent package to apt dev
     needs: [authority]
     if: needs.authority.result == 'success'
     runs-on: ubuntu-latest
@@ -205,13 +201,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ needs.authority.outputs.source_sha }}
-      - name: Publish exact accepted AMD64 and ARM64 development packages
+      - name: Publish exact accepted ARM64 development package
         uses: ./.github/actions/agent-apt-publish
         with:
           channel: dev
           version: ${{ needs.authority.outputs.version }}
           arm64_package: ${{ needs.authority.outputs.arm64_package }}
-          amd64_package: ${{ needs.authority.outputs.amd64_package }}
           artifact_name: ${{ needs.authority.outputs.artifact_name }}
           artifact_run_id: ${{ needs.authority.outputs.run_id }}
           artifact_token: ${{ github.token }}

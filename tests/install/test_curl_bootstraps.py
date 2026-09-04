@@ -95,6 +95,8 @@ def _run_bootstrap(
         'done\ncase "$url" in */payload.json) source=$VONK_TEST_PAYLOAD ;; *.deb) source=$VONK_TEST_PACKAGE ;; *.sig) source=$VONK_TEST_SETUP_SIGNATURE ;; *) source=$VONK_TEST_ARTIFACT ;; esac\n'
         'cp "$source" "$destination"\n',
     )
+    for command in ("apt-get", "dpkg-deb", "systemctl"):
+        _fake_command(commands, command, "exit 97\n")
     forbidden = tmp_path / "forbidden-tools"
     for command in ("sudo", "docker", "git", "ssh"):
         _fake_command(
@@ -133,7 +135,6 @@ def _run_bootstrap(
 @pytest.mark.parametrize(
     ("kind", "system", "machine", "arguments", "expected_arguments"),
     (
-        ("spark", "Linux", "x86_64", (), "--package"),
         ("spark", "Linux", "aarch64", (), "--package"),
     ),
 )
@@ -276,12 +277,23 @@ def test_spark_bootstrap_rejects_non_linux_before_downloading(tmp_path: Path) ->
     assert not forbidden.exists()
 
 
+def test_spark_bootstrap_rejects_non_arm64_before_downloading(tmp_path: Path) -> None:
+    result, receipt, forbidden = _run_bootstrap(
+        tmp_path, "spark", system="Linux", machine="x86_64"
+    )
+
+    assert result.returncode != 0
+    assert "CPU architecture is not supported" in result.stderr
+    assert not receipt.exists()
+    assert not forbidden.exists()
+
+
 def test_spark_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
     result, receipt, forbidden = _run_bootstrap(
         tmp_path,
         "spark",
         system="Linux",
-        machine="x86_64",
+        machine="aarch64",
         arguments=("--package", "/tmp/untrusted.deb"),
     )
 
@@ -296,7 +308,7 @@ def test_spark_bootstrap_passes_only_explicit_enrollment_mode(tmp_path: Path) ->
         tmp_path,
         "spark",
         system="Linux",
-        machine="x86_64",
+        machine="aarch64",
         arguments=("--enroll",),
     )
 
@@ -308,7 +320,7 @@ def test_spark_bootstrap_passes_only_explicit_enrollment_mode(tmp_path: Path) ->
 
 def test_bootstrap_never_executes_an_unpinned_download(tmp_path: Path) -> None:
     result, receipt, forbidden = _run_bootstrap(
-        tmp_path, "spark", system="Linux", machine="x86_64"
+        tmp_path, "spark", system="Linux", machine="aarch64"
     )
     assert result.returncode == 0
     receipt.unlink()

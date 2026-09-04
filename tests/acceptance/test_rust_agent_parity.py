@@ -2,7 +2,6 @@
 
 import ast
 import re
-
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -169,10 +168,9 @@ def test_release_workflow_runs_every_agent_owner_before_publication() -> None:
     assert "workflows: [Rust Vonk Forge agent development]" in apt_publisher
     assert "uses: ./.github/actions/agent-apt-publish" in apt_publisher
     for gate in (
-        "Build and sign AMD64 and ARM64; lifecycle-test ARM64",
+        "Build, sign, and lifecycle-test ARM64 Spark agent",
         "Run Rust and package security gates",
         "Lifecycle-test accepted ARM64 package on ARM64",
-        "Lifecycle-test accepted AMD64 package on AMD64",
     ):
         assert f"'{gate}'" in apt_publisher
     assert "uses: ./.github/actions/agent-package-security" in package_builder
