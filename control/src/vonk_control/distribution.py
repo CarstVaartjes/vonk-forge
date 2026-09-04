@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from vonk_agent_protocol import DistributionAssignment, DistributionObject, canonical_message
 
-from .models import ArtifactDistributionAssignment
+from .models import ArtifactDistributionAssignment, RecipeBuild
 
 
 class DistributionError(ValueError):
@@ -142,6 +142,39 @@ class FilesystemVerifiedObjectSource:
             raise DistributionError("distribution.object_unavailable", "verified object is unavailable") from error
 
 
+class RecipeBuildVerifiedObjectSource(FilesystemVerifiedObjectSource):
+    """Verified OCI source backed by succeeded Controller recipe builds."""
+
+    def __init__(self, sessions: sessionmaker[Session], artifact_root: Path, **kwargs: object) -> None:
+        super().__init__(artifact_root, **kwargs)
+        self.sessions = sessions
+
+    def verify_artifact_set(
+        self, artifact_set_sha256: str, objects: tuple[DistributionObject, ...]
+    ) -> bool:
+        return False
+
+    def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
+        with self.sessions() as session:
+            return session.scalar(select(RecipeBuild.id).where(
+                RecipeBuild.state == "succeeded",
+                RecipeBuild.image_digest == image_digest,
+                RecipeBuild.oci_layout_sha256 == archive_sha256,
+                RecipeBuild.image_bytes > 0,
+            )) is not None
+
+    def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
+        with self.sessions() as session:
+            authorized = session.scalar(select(RecipeBuild.id).where(
+                RecipeBuild.state == "succeeded",
+                RecipeBuild.oci_layout_sha256 == digest,
+                RecipeBuild.image_bytes == expected_bytes,
+            ))
+        if authorized is None:
+            raise DistributionError("distribution.object_unavailable", "OCI archive is not a succeeded build artifact")
+        return super().open_verified(digest, expected_bytes)
+
+
 class ModelCacheVerifiedObjectSource:
     """Narrow adapter for the NAS model-cache verified-object service.
 
@@ -169,6 +202,73 @@ class ModelCacheVerifiedObjectSource:
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
         return False
+
+    @classmethod
+    def from_service(cls, service: object) -> ModelCacheVerifiedObjectSource:
+        """Construct directly from the NAS worker's verified-object service."""
+        return cls._from_cache_service(service)
+
+    @classmethod
+    def _from_cache_service(cls, service: object) -> ModelCacheVerifiedObjectSource:
+        adapter = cls.__new__(cls)
+        adapter._service = service
+        adapter._manifests = {}
+        adapter._paths = {}
+        adapter._open_verified = adapter._open_cache_object
+        return adapter
+
+    def _load_manifest(self, digest: str) -> tuple[DistributionObject, ...]:
+        try:
+            # ModelCacheService validates its opaque digest against the full
+            # canonical ArtifactSetManifest before exposing descriptors.
+            manifest = self._service.manifest_for_artifact_set(digest)
+            if manifest.digest != digest:
+                raise ValueError("cache manifest identity changed")
+            descriptors = self._service.resolve_verified_artifact_set(digest)
+        except Exception as error:
+            raise DistributionError("distribution.model_set_mismatch", "NAS cache manifest is unavailable") from error
+        objects = []
+        for descriptor in descriptors:
+            try:
+                item = DistributionObject(
+                    name=str(descriptor["path"]),
+                    sha256=str(descriptor["sha256"]),
+                    bytes=int(descriptor["bytes"]),
+                    kind="model",
+                )
+                item = DistributionObject.parse(item.to_mapping())
+                path = descriptor["file"]
+            except (KeyError, TypeError, ValueError) as error:
+                raise DistributionError("distribution.model_set_mismatch", "NAS cache manifest is malformed") from error
+            objects.append(item)
+            self._paths[item.sha256] = (digest, item.name, path)
+        result = tuple(objects)
+        self._manifests[digest] = result
+        return result
+
+    def _open_cache_object(self, digest: str, expected_bytes: int) -> VerifiedObject:
+        entry = self._paths.get(digest)
+        if entry is None:
+            raise DistributionError("distribution.object_unavailable", "NAS cache object was not authorized")
+        set_digest, path, _ = entry
+        try:
+            verified_path, size, verified_digest = self._service.verified_artifact_file(
+                set_digest, digest, path
+            )
+            if size != expected_bytes or verified_digest != digest:
+                raise DistributionError("distribution.object_unavailable", "NAS cache object identity changed")
+            return VerifiedObject(verified_path.open("rb"), size, digest)
+        except DistributionError:
+            raise
+        except Exception as error:
+            raise DistributionError("distribution.object_unavailable", "NAS cache object is unavailable") from error
+
+    def verify_artifact_set(
+        self, artifact_set_sha256: str, objects: tuple[DistributionObject, ...]
+    ) -> bool:
+        declared = self._manifests.get(artifact_set_sha256) or self._load_manifest(artifact_set_sha256)
+        expected = tuple(item for item in objects if item.kind == "model")
+        return declared == expected
 
 
 class CompositeVerifiedObjectSource:
@@ -423,9 +523,11 @@ __all__ = [
     "FilesystemVerifiedObjectSource",
     "MemoryVerifiedObjectSource",
     "ModelCacheVerifiedObjectSource",
+    "RecipeBuildVerifiedObjectSource",
     "VerifiedObject",
     "VerifiedObjectSource",
     "build_distribution_service",
+    "build_distribution_service_from_components",
 ]
 
 
@@ -441,4 +543,20 @@ def build_distribution_service(
         CompositeVerifiedObjectSource(model_source, oci_source),
         clock=clock,
         sessions=sessions,
+    )
+
+
+def build_distribution_service_from_components(
+    model_cache: object,
+    sessions: sessionmaker[Session],
+    artifact_root: Path,
+    *,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> DistributionService:
+    """Build the production source pair from Controller startup components."""
+    return build_distribution_service(
+        ModelCacheVerifiedObjectSource.from_service(model_cache),
+        RecipeBuildVerifiedObjectSource(sessions, artifact_root),
+        sessions,
+        clock=clock,
     )

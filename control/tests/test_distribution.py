@@ -3,7 +3,11 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
+from vonk_control.distribution import (
+    DistributionService,
+    MemoryVerifiedObjectSource,
+    ModelCacheVerifiedObjectSource,
+)
 from vonk_agent_protocol import DistributionAssignment, DistributionObject
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system
@@ -141,3 +145,31 @@ def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> N
         assert getattr(error, "code", None) == "distribution.model_set_mismatch"
     else:
         raise AssertionError("unverified cache manifest was accepted")
+
+
+def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> None:
+    payload = b"model payload"
+    digest = __import__("hashlib").sha256(payload).hexdigest()
+    path = tmp_path / "model.bin"
+    path.write_bytes(payload)
+
+    class Cache:
+        class Manifest:
+            digest = "b" * 64
+
+        def manifest_for_artifact_set(self, set_digest):
+            assert set_digest == "b" * 64
+            return self.Manifest()
+
+        def resolve_verified_artifact_set(self, set_digest):
+            return ({"path": "weights/model.bin", "sha256": digest, "bytes": len(payload), "file": path},)
+
+        def verified_artifact_file(self, set_digest, object_digest, object_path):
+            assert set_digest == "b" * 64 and object_digest == digest and object_path == "weights/model.bin"
+            return path, len(payload), digest
+
+    source = ModelCacheVerifiedObjectSource.from_service(Cache())
+    obj = DistributionObject("weights/model.bin", digest, len(payload), "model")
+    assert source.verify_artifact_set("b" * 64, (obj,))
+    opened = source.open_verified(digest, len(payload))
+    assert opened.stream.read() == payload
