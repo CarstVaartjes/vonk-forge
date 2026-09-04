@@ -425,6 +425,33 @@ jobs:
               "$docker_config" >/dev/null
           fi
 
+      - name: Smoke the exact rootless LiteLLM runtime on both architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags=()
+          cleanup() {
+            if ((${#tags[@]} > 0)); then
+              docker image rm --force "${tags[@]}" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+          for architecture in amd64 arm64; do
+            tag="vonk-forge-litellm-smoke:${architecture}-${GITHUB_RUN_ID}"
+            tags+=("$tag")
+            skopeo copy --override-os linux --override-arch "$architecture" \
+              "oci-archive:$RUNNER_TEMP/vonk-forge-litellm.oci.tar" \
+              "docker-daemon:$tag"
+            docker run --rm --platform "linux/$architecture" \
+              --network none --read-only --cap-drop ALL \
+              --security-opt no-new-privileges \
+              --entrypoint python \
+              --env PRISMA_QUERY_ENGINE_BINARY=/opt/vonk-litellm/prisma/query-engine \
+              --volume "$GITHUB_WORKSPACE/deploy/compose/litellm/config_supervisor.py:/tmp/config_supervisor.py:ro" \
+              "$tag" -c \
+              'import importlib.util,sys; spec=importlib.util.spec_from_file_location("vonk_litellm_supervisor","/tmp/config_supervisor.py"); module=importlib.util.module_from_spec(spec); sys.modules[spec.name]=module; spec.loader.exec_module(module); module._prepare_query_engine()'
+          done
+
       - parallel:
           - name: Deep-scan exact API build and bind its remote digest
             shell: bash

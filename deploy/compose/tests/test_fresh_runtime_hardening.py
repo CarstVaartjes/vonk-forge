@@ -77,9 +77,6 @@ def test_read_only_litellm_places_prisma_cache_on_tmpfs() -> None:
     assert "/root:exec,mode=0700,uid=10002,gid=10001" in litellm["tmpfs"]
     assert litellm["environment"]["HOME"] == "/root"
     assert litellm["environment"]["XDG_CACHE_HOME"] == "/root/.cache"
-    assert litellm["environment"]["PRISMA_QUERY_ENGINE_BINARY"].startswith(
-        "/root/.cache/"
-    )
 
 
 def test_caddy_healthcheck_does_not_depend_on_a_virtual_host() -> None:
