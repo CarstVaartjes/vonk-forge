@@ -132,6 +132,11 @@ impl fmt::Display for PodmanImportDiagnostic {
 impl RecipeBuildError {
     pub(crate) fn failure_evidence(&self) -> serde_json::Value {
         match self {
+            Self::Process(error) => serde_json::json!({
+                "diagnostic": process_error_diagnostic(error),
+                "reason": self.to_string(),
+                "stage": "bounded-build-process",
+            }),
             Self::BaseImageImport { diagnostic } => serde_json::json!({
                 "diagnostic": diagnostic.to_string(),
                 "reason": self.to_string(),
@@ -144,6 +149,16 @@ impl RecipeBuildError {
             }),
             _ => serde_json::json!({"reason": self.to_string()}),
         }
+    }
+}
+
+fn process_error_diagnostic(error: &ProcessError) -> &'static str {
+    match error {
+        ProcessError::Io(_) => "subprocess-unavailable",
+        ProcessError::Timeout => "deadline-exceeded",
+        ProcessError::OutputLimit => "diagnostic-output-limit-exceeded",
+        ProcessError::StorageLimit => "declared-storage-limit-exceeded",
+        ProcessError::Cancelled => "controller-cancelled",
     }
 }
 
@@ -1172,6 +1187,32 @@ mod tests {
             assert_eq!(error.failure_evidence()["diagnostic"], diagnostic);
             assert!(!error.failure_evidence().to_string().contains("private"));
             assert!(!error.failure_evidence().to_string().contains("secret"));
+        }
+    }
+
+    #[test]
+    fn bounded_build_process_failures_have_stable_secret_free_evidence() {
+        for (error, diagnostic) in [
+            (
+                ProcessError::StorageLimit,
+                "declared-storage-limit-exceeded",
+            ),
+            (ProcessError::Timeout, "deadline-exceeded"),
+            (
+                ProcessError::OutputLimit,
+                "diagnostic-output-limit-exceeded",
+            ),
+            (
+                ProcessError::Io(std::io::Error::other("/private/secret")),
+                "subprocess-unavailable",
+            ),
+            (ProcessError::Cancelled, "controller-cancelled"),
+        ] {
+            let evidence = RecipeBuildError::Process(error).failure_evidence();
+            assert_eq!(evidence["stage"], "bounded-build-process");
+            assert_eq!(evidence["diagnostic"], diagnostic);
+            assert!(!evidence.to_string().contains("private"));
+            assert!(!evidence.to_string().contains("secret"));
         }
     }
 }

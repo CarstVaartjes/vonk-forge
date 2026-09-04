@@ -1,7 +1,8 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
+    os::unix::fs::MetadataExt,
     path::Path,
     process::{Child, Command, Stdio},
     thread,
@@ -671,6 +672,12 @@ fn directory_bytes(path: &Path) -> Result<u64, std::io::Error> {
         return Ok(0);
     }
     let mut total = 0_u64;
+    // Overlay stores can expose the same layer payload through several hard
+    // links. Disk reservations describe bytes consumed, so counting every
+    // pathname at its full logical length can falsely multiply one inode past
+    // the limit and kill an otherwise bounded build. Keep sparse-file logical
+    // length accounting fail-closed, but count each regular-file inode once.
+    let mut regular_files = HashSet::new();
     let mut pending = vec![path.to_path_buf()];
     while let Some(directory) = pending.pop() {
         let Some(entries) = present_during_scan(fs::read_dir(directory))? else {
@@ -693,6 +700,7 @@ fn directory_bytes(path: &Path) -> Result<u64, std::io::Error> {
                 pending.push(entry.path());
             } else if metadata.is_file()
                 && let Some(metadata) = present_during_scan(entry.metadata())?
+                && regular_files.insert((metadata.dev(), metadata.ino()))
             {
                 total = total
                     .checked_add(metadata.len())
@@ -833,6 +841,16 @@ mod tests {
         symlink("/usr/bin", directory.path().join("bin")).unwrap();
 
         assert_eq!(directory_bytes(directory.path()).unwrap(), 8);
+    }
+
+    #[test]
+    fn storage_accounting_counts_hardlinked_layer_payload_once() {
+        let directory = tempdir().unwrap();
+        let layer = directory.path().join("layer");
+        fs::write(&layer, b"immutable-layer").unwrap();
+        fs::hard_link(&layer, directory.path().join("reused-layer")).unwrap();
+
+        assert_eq!(directory_bytes(directory.path()).unwrap(), 15);
     }
 
     #[test]
