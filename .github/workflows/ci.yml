@@ -241,6 +241,8 @@ jobs:
       - name: Generate the OpenAPI schema without Node tooling
         id: generation
         shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           scripts/generate-control-clients --schema-only
@@ -249,7 +251,7 @@ jobs:
             run_full=true
           elif [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
             run_full=true
-          elif ! git diff --quiet "$GITHUB_BASE_SHA" "$GITHUB_SHA" -- \
+          elif ! git diff --quiet "$PR_BASE_SHA" "$GITHUB_SHA" -- \
             scripts/generate-control-clients \
             control/openapi-python-client.yaml \
             tools/openapi-client \
