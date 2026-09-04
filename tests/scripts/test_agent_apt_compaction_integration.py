@@ -230,7 +230,7 @@ def run_channel(
         ]
         records = state._repository_records(config, repository)
         expected_versions = 1 if channel == "dev" else min(position + 1, 3)
-        assert len(records) == expected_versions * 2
+        assert len(records) == expected_versions
         assert state._sorted_versions({record[1] for record in records})[-1] == version
         state_sizes.append(len(state.build_bundle(aptly_root, "state", publication)))
         if first_public_path is None:
