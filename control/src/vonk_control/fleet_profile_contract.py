@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -187,6 +187,7 @@ class FleetProfileAssignmentPreview(_StrictModel):
             "distribute-image",
             "install",
             "start",
+            "switch",
             "keep",
         ]
     ] = Field(max_length=7)
@@ -208,6 +209,7 @@ class FleetProfilePlanStep(_StrictModel):
         "distribute-image",
         "install",
         "start",
+        "switch",
     ]
     assignment_id: UuidId | None = None
     owner_id: UuidId | None = None
@@ -231,6 +233,66 @@ class FleetProfilePlanSummary(_StrictModel):
 class FleetProfileAssignmentPreparation(_StrictModel):
     assignment_id: UuidId
     preparation: RolloutPreparation
+
+
+class FleetProfileChildProgress(_StrictModel):
+    """Typed progress emitted by the profile-owned Run switch adapter."""
+
+    phase: Literal[
+        "model-download",
+        "container-download",
+        "target-copy",
+        "start",
+        "final-verify",
+    ]
+    node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
+    bytes: int | None = Field(default=None, ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def byte_progress_is_consistent(self) -> FleetProfileChildProgress:
+        if (
+            self.bytes is not None
+            and self.total_bytes is not None
+            and self.bytes > self.total_bytes
+        ):
+            raise ValueError("child progress bytes cannot exceed total bytes")
+        return self
+
+
+class FleetProfileChildOperation(_StrictModel):
+    """Stable child operation envelope independent of the Run service module."""
+
+    id: UuidId
+    state: Literal[
+        "queued",
+        "running",
+        "waiting-for-operator",
+        "succeeded",
+        "failed",
+        "cancelled",
+    ]
+    progress: FleetProfileChildProgress | None = None
+    status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+    result: dict[str, object] | None = None
+
+
+class FleetProfileSwitchAdapter(Protocol):
+    """Profile boundary for the integrated automatic Run switch service."""
+
+    def start(
+        self,
+        *,
+        application_id: str,
+        assignment: FleetProfileAssignment,
+        scope_node_ids: tuple[str, ...],
+        actor: str,
+        request_id: str,
+    ) -> FleetProfileChildOperation:
+        """Start preparation, target staging, Run start, and final verification."""
+
+    def get(self, operation_id: str) -> FleetProfileChildOperation:
+        """Return the durable child state for inspection or resumption."""
 
 
 class FleetProfilePreview(_StrictModel):
@@ -329,6 +391,8 @@ __all__ = [
     "FleetProfileAssignmentInput",
     "FleetProfileAssignmentPreview",
     "FleetProfileAssignmentPreparation",
+    "FleetProfileChildOperation",
+    "FleetProfileChildProgress",
     "FleetProfileCaptureInput",
     "FleetProfileDuplicateInput",
     "FleetProfileInput",
@@ -344,5 +408,6 @@ __all__ = [
     "FleetProfileScope",
     "FleetProfileScopePreview",
     "FleetProfileStatusView",
+    "FleetProfileSwitchAdapter",
     "FleetProfileView",
 ]
