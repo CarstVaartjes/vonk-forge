@@ -81,6 +81,10 @@ from .global_catalog import GlobalCatalogClient
 from .library_api import install_library_routes
 from .library_placement_api import install_library_placement_routes
 from .metrics import MetricsRegistry
+from .model_cache_api import (
+    install_model_cache_routes,
+    register_model_cache_operation_provider,
+)
 from .operation_api import (
     AgentsResponse,
     EndpointResponse,
@@ -474,6 +478,7 @@ def create_app(
     library_placements: Any | None = None,
     agent_upgrades: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
+    model_cache: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Vonk Forge Control", version="1.0", docs_url=None, redoc_url=None
@@ -745,6 +750,13 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         service=artifact_jobs,
+    )
+    install_model_cache_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        service=model_cache,
+        audits=audits,
+        cursors=cursor_codec,
     )
 
     @app.get("/api/v1/healthz")
@@ -1338,6 +1350,7 @@ def production_app() -> FastAPI:
     from .library_projection import LibraryProjection
     from .logging import DatabaseJobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
+    from .model_cache import ModelCacheService
     from .models import Job
     from .operation_api import durable_operation_services
     from .presence import ManagementAddressPolicy
@@ -1564,6 +1577,13 @@ def production_app() -> FastAPI:
         reader=recipe_library,
         clock=clock,
     )
+    model_cache = ModelCacheService(
+        sessions,
+        settings.model_cache_root,
+        reserve_bytes=settings.model_cache_reserve_bytes,
+        clock=clock,
+    )
+    model_cache.resume_operations()
     audits_store = SqlAuditStore(sessions, clock)
     app = create_app(
         jobs=job_service,
@@ -1590,13 +1610,16 @@ def production_app() -> FastAPI:
         worker_api_token=(
             settings.worker_api_token if settings.agent_runtime == "enabled" else b""
         ),
-        operations=durable_operation_services(
-            sessions,
-            Path("/routes"),
-            clock=clock,
-            cursors=cursor_codec,
-            resume_agent_upgrade=agent_upgrades.resume,
-            operation_providers=(fleet_profiles.operation_provider(),),
+        operations=register_model_cache_operation_provider(
+            durable_operation_services(
+                sessions,
+                Path("/routes"),
+                clock=clock,
+                cursors=cursor_codec,
+                resume_agent_upgrade=agent_upgrades.resume,
+                operation_providers=(fleet_profiles.operation_provider(),),
+            ),
+            model_cache,
         ),
         catalog=catalog_service,
         global_catalog=global_catalog,
@@ -1620,6 +1643,7 @@ def production_app() -> FastAPI:
         fleet_profiles=fleet_profiles,
         library_placements=library_placements,
         agent_upgrades=agent_upgrades,
+        model_cache=model_cache,
     )
     web_root = Path(__file__).resolve().parent / "web"
     if web_root.is_dir():

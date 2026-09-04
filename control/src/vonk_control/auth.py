@@ -58,6 +58,22 @@ MUTATION_ROLES = {
     ),
     ("POST", "/api/v1/library/placements/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/library/placements"): frozenset({"administrator"}),
+    ("POST", "/api/v1/model-cache/download-preview"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/download"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/repair-preview"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/repair"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/eviction-preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/evict"): frozenset({"administrator"}),
     # Local catalog authoring and WorkloadRun imports change the controller's
     # authoritative PostgreSQL state. Keep them administrator-only and list
     # preview calls too: previews accept untrusted source documents and are
