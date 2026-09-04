@@ -186,3 +186,14 @@ The [Controller-owned rollout preparation contract](controller-preparation-contr
 ## Superseding UX simplification — 2026-09-05
 
 User direction: recipes should just work. Normal actions are Run and Switch profile, with automatic Controller preparation and plain progress/errors. Mandatory review screens and readiness/qualification ceremonies are removed from the default workflow. Internal verification, scoped authorization and idempotency remain. See the superseding product direction in [Controller preparation](controller-preparation-contract-2026-09-05.md). Optional preparation, cache downloads and advanced plan inspection are secondary tools. Recipe updates remain deferred.
+
+## Final workflow simplification — 2026-09-05
+
+User confirmed: make it simple and communicate progress. This supersedes the earlier proposal to expose Prepare profile as a normal action.
+
+- **Download to Library** caches model files and associated required container assets on Controller/NAS as resolved by the selected recipe; indicate exactly what is being downloaded. Model-only downloads need not invent a recipe choice.
+- **Run** and **Switch profile** automatically obtain anything missing, copy to the selected Sparks, verify and start. Existing verified Spark copies are reused. No manual installation, mandatory review or Prepare profile prerequisite/control in the normal interface.
+- Show actual plain-language progress: Downloading model/container; Copying to Atlas (and each other target); Starting model; Running. Display transferred bytes/total when known, indeterminate progress otherwise. Never invent percentages or ETAs. Skip cached work rather than replaying decorative progress. Keep complete details available on demand.
+- On failure, preserve completed work, identify the affected Spark and failed step, and offer a meaningful retry. A partially switched fleet must show what is actually running on each Spark. Background work remains durable when navigating away or reconnecting.
+
+Internal planning, staging and verification remain automatic implementation mechanisms. Advanced diagnostic APIs/CLI can expose them, but the normal web and CLI journeys must require only the user's intended Run/Switch action. Preparation speed is measured and reported; fast networking does not justify fabricated instantaneous completion.
