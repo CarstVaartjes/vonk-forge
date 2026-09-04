@@ -105,6 +105,18 @@ _ADMIN_OPERATION_IDS = {
         "get",
         "/api/v1/nodes/{node_id}/telemetry",
     ): "getNodeTelemetryHistory",
+    (
+        "get",
+        "/api/v1/nodes/{node_id}/telemetry/current",
+    ): "getNodeTelemetryCurrent",
+    (
+        "get",
+        "/api/v1/nodes/{node_id}/telemetry/capabilities",
+    ): "getNodeTelemetryCapabilities",
+    (
+        "get",
+        "/api/v1/nodes/{node_id}/telemetry/workloads",
+    ): "listNodeTelemetryWorkloads",
     ("get", "/api/v1/endpoints/{alias}"): "getPublishedEndpoint",
     ("get", "/api/v1/agents"): "listAgents",
     ("get", "/api/v1/authority"): "getAuthority",
