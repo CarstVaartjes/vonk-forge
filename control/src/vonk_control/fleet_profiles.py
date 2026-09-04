@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import String, cast, delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -15,6 +15,7 @@ from vonk_agent_protocol import canonical_message
 from .fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfileAssignment,
+    FleetProfileAssignmentPreparation,
     FleetProfileAssignmentInput,
     FleetProfileAssignmentPreview,
     FleetProfileInput,
@@ -45,6 +46,7 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .preparation_contract import RolloutPreparation
 from .recipe_contract import RecipeContractError, recipe_topology
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 
@@ -136,10 +138,14 @@ class FleetProfileService:
         *,
         clock: Callable[[], datetime],
         recipe_operations: RecipeOperationService | None = None,
+        preparation_provider: Callable[[
+            Session, FleetProfileAssignment, tuple[str, ...]
+        ], RolloutPreparation | None] | None = None,
     ) -> None:
         self._sessions = sessions
         self._clock = clock
         self._recipe_operations = recipe_operations
+        self._preparation_provider = preparation_provider
 
     def list(self) -> FleetProfileList:
         now = _aware(self._clock())
@@ -382,6 +388,13 @@ class FleetProfileService:
             "assignments": [
                 item.model_dump(mode="json") for item in preview.assignments
             ],
+            "preparations": [
+                {
+                    "assignment_id": item.assignment_id,
+                    "preparation": self._preparation_identity(item.preparation),
+                }
+                for item in preview.preparations
+            ],
             "reasons": [reason.model_dump(mode="json") for reason in preview.reasons],
             "steps": [step.model_dump(mode="json") for step in steps],
         }
@@ -408,7 +421,12 @@ class FleetProfileService:
             raise FleetProfileConflict("Fleet profile preview is blocked")
         if preview.plan_digest != plan_digest:
             raise FleetProfileConflict("Fleet profile preparation preview is stale")
-        return self._queue_application(preview, request_key=request_key, actor=actor)
+        return self._queue_application(
+            preview,
+            request_key=request_key,
+            actor=actor,
+            operation_kind="fleet-profile.prepare",
+        )
 
     def switch(
         self, profile_id: str, *, plan_digest: str, request_key: str, actor: str
@@ -628,6 +646,7 @@ class FleetProfileService:
                 raise KeyError(profile_id)
             view = self._view(session, row)
             assignment_previews: list[FleetProfileAssignmentPreview] = []
+            assignment_preparations: list[FleetProfileAssignmentPreparation] = []
             reasons: list[FleetProfileReason] = []
             scope_rows = {
                 node.node_id: node
@@ -661,12 +680,87 @@ class FleetProfileService:
             start_steps: list[dict[str, object]] = []
             desired_installation_ids: set[str] = set()
             desired_run_ids: set[str] = set()
+            preparation_unavailable_reported = False
             # Scope is the authoritative reconciliation boundary.  An idle
             # member has no assignment and must still participate in the plan.
             target_nodes = set(view.scope.node_ids)
 
             for assignment in view.assignments:
                 state = self._assignment_state(session, assignment)
+                preparation = None
+                expected_nodes = tuple(sorted(node.node_id for node in assignment.nodes))
+                if self._preparation_provider is None:
+                    if not preparation_unavailable_reported:
+                        reasons.append(
+                            FleetProfileReason(
+                                code="profile.preparation_unavailable",
+                                detail=(
+                                    "Exact model and OCI preparation evidence is "
+                                    "unavailable from the configured Controller provider."
+                                ),
+                                severity="warning",
+                            )
+                        )
+                        preparation_unavailable_reported = True
+                else:
+                    try:
+                        preparation = self._preparation_provider(
+                            session, assignment, expected_nodes
+                        )
+                    except (KeyError, RuntimeError, ValueError) as error:
+                        reasons.append(
+                            FleetProfileReason(
+                                code="profile.preparation_unavailable",
+                                detail=str(error)[:512]
+                                or "The preparation provider returned no exact evidence.",
+                                severity="warning",
+                            )
+                        )
+                    if preparation is not None and not isinstance(
+                        preparation, RolloutPreparation
+                    ):
+                        reasons.append(
+                            FleetProfileReason(
+                                code="profile.preparation_unavailable",
+                                detail="The preparation provider returned an invalid contract.",
+                                severity="warning",
+                            )
+                        )
+                        preparation = None
+                    if preparation is not None:
+                        observed_target_ids = tuple(preparation.target_node_ids)
+                        observed_model_targets = tuple(
+                            sorted(target.node_id for target in preparation.model.targets)
+                        )
+                        observed_image_targets = tuple(
+                            sorted(
+                                target.node_id
+                                for target in preparation.runtime_image.targets
+                            )
+                        )
+                        if (
+                            observed_target_ids != expected_nodes
+                            or observed_model_targets != expected_nodes
+                            or observed_image_targets != expected_nodes
+                        ):
+                            reasons.append(
+                                FleetProfileReason(
+                                    code="profile.preparation_scope_mismatch",
+                                    detail=(
+                                        "Preparation evidence does not cover exactly "
+                                        f"the assignment target scope ({', '.join(expected_nodes)})."
+                                    ),
+                                    severity="error",
+                                )
+                            )
+                            preparation = None
+                if preparation is not None:
+                    assignment_preparations.append(
+                        FleetProfileAssignmentPreparation(
+                            assignment_id=assignment.id,
+                            preparation=preparation,
+                        )
+                    )
                 if state.installation is not None:
                     desired_installation_ids.add(state.installation.id)
                 if (
@@ -928,6 +1022,18 @@ class FleetProfileService:
                 "assignment_state": [
                     item.model_dump(mode="json") for item in assignment_previews
                 ],
+                "preparations": [
+                    {
+                        "assignment_id": item.assignment_id,
+                        "preparation": self._preparation_identity(
+                            item.preparation
+                        ),
+                    }
+                    for item in sorted(
+                        assignment_preparations,
+                        key=lambda item: item.assignment_id,
+                    )
+                ],
                 "reasons": [reason.model_dump(mode="json") for reason in reasons],
             }
             return FleetProfilePreview(
@@ -949,6 +1055,10 @@ class FleetProfileService:
                 ),
                 summary=summary,
                 assignments=assignment_previews,
+                preparations=sorted(
+                    assignment_preparations,
+                    key=lambda item: item.assignment_id,
+                ),
                 steps=steps,
                 reasons=reasons,
                 plan_digest=_digest(identity),
@@ -962,7 +1072,12 @@ class FleetProfileService:
             raise FleetProfileConflict("Fleet profile preview is blocked")
         if preview.plan_digest != plan_digest:
             raise FleetProfileConflict("Fleet profile preview is stale")
-        return self._queue_application(preview, request_key=request_key, actor=actor)
+        return self._queue_application(
+            preview,
+            request_key=request_key,
+            actor=actor,
+            operation_kind="fleet-profile.apply",
+        )
 
     def _queue_application(
         self,
@@ -970,6 +1085,7 @@ class FleetProfileService:
         *,
         request_key: str,
         actor: str,
+        operation_kind: str,
     ) -> FleetProfileApplicationView:
         now = _aware(self._clock())
         with self._sessions.begin() as session:
@@ -996,7 +1112,11 @@ class FleetProfileService:
                 plan=preview.model_dump(mode="json"),
                 current_step=0,
                 current_operation_id=None,
-                progress={"completed_steps": 0, "total_steps": len(preview.steps)},
+                progress={
+                    "operation_kind": operation_kind,
+                    "completed_steps": 0,
+                    "total_steps": len(preview.steps),
+                },
                 result={"changed": False} if not preview.steps else None,
                 actor=actor,
                 created_at=now,
@@ -1019,32 +1139,45 @@ class FleetProfileService:
             node_id = getattr(query, "node_id", None)
             limit = int(getattr(query, "limit", 100))
             with self._sessions() as session:
-                statement = select(FleetProfileApplication).order_by(
+                base_statement = select(FleetProfileApplication).order_by(
                     FleetProfileApplication.created_at.desc(),
                     FleetProfileApplication.id.desc(),
                 )
                 if isinstance(state, str):
-                    statement = statement.where(FleetProfileApplication.state == state)
-                candidates = tuple(session.scalars(statement))
-                rows = [
-                    row
-                    for row in candidates
-                    if node_id is None
-                    or node_id in self._operation_scope(row)
-                ]
-                total = len(rows)
+                    base_statement = base_statement.where(
+                        FleetProfileApplication.state == state
+                    )
+                # The plan is canonical JSON. Quoted containment avoids matching
+                # a node-id substring while keeping this projection portable across
+                # PostgreSQL JSON and SQLite JSON test databases.
+                if isinstance(node_id, str):
+                    base_statement = base_statement.where(
+                        cast(
+                            FleetProfileApplication.plan["scope"]["node_ids"],
+                            String,
+                        ).like(f'%"{node_id}"%')
+                    )
+                total = int(
+                    session.scalar(
+                        select(func.count()).select_from(base_statement.subquery())
+                    )
+                    or 0
+                )
+                statement = base_statement
                 if after is not None:
                     after_at, after_id = after
-                    rows = [
-                        row
-                        for row in rows
-                        if (
-                            _aware(row.created_at), row.id
-                        ) < (_aware(after_at), after_id)
-                    ]
-                items = [self._operation_item(row) for row in rows]
+                    statement = statement.where(
+                        (FleetProfileApplication.created_at < after_at)
+                        | (
+                            (FleetProfileApplication.created_at == after_at)
+                            & (FleetProfileApplication.id < after_id)
+                        )
+                    )
+                rows = tuple(session.scalars(statement.limit(limit)))
                 return OperationListPage(
-                    items=items[:limit], next_cursor=None, total=total
+                    items=[self._operation_item(row) for row in rows],
+                    next_cursor=None,
+                    total=total,
                 )
 
         def get_operation(operation_id: str) -> Mapping[str, object]:
@@ -1078,8 +1211,10 @@ class FleetProfileService:
         if isinstance(steps, list) and 0 <= row.current_step < len(steps):
             step = steps[row.current_step]
             kind = step.get("kind") if isinstance(step, Mapping) else None
-            if kind in {"create-placement", "build", "distribute-image", "install"}:
+            if kind in {"create-placement", "build", "install"}:
                 return "prepare"
+            if kind == "distribute-image":
+                return "transfer"
             if kind == "stop":
                 return "stop"
             if kind == "uninstall":
@@ -1090,13 +1225,27 @@ class FleetProfileService:
 
     @classmethod
     def _operation_item(cls, row: FleetProfileApplication) -> dict[str, object]:
-        progress = dict(row.progress) if isinstance(row.progress, Mapping) else {}
-        progress["phase"] = cls._operation_phase(row)
+        """Build a schema-2 Activity row for inspect-only profile recovery.
+
+        Profile applications currently have one durable resumable attempt; the
+        Activity projection therefore exposes attempt 1 and no retry action.
+        """
+
+        progress = {"phase": cls._operation_phase(row)}
+        operation_kind = (
+            row.progress.get("operation_kind")
+            if isinstance(row.progress, Mapping)
+            else None
+        )
         return {
             "id": row.id,
             "parent_id": None,
             "node_ids": list(cls._operation_scope(row)),
-            "kind": "fleet-profile.apply",
+            "kind": (
+                operation_kind
+                if isinstance(operation_kind, str)
+                else "fleet-profile.apply"
+            ),
             "state": row.state,
             "attempt": 1,
             "progress": progress,
@@ -1565,6 +1714,37 @@ class FleetProfileService:
             self.installation = installation
             self.run = run
             self.build = build
+
+    @staticmethod
+    def _preparation_identity(preparation: RolloutPreparation) -> dict[str, object]:
+        identity = preparation.model_dump(mode="json")
+        for asset_name in ("model", "runtime_image"):
+            asset = identity.get(asset_name)
+            if not isinstance(asset, dict):
+                continue
+            controller = asset.get("controller")
+            if isinstance(controller, dict):
+                controller.pop("verified_at", None)
+                controller.pop("state", None)
+                controller.pop("verified_bytes", None)
+                controller.pop("missing_bytes", None)
+            targets = asset.get("targets")
+            if isinstance(targets, list):
+                for target in targets:
+                    if isinstance(target, dict):
+                        target.pop("verified_at", None)
+                        target.pop("state", None)
+                        target.pop("present_bytes", None)
+                        target.pop("missing_bytes", None)
+                        target.pop("verified_sha256", None)
+                        target.pop("imported_image_digest", None)
+                        target.pop("reason", None)
+        identity.pop("controller_ready", None)
+        identity.pop("targets_ready", None)
+        identity.pop("ready", None)
+        identity.pop("reasons", None)
+        return identity
+
 
     def _assignment_state(
         self, session: Session, assignment: FleetProfileAssignment
