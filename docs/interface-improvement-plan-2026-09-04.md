@@ -2,6 +2,8 @@
 
 Updated 4 September 2026. Baseline: freshly re-fetched `origin/main`, `a31106bb152d3bd9fe60313e544babb7fc0cc377`. Proposed design and implementation plan; no UI, Controller, or Spark changes made.
 
+Execution details: [screen-by-screen implementation specification](interface-implementation-spec-2026-09-04.md). The specification defines visual rules, every primary screen and state, CLI parity, and acceptance IDs A01–A16.
+
 ## The product contract
 
 **Library chooses and prepares what should run. Fleet shows what is running and Spark health. Web and CLI are equal clients of the same Controller.**
