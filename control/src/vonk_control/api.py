@@ -110,6 +110,8 @@ from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
 from .recipe_library import RecipeLibraryClient, RecipeLibraryError
 from .recipe_operations import RecipeOperationService
+from .run_switch_api import install_run_switch_routes
+from .run_switch_operations import RunSwitchOperationService
 from .source_bundles import DatabaseSourceBundleStore
 from .telemetry import TelemetryResolution
 from .workload_run_api import install_workload_run_routes
@@ -473,6 +475,7 @@ def create_app(
     managed_catalog_sync: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
     recipe_operations: RecipeOperationService | None = None,
+    run_switch_operations: RunSwitchOperationService | None = None,
     artifact_jobs: ArtifactJobService | None = None,
     fleet_profiles: Any | None = None,
     library_placements: Any | None = None,
@@ -745,6 +748,12 @@ def create_app(
         actor_dependency=authenticated_actor,
         audits=audits,
         service=recipe_operations,
+    )
+    install_run_switch_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        audits=audits,
+        service=run_switch_operations,
     )
     install_artifact_job_routes(
         app,
@@ -1496,6 +1505,12 @@ def production_app() -> FastAPI:
         ),
         mappings=ClusterMappingService(sessions),
     )
+    run_switch_operations = RunSwitchOperationService(
+        sessions,
+        lifecycle=recipe_operations,
+        clock=clock,
+        mappings=ClusterMappingService(sessions),
+    )
     artifact_jobs = ArtifactJobService(
         sessions,
         recipe_operations=recipe_operations,
@@ -1639,6 +1654,7 @@ def production_app() -> FastAPI:
             clock=clock,
         ),
         recipe_operations=recipe_operations,
+        run_switch_operations=run_switch_operations,
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
         library_placements=library_placements,
