@@ -1055,6 +1055,217 @@ def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() ->
     )
 
 
+def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
+    sessions = _database()
+    dual_revision_id, solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
+    with sessions.begin() as session:
+        session.add(
+            ClusterMapping(
+                id=_uuid(600),
+                recipe_revision_id=dual_revision_id,
+                topology_name="pair",
+                generation=1,
+                node_count=2,
+                state="ready",
+                parameters={},
+                placement_digest="a" * 64,
+                endpoint_owner_node_id=_node_id(1),
+                created_by="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add_all(
+            [
+                ClusterMappingNode(
+                    id=_uuid(601),
+                    mapping_id=_uuid(600),
+                    node_id=_node_id(1),
+                    rank=0,
+                    role="entrypoint",
+                    endpoint_owner=True,
+                    created_at=NOW,
+                ),
+                ClusterMappingNode(
+                    id=_uuid(602),
+                    mapping_id=_uuid(600),
+                    node_id=_node_id(2),
+                    rank=1,
+                    role="worker",
+                    endpoint_owner=False,
+                    created_at=NOW,
+                ),
+            ]
+        )
+        session.add(
+            RecipeBuild(
+                id=_uuid(603),
+                recipe_revision_id=dual_revision_id,
+                builder_node_id=_node_id(1),
+                source_bundle_sha256="b" * 64,
+                build_input_sha256="c" * 64,
+                state="succeeded",
+                policy_report={},
+                plan={},
+                image_digest="sha256:" + "d" * 64,
+                oci_layout_sha256="e" * 64,
+                image_bytes=1024,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            RecipeInstallation(
+                id=_uuid(604),
+                recipe_revision_id=dual_revision_id,
+                mapping_id=_uuid(600),
+                mapping_generation=1,
+                recipe_build_id=_uuid(603),
+                image_digest="sha256:" + "d" * 64,
+                plan_digest="f" * 64,
+                plan={},
+                state="installed",
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add_all(
+            [
+                InstallationNode(
+                    id=_uuid(605),
+                    installation_id=_uuid(604),
+                    node_id=_node_id(1),
+                    rank=0,
+                    role="entrypoint",
+                    state="installed",
+                    required_bytes=1,
+                    installed_bytes=1,
+                    updated_at=NOW,
+                ),
+                InstallationNode(
+                    id=_uuid(606),
+                    installation_id=_uuid(604),
+                    node_id=_node_id(2),
+                    rank=1,
+                    role="worker",
+                    state="installed",
+                    required_bytes=1,
+                    installed_bytes=1,
+                    updated_at=NOW,
+                ),
+            ]
+        )
+        session.add(
+            RecipeRun(
+                id=_uuid(607),
+                installation_id=_uuid(604),
+                mapping_id=_uuid(600),
+                mapping_generation=1,
+                alias="unlisted-dual",
+                plan_digest="1" * 64,
+                plan={},
+                state="running",
+                route_state="published",
+                route_generation=1,
+                route_digest="2" * 64,
+                actor="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add_all(
+            [
+                RunNode(
+                    id=_uuid(608),
+                    run_id=_uuid(607),
+                    node_id=_node_id(1),
+                    rank=0,
+                    role="entrypoint",
+                    state="running",
+                    port=8000,
+                    reserved_memory_bytes=1,
+                    updated_at=NOW,
+                ),
+                RunNode(
+                    id=_uuid(609),
+                    run_id=_uuid(607),
+                    node_id=_node_id(2),
+                    rank=1,
+                    role="worker",
+                    state="running",
+                    port=8001,
+                    reserved_memory_bytes=1,
+                    updated_at=NOW,
+                ),
+            ]
+        )
+
+    adapter = _SwitchAdapter()
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Two solo assignments",
+                "scope": {"node_ids": [_node_id(1), _node_id(2)]},
+                "assignments": [
+                    {
+                        "recipe_revision_id": solo_revision_id,
+                        "topology_name": "solo",
+                        "desired_state": "running",
+                        "alias": "solo-one",
+                        "nodes": [
+                            {
+                                "node_id": _node_id(1),
+                                "rank": 0,
+                                "role": "entrypoint",
+                                "endpoint_owner": True,
+                            }
+                        ],
+                    },
+                    {
+                        "recipe_revision_id": solo_revision_id,
+                        "topology_name": "solo",
+                        "desired_state": "running",
+                        "alias": "solo-two",
+                        "nodes": [
+                            {
+                                "node_id": _node_id(2),
+                                "rank": 0,
+                                "role": "entrypoint",
+                                "endpoint_owner": True,
+                            }
+                        ],
+                    },
+                ],
+            }
+        ),
+        actor="admin",
+    )
+
+    preview = service.preview(profile.id)
+
+    assert preview.allowed is True
+    assert [step.kind for step in preview.steps] == ["switch"]
+    assert preview.summary.stops == 0
+    assert set(preview.steps[0].node_ids) == {_node_id(1), _node_id(2)}
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(610),
+        actor="admin",
+    )
+    assert service.tick() is True
+    assert len(adapter.starts) == 1
+    assert set(adapter.starts[0]["assignment_scopes"]) == {
+        (_node_id(1),),
+        (_node_id(2),),
+    }
+    assert service.application(application.id).current_operation_id is not None
+
+
 def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
     sessions = _database()
     _recipe_id, revision_id = _seed(sessions)
