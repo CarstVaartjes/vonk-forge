@@ -29,10 +29,10 @@ jobs:
               --shell /usr/sbin/nologin vonk-agent
           fi
           if ! grep -q '^vonk-agent:' /etc/subuid; then
-            sudo usermod --add-subuids 200000:65536 vonk-agent
+            sudo usermod --add-subuids 200000-265535 vonk-agent
           fi
           if ! grep -q '^vonk-agent:' /etc/subgid; then
-            sudo usermod --add-subgids 200000:65536 vonk-agent
+            sudo usermod --add-subgids 200000-265535 vonk-agent
           fi
           uid=$(id -u vonk-agent)
           sudo loginctl enable-linger vonk-agent
