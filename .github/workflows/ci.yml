@@ -329,12 +329,9 @@ jobs:
       fail-fast: false
       matrix:
         shard:
-          - {index: 0, label: 1-of-6}
-          - {index: 1, label: 2-of-6}
-          - {index: 2, label: 3-of-6}
-          - {index: 3, label: 4-of-6}
-          - {index: 4, label: 5-of-6}
-          - {index: 5, label: 6-of-6}
+          - {index: 0, label: 1-of-3}
+          - {index: 1, label: 2-of-3}
+          - {index: 2, label: 3-of-3}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -348,30 +345,25 @@ jobs:
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 6
+          SHARD_TOTAL: 3
         run: |
           set -euo pipefail
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
             pytest --collect-only -q > "$collection"
-          mapfile -t repository_tests < <(
+          mapfile -t shard_files < <(
             awk '
               /^tests\/.*::/ &&
               $0 !~ /^tests\/control\/test_openapi_clients\.py::/
-            ' "$collection"
+            ' "$collection" |
+              scripts/select-pytest-shard-files \
+                --index "$SHARD_INDEX" --total "$SHARD_TOTAL"
           )
-          ((${#repository_tests[@]} >= SHARD_TOTAL))
-          shard_tests=()
-          for position in "${!repository_tests[@]}"; do
-            if ((position % SHARD_TOTAL == SHARD_INDEX)); then
-              shard_tests+=("${repository_tests[$position]}")
-            fi
-          done
-          ((${#shard_tests[@]} > 0))
+          ((${#shard_files[@]} > 0))
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
             pytest -q --basetemp="$RUNNER_TEMP/repository-pytest" \
-            "${shard_tests[@]}"
+            "${shard_files[@]}"
 
   control-suite:
     name: Complete control suite (${{ matrix.shard.label }})
@@ -381,12 +373,9 @@ jobs:
       fail-fast: false
       matrix:
         shard:
-          - {index: 0, label: 1-of-6}
-          - {index: 1, label: 2-of-6}
-          - {index: 2, label: 3-of-6}
-          - {index: 3, label: 4-of-6}
-          - {index: 4, label: 5-of-6}
-          - {index: 5, label: 6-of-6}
+          - {index: 0, label: 1-of-3}
+          - {index: 1, label: 2-of-3}
+          - {index: 2, label: 3-of-3}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -400,27 +389,23 @@ jobs:
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 6
+          SHARD_TOTAL: 3
         run: |
           set -euo pipefail
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --project control --frozen --with-editable . \
             pytest --collect-only -q control/tests > "$collection"
-          mapfile -t control_tests < <(
-            awk '/^tests\/.*::/' "$collection"
+          mapfile -t shard_files < <(
+            awk '/^tests\/.*::/' "$collection" |
+              scripts/select-pytest-shard-files \
+                --index "$SHARD_INDEX" --total "$SHARD_TOTAL" \
+                --prefix control/
           )
-          ((${#control_tests[@]} >= SHARD_TOTAL))
-          shard_tests=()
-          for position in "${!control_tests[@]}"; do
-            if ((position % SHARD_TOTAL == SHARD_INDEX)); then
-              shard_tests+=("control/${control_tests[$position]}")
-            fi
-          done
-          ((${#shard_tests[@]} > 0))
+          ((${#shard_files[@]} > 0))
           uv run --python 3.12 --project control --frozen --with-editable . \
-            --with pytest-xdist==3.8.0 pytest -q -n auto --dist loadfile \
-            "${shard_tests[@]}"
+            --with pytest-xdist==3.8.0 pytest -q -n 4 --dist loadfile \
+            "${shard_files[@]}"
 
   web-suite:
     name: Admin web behavior
