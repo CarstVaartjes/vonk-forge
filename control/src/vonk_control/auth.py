@@ -122,6 +122,14 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/recipes/installations"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/run-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/runs"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/run-switch-plans/preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/recipes/run-switches"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/run-switch-stops/preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/recipes/run-switch-stops"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/job-runs"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/runs/{run_id}/artifact-jobs"): frozenset(
         {"operator", "administrator"}
