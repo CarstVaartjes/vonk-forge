@@ -843,7 +843,8 @@ jobs:
           name: installer-candidate-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           path: ${{ runner.temp }}/spark-publication
 
-      - name: Enable Docker CDI for the synthetic Spark device
+      - name: Enable Docker CDI for the ARM64 recipe canary
+        if: matrix.platform == 'linux-arm64'
         shell: bash
         run: |
           set -euo pipefail
@@ -865,7 +866,7 @@ jobs:
             jq -e 'index("/etc/cdi") != null and index("/var/run/cdi") != null' \
               >/dev/null
 
-      - name: Run packaged Spark fresh-install, pairing, job, and renewal acceptance
+      - name: Run packaged Spark architecture acceptance
         shell: bash
         env:
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}

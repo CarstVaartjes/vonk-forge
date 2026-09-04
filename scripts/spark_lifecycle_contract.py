@@ -17,13 +17,13 @@ GATES = {
     "linux-arm64": ["spark_arm64", "spark_job", "spark_renewal"],
 }
 PHASES = {
+    # AMD64 is a package-portability boundary. Recipe and workload contracts are
+    # intentionally linux/arm64 because the managed target is DGX Spark.
     "linux-amd64": [
         "publication-graph-verified",
         "controller-ready",
         "candidate-installed",
         "paired",
-        "synthetic-device-ready",
-        "canary-completed",
         "direct-rust-agent-healthy",
     ],
     "linux-arm64": [
@@ -582,36 +582,35 @@ def _validate_amd64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
     _exact(
         proof,
         {
-            "canary",
             "controller_generation",
             "direct_agent_health",
             "installation",
             "node_id",
             "pairing_grant_use_count",
             "publication_graph",
-            "synthetic_device",
         },
         "AMD64 lifecycle proof",
     )
     installation = _object(proof.get("installation"), "AMD64 installation proof")
     _exact(
         installation,
-        {"architecture", "package_sha256", "version"},
+        {"architecture", "identity"},
         "AMD64 installation proof",
     )
     selected = graph["packages"]["linux-amd64"]
-    if installation != {
-        "architecture": "amd64",
-        "package_sha256": selected["candidate_sha256"],
-        "version": graph["candidate_version"],
-    }:
-        raise ContractError("AMD64 installation does not match the candidate graph")
+    if installation.get("architecture") != "amd64":
+        raise ContractError("AMD64 installation architecture is invalid")
+    _validate_install_identity(
+        installation.get("identity"),
+        label="AMD64 candidate installation identity",
+        version=graph["candidate_version"],
+        package_digest=selected["candidate_sha256"],
+    )
     if (
         not isinstance(proof.get("node_id"), str)
         or NODE_ID.fullmatch(proof["node_id"]) is None
     ):
         raise ContractError("AMD64 node identity proof is invalid")
-    _validate_canary(proof, platform="linux-amd64")
 
 
 def _validate_canary(proof: dict[str, Any], *, platform: str) -> None:

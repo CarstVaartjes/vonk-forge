@@ -22,7 +22,7 @@ def _module():
     return module
 
 
-def test_amd64_observation_runs_the_executable_recipe_canary(
+def test_amd64_observation_proves_the_installed_agent_without_an_arm64_recipe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lifecycle = _module()
@@ -46,7 +46,11 @@ def test_amd64_observation_runs_the_executable_recipe_canary(
     run._installer_environment = lambda *, baseline: {}
     run._prepare_podman_apparmor_profile = lambda: None
     run._wait_for_agent_identity = lambda **_kwargs: {
-        "node_id": "spk_0123456789abcdef0123456789abcdef"
+        "node_id": "spk_0123456789abcdef0123456789abcdef",
+        "binary_sha256": "e" * 64,
+        "build_sha256": "f" * 64,
+        "package_sha256": "b" * 64,
+        "version": "1.2.3",
     }
     run._pairing_grant_use_count = lambda _grant: 1
     run._direct_agent_health = lambda: {
@@ -54,31 +58,28 @@ def test_amd64_observation_runs_the_executable_recipe_canary(
         "implementation": "rust",
         "transport": "direct",
     }
-    observed: list[str] = []
-    run._run_synthetic_canary = lambda node_id: (
-        observed.append(node_id)
-        or {
-            "completed_states": ["inference-ok"],
-            "deterministic_response_sha256": "e" * 64,
-        }
+    run._run_synthetic_canary = lambda _node_id: pytest.fail(
+        "AMD64 must not execute the ARM64-only recipe contract"
     )
     monkeypatch.setattr(lifecycle, "_run_spark_bootstrap", lambda *_args, **_kw: None)
 
     proof = run.observe()
 
-    assert observed == ["spk_0123456789abcdef0123456789abcdef"]
-    assert proof["canary"]["completed_states"] == ["inference-ok"]
-    assert proof["synthetic_device"]["architecture"] == "linux-amd64"
+    assert proof["node_id"] == "spk_0123456789abcdef0123456789abcdef"
+    assert proof["installation"] == {
+        "architecture": "amd64",
+        "identity": {
+            "binary_sha256": "e" * 64,
+            "build_sha256": "f" * 64,
+            "package_sha256": "b" * 64,
+            "version": "1.2.3",
+        },
+    }
 
 
 @pytest.mark.parametrize(
     ("platform", "architecture", "image_digest"),
     (
-        (
-            "linux-amd64",
-            "amd64",
-            "c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49",
-        ),
         (
             "linux-arm64",
             "arm64",

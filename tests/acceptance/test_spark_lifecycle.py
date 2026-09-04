@@ -916,7 +916,8 @@ class SparkLifecycle:
             raise LifecycleError(
                 "candidate controller services are not healthy"
             ) from error
-        self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
+        if self.arguments.platform == "linux-arm64":
+            self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
         self._prepare_synthetic_firewall_environment()
         boundary = LocalBrowserController(
             hostname=self.control_hostname,
@@ -1344,6 +1345,19 @@ class SparkLifecycle:
         use_count = self._pairing_grant_use_count(grant_id)
         direct_health = self._direct_agent_health()
         node_id = str(candidate["node_id"])
+        if self.arguments.platform == "linux-amd64":
+            return {
+                "controller_generation": self.arguments.generation,
+                "direct_agent_health": direct_health,
+                "installation": {
+                    "architecture": "amd64",
+                    "identity": self._installation_identity(candidate),
+                },
+                "node_id": node_id,
+                "pairing_grant_use_count": use_count,
+                "publication_graph": self.graph,
+            }
+
         canary = self._run_synthetic_canary(node_id)
         synthetic_device = {
             "architecture": self.arguments.platform,
@@ -1353,22 +1367,6 @@ class SparkLifecycle:
             "provenance": "ci-only-synthetic-cdi",
             "synthetic": True,
         }
-        if self.arguments.platform == "linux-amd64":
-            return {
-                "canary": canary,
-                "controller_generation": self.arguments.generation,
-                "direct_agent_health": direct_health,
-                "installation": {
-                    "architecture": "amd64",
-                    "package_sha256": self.graph["candidate_package_sha256"],
-                    "version": self.graph["candidate_version"],
-                },
-                "node_id": node_id,
-                "pairing_grant_use_count": use_count,
-                "publication_graph": self.graph,
-                "synthetic_device": synthetic_device,
-            }
-
         renewal = self._observe_renewal(node_id, str(candidate["serial"]))
         return {
             "canary": canary,
@@ -1583,19 +1581,14 @@ class SparkLifecycle:
 
     def _synthetic_canary_inputs(self, module: object) -> tuple[Path, Path, Path]:
         assert self.temporary_root is not None
-        target = {
-            "linux-amd64": (
-                "amd64",
-                "c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49",
-            ),
-            "linux-arm64": (
-                "arm64",
-                "9bb659dc6d5218917236f3711e866a5634bb4c2f208de9d4533aa4863f57c1d3",
-            ),
-        }.get(self.arguments.platform)
-        if target is None:
+        # Do not manufacture an AMD64 recipe: the production recipe, catalog,
+        # harness, Controller, and agent workload contracts are Spark/ARM64-only.
+        if self.arguments.platform != "linux-arm64":
             raise LifecycleError("synthetic canary platform is invalid")
-        architecture, image_digest = target
+        architecture = "arm64"
+        image_digest = (
+            "9bb659dc6d5218917236f3711e866a5634bb4c2f208de9d4533aa4863f57c1d3"
+        )
         image = f"docker.io/library/python:3.12.11-slim-bookworm@sha256:{image_digest}"
         fixture = REPOSITORY_ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
         generated = self.temporary_root / "synthetic-canary-inputs"
