@@ -11,6 +11,7 @@ pinned openapi-fetch dependency; this task generates its schema types only.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -130,6 +131,18 @@ def _normalize_generated_text(path: Path) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--schema-only",
+        action="store_true",
+        help="regenerate only the tracked OpenAPI document without Node tooling",
+    )
+    arguments = parser.parse_args()
+
+    if arguments.schema_only:
+        _write_openapi(_schema(include_browser_auth=True))
+        return
+
     # Keep the tracked document complete. Generated clients receive a filtered
     # copy because large byte streams use the handwritten Python and browser
     # transports instead of buffered typed-client methods.

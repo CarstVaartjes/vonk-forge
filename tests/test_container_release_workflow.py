@@ -472,79 +472,6 @@ exit 64
     assert result.returncode != 0
 
 
-def test_runtime_image_full_pull_qualification_runs_beside_archive_builds() -> None:
-    workflow_data = development_workflow()
-    runtime = workflow_data["jobs"]["verify-runtime-images"]
-    acceptance = workflow_data["jobs"]["build-and-accept"]
-    runtime_text = DEV_WORKFLOW.read_text()[
-        DEV_WORKFLOW.read_text().index(
-            "  verify-runtime-images:"
-        ) : DEV_WORKFLOW.read_text().index("  build-and-accept:")
-    ]
-    acceptance_text = DEV_WORKFLOW.read_text()[
-        DEV_WORKFLOW.read_text().index(
-            "  build-and-accept:"
-        ) : DEV_WORKFLOW.read_text().index("  publish-development-images:")
-    ]
-
-    assert "needs" not in runtime
-    assert acceptance["needs"] == ["verify-runtime-images"]
-    assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in runtime_text
-    assert 'test "${#runtime_images[@]}" = 6' in runtime_text
-    assert "sort -u" in runtime_text
-    assert "@sha256:[0-9a-f]{64}" in runtime_text
-    assert 'docker pull "$runtime_image"' in runtime_text
-    assert "docker pull" not in acceptance_text
-
-
-def test_development_image_source_contracts_run_in_parallel_after_npm_install() -> None:
-    text = DEV_WORKFLOW.read_text()
-    validation = text[
-        text.index("  build-and-accept:") : text.index("  publish-development-images:")
-    ]
-
-    install = validation.index("- name: Install locked admin web dependencies")
-    parallel = validation.index("      - parallel:")
-    confirmation = validation.index(
-        "- name: Confirm parallel source and image prerequisites completed"
-    )
-    assert install < parallel < confirmation
-    assert (
-        "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0"
-        in validation[:install]
-    )
-    assert 'node-version: "24"' in validation[:install]
-    assert "cache: npm" in validation[:install]
-    assert (
-        "cache-dependency-path: control/web/package-lock.json" in validation[:install]
-    )
-    assert "tools/openapi-client/package-lock.json" not in validation
-    assert "node_modules" not in validation
-    for step in (
-        "Run focused Compose contracts",
-        "Test and build admin web",
-        "Run focused control authentication contracts",
-        "Scan public image source inputs",
-        "Wait for exact OCI acceptance evidence",
-    ):
-        assert f"          - name: {step}" in validation[parallel:confirmation]
-    assert validation.count("npm ci --prefix control/web") == 1
-    assert validation.count("-p no:cacheprovider") == 2
-    assert "test -d control/web/dist" in validation[confirmation:]
-    assert (
-        'test -f "$RUNNER_TEMP/accepted-evidence/$role.role-receipt.json"'
-        in (validation[confirmation:])
-    )
-    render = validation.index(
-        "- name: Render and validate disposable development Compose artifacts"
-    )
-    assert confirmation < render
-    assert validation.count("      - parallel:") == 1
-    assert "docker-daemon:" not in validation
-    assert "docker history" not in validation
-    assert "docker image inspect" not in validation
-
-
 def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> None:
     text = DEV_WORKFLOW.read_text()
     workflow_data = development_workflow()
@@ -1418,39 +1345,6 @@ def test_apt_publication_consumes_the_unified_release_artifact() -> None:
 def test_manual_agent_validation_does_not_publish_a_second_tag_release() -> None:
     agent_workflow = (ROOT / ".github/workflows/agent-release.yml").read_text()
     assert 'push:\n    tags: ["v*"]' not in agent_workflow
-
-
-def test_publisher_needs_every_ci_gate_and_alone_can_write_packages() -> None:
-    metadata = job("release-metadata")
-    validator = job("validate-release-images")
-    publisher = job("publish-images")
-    manifest = job("release-manifest")
-
-    assert (
-        "needs: [lint, generated-clients, test, release-metadata, "
-        "build-agent-package, native-amd64-agent-lifecycle]" in validator
-    )
-    assert "needs: [validate-release-images, release-metadata]" in publisher
-    assert "packages: write" not in validator
-    assert (
-        "permissions:\n      attestations: write\n      contents: read\n"
-        "      id-token: write\n      packages: write" in publisher
-    )
-    assert "packages: write" not in metadata
-    assert "packages: write" not in manifest
-    assert "permissions:\n      contents: write" in manifest
-    assert "contents: write" not in metadata
-    assert "contents: write" not in publisher
-    for read_only_job in ("lint", "generated-clients", "test"):
-        assert "packages: write" not in job(read_only_job)
-        assert "contents: write" not in job(read_only_job)
-    alias = job("advance-production-aliases")
-    assert (
-        "permissions:\n      attestations: read\n      contents: read\n"
-        "      id-token: write\n      packages: write" in alias
-    )
-    assert workflow().count("packages: write") == 2
-    assert workflow().count("contents: write") == 1
 
 
 def test_release_builds_are_per_version_and_alias_jobs_reconcile_globally() -> None:

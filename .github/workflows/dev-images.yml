@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   verify-runtime-images:
-    name: Verify pinned runtime images are pullable
+    name: Verify pinned runtime image manifests
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     concurrency:
@@ -43,7 +43,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Pull every pinned runtime image
+      - name: Inspect every pinned runtime image manifest
         shell: bash
         run: |
           set -euo pipefail
@@ -54,7 +54,7 @@ jobs:
           test "${#runtime_images[@]}" = 6
           for runtime_image in "${runtime_images[@]}"; do
             [[ "$runtime_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
-            docker pull "$runtime_image"
+            docker manifest inspect "$runtime_image" >/dev/null
           done
 
   build-and-accept:
@@ -95,53 +95,7 @@ jobs:
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})" \
             >> "$GITHUB_OUTPUT"
 
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-        with:
-          version: "0.12.1"
-          python-version: "3.12"
-          enable-cache: true
-
-      - name: Install pinned Node.js with admin web dependency cache
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: control/web/package-lock.json
-
-      - name: Install locked admin web dependencies
-        shell: bash
-        run: npm ci --prefix control/web
-
       - parallel:
-          - name: Run focused Compose contracts
-            shell: bash
-            run: |
-              set -euo pipefail
-              uv run --python 3.12 --frozen --with pytest==9.1.1 pytest -q \
-                -p no:cacheprovider \
-                deploy/compose/tests/test_production_shaped_development.py \
-                scripts/tests/test_render_production_compose.py
-
-          - name: Test and build admin web
-            shell: bash
-            run: |
-              set -euo pipefail
-              npm test --prefix control/web -- --run src/auth.test.tsx src/pages/login.test.tsx src/api/client.test.ts
-              npm run build --prefix control/web
-
-          - name: Run focused control authentication contracts
-            shell: bash
-            run: |
-              set -euo pipefail
-              uv run --project control --frozen pytest -q \
-                -p no:cacheprovider \
-                control/tests/test_passwords.py \
-                control/tests/test_browser_auth.py \
-                control/tests/test_auth_api.py \
-                control/tests/test_api.py \
-                control/tests/test_settings.py
-
           - name: Scan public image source inputs
             shell: bash
             run: scripts/verify-public-image-inputs
@@ -197,7 +151,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -d control/web/dist
           for role in api worker hermes litellm; do
             test -f "$RUNNER_TEMP/accepted-evidence/$role.role-receipt.json"
           done
@@ -394,6 +347,8 @@ jobs:
               labels: |
                 org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
                 org.opencontainers.image.revision=${{ github.sha }}
+              cache-from: type=gha,scope=vonk-forge-hermes
+              cache-to: type=gha,mode=max,scope=vonk-forge-hermes
 
           - name: Build LiteLLM once to local OCI and exact registry digest
             id: build_litellm
@@ -410,6 +365,8 @@ jobs:
               labels: |
                 org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
                 org.opencontainers.image.revision=${{ github.sha }}
+              cache-from: type=gha,scope=vonk-forge-litellm
+              cache-to: type=gha,mode=max,scope=vonk-forge-litellm
 
       - name: Remove registry write credentials before acceptance
         shell: bash

@@ -230,27 +230,56 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install pinned Node.js with generator dependency cache
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: tools/openapi-client/package-lock.json
+          fetch-depth: 0
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
+      - name: Generate the OpenAPI schema without Node tooling
+        id: generation
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          scripts/generate-control-clients --schema-only
+          run_full=false
+          if ! git diff --quiet -- control/openapi.json; then
+            run_full=true
+          elif [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            run_full=true
+          elif ! git diff --quiet "$PR_BASE_SHA" "$GITHUB_SHA" -- \
+            scripts/generate-control-clients \
+            control/openapi-python-client.yaml \
+            tools/openapi-client \
+            src/cluster_profiles/generated_control \
+            control/web/src/api/generated.d.ts; then
+            run_full=true
+          fi
+          echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Node.js with generator dependency cache
+        if: steps.generation.outputs.run_full == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tools/openapi-client/package-lock.json
       - name: Install pinned TypeScript generator
+        if: steps.generation.outputs.run_full == 'true'
         run: npm ci --prefix tools/openapi-client
-      - name: Verify generated OpenAPI and clients
-        run: uv run --project control --frozen --with-editable . pytest tests/control/test_openapi_clients.py -v
+      - name: Generate language clients once when their contract changed
+        if: steps.generation.outputs.run_full == 'true'
+        run: scripts/generate-control-clients
+      - name: Verify generated client behavior
+        run: uv run --project control --frozen --with-editable . pytest tests/control/test_openapi_clients.py -q
       - name: Reject generated drift
         run: git diff --exit-code -- control/openapi.json src/cluster_profiles/generated_control control/web/src/api/generated.d.ts
 
-  test:
-    name: PR contract smoke
+  compose-integration:
+    name: Compose integration
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -266,12 +295,11 @@ jobs:
         run: >-
           docker pull
           postgres:18.6@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
-      - name: Run required fresh PostgreSQL integration contracts
+      - name: Run fresh PostgreSQL initialization contract
         env:
           CI: "true"
         run: >-
           uv run --project control --frozen --with-editable . pytest -q
-          control/tests/test_database_authority_postgres.py
           deploy/compose/tests/test_postgres_init_databases.py
       - parallel:
           - name: Run canonical runtime readiness model contracts
@@ -293,21 +321,7 @@ jobs:
             run: >-
               uv run --project control --frozen --with-editable . pytest -q
               -p no:cacheprovider
-              control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
               deploy/compose/tests/test_pki_tls_integration.py
-          - name: Run focused repository contracts
-            run: >-
-              uv run --python 3.12 --project control --frozen --with-editable .
-              --with pytest==9.1.1 pytest -q -p no:cacheprovider
-              tests/test_ci_platform_boundaries.py
-              tests/test_container_release_workflow.py
-          - name: Run focused control cleanup contracts
-            run: >-
-              uv run --project control --frozen --with-editable . pytest -q
-              -p no:cacheprovider
-              control/tests/test_api.py
-              control/tests/test_migrations.py
-              control/tests/test_production_worker.py
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
@@ -317,12 +331,9 @@ jobs:
       fail-fast: false
       matrix:
         shard:
-          - {index: 0, label: 1-of-6}
-          - {index: 1, label: 2-of-6}
-          - {index: 2, label: 3-of-6}
-          - {index: 3, label: 4-of-6}
-          - {index: 4, label: 5-of-6}
-          - {index: 5, label: 6-of-6}
+          - {index: 0, label: 1-of-3}
+          - {index: 1, label: 2-of-3}
+          - {index: 2, label: 3-of-3}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -336,30 +347,25 @@ jobs:
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 6
+          SHARD_TOTAL: 3
         run: |
           set -euo pipefail
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
             pytest --collect-only -q > "$collection"
-          mapfile -t repository_tests < <(
+          mapfile -t shard_files < <(
             awk '
               /^tests\/.*::/ &&
               $0 !~ /^tests\/control\/test_openapi_clients\.py::/
-            ' "$collection"
+            ' "$collection" |
+              scripts/select-pytest-shard-files \
+                --index "$SHARD_INDEX" --total "$SHARD_TOTAL"
           )
-          ((${#repository_tests[@]} >= SHARD_TOTAL))
-          shard_tests=()
-          for position in "${!repository_tests[@]}"; do
-            if ((position % SHARD_TOTAL == SHARD_INDEX)); then
-              shard_tests+=("${repository_tests[$position]}")
-            fi
-          done
-          ((${#shard_tests[@]} > 0))
+          ((${#shard_files[@]} > 0))
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
             pytest -q --basetemp="$RUNNER_TEMP/repository-pytest" \
-            "${shard_tests[@]}"
+            "${shard_files[@]}"
 
   control-suite:
     name: Complete control suite (${{ matrix.shard.label }})
@@ -369,12 +375,9 @@ jobs:
       fail-fast: false
       matrix:
         shard:
-          - {index: 0, label: 1-of-6}
-          - {index: 1, label: 2-of-6}
-          - {index: 2, label: 3-of-6}
-          - {index: 3, label: 4-of-6}
-          - {index: 4, label: 5-of-6}
-          - {index: 5, label: 6-of-6}
+          - {index: 0, label: 1-of-3}
+          - {index: 1, label: 2-of-3}
+          - {index: 2, label: 3-of-3}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -388,30 +391,26 @@ jobs:
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 6
+          SHARD_TOTAL: 3
         run: |
           set -euo pipefail
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --project control --frozen --with-editable . \
             pytest --collect-only -q control/tests > "$collection"
-          mapfile -t control_tests < <(
-            awk '/^tests\/.*::/' "$collection"
+          mapfile -t shard_files < <(
+            awk '/^tests\/.*::/' "$collection" |
+              scripts/select-pytest-shard-files \
+                --index "$SHARD_INDEX" --total "$SHARD_TOTAL" \
+                --prefix control/
           )
-          ((${#control_tests[@]} >= SHARD_TOTAL))
-          shard_tests=()
-          for position in "${!control_tests[@]}"; do
-            if ((position % SHARD_TOTAL == SHARD_INDEX)); then
-              shard_tests+=("control/${control_tests[$position]}")
-            fi
-          done
-          ((${#shard_tests[@]} > 0))
+          ((${#shard_files[@]} > 0))
           uv run --python 3.12 --project control --frozen --with-editable . \
-            --with pytest-xdist==3.8.0 pytest -q -n auto --dist loadfile \
-            "${shard_tests[@]}"
+            --with pytest-xdist==3.8.0 pytest -q -n 4 --dist loadfile \
+            "${shard_files[@]}"
 
   web-suite:
-    name: Complete admin web suite
+    name: Admin web behavior
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -429,22 +428,6 @@ jobs:
         run: npm test --prefix control/web -- --run
       - name: Build admin web application
         run: npm run build --prefix control/web
-
-  web-browser-acceptance:
-    name: Admin web browser acceptance
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install pinned Node.js with admin web dependency cache
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: control/web/package-lock.json
-      - name: Install locked admin web dependencies
-        run: npm ci --prefix control/web
       - name: Install pinned Chromium browser
         run: npm exec --prefix control/web -- playwright install --with-deps chromium
       - name: Run fixture-backed browser acceptance
@@ -462,7 +445,7 @@ jobs:
 
   catalog-runtime:
     name: Catalog and service suites
-    needs: [repository-suite, control-suite, web-suite, web-browser-acceptance]
+    needs: [repository-suite, control-suite, web-suite]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -472,12 +455,10 @@ jobs:
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           WEB_RESULT: ${{ needs.web-suite.result }}
-          BROWSER_RESULT: ${{ needs.web-browser-acceptance.result }}
         run: |
           test "$REPOSITORY_RESULT" = success
           test "$CONTROL_RESULT" = success
           test "$WEB_RESULT" = success
-          test "$BROWSER_RESULT" = success
 
   release-metadata:
     name: Validate container release tag
@@ -485,14 +466,14 @@ jobs:
       needs.lint.result == 'success' &&
       needs.rust.result == 'success' &&
       needs.generated-clients.result == 'success' &&
-      needs.test.result == 'success' &&
+      needs.compose-integration.result == 'success' &&
       needs.catalog-runtime.result == 'success' &&
       vars.VONK_CONTAINER_RELEASES_ENABLED == 'true' &&
       vars.VONK_PLATFORM_RELEASES_ENABLED == 'true' &&
       github.event_name == 'push' &&
       github.ref_type == 'tag' &&
       startsWith(github.ref_name, 'v')
-    needs: [lint, rust, generated-clients, test, catalog-runtime]
+    needs: [lint, rust, generated-clients, compose-integration, catalog-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -649,7 +630,7 @@ jobs:
 
   validate-release-images:
     name: Validate accepted release images
-    needs: [lint, generated-clients, test, release-metadata, build-agent-package, native-amd64-agent-lifecycle]
+    needs: [lint, generated-clients, compose-integration, release-metadata, build-agent-package, native-amd64-agent-lifecycle]
     runs-on: ubuntu-latest
     permissions:
       attestations: read

@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Assign complete pytest files to stable, count-balanced CI shards."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from collections import Counter
+
+
+def select_files(
+    node_ids: list[str], *, index: int, total: int, prefix: str = ""
+) -> list[str]:
+    if total < 1 or not 0 <= index < total:
+        raise ValueError("shard index must be within the positive shard total")
+    counts = Counter(node_id.split("::", 1)[0] for node_id in node_ids if "::" in node_id)
+    if len(counts) < total:
+        raise ValueError("pytest collection has fewer files than shards")
+
+    shards: list[list[str]] = [[] for _ in range(total)]
+    weights = [0] * total
+    for path, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+        destination = min(range(total), key=lambda shard: (weights[shard], shard))
+        shards[destination].append(f"{prefix}{path}")
+        weights[destination] += count
+    return sorted(shards[index])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--index", type=int, required=True)
+    parser.add_argument("--total", type=int, required=True)
+    parser.add_argument("--prefix", default="")
+    arguments = parser.parse_args()
+    try:
+        selected = select_files(
+            [line.strip() for line in sys.stdin if line.strip()],
+            index=arguments.index,
+            total=arguments.total,
+            prefix=arguments.prefix,
+        )
+    except ValueError as error:
+        parser.error(str(error))
+    print(*selected, sep="\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
