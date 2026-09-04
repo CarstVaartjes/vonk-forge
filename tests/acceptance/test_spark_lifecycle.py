@@ -916,8 +916,9 @@ class SparkLifecycle:
             raise LifecycleError(
                 "candidate controller services are not healthy"
             ) from error
-        if self.arguments.platform == "linux-arm64":
-            self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
+        # Both package lanes need deterministic NVIDIA discovery so the agent
+        # can start on a GPU-less CI runner. Only ARM64 consumes it in a recipe.
+        self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
         self._prepare_synthetic_firewall_environment()
         boundary = LocalBrowserController(
             hostname=self.control_hostname,
