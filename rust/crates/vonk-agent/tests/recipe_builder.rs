@@ -1020,6 +1020,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
         "--service-type=exec",
         "--unit=vonk-recipe-build-00000000-0000-4000-8000-000000000002",
         "--setenv=HOME=/var/lib/vonk-forge-agent",
+        "--setenv=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config",
         "--setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent",
         "--setenv=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf",
         "--property=MemoryMax=8589934592",

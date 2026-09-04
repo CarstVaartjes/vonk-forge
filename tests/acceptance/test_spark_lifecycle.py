@@ -1344,8 +1344,18 @@ class SparkLifecycle:
         use_count = self._pairing_grant_use_count(grant_id)
         direct_health = self._direct_agent_health()
         node_id = str(candidate["node_id"])
+        canary = self._run_synthetic_canary(node_id)
+        synthetic_device = {
+            "architecture": self.arguments.platform,
+            "cdi_name": "nvidia.com/gpu=all",
+            "fixture_sha256": self.synthetic_fixture_sha256,
+            "physical_gpu": False,
+            "provenance": "ci-only-synthetic-cdi",
+            "synthetic": True,
+        }
         if self.arguments.platform == "linux-amd64":
             return {
+                "canary": canary,
                 "controller_generation": self.arguments.generation,
                 "direct_agent_health": direct_health,
                 "installation": {
@@ -1356,9 +1366,9 @@ class SparkLifecycle:
                 "node_id": node_id,
                 "pairing_grant_use_count": use_count,
                 "publication_graph": self.graph,
+                "synthetic_device": synthetic_device,
             }
 
-        canary = self._run_synthetic_canary(node_id)
         renewal = self._observe_renewal(node_id, str(candidate["serial"]))
         return {
             "canary": canary,
@@ -1373,14 +1383,7 @@ class SparkLifecycle:
             "pairing_grant_use_count": use_count,
             "publication_graph": self.graph,
             "renewal": renewal["proof"],
-            "synthetic_device": {
-                "architecture": "linux-arm64",
-                "cdi_name": "nvidia.com/gpu=all",
-                "fixture_sha256": self.synthetic_fixture_sha256,
-                "physical_gpu": False,
-                "provenance": "ci-only-synthetic-cdi",
-                "synthetic": True,
-            },
+            "synthetic_device": synthetic_device,
         }
 
     def _prepare_podman_apparmor_profile(self) -> None:

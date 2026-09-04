@@ -415,6 +415,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             "--service-type=exec".to_owned(),
             format!("--unit=vonk-recipe-build-{operation_id}"),
             "--setenv=HOME=/var/lib/vonk-forge-agent".to_owned(),
+            "--setenv=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config".to_owned(),
             "--setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent".to_owned(),
             format!("--setenv=XDG_RUNTIME_DIR={}", podman_runtime.display()),
             format!("--setenv=TMPDIR={}", podman_image_tmp.display()),

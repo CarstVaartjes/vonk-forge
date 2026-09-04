@@ -2401,6 +2401,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "slot" not in unit
     assert "activation-challenge" not in unit
     assert "Environment=HOME=/var/lib/vonk-forge-agent" in unit
+    assert "Environment=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config" in unit
     assert "Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent" in unit
     assert "ProtectControlGroups=yes" in unit
     # The rootless OCI runtime must set the hostname inside each build's private UTS
