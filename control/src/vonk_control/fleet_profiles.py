@@ -657,7 +657,8 @@ class FleetProfileService:
                 )
             stop_steps: list[dict[str, object]] = []
             uninstall_steps: list[dict[str, object]] = []
-            assignment_steps: list[dict[str, object]] = []
+            preparation_steps: list[dict[str, object]] = []
+            start_steps: list[dict[str, object]] = []
             desired_installation_ids: set[str] = set()
             desired_run_ids: set[str] = set()
             # Scope is the authoritative reconciliation boundary.  An idle
@@ -697,7 +698,7 @@ class FleetProfileService:
                 else:
                     if state.mapping is None:
                         actions.append("create-placement")
-                        assignment_steps.append(
+                        preparation_steps.append(
                             {
                                 "kind": "create-placement",
                                 "assignment_id": assignment.id,
@@ -713,7 +714,7 @@ class FleetProfileService:
                     }:
                         if state.build is None:
                             actions.append("build")
-                            assignment_steps.append(
+                            preparation_steps.append(
                                 {
                                     "kind": "build",
                                     "assignment_id": assignment.id,
@@ -725,7 +726,7 @@ class FleetProfileService:
                                 }
                             )
                         actions.extend(("distribute-image", "install"))
-                        assignment_steps.extend(
+                        preparation_steps.extend(
                             (
                                 {
                                     "kind": "distribute-image",
@@ -752,7 +753,7 @@ class FleetProfileService:
                         and state.current_state != "running"
                     ):
                         actions.append("start")
-                        assignment_steps.append(
+                        start_steps.append(
                             {
                                 "kind": "start",
                                 "assignment_id": assignment.id,
@@ -885,7 +886,21 @@ class FleetProfileService:
                         }
                     )
 
-            raw_steps = stop_steps + uninstall_steps + assignment_steps
+            if stop_steps:
+                reasons.append(
+                    FleetProfileReason(
+                        code="profile.interruption_expected",
+                        detail=(
+                            "The reviewed plan includes required runtime stops; "
+                            "affected workloads may be unavailable until final starts complete."
+                        ),
+                        severity="warning",
+                    )
+                )
+            # Prepare images and installations while the current profile can
+            # still serve traffic. Required stops then release runtime
+            # resources before final starts and verification.
+            raw_steps = preparation_steps + stop_steps + uninstall_steps + start_steps
             steps = [
                 FleetProfilePlanStep(index=index, **step)
                 for index, step in enumerate(raw_steps)
