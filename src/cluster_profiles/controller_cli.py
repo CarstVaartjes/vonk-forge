@@ -2983,18 +2983,19 @@ def _run_activity(
 def _model_supports_capabilities(
     model: Mapping[str, object], requested: list[str]
 ) -> bool:
-    """Match only an explicit Controller capability inventory."""
-    inventory = model.get("capability_inventory")
-    if not isinstance(inventory, list):
+    """Match only declared facts from the Controller model inventory."""
+    inventory = model.get("model_capabilities")
+    if not isinstance(inventory, Mapping) or inventory.get("state") != "declared":
+        return False
+    facts = inventory.get("facts")
+    if not isinstance(facts, list):
         return False
     supported = {
-        str(item.get("key") or item.get("capability") or item.get("name"))
-        for item in inventory
+        str(item.get("capability"))
+        for item in facts
         if isinstance(item, Mapping)
-        and item.get("support_status") == "supported"
-        and isinstance(
-            item.get("key") or item.get("capability") or item.get("name"), str
-        )
+        and item.get("support") == "supported"
+        and isinstance(item.get("capability"), str)
     }
     return all(capability in supported for capability in requested)
 
@@ -3105,6 +3106,36 @@ _TERMINAL_OPERATION_STATES = frozenset(
 )
 
 
+def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
+    phase = observed.get("phase") or observed.get("current_phase")
+    pieces: list[str] = []
+    if isinstance(phase, str) and phase:
+        pieces.append(f"phase: {phase}")
+    completed = observed.get("bytes_completed")
+    total = observed.get("bytes_total")
+    if isinstance(completed, int) and not isinstance(completed, bool):
+        if isinstance(total, int) and not isinstance(total, bool):
+            pieces.append(f"bytes: {completed}/{total}")
+        else:
+            pieces.append(f"bytes: {completed}")
+    members = observed.get("members") or observed.get("targets")
+    if isinstance(members, list):
+        labels = []
+        for member in members:
+            if isinstance(member, Mapping):
+                label = (
+                    member.get("display_name")
+                    or member.get("node_name")
+                    or member.get("node_id")
+                    or member.get("id")
+                )
+                if isinstance(label, str) and label:
+                    labels.append(label)
+        if labels:
+            pieces.append("sparks: " + ", ".join(labels[:32]))
+    return " | ".join(pieces) if pieces else None
+
+
 def _follow_submitted_operation(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -3117,8 +3148,15 @@ def _follow_submitted_operation(
     timeout = max(0, min(args.timeout_seconds, 300))
     interval = max(0.1, min(args.interval_seconds, 30.0))
     deadline = time.monotonic() + timeout
+    last_progress: str | None = None
+    human_output = not (args.global_json or getattr(args, "json", False))
     while True:
         observed = client.request("GET", f"/api/v1/operations/{_quoted(operation_id)}")
+        if human_output:
+            progress = _operation_progress_line(observed)
+            if progress is not None and progress != last_progress:
+                print(progress, file=sys.stderr)
+                last_progress = progress
         state = str(observed.get("state", observed.get("status", ""))).casefold()
         if state in _TERMINAL_OPERATION_STATES:
             return observed

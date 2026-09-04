@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -1586,9 +1586,13 @@ def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> Non
                             "slug": "vision",
                             "content_sha256": "a" * 64,
                         },
-                        "capability_inventory": [
-                            {"key": "vision", "support_status": "supported"}
-                        ],
+                        "model_capabilities": {
+                            "schema_version": 2,
+                            "state": "declared",
+                            "facts": [{"capability": "vision", "support": "supported"}],
+                            "reasons": [],
+                            "provenance": {"source": "catalog"},
+                        },
                         "recipes": [{"capabilities": ["chat"]}],
                     },
                     {
@@ -1777,7 +1781,6 @@ def test_simple_cache_download_previews_then_applies_exact_artifacts() -> None:
     artifact_input = {
         "model_version_sha256": "a" * 64,
         "recipe_revision_id": "recipe-1",
-        "runtime_image": "oci://registry.example/vllm@sha256:" + "b" * 64,
     }
 
     result, payload = _invoke(
@@ -1837,6 +1840,43 @@ def test_simple_profile_switch_previews_then_applies_without_manual_digest() -> 
         "plan_digest": "d" * 64,
         "request_key": request_key,
     }
+
+
+def test_simple_run_human_mode_reports_changed_operation_progress_to_stderr() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/recipes/run-switch-plans/preview"): {
+                "plan_digest": "d" * 64
+            },
+            ("POST", "/api/v1/recipes/run-switches"): {"operation_id": "op-1"},
+            ("GET", "/api/v1/operations/op-1"): [
+                {
+                    "state": "running",
+                    "phase": "copying",
+                    "bytes_completed": 10,
+                    "bytes_total": 100,
+                    "targets": [{"node_id": "spk_1"}],
+                },
+                {"state": "succeeded", "phase": "running"},
+            ],
+        }
+    )
+    stderr = StringIO()
+    with redirect_stderr(stderr):
+        result = cli.main(
+            (
+                "models",
+                "run",
+                "--input",
+                '{"model_version_sha256":"' + "a" * 64 + '"}',
+                "--request-key",
+                "11111111-1111-4111-8111-111111111111",
+            ),
+            control_client=client,
+        )
+
+    assert result == 0
+    assert "phase: copying | bytes: 10/100 | sparks: spk_1" in stderr.getvalue()
 
 
 def test_uncertain_run_apply_error_preserves_request_key_for_reconciliation() -> None:
