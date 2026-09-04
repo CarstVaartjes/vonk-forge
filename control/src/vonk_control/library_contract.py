@@ -137,6 +137,111 @@ class LibraryCapabilityInventory(_StrictModel):
     reasons: list[ProjectionReason] = Field(default_factory=list, max_length=16)
 
 
+class ModelVersionIdentity(_StrictModel):
+    kind: Literal["model-version"]
+    publisher: Text128
+    slug: Text128
+    content_sha256: Digest
+
+
+class LibraryCatalogReference(_StrictModel):
+    """A content addressed catalog identity retained in a Library response."""
+
+    kind: Literal["model-group", "model", "model-version"]
+    publisher: Text128
+    slug: Text128
+    content_sha256: Digest
+
+
+class LibraryModelMetadata(_StrictModel):
+    title: Text200
+    description: Annotated[str, StringConstraints(max_length=4_000)]
+    tags: list[Text64] = Field(max_length=20)
+
+
+class LibraryModelSource(_StrictModel):
+    repository: Text512
+    revision: Text80
+
+
+class LibraryModelLineage(_StrictModel):
+    publisher: Text128
+    relation: Literal["official", "derived", "quantized"]
+    source_model: LibraryCatalogReference
+    derivation: Annotated[str, StringConstraints(max_length=2_000)]
+
+
+class LibraryModelFormat(_StrictModel):
+    container: Literal["gguf", "safetensors"]
+    precision: Text64
+    quantization: Text128
+
+
+class LibraryModelParameters(_StrictModel):
+    total: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+    active: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+
+
+class LibraryModelLimits(_StrictModel):
+    context_tokens: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+    resolution_pixels: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+    frames: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+    sample_rate_hz: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
+
+
+class LibraryModelSizes(_StrictModel):
+    download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    installed_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+
+
+class LibraryModelArtifact(_StrictModel):
+    id: Text64
+    path: Text512
+    kind: Literal["huggingface.file", "http.file", "oci.artifact"]
+    repository: Text512
+    revision: Text80
+    sha256: Digest
+    download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    installed_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    roles: list[Text64] = Field(min_length=1, max_length=16)
+
+
+class LibraryModelFamily(_StrictModel):
+    identity: LibraryCatalogReference
+    family: Text64
+    metadata: LibraryModelMetadata
+
+
+class LibraryModelDefinition(_StrictModel):
+    identity: LibraryCatalogReference
+    model_group: LibraryCatalogReference
+    architecture: Text128
+    metadata: LibraryModelMetadata
+
+
+class LibraryModelVersionFacts(_StrictModel):
+    """Exact schema-valid model-version facts, with unknown fields fail-closed."""
+
+    schema_version: Literal[2] = 2
+    state: Literal["resolved", "unknown"]
+    identity: ModelVersionIdentity
+    model: LibraryCatalogReference | None = None
+    family: LibraryModelFamily | None = None
+    model_definition: LibraryModelDefinition | None = None
+    metadata: LibraryModelMetadata | None = None
+    version: Text128 | None = None
+    source: LibraryModelSource | None = None
+    lineage: LibraryModelLineage | None = None
+    format: LibraryModelFormat | None = None
+    parameters: LibraryModelParameters | None = None
+    limits: LibraryModelLimits | None = None
+    sizes: LibraryModelSizes | None = None
+    artifacts: list[LibraryModelArtifact] = Field(max_length=512)
+    dependencies: list[LibraryCatalogReference] = Field(max_length=32)
+    availability: Literal["active", "withdrawn", "superseded"] | None = None
+    reasons: list[ProjectionReason] = Field(default_factory=list, max_length=16)
+
+
 class LibraryRecipeSummary(LibraryRecipeIdentity):
     selected_revision: RecipeRevisionSummary | None
     capabilities: list[Text64] = Field(max_length=64)
@@ -155,13 +260,6 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     )
 
 
-class ModelVersionIdentity(_StrictModel):
-    kind: Literal["model-version"]
-    publisher: Text128
-    slug: Text128
-    content_sha256: Digest
-
-
 class LibraryModel(_StrictModel):
     model: ModelVersionIdentity
     page_local: Literal[True] = True
@@ -169,6 +267,7 @@ class LibraryModel(_StrictModel):
     model_capabilities: "LibraryCapabilityInventory" = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )
+    model_version: LibraryModelVersionFacts | None = None
 
 
 class LibrarySnapshot(_StrictModel):
@@ -705,6 +804,7 @@ class LibraryRecipeDetail(_StrictModel):
     recipe_capabilities: LibraryCapabilityInventory = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )
+    model_version: LibraryModelVersionFacts | None = None
 
 
 def _utc(value: datetime) -> datetime:

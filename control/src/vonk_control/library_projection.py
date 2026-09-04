@@ -36,7 +36,19 @@ from .library_contract import (
     LibraryCapabilityFact,
     LibraryCapabilityInventory,
     LibraryCapabilityProvenance,
+    LibraryCatalogReference,
     LibraryModel,
+    LibraryModelArtifact,
+    LibraryModelDefinition,
+    LibraryModelFamily,
+    LibraryModelFormat,
+    LibraryModelLineage,
+    LibraryModelLimits,
+    LibraryModelMetadata,
+    LibraryModelParameters,
+    LibraryModelSizes,
+    LibraryModelSource,
+    LibraryModelVersionFacts,
     ModelVersionIdentity,
     LibraryRecipeDetail,
     LibraryRecipeIdentity,
@@ -128,6 +140,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .catalog_contract import catalog_content_sha256, validate_catalog_document
 from .recipe_contract import RecipeContractError, recipe_topology, validate_recipe
 from .topology import Placement, TopologyError, validate_topology
 
@@ -493,17 +506,17 @@ def _resolved_model_version_document(
     return _resolved_model_version_reference(session, recipe_document["model"])
 
 
-def _resolved_model_version_reference(
+def _resolved_catalog_revision(
     session: Session,
     reference: Mapping[str, object],
-) -> Mapping[str, object] | None:
-    """Load one exact model-version revision addressed by a recipe reference."""
+) -> CatalogEntityRevision | None:
+    """Load the resolved revision addressed by one content-addressed reference."""
 
-    revision = session.scalar(
+    return session.scalar(
         select(CatalogEntityRevision)
         .join(CatalogEntity, CatalogEntity.id == CatalogEntityRevision.entity_id)
         .where(
-            CatalogEntity.kind == "model-version",
+            CatalogEntity.kind == reference["kind"],
             CatalogEntity.publisher == reference["publisher"],
             CatalogEntity.slug == reference["slug"],
             CatalogEntityRevision.content_sha256 == reference["content_sha256"],
@@ -512,7 +525,199 @@ def _resolved_model_version_reference(
         .order_by(CatalogEntityRevision.revision_number.desc())
         .limit(1)
     )
+
+
+def _resolved_model_version_reference(
+    session: Session,
+    reference: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Load one exact model-version revision addressed by a recipe reference."""
+
+    revision = _resolved_catalog_revision(session, reference)
     return revision.document if revision is not None else None
+
+
+def _catalog_reference(reference: Mapping[str, object]) -> LibraryCatalogReference:
+    return LibraryCatalogReference(
+        kind=reference["kind"],
+        publisher=reference["publisher"],
+        slug=reference["slug"],
+        content_sha256=reference["content_sha256"],
+    )
+
+
+def _model_version_facts(
+    session: Session,
+    reference: Mapping[str, object],
+) -> LibraryModelVersionFacts:
+    """Project only schema-valid facts from the exact model-version revision.
+
+    The recipe reference is enough to identify a version, but it is not enough
+    to claim that version metadata is authoritative.  Invalid, missing, or
+    content-mismatched catalog documents therefore remain visible as unknown.
+    """
+
+    identity = ModelVersionIdentity(
+        kind="model-version",
+        publisher=reference["publisher"],
+        slug=reference["slug"],
+        content_sha256=reference["content_sha256"],
+    )
+    revision = _resolved_catalog_revision(session, reference)
+    if revision is None or not isinstance(revision.document, Mapping):
+        return LibraryModelVersionFacts(
+            state="unknown",
+            identity=identity,
+            model=None,
+            artifacts=[],
+            dependencies=[],
+            reasons=[
+                _reason(
+                    "model.version_metadata_unknown",
+                    "The exact resolved model-version document is unavailable.",
+                    "info",
+                )
+            ],
+        )
+    document = revision.document
+    try:
+        validate_catalog_document(document)
+    except Exception as error:
+        return LibraryModelVersionFacts(
+            state="unknown",
+            identity=identity,
+            model=None,
+            artifacts=[],
+            dependencies=[],
+            reasons=[
+                _reason(
+                    "model.version_metadata_invalid",
+                    f"The exact model-version document is not schema-valid: {error}",
+                    "warning",
+                )
+            ],
+        )
+    if catalog_content_sha256(document) != revision.content_sha256:
+        return LibraryModelVersionFacts(
+            state="unknown",
+            identity=identity,
+            model=None,
+            artifacts=[],
+            dependencies=[],
+            reasons=[
+                _reason(
+                    "model.version_metadata_digest_mismatch",
+                    "The resolved model-version document does not match its content digest.",
+                    "warning",
+                )
+            ],
+        )
+    document_identity = document["identity"]
+    if (
+        document_identity["publisher"] != reference["publisher"]
+        or document_identity["slug"] != reference["slug"]
+    ):
+        return LibraryModelVersionFacts(
+            state="unknown",
+            identity=identity,
+            model=None,
+            artifacts=[],
+            dependencies=[],
+            reasons=[
+                _reason(
+                    "model.version_metadata_identity_mismatch",
+                    "The resolved model-version document identity does not match its reference.",
+                    "warning",
+                )
+            ],
+        )
+
+    model_reference = document["model"]
+    reasons: list[ProjectionReason] = []
+    model_definition = None
+    family = None
+    model_revision = _resolved_catalog_revision(session, model_reference)
+    if model_revision is not None and isinstance(model_revision.document, Mapping):
+        model_document = model_revision.document
+        try:
+            validate_catalog_document(model_document)
+            if catalog_content_sha256(model_document) != model_revision.content_sha256:
+                raise ValueError("resolved model document digest mismatch")
+            model_definition = LibraryModelDefinition(
+                identity=_catalog_reference(model_reference),
+                model_group=_catalog_reference(model_document["model_group"]),
+                architecture=model_document["architecture"],
+                metadata=LibraryModelMetadata(**model_document["metadata"]),
+            )
+            family_reference = model_document["model_group"]
+            family_revision = _resolved_catalog_revision(session, family_reference)
+            if family_revision is not None and isinstance(
+                family_revision.document, Mapping
+            ):
+                family_document = family_revision.document
+                validate_catalog_document(family_document)
+                if catalog_content_sha256(family_document) != family_revision.content_sha256:
+                    raise ValueError("resolved model-group document digest mismatch")
+                family = LibraryModelFamily(
+                    identity=_catalog_reference(family_reference),
+                    family=family_document["family"],
+                    metadata=LibraryModelMetadata(**family_document["metadata"]),
+                )
+            else:
+                reasons.append(
+                    _reason(
+                        "model.family_metadata_unknown",
+                        "The exact model-group document is unavailable.",
+                        "info",
+                    )
+                )
+        except Exception:
+            reasons.append(
+                _reason(
+                    "model.definition_metadata_unknown",
+                    "The exact model document is not an accepted schema-valid authority.",
+                    "warning",
+                )
+            )
+            model_definition = None
+    else:
+        reasons.append(
+            _reason(
+                "model.definition_metadata_unknown",
+                "The exact model document is unavailable.",
+                "info",
+            )
+        )
+
+    def catalog_references(values: object) -> list[LibraryCatalogReference]:
+        if not isinstance(values, list):
+            return []
+        return [_catalog_reference(value) for value in values]
+
+    return LibraryModelVersionFacts(
+        state="resolved",
+        identity=identity,
+        model=_catalog_reference(model_reference),
+        family=family,
+        model_definition=model_definition,
+        metadata=LibraryModelMetadata(**document["metadata"]),
+        version=document["version"],
+        source=LibraryModelSource(**document["source"]),
+        lineage=LibraryModelLineage(
+            publisher=document["lineage"]["publisher"],
+            relation=document["lineage"]["relation"],
+            source_model=_catalog_reference(document["lineage"]["source_model"]),
+            derivation=document["lineage"]["derivation"],
+        ),
+        format=LibraryModelFormat(**document["format"]),
+        parameters=LibraryModelParameters(**document["parameters"]),
+        limits=LibraryModelLimits(**document["limits"]),
+        sizes=LibraryModelSizes(**document["sizes"]),
+        artifacts=[LibraryModelArtifact(**artifact) for artifact in document["artifacts"]],
+        dependencies=catalog_references(document["dependencies"]),
+        availability=document["availability"],
+        reasons=reasons,
+    )
 
 
 def _capability_digest(value: object) -> str | None:
@@ -1018,6 +1223,9 @@ class LibraryProjection:
         with self._sessions.begin() as session:
             rows = list(session.execute(statement.limit(limit + 1)))
             page = rows[:limit]
+            model_version_facts: dict[
+                tuple[str, str, str], LibraryModelVersionFacts
+            ] = {}
             recipe_ids = [recipe.id for recipe, _revision in page]
             ranked_installations = (
                 select(
@@ -1268,6 +1476,7 @@ class LibraryProjection:
             topology_name: str | None = None
             model_identity: tuple[str, str, str] | None = None
             model_capabilities = LibraryCapabilityInventory()
+            model_version = None
             recipe_capabilities = _recipe_capabilities(
                 recipe, revision, document
             )
@@ -1279,6 +1488,15 @@ class LibraryProjection:
                     str(model["content_sha256"]),
                 )
                 model_capabilities = _model_capabilities(model)
+                model_key = (
+                    str(model["publisher"]),
+                    str(model["slug"]),
+                    str(model["content_sha256"]),
+                )
+                model_version = model_version_facts.get(model_key)
+                if model_version is None:
+                    model_version = _model_version_facts(session, model)
+                    model_version_facts[model_key] = model_version
                 recipe_capabilities = _recipe_capabilities(recipe, revision, document)
                 capabilities = [
                     _bounded_text(item["adapter"], 64)
@@ -1355,8 +1573,11 @@ class LibraryProjection:
                         {
                             "publisher": publisher,
                             "slug": slug,
-                            "content_sha256": content_sha256,
-                        }
+                        "content_sha256": content_sha256,
+                    }
+                    ),
+                    model_version=model_version_facts.get(
+                        (publisher, slug, content_sha256)
                     ),
                 )
                 for (publisher, slug, content_sha256), values in sorted(grouped.items())
@@ -1374,6 +1595,7 @@ class LibraryProjection:
         model_reference: Mapping[str, object] | None = None
         model_capabilities = LibraryCapabilityInventory()
         recipe_capabilities = LibraryCapabilityInventory()
+        model_version = None
         with self._sessions.begin() as session:
             row = session.execute(
                 select(LocalRecipe, LocalRecipeRevision)
@@ -1400,6 +1622,7 @@ class LibraryProjection:
                     session, document
                 )
                 model_capabilities = _model_capabilities(model_reference)
+                model_version = _model_version_facts(session, model_reference)
                 recipe_capabilities = _recipe_capabilities(recipe, revision, document)
             else:
                 recipe_capabilities = _recipe_capabilities(
@@ -1699,6 +1922,7 @@ class LibraryProjection:
                 model=None,
                 model_capabilities=model_capabilities,
                 recipe_capabilities=recipe_capabilities,
+                model_version=model_version,
             )
         assert revision is not None
         assert placement_evidence is not None
@@ -1737,6 +1961,7 @@ class LibraryProjection:
             ),
             model_capabilities=model_capabilities,
             recipe_capabilities=recipe_capabilities,
+            model_version=model_version,
         )
 
     @staticmethod

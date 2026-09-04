@@ -740,7 +740,8 @@ def test_root_operational_summaries_are_exact_bounded_and_fair_per_recipe() -> N
     summaries = {item.slug: item for model in snapshot.models for item in model.recipes}
     alpha = summaries["alpha-history-heavy"]
     bravo_summary = summaries["bravo-current"]
-    assert len(statements) == 6
+    # One bounded catalog-authority read supplies exact model-version facts.
+    assert len(statements) == 7
     installation_window = next(
         statement
         for statement in statements
@@ -1272,7 +1273,8 @@ def test_detail_uses_a_fixed_set_query_count_instead_of_candidate_services() -> 
     second = list(statements)
     event.remove(engine, "before_cursor_execute", record)
 
-    assert len(first) == len(second) == 22
+    # The fixed set includes one exact catalog-authority read for model facts.
+    assert len(first) == len(second) == 23
     for table in (
         "local_recipes",
         "cluster_mappings",
@@ -1393,6 +1395,25 @@ def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
         )
         catalog["identity"]["slug"] = document["model"]["slug"]
         catalog["version"] = document["model"]["slug"]
+        if document["model"]["slug"] == "a06-v2":
+            catalog["metadata"]["title"] = "A06 GGUF variant"
+            catalog["metadata"]["tags"] = ["synthetic", "vision", "gguf"]
+            catalog["format"] = {
+                "container": "gguf",
+                "precision": "q4_k_m",
+                "quantization": "q4_k_m",
+            }
+            catalog["artifacts"][0].update(
+                {
+                    "id": "weights-gguf",
+                    "path": "model-q4_k_m.gguf",
+                    "kind": "http.file",
+                    "repository": "https://models.example.test/a06-v2.gguf",
+                    "download_bytes": 2_048,
+                    "installed_bytes": 3_072,
+                }
+            )
+            catalog["sizes"] = {"download_bytes": 2_048, "installed_bytes": 3_072}
         validate_catalog_document(catalog)
         digest = catalog_content_sha256(catalog)
         document["model"]["content_sha256"] = digest
@@ -1455,6 +1476,30 @@ def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
     ] == ["image-job"]
     assert first.model_capabilities.provenance is not None
     assert first.model_capabilities.provenance.content_sha256 == first.model.content_sha256
+    assert first.model_version is not None
+    assert first.model_version.schema_version == 2
+    assert first.model_version.state == "resolved"
+    assert first.model_version.identity.slug == "a06-v1"
+    assert first.model_version.metadata is not None
+    assert first.model_version.metadata.title == "Synthetic Tiny FP16"
+    assert first.model_version.format is not None
+    assert first.model_version.format.container == "safetensors"
+    assert first.model_version.sizes is not None
+    assert first.model_version.sizes.download_bytes == 1_024
+    assert first.model_version.artifacts[0].path == "model.safetensors"
+    assert first.model_version.model is not None
+    assert first.model_version.model.slug == "synthetic-tiny"
+    assert first.model_version.family is None
+    assert "model.definition_metadata_unknown" in {
+        reason.code for reason in first.model_version.reasons
+    }
+    second_model = models["a06-v2"]
+    assert second_model.model_version is not None
+    assert second_model.model_version.format is not None
+    assert second_model.model_version.format.container == "gguf"
+    assert second_model.model_version.sizes is not None
+    assert second_model.model_version.sizes.installed_bytes == 3_072
+    assert second_model.model_version.artifacts[0].id == "weights-gguf"
     assert models["a06-v2"].model_capabilities.state == "unknown"
     second_recipe = models["a06-v2"].recipes[0]
     assert [
@@ -1468,6 +1513,8 @@ def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
         fact.capability for fact in text_detail.recipe_capabilities.facts
     ] == ["openai"]
     assert text_detail.model_capabilities.facts == []
+    assert text_detail.model_version is not None
+    assert text_detail.model_version.identity == first.model_version.identity
     # Recipe exposure does not turn the model support status green.
     assert text_detail.recipe_capabilities.state == "declared"
     assert json.dumps(snapshot.model_dump(mode="json"), sort_keys=True) == json.dumps(
@@ -2048,7 +2095,7 @@ def test_active_run_lineage_precedes_512_newer_operational_rows_without_more_que
     detail = _projection(sessions).detail(_uuid(64))
     event.remove(engine, "before_cursor_execute", record)
 
-    assert len(statements) == 22
+    assert len(statements) == 23
     assert active["run_id"] in {item.run_id for item in detail.operational_state.runs}
     assert active["installation_id"] in {
         item.installation_id for item in detail.operational_state.installations
