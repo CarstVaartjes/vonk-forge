@@ -21,6 +21,7 @@ IMAGES = {
     "api_image": f"ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:{DIGEST}",
     "worker_image": f"ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3@sha256:{DIGEST}",
     "hermes_image": f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{DIGEST}",
+    "litellm_image": f"ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3@sha256:{DIGEST}",
 }
 SERVICES = {
     "tailscale-gateway",

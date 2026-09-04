@@ -230,13 +230,14 @@ def test_development_images_build_supported_linux_architectures_with_targeted_ca
         publisher.count(
             "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
         )
-        == 3
+        == 4
     )
-    assert publisher.count("platforms: linux/amd64,linux/arm64") == 3
+    assert publisher.count("platforms: linux/amd64,linux/arm64") == 4
     for role, image in (
         ("api", "${{ steps.metadata.outputs.api_image }}"),
         ("worker", "${{ steps.metadata.outputs.worker_image }}"),
         ("hermes", "ghcr.io/carstvaartjes/vonk-forge-hermes"),
+        ("litellm", "ghcr.io/carstvaartjes/vonk-forge-litellm"),
     ):
         assert (
             f"type=oci,dest=${{{{ runner.temp }}}}/vonk-forge-{role}.oci.tar"
@@ -246,8 +247,8 @@ def test_development_images_build_supported_linux_architectures_with_targeted_ca
             f"type=image,name={image},push=true,push-by-digest=true,"
             "name-canonical=true,oci-mediatypes=true"
         ) in publisher
-    assert publisher.count("sbom: true") == 3
-    assert publisher.count("provenance: mode=max") == 3
+    assert publisher.count("sbom: true") == 4
+    assert publisher.count("provenance: mode=max") == 4
     for role in ("api", "worker"):
         assert f"cache-from: type=gha,scope=vonk-forge-{role}" in publisher
         assert f"cache-to: type=gha,mode=max,scope=vonk-forge-{role}" in publisher
@@ -316,7 +317,7 @@ def test_development_images_enable_arm64_emulation_before_building() -> None:
         "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0" in qemu
     )
     assert "platforms: arm64" in qemu
-    assert publisher.count("docker/build-push-action@") == 3
+    assert publisher.count("docker/build-push-action@") == 4
 
 
 def test_development_image_acceptance_consumes_only_small_role_receipts() -> None:
@@ -327,7 +328,7 @@ def test_development_image_acceptance_consumes_only_small_role_receipts() -> Non
 
     assert "needs: [verify-runtime-images]" in validation
     assert "actions: read" in validation
-    assert "for role in api worker hermes" in validation
+    assert "for role in api worker hermes litellm" in validation
     assert (
         'artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"'
         in validation
@@ -370,7 +371,8 @@ case "$1:$2" in
     printf '%s\n' '{{"artifacts":[
       {{"name":"development-role-receipt-api-{"a" * 40}-123-2","expired":false}},
       {{"name":"development-role-receipt-worker-{"a" * 40}-123-2","expired":false}},
-      {{"name":"development-role-receipt-hermes-{"a" * 40}-123-2","expired":false}}
+      {{"name":"development-role-receipt-hermes-{"a" * 40}-123-2","expired":false}},
+      {{"name":"development-role-receipt-litellm-{"a" * 40}-123-2","expired":false}}
     ]}}'
     ;;
   run:download)
@@ -419,7 +421,7 @@ esac
 
     assert result.returncode == 0, result.stderr
     assert state.read_text() == "2\n"
-    for role in ("api", "worker", "hermes"):
+    for role in ("api", "worker", "hermes", "litellm"):
         assert (tmp_path / "accepted-evidence" / f"{role}.role-receipt.json").is_file()
 
 
@@ -488,7 +490,7 @@ def test_runtime_image_full_pull_qualification_runs_beside_archive_builds() -> N
     assert "needs" not in runtime
     assert acceptance["needs"] == ["verify-runtime-images"]
     assert "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" in runtime_text
-    assert 'test "${#runtime_images[@]}" = 7' in runtime_text
+    assert 'test "${#runtime_images[@]}" = 6' in runtime_text
     assert "sort -u" in runtime_text
     assert "@sha256:[0-9a-f]{64}" in runtime_text
     assert 'docker pull "$runtime_image"' in runtime_text
@@ -555,8 +557,8 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
         if value.get("permissions", {}).get("packages") == "write"
     ]
     assert jobs_with_package_write == ["publish-development-images"]
-    assert publisher.count("scripts/accept-development-image-archive") == 3
-    for role in ("api", "worker", "hermes"):
+    assert publisher.count("scripts/accept-development-image-archive") == 4
+    for role in ("api", "worker", "hermes", "litellm"):
         assert f"vonk-forge-{role}.oci.tar" in publisher
         assert f"development-role-receipt-{role}-${{{{ github.sha }}}}" in publisher
     assert "Upload exact OCI archive" not in text
@@ -629,8 +631,8 @@ def test_development_publication_parallelizes_roles_inside_one_safe_job() -> Non
     assert acceptance_wait < publication_check
     assert publication_check < publish_parallel < collect < verify_parallel
     assert verify_parallel < attest_parallel < upload < aliases
-    assert publisher.count("docker/build-push-action@") == 3
-    for role in ("API", "worker", "Hermes"):
+    assert publisher.count("docker/build-push-action@") == 4
+    for role in ("API", "worker", "Hermes", "LiteLLM"):
         assert (
             f"          - name: Publish immutable tested {role} image"
             in publisher[publish_parallel:collect]
@@ -711,7 +713,7 @@ def test_development_publication_uses_only_v3_receipts_after_digest_staging() ->
     assert build_login < last_build < logout < deep_scan < receipt_check < publish_login
     assert publisher[logout:deep_scan].count('has("ghcr.io") | not') == 2
     assert publisher.count("docker/login-action@") == 2
-    assert publisher.count("scripts/publish-immutable-image") == 3
+    assert publisher.count("scripts/publish-immutable-image") == 4
 
 
 def _write_receipt_fixture(root: Path) -> None:
@@ -768,7 +770,7 @@ def _create_v3_receipt(tmp_path: Path) -> tuple[Path, Path, str]:
     run_attempt = "2"
     manifest = b'{"mediaType":"application/vnd.oci.image.index.v1+json"}'
     expected_digest = f"sha256:{hashlib.sha256(manifest).hexdigest()}"
-    for role in ("api", "worker", "hermes"):
+    for role in ("api", "worker", "hermes", "litellm"):
         image = f"ghcr.io/carstvaartjes/vonk-forge-{role}"
         result = subprocess.run(
             [
@@ -823,6 +825,7 @@ def _create_v3_receipt(tmp_path: Path) -> tuple[Path, Path, str]:
         f"api_digest={expected_digest}",
         f"worker_digest={expected_digest}",
         f"hermes_digest={expected_digest}",
+        f"litellm_digest={expected_digest}",
     ]
     assert aggregated.returncode == 0, aggregated.stderr
     assert verified.returncode == 0, verified.stderr
@@ -837,8 +840,8 @@ def test_role_receipts_aggregate_without_retransferring_archives(
 
     assert document["schema"] == "vonk-forge.dev-image-acceptance.v3"
     assert document["run_attempt"] == "2"
-    assert set(document["roles"]) == {"api", "worker", "hermes"}
-    for role in ("api", "worker", "hermes"):
+    assert set(document["roles"]) == {"api", "worker", "hermes", "litellm"}
+    for role in ("api", "worker", "hermes", "litellm"):
         image = f"ghcr.io/carstvaartjes/vonk-forge-{role}"
         assert document["roles"][role] == {
             "artifact": (f"development-role-receipt-{role}-{'a' * 40}-12345-2"),
@@ -1118,6 +1121,7 @@ def test_each_protected_production_mutation_revalidates_exact_tag_authority() ->
             "Log in to GHCR",
             "Promote accepted API image",
             "Promote accepted worker image",
+            "Promote accepted LiteLLM image",
             "Build and push Hermes image",
         ),
         "release-manifest": ("Create public GitHub Release",),
@@ -1480,7 +1484,12 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
         assert action in text
     assert text.count("docker/build-push-action@") == 1
     metadata = (ROOT / "scripts/container-release-metadata").read_text()
-    for package in ("vonk-forge-api", "vonk-forge-worker", "vonk-forge-hermes"):
+    for package in (
+        "vonk-forge-api",
+        "vonk-forge-worker",
+        "vonk-forge-hermes",
+        "vonk-forge-litellm",
+    ):
         assert package in metadata
     qemu = "docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8"
     buildx = "docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e"
@@ -1495,19 +1504,21 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
     assert text.count("push: true") == 1
 
 
-def test_complete_summary_uses_all_three_build_digests() -> None:
+def test_complete_summary_uses_all_four_build_digests() -> None:
     summary = workflow_step("publish-images", "Write digest-pinned image summary")
     run = step_run("publish-images", "Write digest-pinned image summary")
     for variable in (
         "CONTROL_API_IMAGE",
         "CONTROL_WORKER_IMAGE",
         "HERMES_AGENT_IMAGE",
+        "LITELLM_IMAGE",
     ):
         assert variable in run
     for digest in (
         "steps.api.outputs.digest",
         "steps.worker.outputs.digest",
         "steps.hermes.outputs.digest",
+        "steps.litellm.outputs.digest",
     ):
         assert digest in run
     assert "$GITHUB_STEP_SUMMARY" in run
@@ -1524,13 +1535,13 @@ def test_public_input_scanner_runs_before_every_image_build() -> None:
     assert "Build and push Hermes image" in publisher
 
 
-def test_api_and_worker_are_promoted_from_accepted_dev_manifests() -> None:
+def test_api_worker_and_litellm_are_promoted_from_accepted_dev_manifests() -> None:
     publisher = job("publish-images")
     assert "Build and push API image" not in publisher
     assert "Build and push worker image" not in publisher
     assert publisher.count("docker/build-push-action@") == 1
 
-    for role in ("API", "worker"):
+    for role in ("API", "worker", "LiteLLM"):
         validation = workflow_step(
             "validate-release-images", f"Validate accepted {role} image"
         )
@@ -1607,6 +1618,7 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
     assert '"$API_IMAGE" "$API_DIGEST"' in alias
     assert '"$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS"' in alias
     assert '"$HERMES_IMAGE" "$HERMES_DIGEST"' in alias
+    assert '"$LITELLM_IMAGE" "$LITELLM_DIGEST"' in alias
     assert alias.index("Log in to GHCR") < alias.index(
         "Reconcile the newest completed production release"
     )
@@ -1624,9 +1636,11 @@ def test_latest_alias_advances_only_after_release_evidence() -> None:
     assert "CONTROL_API_IMAGE" in alias
     assert "CONTROL_WORKER_IMAGE" in alias
     assert "HERMES_AGENT_IMAGE" in alias
+    assert "LITELLM_IMAGE" in alias
     assert '"docker://$API_IMAGE:$TARGET_TAG"' in alias
     assert '"docker://$WORKER_IMAGE:$TARGET_TAG"' in alias
     assert '"docker://$HERMES_IMAGE:$TARGET_VERSION"' in alias
+    assert '"docker://$LITELLM_IMAGE:$TARGET_TAG"' in alias
     assert ":dev" not in alias
 
 
@@ -1638,6 +1652,7 @@ def test_manifest_receives_digests_only_through_environment() -> None:
         ("CONTROL_API_DIGEST", "api_digest"),
         ("CONTROL_WORKER_DIGEST", "worker_digest"),
         ("HERMES_AGENT_DIGEST", "hermes_digest"),
+        ("LITELLM_DIGEST", "litellm_digest"),
     ):
         assert f"{name}: ${{{{ needs.publish-images.outputs.{output} }}}}" in step
         assert f"needs.publish-images.outputs.{output}" not in run
@@ -1670,9 +1685,10 @@ def test_manifest_rejects_invalid_digests_before_creating_assets(
     )
     valid = f"sha256:{'a' * 64}"
     invalid_sets = (
-        ("", valid, valid),
-        (valid, "sha256:abc", valid),
-        (valid, valid, f"sha256:{'A' * 64}"),
+        ("", valid, valid, valid),
+        (valid, "sha256:abc", valid, valid),
+        (valid, valid, f"sha256:{'A' * 64}", valid),
+        (valid, valid, valid, "sha256:nope"),
     )
 
     for index, digests in enumerate(invalid_sets):
@@ -1686,9 +1702,11 @@ def test_manifest_rejects_invalid_digests_before_creating_assets(
                 "CONTROL_API_IMAGE": "ghcr.io/example/api:1.2.3",
                 "CONTROL_WORKER_IMAGE": "ghcr.io/example/worker:1.2.3",
                 "HERMES_AGENT_IMAGE": "ghcr.io/example/hermes:1.2.3",
+                "LITELLM_IMAGE": "ghcr.io/example/litellm:1.2.3",
                 "CONTROL_API_DIGEST": digests[0],
                 "CONTROL_WORKER_DIGEST": digests[1],
                 "HERMES_AGENT_DIGEST": digests[2],
+                "LITELLM_DIGEST": digests[3],
             },
             check=False,
             capture_output=True,
@@ -1715,9 +1733,11 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
             "CONTROL_API_IMAGE": "ghcr.io/example/api:1.2.3",
             "CONTROL_WORKER_IMAGE": "ghcr.io/example/worker:1.2.3",
             "HERMES_AGENT_IMAGE": "ghcr.io/example/hermes:1.2.3",
+            "LITELLM_IMAGE": "ghcr.io/example/litellm:1.2.3",
             "CONTROL_API_DIGEST": digest,
             "CONTROL_WORKER_DIGEST": digest,
             "HERMES_AGENT_DIGEST": digest,
+            "LITELLM_DIGEST": digest,
         },
         check=False,
         capture_output=True,
@@ -1729,6 +1749,7 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
         f"CONTROL_API_IMAGE=ghcr.io/example/api:1.2.3@{digest}\n"
         f"CONTROL_WORKER_IMAGE=ghcr.io/example/worker:1.2.3@{digest}\n"
         f"HERMES_AGENT_IMAGE=ghcr.io/example/hermes:1.2.3@{digest}\n"
+        f"LITELLM_IMAGE=ghcr.io/example/litellm:1.2.3@{digest}\n"
     )
     checksum = subprocess.run(
         ["sha256sum", "--check", "vonk-forge-images.env.sha256"],

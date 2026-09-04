@@ -36,7 +36,7 @@ STARTUP_ATTEMPTS = 10
 STARTUP_RETRY_SECONDS = 1
 HEALTH_TIMEOUT_SECONDS = 3
 MAXIMUM_LEASE = timedelta(seconds=300)
-_PRISMA_CACHE_ROOT = Path("/root")
+_PRISMA_CACHE_ROOT = Path("/opt/vonk-litellm/prisma")
 _PRISMA_QUERY_ENGINE_ENV = "PRISMA_QUERY_ENGINE_BINARY"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _DIRECTORY = re.compile(r"[0-9]{8}-[0-9a-f]{64}\Z")
