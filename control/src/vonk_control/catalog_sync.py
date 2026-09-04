@@ -164,6 +164,13 @@ class ManagedRecipeCatalogSyncService:
                     "catalog.sync_preview_changed",
                     "recipe library changed since it was reviewed",
                 )
+            # Package readers validate every object in the candidate generation
+            # before the first catalog link/revision is written.  The legacy
+            # GitHub reader has no prepare hook and retains its established
+            # per-item behavior.
+            prepare = getattr(self._reader, "prepare", None)
+            if callable(prepare):
+                prepare(snapshot)
             self._initialize(run.id, snapshot)
             result = self._apply(run.id, snapshot, actor=actor)
             self._finish(run.id, result)
@@ -245,11 +252,6 @@ class ManagedRecipeCatalogSyncService:
                     self._upsert_link(run_id, snapshot, item, revision.id)
                     result["unchanged_count"] = int(result["unchanged_count"]) + 1
                 else:
-                    if not _explicitly_executable(item.document):
-                        raise CatalogSyncError(
-                            "catalog.sync_recipe_not_executable",
-                            "managed recipe does not explicitly declare an executable contract",
-                        )
                     hydrated = self._reader.fetch(item.uri)
                     if (
                         hydrated.library_commit != snapshot.commit
@@ -258,6 +260,11 @@ class ManagedRecipeCatalogSyncService:
                         raise CatalogSyncError(
                             "catalog.sync_revision_changed",
                             "recipe changed while the exact library snapshot was applied",
+                        )
+                    if not _explicitly_executable(hydrated.document):
+                        raise CatalogSyncError(
+                            "catalog.sync_recipe_not_executable",
+                            "managed recipe does not explicitly declare an executable contract",
                         )
                     self._store_source_bundle(hydrated, actor)
                     revision = self._catalog.import_recipe_library(
