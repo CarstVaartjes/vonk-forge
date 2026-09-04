@@ -1259,7 +1259,7 @@ fn import_build_and_export_share_the_recipe_deadline() {
         ["load", "build", "push"]
     );
     assert!(timeouts.iter().all(|(_, timeout)| {
-        *timeout > Duration::from_secs(SYNTHETIC_RECIPE_DEADLINE_SECONDS.into())
+        *timeout > Duration::ZERO
             && *timeout <= Duration::from_secs(SYNTHETIC_RECIPE_DEADLINE_SECONDS.into())
     }));
 }
