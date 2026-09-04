@@ -72,6 +72,38 @@ class CompleteArtifactInspector:
         )
 
 
+class ModelCacheManifestProvider:
+    def __init__(self, *, missing_nas_bytes: int = 1024, fail: bool = False) -> None:
+        self.missing_nas_bytes = missing_nas_bytes
+        self.fail = fail
+
+    def resolve_artifact_set(self, **kwargs):
+        if self.fail:
+            raise RuntimeError("trusted catalog manifest unavailable")
+        model_digest = str(kwargs["model_version_sha256"])
+        return SimpleNamespace(
+            digest=MODEL_ARTIFACT_SET,
+            model_version_sha256=model_digest,
+            expected_bytes=1024,
+            model_versions=(model_digest,),
+            artifacts=(
+                SimpleNamespace(
+                    sha256=MODEL_ARTIFACT,
+                    expected_bytes=1024,
+                ),
+            ),
+        )
+
+    def download_preview(self, **_kwargs):
+        if self.fail:
+            raise RuntimeError("trusted catalog manifest unavailable")
+        return {
+            "artifact_set_sha256": MODEL_ARTIFACT_SET,
+            "new_bytes": self.missing_nas_bytes,
+            "blockers": [],
+        }
+
+
 class RecordingArtifactExecutor:
     def __init__(self, *, child_transfer: bool = False, bad_verify: bool = False) -> None:
         self.child_transfer = child_transfer
@@ -264,6 +296,46 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(tmp_pat
         )
     assert created is not None
     assert child is not None
+
+
+def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: lifecycle._clock(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        model_cache=ModelCacheManifestProvider(missing_nas_bytes=1024),
+        memory_floor_bytes=50,
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+    assert plan.storage.nas_coverage == "partial"
+    assert plan.storage.missing_nas_bytes == 1024
+    assert plan.preparation is not None
+    assert plan.preparation.model.artifact_set_sha256 == MODEL_ARTIFACT_SET
+    assert "run-switch.nas-coverage-unknown" not in {
+        reason.code for reason in plan.blockers
+    }
+    assert "run-switch.nas-download-required" in {
+        reason.code for reason in plan.warnings
+    }
+
+
+def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: lifecycle._clock(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        model_cache=ModelCacheManifestProvider(fail=True),
+        memory_floor_bytes=50,
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+    assert plan.allowed is False
+    assert "run-switch.artifact-inspection-unavailable" in {
+        reason.code for reason in plan.blockers
+    }
 
 
 def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_before_prepare(

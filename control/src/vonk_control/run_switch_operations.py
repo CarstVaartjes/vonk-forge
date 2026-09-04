@@ -263,6 +263,28 @@ def _safe_mapping(value: object) -> Mapping[str, object] | None:
     return value if isinstance(value, Mapping) else None
 
 
+def _manifest_value(value: object, key: str) -> object:
+    if isinstance(value, Mapping):
+        return value.get(key)
+    return getattr(value, key, None)
+
+
+def _manifest_artifact_size(manifest: object, digest: str) -> int:
+    artifacts = _manifest_value(manifest, "artifacts")
+    if isinstance(artifacts, Sequence) and not isinstance(
+        artifacts, (str, bytes, bytearray)
+    ):
+        for item in artifacts:
+            if _manifest_value(item, "sha256") != digest:
+                continue
+            size = _manifest_value(item, "expected_bytes")
+            if size is None:
+                size = _manifest_value(item, "download_bytes")
+            if type(size) is int and size > 0:
+                return size
+    raise RuntimeError("model-cache artifact size is unavailable")
+
+
 def _required_int(value: object) -> int | None:
     return value if type(value) is int and value >= 0 else None
 
@@ -448,11 +470,19 @@ def _latest_inventory(
 class DatabaseRunSwitchArtifactInspector:
     """Conservative Spark-side coverage inspector.
 
-    NAS coverage is intentionally unknown here.  The model-cache component can
-    provide a richer inspector without changing this operation contract.  A
-    missing Spark copy therefore stays a typed blocker until that evidence is
-    available instead of being represented as a guessed zero.
+    When a model-cache provider is bound, its exact manifest and download
+    preview are the authority for NAS coverage.  The database-only fallback
+    remains deliberately conservative for embedded/test callers: it never
+    treats a model revision digest as an artifact object digest.
     """
+
+    def __init__(self, model_cache: object | None = None) -> None:
+        self._model_cache = model_cache
+
+    def bind_model_cache(self, model_cache: object) -> None:
+        """Attach the Controller model-cache authority after startup wiring."""
+
+        self._model_cache = model_cache
 
     def inspect(
         self,
@@ -464,6 +494,16 @@ class DatabaseRunSwitchArtifactInspector:
         retention: str,
         now: datetime,
     ) -> ArtifactInspection:
+        if self._model_cache is not None:
+            return self._inspect_model_cache(
+                session,
+                model_cache=self._model_cache,
+                model_version_sha256=model_version_sha256,
+                recipe_revision_id=recipe_revision_id,
+                node_ids=node_ids,
+                retention=retention,
+                now=now,
+            )
         revision = session.get(LocalRecipeRevision, recipe_revision_id)
         model_document: Mapping[str, object] | None = None
         if revision is not None:
@@ -548,6 +588,153 @@ class DatabaseRunSwitchArtifactInspector:
             freshness=(),
             artifact_set_sha256=artifact_set_sha256,
             artifact_set_bytes=required,
+        )
+
+    def _inspect_model_cache(
+        self,
+        session: Session,
+        *,
+        model_cache: object,
+        model_version_sha256: str,
+        recipe_revision_id: str,
+        node_ids: tuple[str, ...],
+        retention: str,
+        now: datetime,
+    ) -> ArtifactInspection:
+        """Read exact model identity from the cache manifest provider.
+
+        Resolution is metadata-only.  A partial NAS set is a planned download
+        when the trusted catalog manifest resolves; only an unavailable or
+        contradictory provider becomes a blocker.
+        """
+
+        resolve = getattr(model_cache, "resolve_artifact_set", None)
+        preview = getattr(model_cache, "download_preview", None)
+        if not callable(resolve) or not callable(preview):
+            raise RuntimeError("model-cache manifest provider is unavailable")
+        try:
+            manifest = resolve(
+                model_version_sha256=model_version_sha256,
+                recipe_revision_id=recipe_revision_id,
+            )
+            preview_value = preview(
+                model_version_sha256=model_version_sha256,
+                recipe_revision_id=recipe_revision_id,
+            )
+        except Exception as error:
+            raise RuntimeError(f"model-cache exact manifest is unavailable: {error}") from error
+        artifact_set_sha256 = _manifest_value(manifest, "digest")
+        if artifact_set_sha256 is None:
+            artifact_set_sha256 = _manifest_value(preview_value, "artifact_set_sha256")
+        artifacts = _manifest_value(manifest, "artifacts")
+        if not _is_hex_digest(artifact_set_sha256) or not isinstance(artifacts, Sequence):
+            raise RuntimeError("model-cache exact manifest identity is invalid")
+        model_digests: list[str] = []
+        artifact_bytes = 0
+        seen: set[str] = set()
+        for item in artifacts:
+            digest = _manifest_value(item, "sha256")
+            size = _manifest_value(item, "expected_bytes")
+            if size is None:
+                size = _manifest_value(item, "download_bytes")
+            if not _is_hex_digest(digest) or type(size) is not int or size <= 0:
+                raise RuntimeError("model-cache artifact identity is invalid")
+            if digest not in seen:
+                model_digests.append(digest)
+                artifact_bytes += size
+                seen.add(digest)
+        if not model_digests or artifact_bytes < 1:
+            raise RuntimeError("model-cache exact manifest has no artifacts")
+        manifest_model_digest = _manifest_value(manifest, "model_version_sha256")
+        if manifest_model_digest not in (None, model_version_sha256):
+            raise RuntimeError("model-cache manifest model identity does not match the request")
+        manifest_bytes = _manifest_value(manifest, "expected_bytes")
+        if manifest_bytes is not None and manifest_bytes != artifact_bytes:
+            raise RuntimeError("model-cache manifest byte total does not match its artifacts")
+        missing_nas_bytes = _manifest_value(preview_value, "new_bytes")
+        if type(missing_nas_bytes) is not int or missing_nas_bytes < 0:
+            raise RuntimeError("model-cache download preview has no bounded byte total")
+        blockers: list[RunSwitchReason] = []
+        raw_preview_blockers = _manifest_value(preview_value, "blockers")
+        if isinstance(raw_preview_blockers, Sequence) and not isinstance(
+            raw_preview_blockers, (str, bytes, bytearray)
+        ):
+            for raw in raw_preview_blockers:
+                detail = str(raw).strip()
+                if detail:
+                    blockers.append(
+                        _as_reason(
+                            "run-switch.nas-download-blocked",
+                            detail,
+                            scope="artifact",
+                            node_ids=node_ids,
+                        )
+                    )
+        expected_by_digest = {
+            digest: _manifest_artifact_size(manifest, digest) for digest in model_digests
+        }
+        reused = 0
+        missing_spark = 0
+        reclaimable = 0
+        reclaimable_digests: set[str] = set()
+        for node_id in node_ids:
+            rows = tuple(
+                session.scalars(select(NodeArtifact).where(NodeArtifact.node_id == node_id))
+            )
+            by_digest = {row.digest: row for row in rows}
+            for digest, size in expected_by_digest.items():
+                row = by_digest.get(digest)
+                if row is not None and row.state == "verified" and row.size_bytes == size:
+                    reused += size
+                else:
+                    missing_spark += size
+            if retention == "reclaim-unreferenced":
+                for row in rows:
+                    if (
+                        row.digest in expected_by_digest
+                        and row.state == "verified"
+                        and row.ref_count == 0
+                    ):
+                        reclaimable += row.size_bytes
+                        reclaimable_digests.add(row.digest)
+        warnings: list[RunSwitchReason] = []
+        if missing_nas_bytes:
+            warnings.append(
+                _as_reason(
+                    "run-switch.nas-download-required",
+                    "The exact model artifact set is resolved but missing from the NAS cache; the operation will download it before Spark transfer.",
+                    scope="artifact",
+                    severity="warning",
+                    node_ids=node_ids,
+                )
+            )
+        dependency_versions = _manifest_value(manifest, "model_versions")
+        dependencies = tuple(
+            sorted(
+                value
+                for value in (dependency_versions or ())
+                if isinstance(value, str)
+                and value != model_version_sha256
+                and _is_hex_digest(value)
+            )
+        )
+        return ArtifactInspection(
+            required_bytes=artifact_bytes * len(node_ids),
+            reused_bytes=reused,
+            copied_bytes=missing_spark,
+            missing_nas_bytes=missing_nas_bytes,
+            missing_spark_bytes=missing_spark,
+            reclaimable_bytes=reclaimable,
+            nas_coverage="complete" if missing_nas_bytes == 0 else "partial",
+            spark_coverage="complete" if missing_spark == 0 else "partial",
+            artifact_digests=tuple(model_digests),
+            reclaimable_digests=tuple(sorted(reclaimable_digests)),
+            freshness=(),
+            blockers=tuple(blockers),
+            warnings=tuple(warnings),
+            artifact_set_sha256=artifact_set_sha256,
+            artifact_set_bytes=artifact_bytes,
+            dependency_model_version_sha256=dependencies,
         )
 
 
@@ -776,6 +963,7 @@ class RunSwitchOperationService:
         artifact_phase_executor: RunSwitchArtifactPhaseExecutor | None = None,
         phase_executor: RunSwitchPhaseExecutor | None = None,
         model_capability_summary: Any | None = None,
+        model_cache: object | None = None,
         inventory_max_age_seconds: int = 300,
         memory_floor_bytes: int = 4_000_000_000,
     ) -> None:
@@ -787,7 +975,7 @@ class RunSwitchOperationService:
         self._lifecycle = lifecycle
         self._clock = clock
         self._mappings = mappings or ClusterMappingService(sessions)
-        self._artifacts = artifacts or DatabaseRunSwitchArtifactInspector()
+        self._artifacts = artifacts or DatabaseRunSwitchArtifactInspector(model_cache)
         self._artifact_phase_executor = artifact_phase_executor
         self._model_capability_summary = model_capability_summary
         self._custom_phase_executor = phase_executor is not None
@@ -1099,6 +1287,16 @@ class RunSwitchOperationService:
         """
 
         return RunSwitchOperationProvider(self)
+
+    def bind_model_cache(self, model_cache: object) -> None:
+        """Bind the authoritative NAS cache after production composition."""
+
+        binder = getattr(self._artifacts, "bind_model_cache", None)
+        if not callable(binder):
+            raise RunSwitchOperationConflict(
+                "run-switch.artifact-inspector-does-not-support-model-cache"
+            )
+        binder(model_cache)
 
     def tick(self) -> bool:
         """Advance at most one high-level phase, safely after a restart."""
