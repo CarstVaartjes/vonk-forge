@@ -628,6 +628,10 @@ fn subprocess_environment(
         ("LC_ALL", "C.UTF-8".to_owned()),
         ("PATH", "/usr/bin:/bin".to_owned()),
         ("HOME", "/var/lib/vonk-forge-agent".to_owned()),
+        (
+            "XDG_CONFIG_HOME",
+            "/var/lib/vonk-forge-agent/.config".to_owned(),
+        ),
         ("XDG_DATA_HOME", "/var/lib/vonk-forge-agent".to_owned()),
         (
             "CONTAINERS_STORAGE_CONF",
@@ -750,6 +754,10 @@ mod tests {
         for program in [Program::Podman, Program::SystemdRun] {
             let environment = subprocess_environment(program, 128, &arguments);
 
+            assert_eq!(
+                environment["XDG_CONFIG_HOME"],
+                "/var/lib/vonk-forge-agent/.config"
+            );
             assert_eq!(environment["XDG_RUNTIME_DIR"], "/run/user/128");
             assert_eq!(
                 environment["DBUS_SESSION_BUS_ADDRESS"],

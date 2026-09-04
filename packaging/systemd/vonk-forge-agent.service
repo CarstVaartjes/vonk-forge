@@ -12,6 +12,7 @@ Group=vonk-agent
 SupplementaryGroups=
 ExecStart=/usr/lib/vonk-forge/vonk-agent --config /etc/vonk-forge-agent/agent.toml run
 Environment=HOME=/var/lib/vonk-forge-agent
+Environment=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config
 Environment=XDG_DATA_HOME=/var/lib/vonk-forge-agent
 Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent
 Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp

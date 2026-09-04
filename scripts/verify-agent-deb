@@ -719,6 +719,8 @@ def _verify_payload(
         not in units["vonk-forge-agent.service"]
         or "AmbientCapabilities=" not in units["vonk-forge-agent.service"]
         or "ProtectProc=default" not in units["vonk-forge-agent.service"]
+        or "XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config"
+        not in units["vonk-forge-agent.service"]
         or "CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf"
         not in units["vonk-forge-agent.service"]
         or "RestrictNamespaces=user mnt pid ipc uts cgroup net"

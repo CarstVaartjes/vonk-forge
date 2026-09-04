@@ -94,6 +94,7 @@ jobs:
           echo '=== direct build ==='
           sudo -u vonk-agent env \
             HOME=/var/lib/vonk-forge-agent \
+            XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config \
             XDG_DATA_HOME=/var/lib/vonk-forge-agent \
             XDG_RUNTIME_DIR="/run/user/$uid" \
             TMPDIR=/var/lib/vonk-forge-agent/diagnostic/tmp \
@@ -104,6 +105,7 @@ jobs:
           echo '=== transient user service build ==='
           sudo -u vonk-agent env \
             HOME=/var/lib/vonk-forge-agent \
+            XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config \
             XDG_DATA_HOME=/var/lib/vonk-forge-agent \
             XDG_RUNTIME_DIR="/run/user/$uid" \
             CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
@@ -111,6 +113,7 @@ jobs:
             systemd-run --user --wait --pipe --collect --quiet \
               --service-type=exec --unit=vonk-arm64-podman-diagnostic \
               --setenv=HOME=/var/lib/vonk-forge-agent \
+              --setenv=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config \
               --setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent \
               --setenv="XDG_RUNTIME_DIR=/run/user/$uid" \
               --setenv=TMPDIR=/var/lib/vonk-forge-agent/diagnostic/tmp \
