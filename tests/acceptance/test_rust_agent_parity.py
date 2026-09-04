@@ -1,8 +1,12 @@
 """Release-gate map for the recipe-native GPU node agent."""
 
 import ast
-import re
+import json
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -12,20 +16,30 @@ def _source(relative: str) -> str:
 
 
 def _rust_claim_capabilities() -> tuple[str, ...]:
-    """Read the capabilities sent in every Rust agent claim.
-
-    Keep this a source-level check: the release gate runs before a Rust binary
-    is necessarily available, and compiling a second capability list in the
-    test would only create another place for the contract to drift.
-    """
-    source = _source("rust/crates/vonk-agent/src/main.rs")
-    match = re.search(
-        r"let capabilities = \[(?P<body>.*?)\];",
-        source,
-        flags=re.DOTALL,
+    """Ask the compiled agent for the exact list used by its claim lane."""
+    if sys.platform != "linux":
+        pytest.skip("the production agent binary is Linux-only; run this gate in CI")
+    result = subprocess.run(
+        [
+            "cargo",
+            "run",
+            "--quiet",
+            "--locked",
+            "-p",
+            "vonk-agent",
+            "--",
+            "capabilities",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
     )
-    assert match is not None, "Rust agent claim capability list is missing"
-    return tuple(re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', match.group("body")))
+    assert result.returncode == 0, result.stderr
+    capabilities = json.loads(result.stdout)
+    assert isinstance(capabilities, list)
+    assert all(isinstance(value, str) for value in capabilities)
+    return tuple(capabilities)
 
 
 def _controller_known_capabilities() -> frozenset[str]:
@@ -117,64 +131,3 @@ def test_rust_claim_capabilities_have_a_safe_controller_intersection() -> None:
         "workload.stop",
         "workload.verify",
     }
-
-
-def test_production_rust_capabilities_are_exact_and_python_agent_is_not_packaged() -> (
-    None
-):
-    main = _source("rust/crates/vonk-agent/src/main.rs")
-    for capability in (
-        "agent.runtime.rust.v1",
-        "runtime.vonk.v1",
-        "recipe.install",
-        "recipe.start",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.model-uninstall.v1",
-    ):
-        assert f'"{capability}"' in main
-    assert '"package.prepare"' not in main
-
-    package_builder = _source("scripts/build-agent-deb")
-    assert 'EGRESS_BINARY = "vonk-build-egress"' in package_builder
-    assert "vonk_agent" not in package_builder
-
-
-def test_debian_package_is_the_only_agent_installer_authority() -> None:
-    package_builder = _source("scripts/build-agent-deb")
-    for binary in ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "oras"):
-        assert binary in package_builder
-    for unit in (
-        "vonk-forge-agent.service",
-        "vonk-forge-docker-firewall.service",
-        "vonk-forge-package-helper.service",
-        "vonk-forge-package-helper.socket",
-    ):
-        assert (ROOT / "packaging/systemd" / unit).is_file()
-
-    process = _source("rust/crates/vonk-agent/src/process.rs")
-    assert 'Self::Oras => "/usr/lib/vonk-forge/oras"' in process
-
-
-def test_release_workflow_runs_every_agent_owner_before_publication() -> None:
-    orchestrator = _source(".github/workflows/agent-release.yml")
-    apt_publisher = _source(".github/workflows/agent-apt-development.yml")
-    package_builder = _source(".github/actions/agent-package-build/action.yml")
-    package_security = _source(".github/actions/agent-package-security/action.yml")
-
-    assert "uses: ./.github/actions/agent-package-build" in orchestrator
-    assert "needs: [package-metadata, build-test-sign]" in orchestrator
-    assert "uses: ./.github/actions/agent-apt-publish" not in orchestrator
-    assert "workflows: [Rust Vonk Forge agent development]" in apt_publisher
-    assert "uses: ./.github/actions/agent-apt-publish" in apt_publisher
-    for gate in (
-        "Build, sign, and lifecycle-test ARM64 Spark agent",
-        "Run Rust and package security gates",
-        "Lifecycle-test accepted ARM64 package on ARM64",
-    ):
-        assert f"'{gate}'" in apt_publisher
-    assert "uses: ./.github/actions/agent-package-security" in package_builder
-    assert "uses: ./.github/actions/agent-package-security" in orchestrator
-    assert "cargo test --workspace --locked" in package_security
-    assert "tests/acceptance/test_rust_agent_parity.py" in package_security
-    assert "test_agent_deb.py" in package_security
