@@ -2012,7 +2012,10 @@ class RecipeInstallation(Base):
         ForeignKey("recipe_builds.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     image_digest: Mapped[str] = mapped_column(String(71), nullable=False)
-    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # A digest identifies the approved plan contents, not one installation row.
+    # Reinstalling the same immutable plan after uninstall is legitimate and must
+    # not depend on transient inventory noise to manufacture a new digest.
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
