@@ -230,22 +230,49 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install pinned Node.js with generator dependency cache
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: tools/openapi-client/package-lock.json
+          fetch-depth: 0
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
+      - name: Generate the OpenAPI schema without Node tooling
+        id: generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/generate-control-clients --schema-only
+          run_full=false
+          if ! git diff --quiet -- control/openapi.json; then
+            run_full=true
+          elif [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            run_full=true
+          elif ! git diff --quiet "$GITHUB_BASE_SHA" "$GITHUB_SHA" -- \
+            scripts/generate-control-clients \
+            control/openapi-python-client.yaml \
+            tools/openapi-client \
+            src/cluster_profiles/generated_control \
+            control/web/src/api/generated.d.ts; then
+            run_full=true
+          fi
+          echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Node.js with generator dependency cache
+        if: steps.generation.outputs.run_full == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tools/openapi-client/package-lock.json
       - name: Install pinned TypeScript generator
+        if: steps.generation.outputs.run_full == 'true'
         run: npm ci --prefix tools/openapi-client
-      - name: Verify generated OpenAPI and clients
-        run: uv run --project control --frozen --with-editable . pytest tests/control/test_openapi_clients.py -v
+      - name: Generate language clients once when their contract changed
+        if: steps.generation.outputs.run_full == 'true'
+        run: scripts/generate-control-clients
+      - name: Verify generated client behavior
+        run: uv run --project control --frozen --with-editable . pytest tests/control/test_openapi_clients.py -q
       - name: Reject generated drift
         run: git diff --exit-code -- control/openapi.json src/cluster_profiles/generated_control control/web/src/api/generated.d.ts
 
