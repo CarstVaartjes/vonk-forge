@@ -243,6 +243,7 @@ def assemble_production_worker(
     from .recipe_operations import RecipeOperationService
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
     from .run_admission import RunAdmissionService
+    from .run_switch_operations import RunSwitchOperationService
     from .source_bundles import DatabaseSourceBundleStore
     from .telemetry_maintenance import (
         TelemetryMaintenance,
@@ -291,6 +292,12 @@ def assemble_production_worker(
         ),
         mappings=ClusterMappingService(sessions),
     )
+    run_switch_operations = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=clock,
+        mappings=ClusterMappingService(sessions),
+    )
     recipe_operations = RecipeOperationWorker(
         sessions,
         recipe_routes,
@@ -300,6 +307,7 @@ def assemble_production_worker(
             clock=clock,
             recipe_operations=lifecycle,
         ),
+        run_switches=run_switch_operations,
         recoveries=DistributedRecoveryCoordinator(
             sessions,
             routes=recipe_routes,
