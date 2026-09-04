@@ -667,23 +667,6 @@ def _capability_inventory(
 
     # Stable ordering makes JSON comparison and client caching deterministic.
     facts.sort(key=lambda item: (item.capability, item.support, item.evidence_status))
-    by_name: dict[str, set[str]] = {}
-    for fact in facts:
-        by_name.setdefault(fact.capability, set()).add(fact.support)
-    contradictory = {
-        name
-        for name, supports in by_name.items()
-        if {"supported", "unsupported"}.issubset(supports)
-    }
-    if contradictory:
-        facts = [
-            fact.model_copy(
-                update={"evidence_status": "contradicted"}
-            )
-            if fact.capability in contradictory
-            else fact
-            for fact in facts
-        ]
     reasons = []
     if invalid:
         reasons.append(
@@ -695,16 +678,6 @@ def _capability_inventory(
             )
         )
     state: Literal["declared", "unknown", "contradictory"] = "declared"
-    if contradictory:
-        state = "contradictory"
-        reasons.append(
-            _reason(
-                "capability.contradictory_declaration",
-                "The exact identity declares conflicting support values for one or "
-                "more capabilities.",
-                "error",
-            )
-        )
     if not facts and invalid:
         state = "unknown"
     return LibraryCapabilityInventory(
@@ -717,17 +690,26 @@ def _capability_inventory(
 
 def _model_capabilities(
     reference: Mapping[str, object],
-    document: Mapping[str, object] | None,
 ) -> LibraryCapabilityInventory:
-    return _capability_inventory(
-        source_kind="model-version",
-        publisher=reference.get("publisher"),
-        slug=reference.get("slug"),
-        content_sha256=reference.get("content_sha256"),
-        document=document,
-        raw=None if document is None else document.get("capabilities"),
-        path="capabilities",
-        unknown_code="model.capabilities_unknown",
+    """Keep model capability support unknown until catalog authority declares it."""
+
+    return LibraryCapabilityInventory(
+        state="unknown",
+        provenance=_capability_provenance(
+            source_kind="model-version",
+            publisher=reference.get("publisher"),
+            slug=reference.get("slug"),
+            content_sha256=reference.get("content_sha256"),
+            path=None,
+            evidence_digest=None,
+        ),
+        reasons=[
+            _reason(
+                "model.capabilities_unknown",
+                "The current model-version catalog contract has no accepted typed capability declaration.",
+                "info",
+            )
+        ],
     )
 
 
@@ -735,7 +717,6 @@ def _recipe_capabilities(
     recipe: LocalRecipe,
     revision: LocalRecipeRevision | None,
     document: Mapping[str, object] | None,
-    model_capabilities: LibraryCapabilityInventory,
 ) -> LibraryCapabilityInventory:
     reference_digest = None if revision is None else revision.content_sha256
     raw = None
@@ -758,35 +739,6 @@ def _recipe_capabilities(
         unknown_code="recipe.capabilities_unknown",
         revision_id=None if revision is None else revision.id,
     )
-    model_support = {
-        fact.capability: fact.support for fact in model_capabilities.facts
-    }
-    contradictory_names = {
-        fact.capability
-        for fact in inventory.facts
-        if model_support.get(fact.capability) == "unsupported"
-    }
-    if contradictory_names:
-        inventory = inventory.model_copy(
-            update={
-                "state": "contradictory",
-                "facts": [
-                    fact.model_copy(update={"evidence_status": "contradicted"})
-                    if fact.capability in contradictory_names
-                    else fact
-                    for fact in inventory.facts
-                ],
-                "reasons": [
-                    *inventory.reasons,
-                    _reason(
-                        "capability.model_recipe_conflict",
-                        "The recipe exposes a capability explicitly marked unsupported "
-                        "by the exact model version.",
-                        "error",
-                    ),
-                ],
-            }
-        )
     return inventory
 
 
@@ -1067,22 +1019,6 @@ class LibraryProjection:
             rows = list(session.execute(statement.limit(limit + 1)))
             page = rows[:limit]
             recipe_ids = [recipe.id for recipe, _revision in page]
-            model_references: dict[tuple[str, str, str], Mapping[str, object]] = {}
-            for _recipe, revision in page:
-                document, _document_reasons = _validated_document(revision)
-                if document is None or not isinstance(document.get("model"), Mapping):
-                    continue
-                reference = document["model"]
-                key = (
-                    str(reference.get("publisher")),
-                    str(reference.get("slug")),
-                    str(reference.get("content_sha256")),
-                )
-                model_references[key] = reference
-            model_documents = {
-                key: _resolved_model_version_reference(session, reference)
-                for key, reference in model_references.items()
-            }
             ranked_installations = (
                 select(
                     LocalRecipeRevision.recipe_id.label("recipe_id"),
@@ -1333,7 +1269,7 @@ class LibraryProjection:
             model_identity: tuple[str, str, str] | None = None
             model_capabilities = LibraryCapabilityInventory()
             recipe_capabilities = _recipe_capabilities(
-                recipe, revision, document, model_capabilities
+                recipe, revision, document
             )
             if document is not None:
                 model = document["model"]
@@ -1342,13 +1278,8 @@ class LibraryProjection:
                     str(model["slug"]),
                     str(model["content_sha256"]),
                 )
-                model_capabilities = _model_capabilities(
-                    model,
-                    model_documents.get(model_identity),
-                )
-                recipe_capabilities = _recipe_capabilities(
-                    recipe, revision, document, model_capabilities
-                )
+                model_capabilities = _model_capabilities(model)
+                recipe_capabilities = _recipe_capabilities(recipe, revision, document)
                 capabilities = [
                     _bounded_text(item["adapter"], 64)
                     for item in document["interfaces"]
@@ -1421,8 +1352,11 @@ class LibraryProjection:
                     },
                     recipes=values,
                     model_capabilities=_model_capabilities(
-                        model_references[(publisher, slug, content_sha256)],
-                        model_documents.get((publisher, slug, content_sha256)),
+                        {
+                            "publisher": publisher,
+                            "slug": slug,
+                            "content_sha256": content_sha256,
+                        }
                     ),
                 )
                 for (publisher, slug, content_sha256), values in sorted(grouped.items())
@@ -1465,15 +1399,11 @@ class LibraryProjection:
                 model_version_document = _resolved_model_version_document(
                     session, document
                 )
-                model_capabilities = _model_capabilities(
-                    model_reference, model_version_document
-                )
-                recipe_capabilities = _recipe_capabilities(
-                    recipe, revision, document, model_capabilities
-                )
+                model_capabilities = _model_capabilities(model_reference)
+                recipe_capabilities = _recipe_capabilities(recipe, revision, document)
             else:
                 recipe_capabilities = _recipe_capabilities(
-                    recipe, revision, None, model_capabilities
+                    recipe, revision, None
                 )
             operational_truncations: dict[str, int] = {}
             # Phase 1: prioritize active runs before the bounded public history.
