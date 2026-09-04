@@ -1596,6 +1596,7 @@ def production_app() -> FastAPI:
             clock=clock,
             cursors=cursor_codec,
             resume_agent_upgrade=agent_upgrades.resume,
+            operation_providers=(fleet_profiles.operation_provider(),),
         ),
         catalog=catalog_service,
         global_catalog=global_catalog,

@@ -21,6 +21,7 @@ from vonk_control.fleet_projection import (
     FleetSnapshot,
     TelemetryHistoryResponse,
 )
+from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -28,6 +29,8 @@ from vonk_control.models import (
     AgentOperationAttempt,
     AgentPresence,
     Base,
+    FleetProfile,
+    FleetProfileApplication,
     Job,
     Reconciliation,
     RoutePublication,
@@ -40,6 +43,7 @@ from vonk_control.operation_api import (
     OperationPage,
     OperationProvider,
     OperationQuery,
+    durable_operation_services,
 )
 
 COMMIT = "a" * 64
@@ -371,6 +375,110 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     assert filtered.status_code == 200
     assert filtered.json()["total"] == 1
     assert filtered.json()["operations"][0]["id"] == "run-1"
+
+
+def test_profile_operation_provider_is_registered_through_the_global_api(
+    tmp_path,
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'profile-operations.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    profile_id = "44444444-4444-4444-8444-444444444444"
+    newest_id = "55555555-5555-4555-8555-555555555555"
+    older_id = "66666666-6666-4666-8666-666666666666"
+    second_node = "spk_" + "2" * 32
+    now = datetime(2026, 8, 15, 12, tzinfo=UTC)
+    with sessions.begin() as session:
+        session.add(
+            FleetProfile(
+                id=profile_id,
+                name="Studio",
+                description="",
+                installation_policy="keep-cached",
+                assignments=[],
+                scope=[NODE_ID, second_node],
+                labels={},
+                favorite=False,
+                created_by="admin",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        for operation_id, request_key, plan_digest, created_at, node_ids in (
+            (
+                newest_id,
+                "77777777-7777-4777-8777-777777777777",
+                "7" * 64,
+                now,
+                [NODE_ID, second_node],
+            ),
+            (
+                older_id,
+                "88888888-8888-4888-8888-888888888888",
+                "8" * 64,
+                now - timedelta(minutes=1),
+                [NODE_ID],
+            ),
+        ):
+            session.add(
+                FleetProfileApplication(
+                    id=operation_id,
+                    request_key=request_key,
+                    profile_id=profile_id,
+                    profile_digest="9" * 64,
+                    plan_digest=plan_digest,
+                    state="running",
+                    plan={"scope": {"node_ids": node_ids}, "steps": [{"kind": "start"}]},
+                    current_step=0,
+                    current_operation_id=None,
+                    progress={"operation_kind": "fleet-profile.apply"},
+                    result=None,
+                    status_reason=None,
+                    actor="admin",
+                    created_at=created_at,
+                    updated_at=created_at,
+                )
+            )
+
+    profiles = FleetProfileService(sessions, clock=lambda: now)
+    services = durable_operation_services(
+        sessions,
+        tmp_path / "routes",
+        clock=lambda: now,
+        cursors=TokenCodec(b"q" * 32).cursor_codec(),
+        operation_providers=(profiles.operation_provider(),),
+    )
+    client, operator, *_ = _client(operations=services)
+
+    first = client.get(
+        "/api/v1/operations", headers=operator, params={"limit": 1}
+    )
+    detail = client.get(f"/api/v1/operations/{newest_id}", headers=operator)
+    second = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"limit": 1, "cursor": first.json()["next_cursor"]},
+    )
+    filtered = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"node_id": second_node},
+    )
+
+    assert first.status_code == 200
+    assert first.json()["total"] == 2
+    assert first.json()["operations"][0]["id"] == newest_id
+    assert first.json()["operations"][0]["node_ids"] == [NODE_ID, second_node]
+    assert first.json()["next_cursor"] is not None
+    assert detail.status_code == 200
+    assert detail.json()["kind"] == "fleet-profile.apply"
+    assert detail.json()["progress"] == {"phase": "start"}
+    assert second.status_code == 200
+    assert second.json()["total"] == 2
+    assert second.json()["operations"][0]["id"] == older_id
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["operations"][0]["id"] == newest_id
 
 
 def test_fleet_exposes_visual_state_and_node_evidence() -> None:
