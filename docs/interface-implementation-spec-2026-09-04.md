@@ -182,3 +182,7 @@ The [metrics implementation and visual acceptance contract](interface-metrics-sp
 ## Controller preparation decision
 
 The [Controller-owned rollout preparation contract](controller-preparation-contract-2026-09-05.md) makes the Controller the preparation and delivery authority for both model files and runtime images. Profile preparation stages both onto selected Sparks before quick switching. This is required implementation scope.
+
+## Superseding UX simplification — 2026-09-05
+
+User direction: recipes should just work. Normal actions are Run and Switch profile, with automatic Controller preparation and plain progress/errors. Mandatory review screens and readiness/qualification ceremonies are removed from the default workflow. Internal verification, scoped authorization and idempotency remain. See the superseding product direction in [Controller preparation](controller-preparation-contract-2026-09-05.md). Optional preparation, cache downloads and advanced plan inspection are secondary tools. Recipe updates remain deferred.
