@@ -1006,6 +1006,106 @@ class FleetProfileService:
             session.flush()
             return self._application_view(row)
 
+    def operation_provider(self) -> object:
+        """Project profile applications into the global Activity provider contract."""
+
+        # Keep this import local so the profile domain remains usable by the
+        # profile routes when the optional Activity projection is unavailable.
+        from .operation_api import OperationListPage, OperationProvider
+
+        def list_operations(query: object) -> object:
+            after = getattr(query, "after", None)
+            state = getattr(query, "state", None)
+            node_id = getattr(query, "node_id", None)
+            limit = int(getattr(query, "limit", 100))
+            with self._sessions() as session:
+                statement = select(FleetProfileApplication).order_by(
+                    FleetProfileApplication.created_at.desc(),
+                    FleetProfileApplication.id.desc(),
+                )
+                if isinstance(state, str):
+                    statement = statement.where(FleetProfileApplication.state == state)
+                candidates = tuple(session.scalars(statement))
+                rows = [
+                    row
+                    for row in candidates
+                    if node_id is None
+                    or node_id in self._operation_scope(row)
+                ]
+                total = len(rows)
+                if after is not None:
+                    after_at, after_id = after
+                    rows = [
+                        row
+                        for row in rows
+                        if (
+                            _aware(row.created_at), row.id
+                        ) < (_aware(after_at), after_id)
+                    ]
+                items = [self._operation_item(row) for row in rows]
+                return OperationListPage(
+                    items=items[:limit], next_cursor=None, total=total
+                )
+
+        def get_operation(operation_id: str) -> Mapping[str, object]:
+            with self._sessions() as session:
+                row = session.get(FleetProfileApplication, operation_id)
+                if row is None:
+                    raise KeyError(operation_id)
+                return self._operation_item(row)
+
+        return OperationProvider(
+            family="fleet-profile",
+            list_operations=list_operations,
+            get_operation=get_operation,
+        )
+
+    @staticmethod
+    def _operation_scope(row: FleetProfileApplication) -> tuple[str, ...]:
+        plan = row.plan if isinstance(row.plan, Mapping) else {}
+        scope = plan.get("scope")
+        node_ids = scope.get("node_ids") if isinstance(scope, Mapping) else None
+        if not isinstance(node_ids, list):
+            return ()
+        return tuple(node_id for node_id in node_ids if isinstance(node_id, str))
+
+    @classmethod
+    def _operation_phase(cls, row: FleetProfileApplication) -> str:
+        if row.state == "succeeded":
+            return "final_verify"
+        plan = row.plan if isinstance(row.plan, Mapping) else {}
+        steps = plan.get("steps")
+        if isinstance(steps, list) and 0 <= row.current_step < len(steps):
+            step = steps[row.current_step]
+            kind = step.get("kind") if isinstance(step, Mapping) else None
+            if kind in {"create-placement", "build", "distribute-image", "install"}:
+                return "prepare"
+            if kind == "stop":
+                return "stop"
+            if kind == "uninstall":
+                return "cleanup"
+            if kind == "start":
+                return "start"
+        return "final_verify"
+
+    @classmethod
+    def _operation_item(cls, row: FleetProfileApplication) -> dict[str, object]:
+        progress = dict(row.progress) if isinstance(row.progress, Mapping) else {}
+        progress["phase"] = cls._operation_phase(row)
+        return {
+            "id": row.id,
+            "parent_id": None,
+            "node_ids": list(cls._operation_scope(row)),
+            "kind": "fleet-profile.apply",
+            "state": row.state,
+            "attempt": 1,
+            "progress": progress,
+            "created_at": _aware(row.created_at).isoformat(),
+            "updated_at": _aware(row.updated_at).isoformat(),
+            "supported_actions": [],
+            "result": row.result,
+        }
+
     def application(self, application_id: str) -> FleetProfileApplicationView:
         with self._sessions() as session:
             row = session.get(FleetProfileApplication, application_id)

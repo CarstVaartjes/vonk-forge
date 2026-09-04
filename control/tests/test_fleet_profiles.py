@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_control import operation_api
 from vonk_control.cluster_mappings import ClusterMappingPlan
 from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfileScope
 from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
@@ -666,6 +667,49 @@ def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() 
             )
         } == {_node_id(1), _node_id(2)}
     assert operations.events == ["stop", "start"]
+
+
+def test_profile_operation_provider_projects_bound_scope_and_phase(monkeypatch) -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(40),
+        actor="admin",
+    )
+
+    class _Page:
+        def __init__(self, items, next_cursor, total):
+            self.items = items
+            self.next_cursor = next_cursor
+            self.total = total
+
+    class _Provider:
+        def __init__(self, *, family, list_operations, get_operation):
+            self.family = family
+            self.list_operations = list_operations
+            self.get_operation = get_operation
+
+    monkeypatch.setattr(operation_api, "OperationListPage", _Page, raising=False)
+    monkeypatch.setattr(operation_api, "OperationProvider", _Provider, raising=False)
+    provider = service.operation_provider()
+    page = provider.list_operations(
+        SimpleNamespace(after=None, limit=10, state="queued", node_id=None)
+    )
+
+    assert provider.family == "fleet-profile"
+    assert page.total == 1
+    item = page.items[0]
+    assert item["id"] == application.id
+    assert item["parent_id"] is None
+    assert item["node_ids"] == [_node_id(1)]
+    assert item["kind"] == "fleet-profile.apply"
+    assert item["progress"]["phase"] == "prepare"
+    assert provider.get_operation(application.id) == item
 
 
 def test_profile_contract_rejects_ambiguous_or_incomplete_assignments() -> None:
