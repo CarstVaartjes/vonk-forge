@@ -311,28 +311,51 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
     return result
 
 
-def recovery_for_state(state: str, *, uncertain: bool = False) -> OperationRecovery:
-    """Describe actions the Controller can safely offer for an operation state."""
+def recovery_for_operation(
+    state: str,
+    *,
+    supported_actions: object = None,
+    available_actions: object = None,
+    uncertain: bool = False,
+) -> OperationRecovery:
+    """Project only actions explicitly persisted by the Controller.
 
-    if uncertain or state in {"waiting-for-operator", "uncertain"}:
-        return OperationRecovery(
-            uncertain=True,
-            actions=[
-                OperationRecoveryAction.INSPECT,
-                OperationRecoveryAction.RESUME,
-                OperationRecoveryAction.CANCEL,
-            ],
-            explanation="Inspect the durable outcome before resuming or retrying.",
-        )
-    if state in {"failed", "expired"}:
-        return OperationRecovery(
-            actions=[OperationRecoveryAction.RETRY, OperationRecoveryAction.INSPECT]
-        )
-    if state in {"queued", "running"}:
-        return OperationRecovery(
-            actions=[OperationRecoveryAction.CANCEL, OperationRecoveryAction.INSPECT]
-        )
-    return OperationRecovery(actions=[OperationRecoveryAction.INSPECT])
+    State alone cannot prove that a retry, resume, or cancel route is safe for
+    a particular operation. Every operation therefore defaults to inspection;
+    workers may advertise a bounded subset in ``supported_actions``. API
+    projections may further intersect those actions with routes that exist.
+    """
+
+    actions: list[OperationRecoveryAction] = [OperationRecoveryAction.INSPECT]
+    advertised: list[OperationRecoveryAction] = []
+    if isinstance(supported_actions, (list, tuple, set, frozenset)):
+        for raw in supported_actions:
+            try:
+                action = OperationRecoveryAction(raw)
+            except (TypeError, ValueError):
+                continue
+            if action not in advertised:
+                advertised.append(action)
+    if available_actions is None:
+        permitted = set(advertised)
+    else:
+        permitted = {OperationRecoveryAction(raw) for raw in available_actions}
+    actions.extend(action for action in advertised if action in permitted)
+    return OperationRecovery(
+        uncertain=uncertain or state in {"waiting-for-operator", "uncertain"},
+        actions=actions,
+        explanation=(
+            "Inspect the durable outcome before taking recovery action."
+            if uncertain or state in {"waiting-for-operator", "uncertain"}
+            else None
+        ),
+    )
+
+
+def recovery_for_state(state: str, *, uncertain: bool = False) -> OperationRecovery:
+    """Compatibility wrapper with the conservative inspection-only default."""
+
+    return recovery_for_operation(state, uncertain=uncertain)
 
 
 __all__ = [
@@ -346,6 +369,7 @@ __all__ = [
     "OperationRecovery",
     "OperationRecoveryAction",
     "normalize_operation_progress",
+    "recovery_for_operation",
     "recovery_for_state",
     "sanitize_failure_evidence",
     "validate_progress_update",

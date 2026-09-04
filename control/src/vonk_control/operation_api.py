@@ -42,8 +42,9 @@ from .operation_contract import (
     OperationFailureEvidence,
     OperationMemberProgress,
     OperationRecovery,
+    OperationRecoveryAction,
     normalize_operation_progress,
-    recovery_for_state,
+    recovery_for_operation,
     sanitize_failure_evidence,
 )
 from .route_runtime import verify_active_route_bundle
@@ -110,9 +111,11 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/proposals"): "previewProposal",
     ("post", "/api/v1/changes"): "submitChange",
     ("get", "/api/v1/jobs"): "listJobs",
+    ("get", "/api/v1/operations"): "listOperations",
     ("get", "/api/v1/audit"): "listAuditEvents",
     ("get", "/api/v1/identity-history"): "listIdentityHistory",
     ("get", "/api/v1/jobs/{job_id}"): "getJob",
+    ("get", "/api/v1/operations/{operation_id}"): "getOperation",
     ("post", "/api/v1/jobs/{job_id}/resume"): "resumeJob",
     ("get", "/api/v1/jobs/{job_id}/logs"): "listJobLogs",
     ("get", "/api/v1/jobs/{job_id}/logs/{digest}"): "getJobLog",
@@ -237,6 +240,16 @@ class JobOperationResponse(StrictModel):
         return document
 
 
+class OperationDetailResponse(JobOperationResponse):
+    job_id: str = Field(min_length=1, max_length=128)
+
+
+class OperationsResponse(StrictModel):
+    operations: list[OperationDetailResponse] = Field(max_length=100)
+    next_cursor: str | None = Field(default=None, max_length=512)
+    total: int = Field(ge=0)
+
+
 class JobProgress(StrictModel):
     completed: int = Field(ge=0)
     failed: int = Field(ge=0)
@@ -318,6 +331,10 @@ class OperationApiServices:
     agents: Callable[[], Sequence[Mapping[str, object]]]
     job_operations: Callable[[str, str | None, int], OperationPage]
     resume_job: Callable[[str], None]
+    list_operations: (
+        Callable[[str | None, int, str | None, str | None], OperationListPage] | None
+    ) = None
+    get_operation: Callable[[str], Mapping[str, object]] | None = None
 
 
 @dataclass(frozen=True)
@@ -326,6 +343,13 @@ class OperationPage:
     next_cursor: str | None
     progress: JobProgress
     agent_upgrade_diagnostics: Mapping[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class OperationListPage:
+    items: Sequence[Mapping[str, object]]
+    next_cursor: str | None
+    total: int
 
 
 def job_response(
@@ -355,8 +379,10 @@ def job_response(
             failure=_failure_projection(item.get("result")),
             provenance=_provenance_projection(item.get("result")),
             evidence_download=_evidence_download_projection(item.get("result")),
-            recovery=recovery_for_state(
+            recovery=recovery_for_operation(
                 str(item["state"]),
+                supported_actions=item.get("supported_actions"),
+                available_actions=(OperationRecoveryAction.RESUME,),
                 uncertain=bool(
                     isinstance(item.get("result"), Mapping)
                     and item["result"].get("uncertain") is True
@@ -499,6 +525,70 @@ def _evidence_download_projection(value: object) -> OperationEvidenceDownload | 
         return OperationEvidenceDownload.model_validate(value["evidence_download"])
     except (TypeError, ValueError):
         return None
+
+
+def _operation_item(
+    operation: AgentOperation, attempt: AgentOperationAttempt | None
+) -> dict[str, object]:
+    """Project one durable operation without exposing its unbounded payload."""
+
+    progress = None
+    result = None
+    if attempt is not None:
+        projected = _progress_projection(attempt.progress)
+        progress = None if projected is None else projected.model_dump(mode="json")
+        result = attempt.result
+    return {
+        "attempt": operation.current_attempt,
+        "id": operation.id,
+        "kind": operation.kind,
+        "node_id": operation.node_id,
+        "progress": progress,
+        "result": result,
+        "supported_actions": (
+            operation.payload.get("supported_actions")
+            if isinstance(operation.payload, Mapping)
+            else None
+        ),
+        "state": operation.state,
+        "updated_at": _aware(operation.updated_at).isoformat(),
+    }
+
+
+def operation_detail_response(
+    item: Mapping[str, object], *, available_actions: object = ()
+) -> OperationDetailResponse:
+    """Build the bounded generic read representation from a durable projection."""
+
+    return OperationDetailResponse(
+        id=str(item["id"]),
+        job_id=str(item["job_id"]),
+        graph_operation_id=(
+            None
+            if item.get("graph_operation_id") is None
+            else str(item["graph_operation_id"])
+        ),
+        node_id=str(item["node_id"]),
+        kind=str(item["kind"]),
+        state=str(item["state"]),
+        attempt=int(item["attempt"]),
+        progress=_progress_projection(item.get("progress")),
+        updated_at=(
+            None if item.get("updated_at") is None else str(item["updated_at"])
+        ),
+        failure=_failure_projection(item.get("result")),
+        provenance=_provenance_projection(item.get("result")),
+        evidence_download=_evidence_download_projection(item.get("result")),
+        recovery=recovery_for_operation(
+            str(item["state"]),
+            supported_actions=item.get("supported_actions"),
+            available_actions=available_actions,
+            uncertain=bool(
+                isinstance(item.get("result"), Mapping)
+                and item["result"].get("uncertain") is True
+            ),
+        ),
+    )
 
 
 def _aware(value: datetime) -> datetime:
@@ -929,6 +1019,11 @@ class _DurableOperationProjection:
                     if attempts.get(operation.id) is None
                     else attempts[operation.id].result
                 ),
+                "supported_actions": (
+                    operation.payload.get("supported_actions")
+                    if isinstance(operation.payload, Mapping)
+                    else None
+                ),
                 "state": operation.state,
                 "updated_at": _aware(operation.updated_at).isoformat(),
             }
@@ -957,6 +1052,125 @@ class _DurableOperationProjection:
             ),
             agent_upgrade_diagnostics=agent_upgrade_diagnostics,
         )
+
+    def list_operations(
+        self,
+        cursor: str | None,
+        limit: int,
+        state: str | None,
+        node_id: str | None,
+    ) -> OperationListPage:
+        """List the same durable AgentOperation authority globally."""
+
+        if not 1 <= limit <= 100:
+            raise ValueError("operation page limit is invalid")
+        context = {"state": state, "node_id": node_id}
+        boundary: tuple[datetime, str] | None = None
+        if cursor is not None:
+            try:
+                decoded = self._cursors.decode(
+                    cursor,
+                    resource="operations",
+                    order="created-at-desc/id-desc/v1",
+                    context=context,
+                )
+                if (
+                    not isinstance(decoded, list)
+                    or len(decoded) != 2
+                    or not all(isinstance(item, str) for item in decoded)
+                ):
+                    raise ValueError
+                boundary = (datetime.fromisoformat(decoded[0]), decoded[1])
+            except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+                raise ValueError("operation cursor is invalid") from None
+        with self._sessions() as session:
+            filters = []
+            if state is not None:
+                filters.append(AgentOperation.state == state)
+            if node_id is not None:
+                filters.append(AgentOperation.node_id == node_id)
+            if boundary is not None:
+                created_at, operation_id = boundary
+                filters.append(
+                    or_(
+                        AgentOperation.created_at < created_at,
+                        (AgentOperation.created_at == created_at)
+                        & (AgentOperation.id < operation_id),
+                    )
+                )
+            rows = list(
+                session.scalars(
+                    select(AgentOperation)
+                    .where(*filters)
+                    .order_by(
+                        AgentOperation.created_at.desc(), AgentOperation.id.desc()
+                    )
+                    .limit(limit + 1)
+                )
+            )
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            total_filters = []
+            if state is not None:
+                total_filters.append(AgentOperation.state == state)
+            if node_id is not None:
+                total_filters.append(AgentOperation.node_id == node_id)
+            total = int(
+                session.scalar(
+                    select(func.count())
+                    .select_from(AgentOperation)
+                    .where(*total_filters)
+                )
+                or 0
+            )
+            attempts = {
+                attempt.operation_id: attempt
+                for attempt in session.scalars(
+                    select(AgentOperationAttempt).where(
+                        AgentOperationAttempt.operation_id.in_([row.id for row in rows])
+                    )
+                )
+                if any(
+                    row.id == attempt.operation_id
+                    and row.current_attempt == attempt.attempt
+                    for row in rows
+                )
+            }
+        items = [
+            {
+                **_operation_item(row, attempts.get(row.id)),
+                "created_at": _aware(row.created_at).isoformat(),
+                "job_id": row.parent_job_id,
+            }
+            for row in rows
+        ]
+        next_cursor = None
+        if has_more and rows:
+            last = rows[-1]
+            next_cursor = self._cursors.encode(
+                resource="operations",
+                order="created-at-desc/id-desc/v1",
+                context=context,
+                boundary=[_aware(last.created_at).isoformat(), last.id],
+            )
+        return OperationListPage(items=items, next_cursor=next_cursor, total=total)
+
+    def get_operation(self, operation_id: str) -> Mapping[str, object]:
+        with self._sessions() as session:
+            operation = session.get(AgentOperation, operation_id)
+            if operation is None:
+                raise KeyError(operation_id)
+            attempt = session.scalar(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == operation.id,
+                    AgentOperationAttempt.attempt == operation.current_attempt,
+                )
+            )
+            return {
+                **_operation_item(operation, attempt),
+                "created_at": _aware(operation.created_at).isoformat(),
+                "job_id": operation.parent_job_id,
+            }
 
     def resume_job(self, job_id: str) -> None:
         with self._sessions.begin() as session:
@@ -1024,6 +1238,8 @@ def durable_operation_services(
         agents=projection.agents,
         job_operations=projection.job_operations,
         resume_job=resume_job,
+        list_operations=projection.list_operations,
+        get_operation=projection.get_operation,
     )
 
 

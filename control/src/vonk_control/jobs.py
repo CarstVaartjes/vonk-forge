@@ -372,6 +372,7 @@ class JobService:
 
         return (
             existing.kind == requested.kind
+            and existing.actor == requested.actor
             and existing.authority_revision == requested.authority_revision
             and existing.targets == requested.targets
             and existing.payload_digest == requested.payload_digest

@@ -183,6 +183,85 @@ def test_job_activity_summaries_include_their_authoritative_creation_time() -> N
     ]
 
 
+def test_generic_operation_read_contract_projects_bounded_durable_state() -> None:
+    item = {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "job_id": "11111111-1111-4111-8111-111111111111",
+        "node_id": NODE_ID,
+        "kind": "recipe-transfer",
+        "state": "uncertain",
+        "attempt": 2,
+        "progress": {
+            "phase": "transfer",
+            "completed_bytes": 25,
+            "total_bytes": None,
+            "total_bytes_known": False,
+            "members": [
+                {
+                    "member_id": NODE_ID,
+                    "phase": "transfer",
+                    "completed_bytes": 25,
+                    "state": "uncertain",
+                }
+            ],
+        },
+        "result": {
+            "uncertain": True,
+            "failure": {
+                "error_code": "member_lost",
+                "summary": "member did not report completion",
+            },
+        },
+        "supported_actions": ["retry"],
+        "updated_at": "2026-08-15T12:00:00Z",
+    }
+    services = OperationApiServices(
+        endpoint=lambda _alias: {},
+        agents=lambda: (),
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        ),
+        resume_job=lambda _job_id: None,
+        list_operations=lambda _cursor, _limit, _state, _node_id: (
+            operation_api.OperationListPage((item,), None, 1)
+        ),
+        get_operation=lambda _operation_id: item,
+    )
+    client, operator, *_ = _client(operations=services)
+
+    listed = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"state": "uncertain", "node_id": NODE_ID},
+    )
+    detail = client.get(f"/api/v1/operations/{item['id']}", headers=operator)
+
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    assert listed.json()["operations"][0]["job_id"] == item["job_id"]
+    assert listed.json()["operations"][0]["recovery"] == {
+        "uncertain": True,
+        "actions": ["inspect"],
+        "explanation": "Inspect the durable outcome before taking recovery action.",
+    }
+    assert listed.json()["operations"][0]["progress"]["total_bytes_known"] is False
+    assert detail.status_code == 200
+    assert detail.json() == listed.json()["operations"][0]
+
+
+def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
+    client, operator, *_ = _client()
+
+    assert client.get("/api/v1/operations", headers=operator).status_code == 503
+    assert (
+        client.get(
+            "/api/v1/operations/33333333-3333-4333-8333-333333333333",
+            headers=operator,
+        ).status_code
+        == 503
+    )
+
+
 def test_fleet_exposes_visual_state_and_node_evidence() -> None:
     client, operator, *_ = _client()
 

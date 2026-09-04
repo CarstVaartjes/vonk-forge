@@ -58,7 +58,7 @@ def test_repeated_request_key_replays_one_durable_job(service) -> None:
     )
     replay = jobs.enqueue(
         "install",
-        "different-actor",
+        "operator",
         "authority",
         ["spk_1"],
         {"plan_digest": "a" * 64},
@@ -68,7 +68,7 @@ def test_repeated_request_key_replays_one_durable_job(service) -> None:
     with pytest.raises(ValueError, match="already used differently"):
         jobs.enqueue(
             "install",
-            "operator",
+            "different-actor",
             "authority",
             ["spk_1"],
             {"plan_digest": "b" * 64},

@@ -91,11 +91,14 @@ from .operation_api import (
     JobResumeResponse,
     JobsResponse,
     OperationApiServices,
+    OperationDetailResponse,
     OperationPage,
+    OperationsResponse,
     bounded_error_responses,
     decode_offset,
     fleet_response,
     job_response,
+    operation_detail_response,
 )
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
@@ -1089,6 +1092,69 @@ def create_app(
             "next_cursor": next_cursor,
             "total": total,
         }
+
+    @app.get(
+        "/api/v1/operations",
+        response_model=OperationsResponse,
+        responses=bounded_error_responses(401, 422, 503),
+        operation_id="listOperations",
+    )
+    def operations_view(
+        cursor: str | None = Query(default=None, max_length=512),
+        limit: int = Query(default=20, ge=1, le=100),
+        operation_state: str | None = Query(
+            default=None,
+            alias="state",
+            pattern=r"^[a-z][a-z0-9-]{0,31}$",
+        ),
+        node_id: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
+        _actor: Actor = authenticated_actor,
+    ) -> OperationsResponse:
+        if operations is None or operations.list_operations is None:
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            )
+        try:
+            page = operations.list_operations(
+                cursor, limit, operation_state, node_id
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=422, detail="operation cursor is invalid"
+            ) from None
+        except RuntimeError:
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            ) from None
+        return OperationsResponse(
+            operations=[operation_detail_response(item) for item in page.items],
+            next_cursor=page.next_cursor,
+            total=page.total,
+        )
+
+    @app.get(
+        "/api/v1/operations/{operation_id}",
+        response_model=OperationDetailResponse,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getOperation",
+    )
+    def operation_view(
+        operation_id: str = ApiPath(min_length=1, max_length=128),
+        _actor: Actor = authenticated_actor,
+    ) -> OperationDetailResponse:
+        if operations is None or operations.get_operation is None:
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            )
+        try:
+            item = operations.get_operation(operation_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="operation not found") from None
+        except RuntimeError:
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            ) from None
+        return operation_detail_response(item)
 
     @app.get("/api/v1/audit")
     def audit_view(_actor: Actor = authenticated_actor) -> dict[str, object]:

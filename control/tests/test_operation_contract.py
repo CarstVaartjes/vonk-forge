@@ -8,6 +8,7 @@ from vonk_control.operation_contract import (
     OperationProgress,
     OperationRecoveryAction,
     normalize_operation_progress,
+    recovery_for_operation,
     recovery_for_state,
     sanitize_failure_evidence,
     validate_progress_update,
@@ -107,7 +108,13 @@ def test_failure_evidence_is_bounded_and_secret_free() -> None:
 def test_uncertain_operations_require_inspection_before_resume() -> None:
     recovery = recovery_for_state("waiting-for-operator", uncertain=True)
     assert recovery.uncertain is True
-    assert recovery.actions == [
+    assert recovery.actions == [OperationRecoveryAction.INSPECT]
+    advertised = recovery_for_operation(
+        "waiting-for-operator",
+        uncertain=True,
+        supported_actions=["resume", "cancel", "unknown"],
+    )
+    assert advertised.actions == [
         OperationRecoveryAction.INSPECT,
         OperationRecoveryAction.RESUME,
         OperationRecoveryAction.CANCEL,
