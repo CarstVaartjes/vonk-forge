@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Select coarse CI ownership areas from changed repository paths."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections.abc import Iterable
+
+AREAS = ("rust", "repository", "control", "web", "compose", "generated")
+
+
+def _matches(path: str, prefixes: tuple[str, ...], exact: tuple[str, ...] = ()) -> bool:
+    return path in exact or path.startswith(prefixes)
+
+
+def select(paths: Iterable[str], event: str) -> dict[str, bool]:
+    changed = tuple(sorted({path.strip().removeprefix("./") for path in paths if path.strip()}))
+    if event != "pull_request" or not changed:
+        return {area: True for area in AREAS}
+
+    selected = {area: False for area in AREAS}
+    global_inputs = (
+        ".github/actions/",
+        ".github/workflows/ci.yml",
+        ".dockerignore",
+        "inventory/sbom/",
+        "schemas/global/",
+        "scripts/verify-supply-chain",
+    )
+    if any(_matches(path, global_inputs) for path in changed):
+        return {area: True for area in AREAS}
+
+    for path in changed:
+        if _matches(
+            path,
+            ("rust/", "packaging/", "tests/nodes/"),
+            ("Cargo.toml", "Cargo.lock"),
+        ):
+            selected["rust"] = True
+        if _matches(
+            path,
+            ("src/", "scripts/", "config/", "tests/", "agent_protocol/"),
+            ("pyproject.toml",),
+        ):
+            selected["repository"] = True
+        if _matches(
+            path,
+            ("control/", "agent_protocol/", "tests/control/"),
+        ):
+            selected["control"] = True
+        if _matches(path, ("control/web/",)):
+            selected["web"] = True
+        if _matches(path, ("deploy/compose/", "deploy/compose/tests/")):
+            selected["compose"] = True
+        if _matches(
+            path,
+            (
+                "control/src/",
+                "control/migrations/",
+                "tools/openapi-client/",
+                "src/cluster_profiles/generated_control/",
+            ),
+            (
+                "scripts/generate-control-clients",
+                "control/openapi-python-client.yaml",
+                "control/openapi.json",
+            ),
+        ):
+            selected["generated"] = True
+
+    # Unknown product files are safer in the general repository suite. Pure
+    # documentation changes intentionally select no expensive product family.
+    known_documentation = all(
+        path.startswith(("docs/", ".github/ISSUE_TEMPLATE/"))
+        or path.endswith((".md", ".mdx"))
+        for path in changed
+    )
+    if not any(selected.values()) and not known_documentation:
+        selected["repository"] = True
+    return selected
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--event", required=True)
+    parser.add_argument("--github-output", action="store_true")
+    arguments = parser.parse_args()
+    selected = select(sys.stdin, arguments.event)
+    if arguments.github_output:
+        for area in AREAS:
+            print(f"{area}={str(selected[area]).lower()}")
+        print(f"any={str(any(selected.values())).lower()}")
+    else:
+        print(json.dumps(selected, sort_keys=True, separators=(",", ":")))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
