@@ -9,7 +9,7 @@ use std::{
         fs::{MetadataExt, PermissionsExt},
     },
     path::Path,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::Serialize;
@@ -22,11 +22,14 @@ use vonk_agent_protocol::RecipeBuildRequest;
 use crate::{
     base_images::{BaseImageError, BaseImageStore},
     build_source::{BuildSourceError, materialize_source_bundle},
-    process::{ProcessError, ProcessInputBounds, ProcessOutputBounds, ProcessRunner, Program},
+    inventory::available_disk_bytes,
+    process::{ProcessDiskReserve, ProcessError, ProcessRunner, Program},
     source_policy::{SourcePolicyReport, dockerfile_base_images, inspect_build_source},
 };
 
 const MAX_EGRESS_BINARY_BYTES: u64 = 16 * 1024 * 1024;
+const MINIMUM_BUILD_DISK_RESERVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAXIMUM_BUILD_DISK_RESERVE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum RecipeBuildError {
@@ -230,6 +233,9 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         if cancelled() {
             return Err(ProcessError::Cancelled.into());
         }
+        let deadline =
+            Instant::now() + Duration::from_secs(u64::from(request.limits.timeout_seconds));
+        let minimum_free_disk_bytes = ensure_build_disk_available(self.data_root, request)?;
         // `slirp4netns` only isolates the host network namespace; it does not
         // enforce a destination allowlist.  Never silently widen a declared
         // host policy into unrestricted egress. Public builds therefore get
@@ -285,7 +291,14 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         {
             return Err(RecipeBuildError::Evidence);
         }
-        self.import_base_images(request, &storage, runroot.path(), cancelled)?;
+        self.import_base_images(
+            request,
+            &storage,
+            runroot.path(),
+            minimum_free_disk_bytes,
+            deadline,
+            cancelled,
+        )?;
         let egress = match network {
             BuildNetwork::None => None,
             BuildNetwork::Public => Some(BuildEgress::start(
@@ -297,7 +310,8 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                     binary: self.egress_binary,
                     operation_id,
                     hosts: &request.network.hosts,
-                    staging_limit: build_staging_limit(request)?,
+                    minimum_free_disk_bytes,
+                    deadline,
                     cancelled,
                 },
             )?),
@@ -451,20 +465,14 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             "/usr/bin/podman".to_owned(),
         ];
         arguments.extend(podman_arguments);
-        let timeout = Duration::from_secs(request.limits.timeout_seconds.into());
-        let output = self
-            .runner
-            .run_bounded_directory_with_output_limit_cancellable(
-                Program::SystemdRun,
-                &arguments,
-                timeout,
-                ProcessOutputBounds::new(
-                    staging.path(),
-                    build_staging_limit(request)?,
-                    request.limits.output_bytes,
-                ),
-                cancelled,
-            )?;
+        let timeout = remaining_build_time(deadline)?;
+        let output = self.runner.run_with_disk_reserve_cancellable(
+            Program::SystemdRun,
+            &arguments,
+            timeout,
+            ProcessDiskReserve::new(staging.path(), minimum_free_disk_bytes),
+            cancelled,
+        )?;
         if !output.success {
             return Err(RecipeBuildError::ImageBuild {
                 diagnostic: podman_build_diagnostic(&output),
@@ -502,19 +510,13 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             // load path without exposing the daemon to the rootless builder.
             format!("docker-archive:{}", layout.display()),
         ]);
-        let saved = self
-            .runner
-            .run_bounded_directory_with_output_limit_cancellable(
-                Program::Podman,
-                &push_arguments,
-                Duration::from_secs(600),
-                ProcessOutputBounds::new(
-                    &operation_root,
-                    request.limits.temporary_bytes,
-                    request.limits.output_bytes,
-                ),
-                cancelled,
-            )?;
+        let saved = self.runner.run_with_disk_reserve_cancellable(
+            Program::Podman,
+            &push_arguments,
+            remaining_build_time(deadline)?,
+            ProcessDiskReserve::new(&operation_root, minimum_free_disk_bytes),
+            cancelled,
+        )?;
         if !saved.success {
             return Err(RecipeBuildError::ImageExport);
         }
@@ -527,15 +529,16 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         }) {
             return Err(RecipeBuildError::Evidence);
         }
-        let image_bytes = fs::metadata(&layout)?.len();
+        let image_metadata = fs::symlink_metadata(&layout)?;
+        if !image_metadata.is_file() || image_metadata.file_type().is_symlink() {
+            return Err(RecipeBuildError::Evidence);
+        }
+        let image_bytes = image_metadata.len();
         if image_bytes == 0 {
             return Err(RecipeBuildError::Evidence);
         }
         if image_bytes > request.limits.output_bytes {
             return Err(RecipeBuildError::OutputLimit);
-        }
-        if image_bytes > request.limits.temporary_bytes {
-            return Err(RecipeBuildError::Process(ProcessError::StorageLimit));
         }
         let oci_layout_sha256 = sha256_file(&layout)?;
         let mut remove_arguments = podman_storage_arguments(&storage, runroot.path());
@@ -559,6 +562,8 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         request: &RecipeBuildRequest,
         storage: &Path,
         runroot: &Path,
+        minimum_free_disk_bytes: u64,
+        deadline: Instant,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), RecipeBuildError> {
         if request.base_images.is_empty() {
@@ -591,14 +596,14 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             load_arguments.extend(["load".to_owned(), "--quiet".to_owned()]);
             let loaded = self
                 .runner
-                .run_bounded_directory_with_input_cancellable(
+                .run_with_input_disk_reserve_cancellable(
                     Program::Podman,
                     &load_arguments,
-                    Duration::from_secs(600),
-                    ProcessInputBounds::new(
-                        &archive.file,
+                    remaining_build_time(deadline)?,
+                    &archive.file,
+                    ProcessDiskReserve::new(
                         storage.parent().ok_or(RecipeBuildError::Evidence)?,
-                        build_staging_limit(request)?,
+                        minimum_free_disk_bytes,
                     ),
                     cancelled,
                 )
@@ -626,12 +631,72 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
     }
 }
 
-fn build_staging_limit(request: &RecipeBuildRequest) -> Result<u64, RecipeBuildError> {
-    request
+fn build_disk_envelope(request: &RecipeBuildRequest) -> Result<u64, RecipeBuildError> {
+    let retained_inputs_and_output = request
         .base_image_storage_bytes
-        .checked_add(request.limits.temporary_bytes)
-        .and_then(|bytes| bytes.checked_add(request.source_bundle_bytes))
+        .checked_add(request.source_bundle_bytes)
+        .and_then(|bytes| bytes.checked_add(request.limits.output_bytes))
+        .ok_or(RecipeBuildError::Evidence)?;
+    Ok(request
+        .limits
+        .temporary_bytes
+        .max(retained_inputs_and_output))
+}
+
+fn required_build_disk(
+    request: &RecipeBuildRequest,
+    minimum_free_disk_bytes: u64,
+) -> Result<u64, RecipeBuildError> {
+    build_disk_envelope(request)?
+        .checked_add(minimum_free_disk_bytes)
         .ok_or(RecipeBuildError::Evidence)
+}
+
+fn ensure_build_disk_available(
+    data_root: &Path,
+    request: &RecipeBuildRequest,
+) -> Result<u64, RecipeBuildError> {
+    let minimum_free_disk_bytes = build_disk_reserve(data_root)?;
+    let available = available_disk_bytes(data_root).map_err(|_| {
+        RecipeBuildError::Process(ProcessError::Io(std::io::Error::other(
+            "filesystem capacity is unavailable",
+        )))
+    })?;
+    if available < required_build_disk(request, minimum_free_disk_bytes)? {
+        return Err(ProcessError::StorageLimit.into());
+    }
+    Ok(minimum_free_disk_bytes)
+}
+
+fn build_disk_reserve(data_root: &Path) -> Result<u64, RecipeBuildError> {
+    let filesystem = rustix::fs::statvfs(data_root).map_err(|_| {
+        RecipeBuildError::Process(ProcessError::Io(std::io::Error::other(
+            "filesystem capacity is unavailable",
+        )))
+    })?;
+    let total = filesystem
+        .f_blocks
+        .checked_mul(filesystem.f_frsize)
+        .ok_or(RecipeBuildError::Evidence)?;
+    // Two percent reaches the 64 GiB cap on the Sparks while scaling down for
+    // disposable development filesystems and future smaller builders.
+    Ok((total / 50)
+        .clamp(
+            MINIMUM_BUILD_DISK_RESERVE_BYTES,
+            MAXIMUM_BUILD_DISK_RESERVE_BYTES,
+        )
+        .min(total / 4))
+}
+
+fn remaining_build_time(deadline: Instant) -> Result<Duration, RecipeBuildError> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| ProcessError::Timeout.into())
+}
+
+fn phase_time(deadline: Instant, maximum: Duration) -> Result<Duration, RecipeBuildError> {
+    Ok(remaining_build_time(deadline)?.min(maximum))
 }
 
 fn podman_import_diagnostic(output: &crate::process::ProcessOutput) -> PodmanImportDiagnostic {
@@ -802,7 +867,8 @@ struct BuildEgressStart<'a> {
     binary: &'a Path,
     operation_id: Uuid,
     hosts: &'a [String],
-    staging_limit: u64,
+    minimum_free_disk_bytes: u64,
+    deadline: Instant,
     cancelled: &'a dyn Fn() -> bool,
 }
 
@@ -835,8 +901,8 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             ],
             &rootfs,
             context.staging,
-            context.staging_limit,
-            Duration::from_secs(120),
+            context.minimum_free_disk_bytes,
+            phase_time(context.deadline, Duration::from_secs(120))?,
             context.cancelled,
         )?;
         if !imported.success {
@@ -855,8 +921,11 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
                 result.outbound_network.clone(),
             ],
         ] {
-            let output =
-                result.run_cancellable(&arguments, Duration::from_secs(30), context.cancelled)?;
+            let output = result.run_cancellable(
+                &arguments,
+                phase_time(context.deadline, Duration::from_secs(30))?,
+                context.cancelled,
+            )?;
             if !output.success {
                 return Err(RecipeBuildError::NetworkPolicy);
             }
@@ -882,8 +951,11 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             arguments.push("--allow-host".to_owned());
             arguments.push(host.clone());
         }
-        let started =
-            result.run_cancellable(&arguments, Duration::from_secs(30), context.cancelled)?;
+        let started = result.run_cancellable(
+            &arguments,
+            phase_time(context.deadline, Duration::from_secs(30))?,
+            context.cancelled,
+        )?;
         if !started.success {
             return Err(RecipeBuildError::NetworkPolicy);
         }
@@ -894,7 +966,7 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
                 "/vonk-build-egress".to_owned(),
                 "--probe".to_owned(),
             ],
-            Duration::from_secs(10),
+            phase_time(context.deadline, Duration::from_secs(10))?,
             context.cancelled,
         )?;
         if !probed.success {
@@ -933,19 +1005,20 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
         &self,
         extra: &[&str],
         path: &Path,
-        monitored_directory: &Path,
-        maximum_bytes: u64,
+        filesystem: &Path,
+        minimum_free_bytes: u64,
         timeout: Duration,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<crate::process::ProcessOutput, ProcessError> {
         let mut arguments = self.arguments();
         arguments.extend(extra.iter().map(|value| (*value).to_owned()));
         let file = File::open(path)?;
-        self.runner.run_bounded_directory_with_input_cancellable(
+        self.runner.run_with_input_disk_reserve_cancellable(
             Program::Podman,
             &arguments,
             timeout,
-            ProcessInputBounds::new(&file, monitored_directory, maximum_bytes),
+            &file,
+            ProcessDiskReserve::new(filesystem, minimum_free_bytes),
             cancelled,
         )
     }

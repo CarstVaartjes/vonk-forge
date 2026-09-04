@@ -15,7 +15,7 @@ use std::{
 use tempfile::{TempDir, tempdir};
 use uuid::Uuid;
 use vonk_agent::{
-    process::{ProcessError, ProcessOutput, ProcessRunner, Program},
+    process::{ProcessDiskReserve, ProcessError, ProcessOutput, ProcessRunner, Program},
     recipe_builder::{RecipeBuildError, RecipeBuilder},
 };
 use vonk_agent_protocol::{
@@ -42,7 +42,7 @@ struct FailedImportRunner {
     stderr: Vec<u8>,
     temporary_directory: RefCell<Option<PathBuf>>,
     monitored_directory: RefCell<Option<PathBuf>>,
-    maximum_bytes: Cell<u64>,
+    minimum_free_bytes: Cell<u64>,
 }
 
 impl ProcessRunner for FailedImportRunner {
@@ -55,14 +55,14 @@ impl ProcessRunner for FailedImportRunner {
         self.inner.run(program, arguments, timeout)
     }
 
-    fn run_bounded_directory_with_input(
+    fn run_with_input_disk_reserve_cancellable(
         &self,
         program: Program,
         arguments: &[String],
         _timeout: Duration,
         input: &File,
-        directory: &Path,
-        maximum_bytes: u64,
+        reserve: ProcessDiskReserve<'_>,
+        _cancelled: &dyn Fn() -> bool,
     ) -> Result<ProcessOutput, ProcessError> {
         assert_eq!(program, Program::Podman);
         assert!(arguments.iter().any(|argument| argument == "load"));
@@ -74,15 +74,15 @@ impl ProcessRunner for FailedImportRunner {
             .unwrap();
         let temporary_directory = storage.parent().unwrap().join("podman-image-tmp");
         assert!(temporary_directory.is_dir());
-        assert_eq!(temporary_directory.parent(), Some(directory));
+        assert_eq!(temporary_directory.parent(), Some(reserve.filesystem()));
         assert!(input.metadata()?.len() > 0);
         self.temporary_directory
             .borrow_mut()
             .replace(temporary_directory);
         self.monitored_directory
             .borrow_mut()
-            .replace(directory.to_path_buf());
-        self.maximum_bytes.set(maximum_bytes);
+            .replace(reserve.filesystem().to_path_buf());
+        self.minimum_free_bytes.set(reserve.minimum_free_bytes());
         Ok(ProcessOutput {
             success: false,
             stdout: Vec::new(),
@@ -94,6 +94,58 @@ impl ProcessRunner for FailedImportRunner {
 struct CancellingRunner {
     inner: Runner,
     cancelled: Cell<bool>,
+}
+
+struct DeadlineRunner {
+    inner: Runner,
+    timeouts: RefCell<Vec<(String, Duration)>>,
+}
+
+impl DeadlineRunner {
+    fn record(&self, arguments: &[String], timeout: Duration) {
+        for phase in ["load", "build", "push"] {
+            if arguments.iter().any(|value| value == phase) {
+                self.timeouts.borrow_mut().push((phase.to_owned(), timeout));
+                break;
+            }
+        }
+    }
+}
+
+impl ProcessRunner for DeadlineRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        self.inner.run(program, arguments, timeout)
+    }
+
+    fn run_with_disk_reserve_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        _reserve: ProcessDiskReserve<'_>,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        self.record(arguments, timeout);
+        self.inner.run(program, arguments, timeout)
+    }
+
+    fn run_with_input_disk_reserve_cancellable(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+        _input: &File,
+        _reserve: ProcessDiskReserve<'_>,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<ProcessOutput, ProcessError> {
+        self.record(arguments, timeout);
+        self.inner.run(program, arguments, timeout)
+    }
 }
 
 impl ProcessRunner for CancellingRunner {
@@ -1166,6 +1218,53 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
 }
 
 #[test]
+fn import_build_and_export_share_the_recipe_deadline() {
+    const SYNTHETIC_RECIPE_DEADLINE_SECONDS: u32 = 777;
+    let (archive, digest) = bundle();
+    let runner = DeadlineRunner {
+        inner: Runner {
+            calls: RefCell::new(Vec::new()),
+            fail_build: false,
+            oversize_base: false,
+            registry: None,
+            substitute_base: false,
+        },
+        timeouts: RefCell::new(Vec::new()),
+    };
+    let root = tempdir().unwrap();
+    stage_base_archive(root.path());
+    let runtime = tempdir().unwrap();
+    let mut build_request = request(archive.len(), digest);
+    build_request.limits.timeout_seconds = SYNTHETIC_RECIPE_DEADLINE_SECONDS;
+
+    RecipeBuilder {
+        runner: &runner,
+        data_root: root.path(),
+        runtime_root: runtime.path(),
+        egress_binary: Path::new("/bin/true"),
+    }
+    .build(
+        &build_request,
+        Uuid::parse_str("00000000-0000-4000-8000-00000000000a").unwrap(),
+        &archive,
+    )
+    .unwrap();
+
+    let timeouts = runner.timeouts.borrow();
+    assert_eq!(
+        timeouts
+            .iter()
+            .map(|(phase, _)| phase.as_str())
+            .collect::<Vec<_>>(),
+        ["load", "build", "push"]
+    );
+    assert!(timeouts.iter().all(|(_, timeout)| {
+        *timeout > Duration::ZERO
+            && *timeout <= Duration::from_secs(SYNTHETIC_RECIPE_DEADLINE_SECONDS.into())
+    }));
+}
+
+#[test]
 fn fresh_node_produces_verified_exact_digest_oci_archive_before_offline_build() {
     let mut fixture = registry_fixture();
     fixture.reference = format!("1.1.1.1/vonkforge/base@{}", fixture.manifest_digest);
@@ -1308,7 +1407,7 @@ fn failed_base_image_import_uses_accounted_tmpdir_and_safe_diagnostics() {
             stderr: stderr.to_vec(),
             temporary_directory: RefCell::new(None),
             monitored_directory: RefCell::new(None),
-            maximum_bytes: Cell::new(0),
+            minimum_free_bytes: Cell::new(0),
         };
 
         let error = RecipeBuilder {
@@ -1336,11 +1435,9 @@ fn failed_base_image_import_uses_accounted_tmpdir_and_safe_diagnostics() {
         let monitored_directory = monitored_directory.as_ref().unwrap();
         assert!(temporary_directory.starts_with(root.path().join("build-staging")));
         assert!(monitored_directory.starts_with(root.path().join("build-staging")));
-        assert_eq!(
-            runner.maximum_bytes.get(),
-            request.base_image_storage_bytes
-                + request.limits.temporary_bytes
-                + request.source_bundle_bytes
+        assert!(
+            (4 * 1024 * 1024 * 1024..=64 * 1024 * 1024 * 1024)
+                .contains(&runner.minimum_free_bytes.get())
         );
     }
 }
@@ -1746,14 +1843,14 @@ impl ProcessRunner for ReplacementRaceRunner {
         self.inner.run(program, arguments, timeout)
     }
 
-    fn run_bounded_directory_with_input(
+    fn run_with_input_disk_reserve_cancellable(
         &self,
         program: Program,
         arguments: &[String],
         timeout: Duration,
         input: &File,
-        _directory: &Path,
-        _maximum_bytes: u64,
+        _reserve: ProcessDiskReserve<'_>,
+        _cancelled: &dyn Fn() -> bool,
     ) -> Result<ProcessOutput, ProcessError> {
         if program == Program::Podman && arguments.iter().any(|value| value == "load") {
             let replaced = self.archive_path.with_extension("verified");
