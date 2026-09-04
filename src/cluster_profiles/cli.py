@@ -102,6 +102,19 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _normalize_legacy_telemetry_args(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """Map the pre-group ``fleet telemetry NODE`` spelling to history."""
+    commands = {"current", "capabilities", "history", "workloads"}
+    for index in range(len(argv) - 2):
+        if argv[index : index + 2] != ("fleet", "telemetry"):
+            continue
+        candidate = argv[index + 2]
+        if candidate.startswith("-") or candidate in commands:
+            continue
+        return argv[: index + 2] + ("history",) + argv[index + 2 :]
+    return argv
+
+
 def _sanitize_text(value: object) -> str:
     text = str(value).replace("\x00", "")
     text = _SENSITIVE_ASSIGNMENT.sub(
@@ -500,6 +513,7 @@ def main(
     """Run the API-backed CLI."""
     del root
     raw_argv = tuple(argv) if argv is not None else tuple(sys.argv[1:])
+    raw_argv = _normalize_legacy_telemetry_args(raw_argv)
     try:
         args = _parser().parse_args(raw_argv)
     except _UsageError as error:

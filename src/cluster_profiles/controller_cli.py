@@ -320,18 +320,35 @@ def add_controller_commands(
     _add_json(fleet_node)
 
     telemetry = fleet_commands.add_parser(
-        "telemetry", help="Show node telemetry history"
+        "telemetry", help="Inspect node telemetry and metric support"
     )
-    telemetry.add_argument("node_id")
-    telemetry_time = telemetry.add_mutually_exclusive_group()
-    telemetry_time.add_argument(
+    telemetry_commands = telemetry.add_subparsers(dest="telemetry_command")
+    telemetry_current = telemetry_commands.add_parser("current")
+    telemetry_current.add_argument("node_id")
+    _add_json(telemetry_current)
+    telemetry_capabilities = telemetry_commands.add_parser("capabilities")
+    telemetry_capabilities.add_argument("node_id")
+    _add_json(telemetry_capabilities)
+    telemetry_workloads = telemetry_commands.add_parser("workloads")
+    telemetry_workloads.add_argument("node_id")
+    telemetry_workloads.add_argument("--run-id")
+    telemetry_workloads.add_argument("--state")
+    _add_json(telemetry_workloads)
+    telemetry_history = telemetry_commands.add_parser("history")
+    telemetry_history.add_argument("node_id")
+    telemetry_history_time = telemetry_history.add_mutually_exclusive_group()
+    telemetry_history_time.add_argument(
         "--range", choices=tuple(TELEMETRY_RANGES), default="1h"
     )
-    telemetry_time.add_argument("--start")
-    telemetry.add_argument("--end")
-    telemetry.add_argument("--resolution", choices=("raw", "minute", "fifteen-minute"))
-    telemetry.add_argument("--maximum-points", type=int, choices=range(1, 3001))
-    _add_json(telemetry)
+    telemetry_history_time.add_argument("--start")
+    telemetry_history.add_argument("--end")
+    telemetry_history.add_argument(
+        "--resolution", choices=("raw", "minute", "fifteen-minute")
+    )
+    telemetry_history.add_argument(
+        "--maximum-points", type=int, choices=range(1, 3001)
+    )
+    _add_json(telemetry_history)
 
     metrics = fleet_commands.add_parser(
         "metrics", help="Inspect server-provided Spark metrics and history"
@@ -2021,7 +2038,9 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
                     return node
         raise ValueError(f"Fleet node not found: {args.node_id}")
     if command == "telemetry":
-        return _run_metric_command(args, client, "history")
+        return _run_metric_command(
+            args, client, getattr(args, "telemetry_command", None) or "history"
+        )
     if command == "metrics":
         return _run_metric_command(args, client, args.metrics_command)
     if command in {"profile", "node-profile"}:
@@ -3161,7 +3180,12 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
                     or member.get("member_id")
                 )
                 if isinstance(label, str) and label:
-                    labels.append(label)
+                    detail = member.get("phase") or member.get("state")
+                    labels.append(
+                        f"{label} ({detail})"
+                        if isinstance(detail, str) and detail
+                        else label
+                    )
         if labels:
             pieces.append("sparks: " + ", ".join(labels[:32]))
     return " | ".join(pieces) if pieces else None

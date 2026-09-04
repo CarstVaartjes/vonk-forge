@@ -582,6 +582,33 @@ def test_metrics_current_forwards_server_metric_units_and_provenance() -> None:
     ]
 
 
+def test_telemetry_subcommands_match_metrics_routes() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/nodes/spk_node/telemetry/current"): {"sample": {}},
+            ("GET", "/api/v1/nodes/spk_node/telemetry/capabilities"): {},
+            ("GET", "/api/v1/nodes/spk_node/telemetry/workloads"): {},
+        }
+    )
+    assert _invoke(client, "--json", "fleet", "telemetry", "current", "spk_node")[0] == 0
+    assert _invoke(client, "--json", "fleet", "telemetry", "capabilities", "spk_node")[0] == 0
+    assert _invoke(
+        client,
+        "--json",
+        "fleet",
+        "telemetry",
+        "workloads",
+        "spk_node",
+        "--run-id",
+        "run-1",
+    )[0] == 0
+    assert [call[1] for call in client.calls] == [
+        "/api/v1/nodes/spk_node/telemetry/current",
+        "/api/v1/nodes/spk_node/telemetry/capabilities",
+        "/api/v1/nodes/spk_node/telemetry/workloads",
+    ]
+
+
 def test_metrics_history_capabilities_and_workloads_use_exact_routes() -> None:
     client = _Client(
         {
