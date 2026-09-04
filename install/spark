@@ -27,17 +27,11 @@ case "$release_signature" in /*) ;; *) fail "the signed release signature is req
 [ "$(uname -s)" = Linux ] || fail "Spark installation requires Linux"
 platform=linux
 case $(uname -m) in
-    x86_64|amd64) architecture=amd64 ;;
     aarch64|arm64) architecture=arm64 ;;
     *) fail "this CPU architecture is not supported" ;;
 esac
 
 case "$platform-$architecture" in
-    linux-amd64)
-        expected='@SPARK_LINUX_AMD64_SHA256@'
-        package_expected='@SPARK_LINUX_AMD64_PACKAGE_SHA256@'
-        package_version='@SPARK_LINUX_AMD64_PACKAGE_VERSION@'
-        ;;
     linux-arm64)
         expected='@SPARK_LINUX_ARM64_SHA256@'
         package_expected='@SPARK_LINUX_ARM64_PACKAGE_SHA256@'

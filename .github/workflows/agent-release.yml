@@ -42,9 +42,7 @@ jobs:
       next_version: ${{ steps.metadata.outputs.next_version }}
       baseline_version: ${{ steps.metadata.outputs.baseline_version }}
       arm64_package: ${{ steps.metadata.outputs.arm64_package }}
-      amd64_package: ${{ steps.metadata.outputs.amd64_package }}
       arm64_baseline_package: ${{ steps.metadata.outputs.arm64_baseline_package }}
-      amd64_baseline_package: ${{ steps.metadata.outputs.amd64_baseline_package }}
       artifact_name: ${{ steps.metadata.outputs.artifact_name }}
       baseline_artifact_name: ${{ steps.metadata.outputs.baseline_artifact_name }}
       channel: ${{ steps.metadata.outputs.channel }}
@@ -135,78 +133,16 @@ jobs:
           artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
           source_sha: ${{ github.sha }}
 
-  compile-amd64-candidate:
-    name: Compile AMD64 candidate package binaries
-    if: needs.package-metadata.result == 'success'
-    needs: [package-metadata]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    concurrency:
-      group: vonk-forge-agent-development-compile-amd64-candidate
-      cancel-in-progress: true
-    permissions:
-      contents: read
-    steps:
-      - name: Check out exact AMD64 candidate compilation source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Compile exact AMD64 candidate binaries
-        uses: ./.github/actions/agent-package-compile
-        with:
-          architecture: linux-amd64
-          binary_set: candidate
-          channel: ${{ needs.package-metadata.outputs.channel }}
-          publication_sequence: ${{ github.run_number }}
-          version: ${{ needs.package-metadata.outputs.version }}
-          baseline_version: ${{ needs.package-metadata.outputs.baseline_version }}
-          artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
-          source_sha: ${{ github.sha }}
-
-  compile-amd64-baseline:
-    name: Compile AMD64 baseline package binaries
-    if: needs.package-metadata.result == 'success'
-    needs: [package-metadata]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    concurrency:
-      group: vonk-forge-agent-development-compile-amd64-baseline
-      cancel-in-progress: true
-    permissions:
-      contents: read
-    steps:
-      - name: Check out exact AMD64 baseline compilation source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Compile exact AMD64 baseline binaries
-        uses: ./.github/actions/agent-package-compile
-        with:
-          architecture: linux-amd64
-          binary_set: baseline
-          channel: ${{ needs.package-metadata.outputs.channel }}
-          publication_sequence: ${{ github.run_number }}
-          version: ${{ needs.package-metadata.outputs.version }}
-          baseline_version: ${{ needs.package-metadata.outputs.baseline_version }}
-          artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
-          source_sha: ${{ github.sha }}
-
   build-test-sign:
-    name: Build and sign AMD64 and ARM64; lifecycle-test ARM64
+    name: Build, sign, and lifecycle-test ARM64 Spark agent
     if: >-
       needs.package-metadata.result == 'success' &&
       needs.compile-arm64-candidate.result == 'success' &&
-      needs.compile-arm64-baseline.result == 'success' &&
-      needs.compile-amd64-candidate.result == 'success' &&
-      needs.compile-amd64-baseline.result == 'success'
+      needs.compile-arm64-baseline.result == 'success'
     needs:
       - package-metadata
       - compile-arm64-candidate
       - compile-arm64-baseline
-      - compile-amd64-candidate
-      - compile-amd64-baseline
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     environment: agent-development
@@ -221,11 +157,9 @@ jobs:
     outputs:
       version: ${{ steps.package.outputs.version }}
       arm64_package: ${{ steps.package.outputs.arm64_package }}
-      amd64_package: ${{ steps.package.outputs.amd64_package }}
       artifact_name: ${{ steps.package.outputs.artifact_name }}
       baseline_version: ${{ steps.package.outputs.baseline_version }}
       arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
-      amd64_baseline_package: ${{ steps.package.outputs.amd64_baseline_package }}
       baseline_artifact_name: ${{ steps.package.outputs.baseline_artifact_name }}
     steps:
       - name: Check out exact package source
@@ -239,13 +173,7 @@ jobs:
           pattern: ${{ needs.package-metadata.outputs.artifact_name }}-compiled-arm64-*
           path: prebuilt/arm64
           merge-multiple: true
-      - name: Download exact AMD64 compiled binary sets
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: ${{ needs.package-metadata.outputs.artifact_name }}-compiled-amd64-*
-          path: prebuilt/amd64
-          merge-multiple: true
-      - name: Build, lifecycle-test, and attest AMD64 and ARM64 packages
+      - name: Build, lifecycle-test, and attest ARM64 package
         id: package
         uses: ./.github/actions/agent-package-build
         with:
@@ -255,9 +183,7 @@ jobs:
           next_version: ${{ needs.package-metadata.outputs.next_version }}
           baseline_version: ${{ needs.package-metadata.outputs.baseline_version }}
           arm64_package: ${{ needs.package-metadata.outputs.arm64_package }}
-          amd64_package: ${{ needs.package-metadata.outputs.amd64_package }}
           arm64_baseline_package: ${{ needs.package-metadata.outputs.arm64_baseline_package }}
-          amd64_baseline_package: ${{ needs.package-metadata.outputs.amd64_baseline_package }}
           artifact_name: ${{ needs.package-metadata.outputs.artifact_name }}
           baseline_artifact_name: ${{ needs.package-metadata.outputs.baseline_artifact_name }}
           environment: agent-development
@@ -351,7 +277,7 @@ jobs:
           rustup set profile minimal
           rustup toolchain install 1.97.1
           rustup default 1.97.1
-      - name: Download accepted dual-architecture package set for ARM64
+      - name: Download accepted ARM64 package set
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ needs.build-test-sign.outputs.artifact_name }}
@@ -416,37 +342,3 @@ jobs:
             "$(realpath "baseline/$ARM64_BASELINE_PACKAGE")" \
             "$(realpath "accepted/$ARM64_PACKAGE")" \
             "$BASELINE_VERSION" "$VERSION"
-
-  native-amd64-lifecycle:
-    name: Lifecycle-test accepted AMD64 package on AMD64
-    needs: [package-metadata, build-test-sign]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Check out exact package acceptance source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Download accepted dual-architecture package set
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.build-test-sign.outputs.artifact_name }}
-          path: accepted
-      - name: Exercise accepted AMD64 package natively
-        shell: bash
-        env:
-          AMD64_PACKAGE: ${{ needs.build-test-sign.outputs.amd64_package }}
-        run: |
-          set -euo pipefail
-          test "$(uname -m)" = x86_64
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
-            acl crun iproute2 iptables podman shellcheck slirp4netns uidmap
-          package="accepted/$AMD64_PACKAGE"
-          scripts/verify-agent-deb --json "$package"
-          sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"
-          test "$(/usr/lib/vonk-forge/vonk-agent --version)" = \
-            "vonk-agent $(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
-          sudo env SYSTEMD_OFFLINE=1 dpkg --remove vonk-forge-agent

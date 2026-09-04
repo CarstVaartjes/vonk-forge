@@ -54,11 +54,9 @@ jobs:
       tag_oid: ${{ steps.accept.outputs.tag_oid }}
       package_run_id: ${{ steps.accept.outputs.package_run_id }}
       package_artifact: ${{ steps.accept.outputs.package_artifact }}
-      amd64_package: ${{ steps.accept.outputs.amd64_package }}
       arm64_package: ${{ steps.accept.outputs.arm64_package }}
       baseline_version: ${{ steps.accept.outputs.baseline_version }}
       baseline_artifact: ${{ steps.accept.outputs.baseline_artifact }}
-      amd64_baseline_package: ${{ steps.accept.outputs.amd64_baseline_package }}
       arm64_baseline_package: ${{ steps.accept.outputs.arm64_baseline_package }}
       compose_run_id: ${{ steps.accept.outputs.compose_run_id }}
       compose_artifact: ${{ steps.accept.outputs.compose_artifact }}
@@ -225,11 +223,9 @@ jobs:
 
           version=$(sed -n 's/^version=//p' <<< "$metadata")
           package_artifact=$(sed -n 's/^artifact_name=//p' <<< "$metadata")
-          amd64_package=$(sed -n 's/^amd64_package=//p' <<< "$metadata")
           arm64_package=$(sed -n 's/^arm64_package=//p' <<< "$metadata")
           baseline_version=$(sed -n 's/^baseline_version=//p' <<< "$metadata")
           baseline_artifact=$(sed -n 's/^baseline_artifact_name=//p' <<< "$metadata")
-          amd64_baseline_package=$(sed -n 's/^amd64_baseline_package=//p' <<< "$metadata")
           arm64_baseline_package=$(sed -n 's/^arm64_baseline_package=//p' <<< "$metadata")
           test -n "$version" && test -n "$package_artifact"
           [[ "$compose_run_id" =~ ^[1-9][0-9]*$ ]]
@@ -270,11 +266,9 @@ jobs:
             "tag_oid=$tag_oid" \
             "package_run_id=$package_run_id" \
             "package_artifact=$package_artifact" \
-            "amd64_package=$amd64_package" \
             "arm64_package=$arm64_package" \
             "baseline_version=$baseline_version" \
             "baseline_artifact=$baseline_artifact" \
-            "amd64_baseline_package=$amd64_baseline_package" \
             "arm64_baseline_package=$arm64_baseline_package" \
             "compose_run_id=$compose_run_id" \
             "compose_artifact=$compose_artifact" \
@@ -356,9 +350,7 @@ jobs:
           SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           IMAGES_SOURCE_SHA: ${{ needs.authority.outputs.compose_source_sha }}
           VERSION: ${{ needs.authority.outputs.version }}
-          AMD64_PACKAGE: ${{ needs.authority.outputs.amd64_package }}
           ARM64_PACKAGE: ${{ needs.authority.outputs.arm64_package }}
-          AMD64_BASELINE_PACKAGE: ${{ needs.authority.outputs.amd64_baseline_package }}
           ARM64_BASELINE_PACKAGE: ${{ needs.authority.outputs.arm64_baseline_package }}
           INSTALLER_PUBLIC_ORIGIN: ${{ vars.INSTALLER_PUBLIC_ORIGIN }}
           VONK_INSTALLER_RELEASE_KEY_FINGERPRINT: ${{ vars.VONK_INSTALLER_RELEASE_KEY_FINGERPRINT }}
@@ -432,11 +424,8 @@ jobs:
             --nas-setup "linux-arm64=$RUNNER_TEMP/setups/linux-arm64/vonk-nas-setup"
             --nas-setup "darwin-amd64=$RUNNER_TEMP/setups/darwin-amd64/vonk-nas-setup"
             --nas-setup "darwin-arm64=$RUNNER_TEMP/setups/darwin-arm64/vonk-nas-setup"
-            --spark-setup "linux-amd64=$RUNNER_TEMP/setups/linux-amd64/vonk-spark-setup"
             --spark-setup "linux-arm64=$RUNNER_TEMP/setups/linux-arm64/vonk-spark-setup"
-            --agent-package "linux-amd64=$RUNNER_TEMP/packages/$AMD64_PACKAGE"
             --agent-package "linux-arm64=$RUNNER_TEMP/packages/$ARM64_PACKAGE"
-            --agent-baseline-package "linux-amd64=$RUNNER_TEMP/baseline-packages/$AMD64_BASELINE_PACKAGE"
             --agent-baseline-package "linux-arm64=$RUNNER_TEMP/baseline-packages/$ARM64_BASELINE_PACKAGE"
             --output "$output"
           )
@@ -799,26 +788,17 @@ jobs:
           path: ${{ runner.temp }}/nas-acceptance/report.json
 
   spark-acceptance:
-    name: Exercise clean Spark candidate (${{ matrix.platform }})
+    name: Exercise clean Spark candidate (linux-arm64)
     # NAS acceptance exclusively owns the fixed Tailscale Services.
-    # Both Spark architectures use an explicit local Controller service set
-    # with no gateway, OAuth, or tailnet inputs, so their full package, pairing,
+    # The Spark lane uses an explicit local Controller service set with no
+    # gateway, OAuth, or tailnet inputs, so its full package, pairing,
     # CDI, job, and renewal lifecycles may run beside NAS and one another. The
     # final acceptance signer still requires complete NAS and Spark evidence.
     needs: [authority, candidate]
     if: >-
       needs.authority.result == 'success' &&
       needs.candidate.result == 'success'
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        include:
-          - platform: linux-amd64
-            runner: ubuntu-24.04
-          - platform: linux-arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     environment: installer-canary-${{ needs.authority.outputs.channel }}
     permissions:
@@ -872,7 +852,7 @@ jobs:
           VONK_ACCEPTANCE_CHANNEL: ${{ needs.authority.outputs.channel }}
           VONK_ACCEPTANCE_GENERATION: ${{ needs.candidate.outputs.generation }}
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
-          VONK_ACCEPTANCE_PLATFORM: ${{ matrix.platform }}
+          VONK_ACCEPTANCE_PLATFORM: linux-arm64
           VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY: loopback
           VONK_ACCEPTANCE_SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           VONK_ACCEPTANCE_VERSION: ${{ needs.authority.outputs.version }}
@@ -880,8 +860,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
-          test "$VONK_ACCEPTANCE_PLATFORM" = linux-amd64 || \
-            test "$VONK_ACCEPTANCE_PLATFORM" = linux-arm64
+          test "$VONK_ACCEPTANCE_PLATFORM" = linux-arm64
           mkdir -p "$RUNNER_TEMP/spark-acceptance"
           uv run python tests/acceptance/test_spark_lifecycle.py run \
             --candidate-release "$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/release.json" \
@@ -898,10 +877,10 @@ jobs:
       - name: Upload Spark behavioral gate report
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: installer-spark-acceptance-${{ needs.candidate.outputs.generation }}-${{ matrix.platform }}
+          name: installer-spark-acceptance-${{ needs.candidate.outputs.generation }}-linux-arm64
           retention-days: 7
           if-no-files-found: error
-          path: ${{ runner.temp }}/spark-acceptance/report-${{ matrix.platform }}.json
+          path: ${{ runner.temp }}/spark-acceptance/report-linux-arm64.json
 
   acceptance:
     name: Sign complete candidate acceptance
