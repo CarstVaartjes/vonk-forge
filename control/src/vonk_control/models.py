@@ -626,6 +626,11 @@ class FleetProfile(Base):
     assignments: Mapped[list[dict[str, object]]] = mapped_column(
         JSON, nullable=False, default=list
     )
+    # Explicit fleet membership, independent of desired assignments.  Nodes in
+    # this set without an assignment are intentionally reconciled to idle.
+    scope: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     labels: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     favorite: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"

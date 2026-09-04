@@ -10,16 +10,22 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control.fleet_profile_contract import FleetProfileInput
+from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfileScope
 from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
 from vonk_control.models import (
     AgentNode,
     Base,
+    ClusterMapping,
+    ClusterMappingNode,
     FleetProfile,
     FleetProfileApplication,
     LocalRecipe,
     LocalRecipeRevision,
     RecipeBuild,
+    RecipeInstallation,
+    InstallationNode,
+    RecipeRun,
+    RunNode,
 )
 from vonk_control.recipe_contract import recipe_content_sha256, validate_recipe
 
@@ -98,6 +104,7 @@ def _input(revision_id: str, *, name: str = "Studio ready") -> FleetProfileInput
             "installation_policy": "keep-cached",
             "labels": {"purpose": "interactive"},
             "favorite": True,
+            "scope": {"node_ids": [_node_id(1)]},
             "assignments": [
                 {
                     "recipe_revision_id": revision_id,
@@ -205,6 +212,7 @@ def test_profile_validation_rejects_unknown_sparks_and_recipe_topology_drift() -
     service = FleetProfileService(sessions, clock=lambda: NOW)
     value = _input(revision_id).model_dump(mode="json")
     value["assignments"][0]["nodes"][0]["node_id"] = _node_id(9)
+    value["scope"] = {"node_ids": [_node_id(9)]}
 
     with pytest.raises(FleetProfileConflict, match="active enrolled Fleet member"):
         service.create(FleetProfileInput.model_validate(value), actor="admin")
@@ -284,6 +292,7 @@ def test_profile_validation_rejects_rank_order_that_mapping_would_rewrite() -> N
             ],
         }
     )
+    value["scope"] = {"node_ids": [_node_id(1), _node_id(2)]}
 
     with pytest.raises(
         FleetProfileConflict, match="deterministic Spark identity order"
@@ -367,6 +376,13 @@ def test_profile_preview_explains_prerequisites_then_builds_one_atomic_plan() ->
     assert application == replay
     assert application.state == "queued"
     assert application.total_steps == 4
+    assert application.profile_digest == preview.profile_digest
+    with sessions() as session:
+        stored_plan = session.get(FleetProfileApplication, application.id).plan
+        assert stored_plan["scope"] == {
+            "node_ids": [_node_id(1)],
+            "idle_node_ids": [],
+        }
 
 
 def test_profile_apply_rejects_a_stale_preview_and_request_key_reuse() -> None:
@@ -442,3 +458,226 @@ def test_profile_application_resumes_from_persisted_step_context() -> None:
     after_distribution = restarted.application(application.id)
     assert after_distribution.current_step == 2
     assert after_distribution.current_operation_id is None
+
+
+def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation() -> None:
+    sessions = _database()
+    _recipe_id, dual_revision_id = _seed(sessions)
+    dual_document = _recipe_document()
+    dual_topology = dual_document["topology"]
+    role_template = dict(dual_topology["roles"][0])
+    dual_topology.update(
+        {
+            "name": "pair",
+            "mode": "distributed",
+            "node_count": 2,
+            "roles": [
+                {"name": "entrypoint", "count": 1, "endpoint_owner": True},
+                {"name": "worker", "count": 1, "endpoint_owner": False},
+            ],
+            "parallelism": {
+                "world_size": 2,
+                "tensor": 2,
+                "pipeline": 1,
+                "data": 1,
+                "backend": "nccl",
+            },
+            "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
+            "start_order": ["worker", "entrypoint"],
+            "stop_order": ["entrypoint", "worker"],
+        }
+    )
+    dual_document["topology"]["roles"] = [
+        {**role_template, "name": "entrypoint", "endpoint_owner": True},
+        {**role_template, "name": "worker", "endpoint_owner": False},
+    ]
+    dual_document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
+    validate_recipe(dual_document)
+    solo_revision_id = _uuid(5)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=_node_id(2),
+                state="active",
+                protocol_version=1,
+                architecture="linux-arm64",
+                capabilities=[],
+                last_seen_at=NOW,
+            )
+        )
+        session.execute(
+            LocalRecipeRevision.__table__.update()
+            .where(LocalRecipeRevision.id == dual_revision_id)
+            .values(
+                document=dual_document,
+                content_sha256=recipe_content_sha256(dual_document),
+            )
+        )
+        session.add(
+            LocalRecipe(
+                id=_uuid(4),
+                slug="solo-chat",
+                title="Solo Chat",
+                description="A solo chat recipe.",
+                source_kind="local",
+                created_by="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            LocalRecipeRevision(
+                id=solo_revision_id,
+                recipe_id=_uuid(4),
+                revision_number=1,
+                lifecycle="resolved",
+                schema_version=1,
+                document=_recipe_document(),
+                content_sha256=recipe_content_sha256(_recipe_document()),
+                created_by="admin",
+                created_at=NOW,
+            )
+        )
+        session.add(
+            ClusterMapping(
+                id=_uuid(10),
+                recipe_revision_id=dual_revision_id,
+                topology_name="pair",
+                generation=1,
+                node_count=2,
+                state="ready",
+                parameters={},
+                placement_digest="a" * 64,
+                endpoint_owner_node_id=_node_id(1),
+                created_by="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add_all(
+            [
+                ClusterMappingNode(
+                    id=_uuid(11), mapping_id=_uuid(10), node_id=_node_id(1), rank=0,
+                    role="entrypoint", endpoint_owner=True, created_at=NOW,
+                ),
+                ClusterMappingNode(
+                    id=_uuid(12), mapping_id=_uuid(10), node_id=_node_id(2), rank=1,
+                    role="worker", endpoint_owner=False, created_at=NOW,
+                ),
+            ]
+        )
+        session.add(
+            RecipeBuild(
+                id=_uuid(13), recipe_revision_id=dual_revision_id,
+                builder_node_id=_node_id(1), source_bundle_sha256="b" * 64,
+                build_input_sha256="c" * 64, state="succeeded", policy_report={}, plan={},
+                image_digest=f"sha256:{'d' * 64}", oci_layout_sha256="e" * 64,
+                image_bytes=1024, created_at=NOW, updated_at=NOW,
+            )
+        )
+        session.add(
+            RecipeInstallation(
+                id=_uuid(14), recipe_revision_id=dual_revision_id, mapping_id=_uuid(10),
+                mapping_generation=1, recipe_build_id=_uuid(13),
+                image_digest=f"sha256:{'d' * 64}", plan_digest="f" * 64,
+                plan={}, state="installed", actor="admin", created_at=NOW, updated_at=NOW,
+            )
+        )
+        session.add_all(
+            [
+                InstallationNode(
+                    id=_uuid(15), installation_id=_uuid(14), node_id=_node_id(1), rank=0,
+                    role="entrypoint", state="installed", required_bytes=1,
+                    installed_bytes=1, updated_at=NOW,
+                ),
+                InstallationNode(
+                    id=_uuid(16), installation_id=_uuid(14), node_id=_node_id(2), rank=1,
+                    role="worker", state="installed", required_bytes=1,
+                    installed_bytes=1, updated_at=NOW,
+                ),
+            ]
+        )
+        session.add(
+            RecipeRun(
+                id=_uuid(17), installation_id=_uuid(14), mapping_id=_uuid(10),
+                mapping_generation=1, alias="dual-chat", plan_digest="1" * 64, plan={},
+                state="running", route_state="published", route_generation=1,
+                route_digest="2" * 64, actor="admin", created_at=NOW, updated_at=NOW,
+            )
+        )
+        session.add_all(
+            [
+                RunNode(
+                    id=_uuid(18), run_id=_uuid(17), node_id=_node_id(1), rank=0,
+                    role="entrypoint", state="running", port=8000,
+                    reserved_memory_bytes=1, updated_at=NOW,
+                ),
+                RunNode(
+                    id=_uuid(19), run_id=_uuid(17), node_id=_node_id(2), rank=1,
+                    role="worker", state="running", port=8001,
+                    reserved_memory_bytes=1, updated_at=NOW,
+                ),
+            ]
+        )
+
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    scope = {"node_ids": [_node_id(1), _node_id(2)]}
+    profile_a = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Dual",
+                "scope": scope,
+                "assignments": [{
+                    "recipe_revision_id": dual_revision_id, "topology_name": "pair",
+                    "desired_state": "running", "alias": "dual-chat",
+                    "nodes": [
+                        {"node_id": _node_id(1), "rank": 0, "role": "entrypoint", "endpoint_owner": True},
+                        {"node_id": _node_id(2), "rank": 1, "role": "worker", "endpoint_owner": False},
+                    ],
+                }],
+            }
+        ),
+        actor="admin",
+    )
+    profile_b = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Solo and idle",
+                "scope": scope,
+                "assignments": [{
+                    "recipe_revision_id": solo_revision_id, "topology_name": "solo",
+                    "desired_state": "running", "alias": "solo-chat",
+                    "nodes": [{"node_id": _node_id(1), "rank": 0, "role": "entrypoint", "endpoint_owner": True}],
+                }],
+            }
+        ),
+        actor="admin",
+    )
+    assert service.preview(profile_a.id).steps == []
+    cross_scope = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Narrow scope",
+                "scope": {"node_ids": [_node_id(1)]},
+                "assignments": [],
+            }
+        ),
+        actor="admin",
+    )
+    cross_preview = service.preview(cross_scope.id)
+    assert cross_preview.allowed is False
+    assert any(
+        reason.code == "profile.distributed_cross_scope"
+        for reason in cross_preview.reasons
+    )
+    switch_to_b = service.preview(profile_b.id)
+    assert [step.kind for step in switch_to_b.steps].count("stop") == 1
+    assert switch_to_b.scope.idle_node_ids == [_node_id(2)]
+    assert switch_to_b.summary.uninstalls == 0
+
+    with sessions.begin() as session:
+        session.get(RecipeRun, _uuid(17)).state = "stopped"
+        session.get(RecipeRun, _uuid(17)).route_state = "withdrawn"
+    back_to_a = service.preview(profile_a.id)
+    assert [step.kind for step in back_to_a.steps] == ["start"]
+    assert back_to_a.summary.installs == 0
