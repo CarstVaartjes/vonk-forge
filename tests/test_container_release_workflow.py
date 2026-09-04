@@ -260,10 +260,7 @@ def test_stale_development_builds_cancel_without_interrupting_publication() -> N
 
     assert "concurrency" not in workflow
     assert "build-oci-archives" not in jobs
-    assert jobs["verify-runtime-images"]["concurrency"] == {
-        "group": "vonk-forge-development-runtime-images",
-        "cancel-in-progress": "true",
-    }
+    assert "verify-runtime-images" not in jobs
     assert jobs["build-and-accept"]["concurrency"] == {
         "group": "vonk-forge-development-image-acceptance",
         "cancel-in-progress": "true",
@@ -326,7 +323,7 @@ def test_development_image_acceptance_consumes_only_small_role_receipts() -> Non
         text.index("  build-and-accept:") : text.index("  publish-development-images:")
     ]
 
-    assert "needs: [verify-runtime-images]" in validation
+    assert "needs:" not in validation.split("steps:", maxsplit=1)[0]
     assert "actions: read" in validation
     assert "for role in api worker hermes litellm" in validation
     assert (
@@ -591,9 +588,8 @@ def test_development_publication_uses_only_v3_receipts_after_digest_staging() ->
     publish_job = workflow_data["jobs"]["publish-development-images"]
 
     assert "needs" not in publish_job
-    assert workflow_data["jobs"]["build-and-accept"]["needs"] == [
-        "verify-runtime-images"
-    ]
+    assert "needs" not in workflow_data["jobs"]["build-and-accept"]
+    assert "verify-runtime-images" not in workflow_data["jobs"]
     assert publish_job["permissions"] == {
         "actions": "read",
         "attestations": "write",

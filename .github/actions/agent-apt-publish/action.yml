@@ -144,7 +144,7 @@ runs:
             '. + {($architecture): {filename:$filename, sha256:$sha256}}' \
             <<< "$packages_json")
         done
-        test "$(jq 'length' <<< "$packages_json")" = 2
+        test "$(jq 'length' <<< "$packages_json")" = 1
         printf 'packages_json=%s\n' "$packages_json" >> "$GITHUB_OUTPUT"
 
     - name: Install apt repository tooling
