@@ -39,6 +39,7 @@ from .recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from .recipe_operations import RECIPE_OPERATIONS, RecipeOperationRequest
+from .telemetry import TelemetryReport
 from .workload_packages import (
     ComponentDescriptor,
     OciBundleMetadata,
@@ -84,6 +85,7 @@ __all__ = [
     "RecipeJobRunResult",
     "RecipeOperationRequest",
     "RecipeRunObservationReceiptClaims",
+    "TelemetryReport",
     "RestartUnit",
     "SignedHostHelperGrant",
     "SignedPackageHelperGrant",

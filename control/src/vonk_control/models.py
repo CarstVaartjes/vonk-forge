@@ -1730,6 +1730,13 @@ class NodeTelemetrySample(Base):
     network_transmit_bytes_per_second: Mapped[float | None] = mapped_column(Float)
     gap_samples: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     details: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    # Rich schema-2 observations live separately from the historical scalar
+    # columns.  Keeping the old columns makes rollups and old evidence stable;
+    # this bounded JSON document carries per-device, per-interface and
+    # per-run series plus capability/provenance metadata.
+    metrics: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
 
 
 class NodeTelemetryLatest(Base):
@@ -1808,6 +1815,39 @@ class NodeTelemetryRollupMetric(Base):
             name="ck_telemetry_rollup_metrics_name",
         ),
         CheckConstraint(
+            "key IS NULL OR length(key) BETWEEN 1 AND 96",
+            name="ck_telemetry_rollup_metrics_key",
+        ),
+        CheckConstraint(
+            "scope IS NULL OR length(scope) BETWEEN 1 AND 16",
+            name="ck_telemetry_rollup_metrics_scope",
+        ),
+        CheckConstraint(
+            "device_id IS NULL OR length(device_id) BETWEEN 1 AND 128",
+            name="ck_telemetry_rollup_metrics_device",
+        ),
+        CheckConstraint(
+            "process_id IS NULL OR process_id BETWEEN 1 AND 2147483647",
+            name="ck_telemetry_rollup_metrics_process",
+        ),
+        CheckConstraint(
+            "process_name IS NULL OR length(process_name) BETWEEN 1 AND 128",
+            name="ck_telemetry_rollup_metrics_process_name",
+        ),
+        CheckConstraint(
+            "interface_name IS NULL OR length(interface_name) BETWEEN 1 AND 64",
+            name="ck_telemetry_rollup_metrics_interface",
+        ),
+        CheckConstraint(
+            "run_id IS NULL OR length(run_id) BETWEEN 1 AND 128",
+            name="ck_telemetry_rollup_metrics_run",
+        ),
+        CheckConstraint(
+            "length(unit) BETWEEN 1 AND 32 AND length(source) BETWEEN 1 AND 128 AND "
+            "length(measurement_kind) BETWEEN 1 AND 16 AND length(aggregation) BETWEEN 1 AND 32",
+            name="ck_telemetry_rollup_metrics_metadata",
+        ),
+        CheckConstraint(
             "sample_count BETWEEN 0 AND 9223372036854775807",
             name="ck_telemetry_rollup_metrics_count",
         ),
@@ -1825,6 +1865,28 @@ class NodeTelemetryRollupMetric(Base):
         DateTime(timezone=True), primary_key=True
     )
     metric_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # Rich identity and provenance are retained with each rollup row.  The
+    # bounded metric_name is only the stable storage key; consumers must use
+    # these columns to distinguish devices, processes, interfaces and runs.
+    key: Mapped[str | None] = mapped_column(String(96))
+    scope: Mapped[str | None] = mapped_column(String(16))
+    device_id: Mapped[str | None] = mapped_column(String(128))
+    process_id: Mapped[int | None] = mapped_column(BigInteger)
+    process_name: Mapped[str | None] = mapped_column(String(128))
+    interface_name: Mapped[str | None] = mapped_column(String(64))
+    run_id: Mapped[str | None] = mapped_column(String(128))
+    unit: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unknown", server_default="unknown"
+    )
+    source: Mapped[str] = mapped_column(
+        String(128), nullable=False, default="legacy", server_default="legacy"
+    )
+    measurement_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="measured", server_default="measured"
+    )
+    aggregation: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="mean", server_default="mean"
+    )
     sample_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     minimum: Mapped[float] = mapped_column(Float, nullable=False)
     mean: Mapped[float] = mapped_column(Float, nullable=False)

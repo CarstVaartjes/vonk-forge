@@ -61,6 +61,7 @@ struct Fixtures {
     directory: tempfile::TempDir,
     stat: std::path::PathBuf,
     loadavg: std::path::PathBuf,
+    uptime: std::path::PathBuf,
     meminfo: std::path::PathBuf,
     net_dev: std::path::PathBuf,
 }
@@ -71,10 +72,12 @@ impl Fixtures {
         StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
         let stat = directory.path().join("stat");
         let loadavg = directory.path().join("loadavg");
+        let uptime = directory.path().join("uptime");
         let meminfo = directory.path().join("meminfo");
         let net_dev = directory.path().join("net-dev");
         fs::write(&stat, "cpu  100 0 50 850 0 0 0 0\n").unwrap();
         fs::write(&loadavg, "1.25 0.80 0.50 1/100 42\n").unwrap();
+        fs::write(&uptime, "100.0 0.0\n").unwrap();
         fs::write(
             &meminfo,
             "MemTotal:       1000 kB\nMemAvailable:    400 kB\n",
@@ -89,6 +92,7 @@ impl Fixtures {
             directory,
             stat,
             loadavg,
+            uptime,
             meminfo,
             net_dev,
         }
@@ -98,9 +102,14 @@ impl Fixtures {
         TelemetryPaths {
             stat: self.stat.clone(),
             loadavg: self.loadavg.clone(),
+            uptime: self.uptime.clone(),
             meminfo: self.meminfo.clone(),
             net_dev: self.net_dev.clone(),
             store: self.directory.path().to_path_buf(),
+            sys_block: self.directory.path().join("sys-block"),
+            sys_class_net: self.directory.path().join("sys-class-net"),
+            thermal: self.directory.path().join("thermal"),
+            powercap: self.directory.path().join("powercap"),
         }
     }
 }
@@ -122,6 +131,32 @@ fn boot_id() -> Uuid {
 
 fn next_boot_id() -> Uuid {
     Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap()
+}
+
+fn write_runtime_contract(fixtures: &Fixtures, run_id: &str, adapter: &str) {
+    let directory = fixtures.directory.path().join("run-metadata").join(run_id);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(
+        directory.join("runtime.json"),
+        json!({
+            "run_id": run_id,
+            "adapter": adapter,
+            "adapter_version": 1,
+            "endpoint": {"listen_port": 8101},
+            "placement": {"rank": 0}
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
+fn rich_number(sample: &vonk_agent::telemetry::TelemetrySample, key: &str) -> Option<f64> {
+    sample
+        .metrics
+        .series
+        .iter()
+        .find(|series| series.key == key)
+        .and_then(|series| series.value.as_f64())
 }
 
 fn claim() -> AgentClaim {
@@ -199,8 +234,8 @@ fn collects_literal_cpu_memory_disk_network_and_accelerator_metrics() {
     assert_eq!(first.disk_total_bytes, Some(10_000));
     assert_eq!(first.disk_free_bytes, Some(4_000));
     assert_eq!(first.gpu_utilization_percent, Some(25.0));
-    assert_eq!(first.gpu_memory_total_bytes, Some(1_024_000));
-    assert_eq!(first.gpu_memory_free_bytes, Some(409_600));
+    assert_eq!(first.gpu_memory_total_bytes, None);
+    assert_eq!(first.gpu_memory_free_bytes, None);
     assert_eq!(first.temperature_c, Some(45.5));
     assert_eq!(first.power_watts, Some(17.25));
     assert_eq!(first.network_receive_bytes_per_second, None);
@@ -229,15 +264,184 @@ fn collects_literal_cpu_memory_disk_network_and_accelerator_metrics() {
     assert_eq!(second.network_transmit_bytes_per_second, Some(300.0));
 
     let calls = runner.calls.lock().unwrap();
-    assert_eq!(calls.len(), 2);
+    assert_eq!(calls.len(), 6);
     assert!(calls.iter().all(|call| call.0 == Program::NvidiaSmi));
     assert!(calls.iter().all(|call| call.2 == Duration::from_secs(10)));
     assert_eq!(
         calls[0].1,
         [
-            "--query-gpu=name,utilization.gpu,memory.total,memory.free,temperature.gpu,power.draw,pstate",
+            "--query-gpu=index,name,utilization.gpu,memory.total,memory.used,memory.free,temperature.gpu,power.draw,power.limit,clocks.current.sm,clocks.max.sm,clocks_throttle_reasons.hw_thermal_slowdown,clocks_throttle_reasons.sw_thermal_slowdown,clocks_throttle_reasons.hw_slowdown,clocks_throttle_reasons.sw_power_cap,pstate",
             "--format=csv,noheader,nounits",
         ]
+    );
+    assert!(calls[1].1[0].starts_with("--query-compute-apps="));
+    assert_eq!(calls[2].1, ["dmon", "-s", "m", "-c", "1"]);
+}
+
+#[test]
+fn vllm_runtime_adapter_collects_throughput_queue_cache_and_histogram_p95() {
+    let fixtures = Fixtures::new();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    write_runtime_contract(&fixtures, run_id, "vllm");
+    let output = runner(
+        br#"# HELP vllm_generation_tokens_total generated tokens
+vllm_generation_tokens_total 200
+vllm_prompt_tokens_total 100
+vllm_num_requests_running 2
+vllm_num_requests_waiting 1
+vllm_kv_cache_usage_perc 0.25
+vllm_num_preemptions_total 3
+vllm_prefix_cache_hits_total 4
+vllm_prefix_cache_queries_total 5
+vllm_speculative_accepted_total 8
+vllm_speculative_proposed_total 10
+vllm_time_to_first_token_seconds_bucket{le="0.1"} 90
+vllm_time_to_first_token_seconds_bucket{le="0.2"} 100
+vllm_time_to_first_token_seconds_count 100
+vllm_request_latency_seconds_bucket{le="0.5"} 90
+vllm_request_latency_seconds_bucket{le="0.8"} 100
+vllm_request_latency_seconds_count 100
+vllm_inter_token_latency_seconds_bucket{le="0.01"} 90
+vllm_inter_token_latency_seconds_bucket{le="0.02"} 100
+vllm_inter_token_latency_seconds_count 100
+"#,
+    );
+    let mut collector = TelemetryCollector::new(
+        output.clone(),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let first_at = Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap();
+    let first = collector.sample_at(None, first_at).unwrap();
+    assert_eq!(first.metrics.runtimes[0].backend, "vllm");
+    assert!(first.metrics.runtimes[0].adapter_supported);
+    assert_eq!(
+        rich_number(&first, "runtime.decode_tokens_per_second"),
+        None
+    );
+    assert_eq!(rich_number(&first, "runtime.requests_running"), Some(2.0));
+    assert_eq!(rich_number(&first, "runtime.ttft_p95_ms"), Some(200.0));
+    assert_eq!(
+        rich_number(&first, "runtime.prefix_cache_hit_percent"),
+        Some(80.0)
+    );
+    assert_eq!(
+        rich_number(&first, "runtime.mtp_acceptance_percent"),
+        Some(80.0)
+    );
+    assert!(
+        first
+            .metrics
+            .capabilities
+            .iter()
+            .any(
+                |capability| capability.key == "runtime.prefill_cached_tokens_per_second"
+                    && !capability.supported
+                    && capability.reason.is_some()
+            )
+    );
+
+    output.output.lock().unwrap().stdout = br#"vllm_generation_tokens_total 220
+vllm_prompt_tokens_total 120
+vllm_num_requests_running 1
+vllm_num_requests_waiting 4
+vllm_kv_cache_usage_perc 0.5
+vllm_num_preemptions_total 4
+vllm_prefix_cache_hits_total 5
+vllm_prefix_cache_queries_total 6
+vllm_speculative_accepted_total 9
+vllm_speculative_proposed_total 12
+vllm_time_to_first_token_seconds_bucket{le="0.1"} 90
+vllm_time_to_first_token_seconds_bucket{le="0.2"} 100
+vllm_time_to_first_token_seconds_count 100
+"#
+    .to_vec();
+    let second = collector
+        .sample_at(Some(&first), first_at + chrono::Duration::seconds(2))
+        .unwrap();
+    assert_eq!(
+        rich_number(&second, "runtime.decode_tokens_per_second"),
+        Some(10.0)
+    );
+    assert_eq!(
+        rich_number(&second, "runtime.prefill_tokens_per_second"),
+        Some(10.0)
+    );
+    assert_eq!(rich_number(&second, "runtime.requests_waiting"), Some(4.0));
+    assert_eq!(
+        rich_number(&second, "runtime.kv_cache_usage_percent"),
+        Some(50.0)
+    );
+    assert_eq!(rich_number(&second, "runtime.ttft_p95_ms"), Some(200.0));
+    assert!(second.metrics.runtimes[0].endpoint.is_none());
+    assert!(second.metrics.runtimes[0].model.is_none());
+}
+
+#[test]
+fn sglang_runtime_adapter_uses_the_same_allowlisted_prometheus_contract() {
+    let fixtures = Fixtures::new();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    write_runtime_contract(&fixtures, run_id, "sglang");
+    let collector = runner(b"sglang_generation_tokens_total 12\nsglang_num_requests_running 1\n");
+    let mut collector = TelemetryCollector::new(
+        collector,
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let sample = collector
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+        .unwrap();
+    assert_eq!(sample.metrics.runtimes[0].backend, "sglang");
+    assert!(sample.metrics.runtimes[0].adapter_supported);
+    assert_eq!(rich_number(&sample, "runtime.requests_running"), Some(1.0));
+}
+
+#[test]
+fn comfy_runtime_adapter_reports_queue_and_explicitly_unsupported_token_metrics() {
+    let fixtures = Fixtures::new();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    write_runtime_contract(&fixtures, run_id, "comfyui");
+    let mut collector = TelemetryCollector::new(
+        runner(br#"{"queue_running":[{"prompt_id":"a"}],"queue_pending":[{"prompt_id":"b"},{"prompt_id":"c"}]}"#),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let sample = collector
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+        .unwrap();
+    assert_eq!(sample.metrics.runtimes[0].backend, "comfyui");
+    assert!(sample.metrics.runtimes[0].adapter_supported);
+    assert_eq!(rich_number(&sample, "runtime.requests_running"), Some(1.0));
+    assert_eq!(rich_number(&sample, "runtime.requests_waiting"), Some(2.0));
+    assert!(
+        sample
+            .metrics
+            .capabilities
+            .iter()
+            .any(|capability| capability.key == "runtime.ttft_p95_ms"
+                && !capability.supported
+                && capability.reason.is_some())
     );
 }
 
@@ -481,9 +685,14 @@ fn symlinked_sequence_database_fails_closed() {
         TelemetryPaths {
             stat: store.stat.clone(),
             loadavg: store.loadavg.clone(),
+            uptime: store.uptime.clone(),
             meminfo: store.meminfo.clone(),
             net_dev: store.net_dev.clone(),
             store: store.directory.path().to_path_buf(),
+            sys_block: store.directory.path().join("sys-block"),
+            sys_class_net: store.directory.path().join("sys-class-net"),
+            thermal: store.directory.path().join("thermal"),
+            powercap: store.directory.path().join("powercap"),
         },
         boot_id(),
     );
