@@ -792,6 +792,9 @@ def add_controller_commands(
         action="store_true",
         help="Preview the automatic run without starting it",
     )
+    model_run.add_argument("--detach", action="store_true", help="Return after submission")
+    model_run.add_argument("--timeout-seconds", type=int, default=30)
+    model_run.add_argument("--interval-seconds", type=float, default=1.0)
     model_run_commands = _subcommands(
         model_run, "model_run_command", required=False
     )
@@ -832,6 +835,10 @@ def add_controller_commands(
     cache_download.add_argument("--model-version-sha256")
     cache_download.add_argument("--recipe-revision-sha256")
     cache_download.add_argument("--recipe-revision-id")
+    cache_download.add_argument("--dry-run", action="store_true", help="Preview without downloading")
+    cache_download.add_argument("--detach", action="store_true", help="Return after submission")
+    cache_download.add_argument("--timeout-seconds", type=int, default=30)
+    cache_download.add_argument("--interval-seconds", type=float, default=1.0)
     _plan_flags(cache_download)
     cache_repair = cache_commands.add_parser("repair")
     cache_repair.add_argument("artifact_id", metavar="ARTIFACT_SET_SHA256")
@@ -920,6 +927,9 @@ def add_controller_commands(
         action="store_true",
         help="Preview the automatic switch without applying it",
     )
+    profile_switch.add_argument("--detach", action="store_true", help="Return after submission")
+    profile_switch.add_argument("--timeout-seconds", type=int, default=30)
+    profile_switch.add_argument("--interval-seconds", type=float, default=1.0)
     _apply(profile_switch)
     _add_json(profile_switch)
     profile_application = profile_commands.add_parser("application")
@@ -2973,14 +2983,19 @@ def _run_activity(
 def _model_supports_capabilities(
     model: Mapping[str, object], requested: list[str]
 ) -> bool:
-    """Match advertised model capabilities without inferring them from recipes."""
-    identity = model.get("model")
-    candidates: object = model.get("model_capabilities", model.get("capabilities"))
-    if isinstance(identity, Mapping) and candidates is None:
-        candidates = identity.get("capabilities")
-    if not isinstance(candidates, list):
+    """Match only an explicit Controller capability inventory."""
+    inventory = model.get("capability_inventory")
+    if not isinstance(inventory, list):
         return False
-    supported = {str(value) for value in candidates}
+    supported = {
+        str(item.get("key") or item.get("capability") or item.get("name"))
+        for item in inventory
+        if isinstance(item, Mapping)
+        and item.get("support_status") == "supported"
+        and isinstance(
+            item.get("key") or item.get("capability") or item.get("name"), str
+        )
+    }
     return all(capability in supported for capability in requested)
 
 
@@ -3048,6 +3063,7 @@ def _run_model_run(
         result = client.request(
             "POST", "/api/v1/recipes/run-switches", apply_payload
         )
+        result = _follow_submitted_operation(args, client, result)
         return {
             "plan": preview,
             "result": result,
@@ -3082,6 +3098,33 @@ def _run_model_run(
             "body": payload,
         }
     return client.request("POST", "/api/v1/recipes/run-switch-stops", payload)
+
+
+_TERMINAL_OPERATION_STATES = frozenset(
+    {"succeeded", "completed", "failed", "cancelled", "canceled", "blocked", "partial"}
+)
+
+
+def _follow_submitted_operation(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    submission: dict[str, object],
+) -> dict[str, object]:
+    operation_id = submission.get("operation_id")
+    if not isinstance(operation_id, str) or not operation_id or args.detach:
+        return submission
+    args.operation_id = operation_id
+    timeout = max(0, min(args.timeout_seconds, 300))
+    interval = max(0.1, min(args.interval_seconds, 30.0))
+    deadline = time.monotonic() + timeout
+    while True:
+        observed = client.request("GET", f"/api/v1/operations/{_quoted(operation_id)}")
+        state = str(observed.get("state", observed.get("status", ""))).casefold()
+        if state in _TERMINAL_OPERATION_STATES:
+            return observed
+        if time.monotonic() >= deadline:
+            return {**observed, "timed_out": True, "operation_id": operation_id}
+        time.sleep(interval)
 
 
 def _find_model(snapshot: Mapping[str, object], requested: str) -> dict[str, object]:
@@ -3120,6 +3163,12 @@ def _cache_payload(args: argparse.Namespace) -> dict[str, object]:
     return payload
 
 
+def _artifact_set_sha256(value: str) -> str:
+    if _LOWER_SHA256.fullmatch(value) is None:
+        raise ValueError("artifact set identity must be a lowercase SHA-256 digest")
+    return value
+
+
 def _run_cache(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -3135,12 +3184,18 @@ def _run_cache(
             collection="entries",
         )
     if command == "show":
-        return client.request("GET", f"/api/v1/model-cache/entries/{_quoted(args.artifact_id)}")
+        artifact_set_sha256 = _artifact_set_sha256(args.artifact_id)
+        return client.request(
+            "GET", f"/api/v1/model-cache/entries/{_quoted(artifact_set_sha256)}"
+        )
     if command == "update":
+        artifact_set_sha256 = (
+            _artifact_set_sha256(args.artifact_id) if args.artifact_id else None
+        )
         return client.request(
             "GET",
             "/api/v1/model-cache/updates",
-            query=_query(artifact_set_sha256=args.artifact_id),
+            query=_query(artifact_set_sha256=artifact_set_sha256),
         )
     if command == "operations":
         if args.cache_operations_command == "list":
@@ -3171,7 +3226,31 @@ def _run_cache(
         payload = _cache_payload(args)
         if not payload:
             raise ValueError("cache download requires an exact artifact input")
-        variant = args.download_mode or ("apply" if args.apply else "preview")
+        if args.download_mode is None:
+            preview = client.request(
+                "POST", "/api/v1/model-cache/download-preview", dict(payload)
+            )
+            if args.dry_run:
+                return preview
+            plan_digest = preview.get("plan_digest")
+            if not isinstance(plan_digest, str) or not plan_digest:
+                raise ValueError("automatic cache download preview did not return plan_digest")
+            request_key = _explicit_request_key(args.request_key or request_id_factory())
+            args.request_key = request_key
+            apply_payload = dict(payload)
+            apply_payload.update(plan_digest=plan_digest, request_key=request_key)
+            result = _follow_submitted_operation(
+                args,
+                client,
+                client.request("POST", "/api/v1/model-cache/download", apply_payload),
+            )
+            return {
+                "plan": preview,
+                "result": result,
+                "plan_digest": plan_digest,
+                "request_key": request_key,
+            }
+        variant = args.download_mode
         if variant == "preview":
             if args.apply:
                 raise ValueError("cache download preview cannot be combined with --apply")
@@ -3181,7 +3260,7 @@ def _run_cache(
         payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
         return client.request("POST", "/api/v1/model-cache/download", payload)
     payload = _cache_payload(args)
-    payload.setdefault("artifact_set_sha256", args.artifact_id)
+    payload.setdefault("artifact_set_sha256", _artifact_set_sha256(args.artifact_id))
     variant = args.repair_mode or ("apply" if args.apply else "preview")
     if variant == "preview":
         if args.apply:
@@ -3306,7 +3385,9 @@ def _run_profiles(
                 "path": switch_path,
                 "body": payload,
             }
-        result = client.request("POST", switch_path, payload)
+        result = _follow_submitted_operation(
+            args, client, client.request("POST", switch_path, payload)
+        )
         if preview is None:
             return result
         return {

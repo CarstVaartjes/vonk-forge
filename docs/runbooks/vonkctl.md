@@ -106,6 +106,7 @@ vonkctl models run stop apply RUN_ID --plan-digest DIGEST \
 
 vonkctl cache list --all --json
 vonkctl cache show ARTIFACT_SET_SHA256 --json
+vonkctl cache download --input-file exact-artifacts.json --json
 vonkctl cache download preview --input-file exact-artifacts.json --json
 vonkctl cache download apply --input-file exact-artifacts.json \
   --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
@@ -126,9 +127,6 @@ vonkctl profiles duplicate PROFILE_ID --name "Creative setup" \
 vonkctl profiles capture-current --name "Current setup" \
   --request-key REQUEST_UUID --apply --json
 vonkctl profiles preview PROFILE_ID --json
-vonkctl profiles prepare preview PROFILE_ID --json
-vonkctl profiles prepare apply PROFILE_ID \
-  --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
 vonkctl profiles switch PROFILE_ID --json
 vonkctl profiles switch PROFILE_ID --dry-run --json
 vonkctl profiles switch PROFILE_ID \
@@ -139,14 +137,32 @@ vonkctl profiles delete PROFILE_ID --apply --json
 
 Cache download requests identify an exact immutable artifact set; optional
 `--model-version-sha256` and `--recipe-revision-sha256` flags are available for
-the common single-selection form. Repair and eviction require the digest from
+the common single-selection form. Supplying a recipe revision also includes
+its associated OCI runtime artifact; a model-only request downloads weights
+only. The simple download command previews and applies automatically, while
+the explicit preview/apply forms are useful for automation. Repair and eviction require the digest from
 a fresh preview before `--apply`. Every consequential apply requires an
-explicit reusable `--request-key`; reuse that exact key when rerunning an
-apply after a lost connection.
+explicit reusable `--request-key` in the advanced preview/apply form; simple
+commands generate and return a reusable key. Reuse that exact key when
+rerunning an apply after a lost connection.
+
+The simple Run, Switch, and Download commands follow the returned durable
+operation to a terminal result by default. Use `--detach` to return after
+submission; the generated or supplied request key remains in the JSON result
+for an uncertain-response retry.
 
 `models --capability` filters advertised model support. Use
 `models --recipe-capability` when the question is whether a recipe exposes a
 capability; the CLI keeps these two sources separate.
+
+Advanced automation can prepare a saved profile ahead of switching with the
+separate plan-bound commands:
+
+```bash
+vonkctl profiles prepare preview PROFILE_ID --json
+vonkctl profiles prepare apply PROFILE_ID \
+  --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
+```
 
 ## Operations and recovery
 

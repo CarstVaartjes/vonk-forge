@@ -434,12 +434,16 @@ def _control_error(
         message = _sanitize_text(error)
     result: dict[str, object] = {"error": message, "error_type": "control_api"}
     request_key = getattr(args, "request_key", None) if args is not None else None
+    operation_id = getattr(args, "operation_id", None) if args is not None else None
     if isinstance(request_key, str) and request_key:
         result["request_key"] = request_key
         result["reconcile"] = {
             "operation": "inspect the durable operation with the same request key",
             "request_key": request_key,
         }
+        if isinstance(operation_id, str) and operation_id:
+            result["operation_id"] = operation_id
+            result["reconcile"]["operation_id"] = operation_id
     return result
 
 
@@ -559,3 +563,6 @@ def main(
     ) as error:
         _emit(_control_error(error, args), args)
         return 2
+    except KeyboardInterrupt:
+        _emit(_control_error(ControlClientError("operation interrupted"), args), args)
+        return 130

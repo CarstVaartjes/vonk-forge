@@ -554,18 +554,20 @@ def test_telemetry_range_uses_the_web_resolution_and_point_defaults() -> None:
 def test_metrics_current_forwards_server_metric_units_and_provenance() -> None:
     metrics = {
         "schema_version": 2,
-        "series": [
-            {
-                "key": "gpu.power",
-                "scope": "device",
-                "device_id": "gpu0",
-                "value": 185.5,
-                "unit": "W",
-                "source": "dcgm",
-                "support_status": "supported",
-                "freshness": "fresh",
-            }
-        ],
+        "sample": {
+            "metrics": [
+                {
+                    "key": "gpu.power",
+                    "scope": "device",
+                    "device_id": "gpu0",
+                    "value": 185.5,
+                    "unit": "W",
+                    "source": "dcgm",
+                    "support_status": "supported",
+                    "freshness": "fresh",
+                }
+            ]
+        },
     }
     client = _Client({("GET", "/api/v1/nodes/spk_node/telemetry/current"): metrics})
 
@@ -584,8 +586,7 @@ def test_metrics_history_capabilities_and_workloads_use_exact_routes() -> None:
     client = _Client(
         {
             ("GET", "/api/v1/nodes/spk_node/telemetry"): {
-                "schema_version": 2,
-                "series": [],
+                "samples": [{"schema_version": 2, "metrics": []}],
             },
             ("GET", "/api/v1/nodes/spk_node/telemetry/capabilities"): {
                 "schema_version": 2,
@@ -644,7 +645,10 @@ def test_metrics_history_capabilities_and_workloads_use_exact_routes() -> None:
 
 
 def test_metrics_export_writes_the_unchanged_server_projection(tmp_path: Path) -> None:
-    response = {"schema_version": 2, "series": [], "provenance": {"source": "agent"}}
+    response = {
+        "samples": [{"schema_version": 2, "metrics": []}],
+        "provenance": {"source": "agent"},
+    }
     destination = tmp_path / "metrics.json"
     client = _Client({("GET", "/api/v1/nodes/spk_node/telemetry"): response})
 
@@ -1475,6 +1479,8 @@ def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
     [
         ("library", "compare", "one", "two", "three", "four"),
         ("library", "public", "compare", "one"),
+        ("cache", "show", "artifact-set-1"),
+        ("cache", "repair", "artifact-set-1", "preview"),
         ("fleet", "enroll", "--ttl-seconds", "901"),
         ("fleet", "re-enroll", "spk_NOT_HEX"),
         ("fleet", "profile", "node", "--display-name", "   "),
@@ -1504,7 +1510,7 @@ def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> N
     with redirect_stdout(stdout):
         assert cli.main(("--json", "cache", "list"), control_client=client) == 0
         assert cli.main(
-                ("--json", "cache", "download", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}',
+                ("--json", "cache", "download", "apply", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}',
                  "--plan-digest", "d" * 64,
              "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
             control_client=client,
@@ -1579,8 +1585,10 @@ def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> Non
                             "publisher": "acme",
                             "slug": "vision",
                             "content_sha256": "a" * 64,
-                            "capabilities": ["vision"],
                         },
+                        "capability_inventory": [
+                            {"key": "vision", "support_status": "supported"}
+                        ],
                         "recipes": [{"capabilities": ["chat"]}],
                     },
                     {
@@ -1610,6 +1618,12 @@ def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> Non
     assert result == 0
     assert [item["model"]["slug"] for item in payload["models"]] == ["text"]
 
+    result, payload = _invoke(
+        client, "--json", "models", "list", "--capability", "chat"
+    )
+    assert result == 0
+    assert payload["models"] == []
+
 
 @pytest.mark.parametrize(
     "argv",
@@ -1618,8 +1632,8 @@ def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> Non
         ("fleet", "state"),
         ("models", "discover"),
         ("models", "compare", "a", "b"),
-        ("cache", "show", "a"),
-        ("cache", "update", "a"),
+        ("cache", "show", "a" * 64),
+        ("cache", "update", "a" * 64),
         ("cache", "eviction", "preview", "--target-bytes", "100"),
         ("cache", "eviction", "apply", "--target-bytes", "100", "--plan-digest", "d" * 64,
          "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
@@ -1693,9 +1707,32 @@ def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
                 "schema_version": 2,
                 "operation_id": "op-1",
             },
+            ("GET", "/api/v1/operations/op-1"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+                "state": "succeeded",
+            },
         }
     )
     request_key = "11111111-1111-4111-8111-111111111111"
+    run_input = {
+        "model_version_sha256": "a" * 64,
+        "recipe_revision_id": "recipe-1",
+        "spark_group": {
+            "nodes": [
+                {
+                    "node_id": "spk_11111111111111111111111111111111",
+                    "rank": 0,
+                    "role": "coordinator",
+                    "endpoint_owner": True,
+                }
+            ]
+        },
+        "alias": "demo",
+        "action": "run",
+        "retention": "retain-cached",
+        "invocation": {"prompt": "hello"},
+    }
 
     result, payload = _invoke(
         client,
@@ -1703,7 +1740,7 @@ def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
         "models",
         "run",
         "--input",
-        '{"model_version_sha256":"' + "a" * 64 + '"}',
+        json.dumps(run_input),
         "--request-key",
         request_key,
     )
@@ -1713,9 +1750,52 @@ def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
     assert [call[1] for call in client.calls] == [
         "/api/v1/recipes/run-switch-plans/preview",
         "/api/v1/recipes/run-switches",
+        "/api/v1/operations/op-1",
     ]
-    assert client.calls[1][2] == {
+    assert client.calls[1][2] == {**run_input, "plan_digest": "d" * 64, "request_key": request_key}
+
+
+def test_simple_cache_download_previews_then_applies_exact_artifacts() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/model-cache/download-preview"): {
+                "schema_version": 2,
+                "plan_digest": "d" * 64,
+            },
+            ("POST", "/api/v1/model-cache/download"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+            },
+            ("GET", "/api/v1/operations/op-1"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+                "state": "succeeded",
+            },
+        }
+    )
+    request_key = "11111111-1111-4111-8111-111111111111"
+    artifact_input = {
         "model_version_sha256": "a" * 64,
+        "recipe_revision_id": "recipe-1",
+        "runtime_image": "oci://registry.example/vllm@sha256:" + "b" * 64,
+    }
+
+    result, payload = _invoke(
+        client,
+        "--json",
+        "cache",
+        "download",
+        "--input",
+        json.dumps(artifact_input),
+        "--request-key",
+        request_key,
+    )
+
+    assert result == 0
+    assert payload["request_key"] == request_key
+    assert client.calls[0][2] == artifact_input
+    assert client.calls[1][2] == {
+        **artifact_input,
         "plan_digest": "d" * 64,
         "request_key": request_key,
     }
@@ -1731,6 +1811,11 @@ def test_simple_profile_switch_previews_then_applies_without_manual_digest() -> 
             ("POST", "/api/v1/fleet-profiles/p/switch"): {
                 "schema_version": 2,
                 "operation_id": "op-1",
+            },
+            ("GET", "/api/v1/operations/op-1"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+                "state": "succeeded",
             },
         }
     )
@@ -1785,8 +1870,8 @@ def test_strict_fixture_rejects_route_query_and_body_drift() -> None:
         ("profiles", "switch", "profile-1", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
         ("cache", "eviction", "preview", "--target-bytes", "100"),
         ("cache", "eviction", "apply", "--target-bytes", "100", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
-        ("cache", "repair", "artifact-set-1", "preview"),
-        ("cache", "repair", "artifact-set-1", "apply", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
+        ("cache", "repair", "a" * 64, "preview"),
+        ("cache", "repair", "a" * 64, "apply", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
         ("operations", "list", "--status", "running"),
     )
     for command in commands:
