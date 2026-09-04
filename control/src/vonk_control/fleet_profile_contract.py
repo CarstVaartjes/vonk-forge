@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
+from .preparation_contract import RolloutPreparation
+
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -226,6 +228,11 @@ class FleetProfilePlanSummary(_StrictModel):
     blockers: int = Field(ge=0, le=2048)
 
 
+class FleetProfileAssignmentPreparation(_StrictModel):
+    assignment_id: UuidId
+    preparation: RolloutPreparation
+
+
 class FleetProfilePreview(_StrictModel):
     schema_version: Literal[2] = 2
     profile_id: UuidId
@@ -236,6 +243,9 @@ class FleetProfilePreview(_StrictModel):
     scope: FleetProfileScopePreview
     summary: FleetProfilePlanSummary
     assignments: list[FleetProfileAssignmentPreview] = Field(max_length=64)
+    preparations: list[FleetProfileAssignmentPreparation] = Field(
+        default_factory=list, max_length=64
+    )
     steps: list[FleetProfilePlanStep] = Field(max_length=1024)
     reasons: list[FleetProfileReason] = Field(max_length=128)
     plan_digest: Digest
@@ -318,6 +328,7 @@ __all__ = [
     "FleetProfileAssignment",
     "FleetProfileAssignmentInput",
     "FleetProfileAssignmentPreview",
+    "FleetProfileAssignmentPreparation",
     "FleetProfileCaptureInput",
     "FleetProfileDuplicateInput",
     "FleetProfileInput",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,6 +30,7 @@ from vonk_control.models import (
     RecipeRun,
     RunNode,
 )
+from vonk_control.preparation_contract import RolloutPreparation
 from vonk_control.recipe_contract import recipe_content_sha256, validate_recipe
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
@@ -42,6 +43,90 @@ def _uuid(value: int) -> str:
 
 def _node_id(value: int) -> str:
     return "spk_" + f"{value:032x}"
+
+
+def _exact_preparation(
+    node_ids: tuple[str, ...], *, observed_at: datetime = NOW
+) -> RolloutPreparation:
+    """Return preparation evidence from the Controller authority fixture."""
+
+    model_digest = "a" * 64
+    image_layout_digest = "e" * 64
+    image_digest = "sha256:" + "d" * 64
+    controller_model = {
+        "state": "ready",
+        "expected_bytes": 100,
+        "verified_bytes": 100,
+        "missing_bytes": 0,
+        "verified_sha256": model_digest,
+        "verified_at": observed_at,
+        "source": "nas-cache",
+    }
+    controller_image = {
+        "state": "ready",
+        "expected_bytes": 100,
+        "verified_bytes": 100,
+        "missing_bytes": 0,
+        "verified_sha256": image_layout_digest,
+        "verified_at": observed_at,
+        "source": "controller-build",
+    }
+    return RolloutPreparation.model_validate(
+        {
+            "model": {
+                "artifact_set_sha256": model_digest,
+                "model_version_sha256": "b" * 64,
+                "recipe_revision_sha256": "c" * 64,
+                "artifact_count": 1,
+                "artifact_set_bytes": 100,
+                "dependency_model_version_sha256": [],
+                "completeness": "complete",
+                "controller": controller_model,
+                "targets": [
+                    {
+                        "node_id": node_id,
+                        "state": "ready",
+                        "expected_bytes": 100,
+                        "present_bytes": 100,
+                        "missing_bytes": 0,
+                        "verified_sha256": model_digest,
+                        "verified_at": observed_at,
+                        "reason": None,
+                    }
+                    for node_id in node_ids
+                ],
+            },
+            "runtime_image": {
+                "image_digest": image_digest,
+                "oci_layout_sha256": image_layout_digest,
+                "image_bytes": 100,
+                "architecture": "linux-arm64",
+                "runtime_interface": "vonk.runtime.v1",
+                "build_id": "build-1",
+                "controller": controller_image,
+                "targets": [
+                    {
+                        "node_id": node_id,
+                        "state": "ready",
+                        "expected_bytes": 100,
+                        "present_bytes": 100,
+                        "missing_bytes": 0,
+                        "verified_sha256": image_layout_digest,
+                        "imported_image_digest": image_digest,
+                        "verified_at": observed_at,
+                        "reason": None,
+                    }
+                    for node_id in node_ids
+                ],
+            },
+            "exceptions": [],
+            "target_node_ids": list(node_ids),
+            "controller_ready": True,
+            "targets_ready": True,
+            "ready": True,
+            "reasons": [],
+        }
+    )
 
 
 def _database() -> sessionmaker[Session]:
@@ -666,6 +751,221 @@ def test_profile_apply_switches_dual_solo_idle_and_reuses_cached_installation() 
             )
         } == {_node_id(1), _node_id(2)}
     assert operations.events == ["stop", "start"]
+
+
+def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        preparation_provider=lambda _session, _assignment, node_ids: _exact_preparation(
+            node_ids
+        ),
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    preview = service.preview(profile.id)
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(40),
+        actor="admin",
+    )
+
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        item = service._operation_item(row)
+
+    assert item["id"] == application.id
+    assert item["parent_id"] is None
+    assert item["node_ids"] == [_node_id(1)]
+    assert item["kind"] == "fleet-profile.apply"
+    assert item["progress"] == {"phase": "prepare"}
+
+    preparation_preview = service.prepare_preview(profile.id)
+    prepared = service.prepare(
+        profile.id,
+        plan_digest=preparation_preview.plan_digest,
+        request_key=_uuid(41),
+        actor="admin",
+    )
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, prepared.id)
+        assert row is not None
+        prepared_item = service._operation_item(row)
+    assert prepared_item["kind"] == "fleet-profile.prepare"
+
+
+def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=_node_id(2),
+                state="active",
+                protocol_version=1,
+                architecture="linux-arm64",
+                capabilities=[],
+                last_seen_at=NOW,
+            )
+        )
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    profile = service.create(
+        FleetProfileInput(
+            name="All idle",
+            scope=FleetProfileScope(node_ids=[_node_id(1), _node_id(2)]),
+            assignments=[],
+        ),
+        actor="admin",
+    )
+
+    preview = service.preview(profile.id)
+
+    assert preview.allowed is True
+    assert preview.scope.idle_node_ids == [_node_id(1), _node_id(2)]
+    assert preview.steps == []
+    assert preview.preparations == []
+
+
+def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=_node_id(2),
+                state="active",
+                protocol_version=1,
+                architecture="linux-arm64",
+                capabilities=[],
+                last_seen_at=NOW,
+            )
+        )
+        session.add(
+            RecipeBuild(
+                id=_uuid(60),
+                recipe_revision_id=revision_id,
+                builder_node_id=_node_id(1),
+                source_bundle_sha256="b" * 64,
+                build_input_sha256="c" * 64,
+                state="succeeded",
+                policy_report={},
+                plan={},
+                image_digest="sha256:" + "d" * 64,
+                oci_layout_sha256="e" * 64,
+                image_bytes=1024,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    assignments = [
+        {
+            "recipe_revision_id": revision_id,
+            "topology_name": "solo",
+            "desired_state": "installed",
+            "alias": None,
+            "nodes": [
+                {
+                    "node_id": _node_id(2),
+                    "rank": 0,
+                    "role": "entrypoint",
+                    "endpoint_owner": True,
+                }
+            ],
+        },
+        {
+            "recipe_revision_id": revision_id,
+            "topology_name": "solo",
+            "desired_state": "installed",
+            "alias": None,
+            "nodes": [
+                {
+                    "node_id": _node_id(1),
+                    "rank": 0,
+                    "role": "entrypoint",
+                    "endpoint_owner": True,
+                }
+            ],
+        },
+    ]
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        preparation_provider=lambda _session, _assignment, node_ids: _exact_preparation(
+            node_ids
+        ),
+    )
+    profile = service.create(
+        FleetProfileInput(
+            name="Two cached copies",
+            scope=FleetProfileScope(node_ids=[_node_id(1), _node_id(2)]),
+            assignments=assignments,
+        ),
+        actor="admin",
+    )
+
+    preview = service.preview(profile.id)
+
+    next_observation = NOW
+
+    def changing_observation_provider(
+        _session, _assignment, node_ids
+    ) -> RolloutPreparation:
+        nonlocal next_observation
+        result = _exact_preparation(node_ids, observed_at=next_observation)
+        next_observation += timedelta(seconds=1)
+        return result
+
+    digest_service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        preparation_provider=changing_observation_provider,
+    )
+    assert digest_service.preview(profile.id).plan_digest == digest_service.preview(
+        profile.id
+    ).plan_digest
+
+    assert [item.assignment_id for item in preview.preparations] == sorted(
+        item.assignment_id for item in preview.preparations
+    )
+    assert len(preview.preparations) == 2
+    assert {
+        item.preparation.model.artifact_set_sha256
+        for item in preview.preparations
+    } == {preview.preparations[0].preparation.model.artifact_set_sha256}
+    assert {
+        item.preparation.runtime_image.image_digest
+        for item in preview.preparations
+    } == {"sha256:" + "d" * 64}
+    assert {
+        item.preparation.model.artifact_set_bytes
+        for item in preview.preparations
+    } == {100}
+
+
+def test_profile_rejects_preparation_evidence_for_another_scope() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions,
+        clock=lambda: NOW,
+        preparation_provider=lambda _session, _assignment, _node_ids: _exact_preparation(
+            (_node_id(2),)
+        ),
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+
+    preview = service.preview(profile.id)
+
+    assert preview.allowed is False
+    assert preview.preparations == []
+    assert any(
+        reason.code == "profile.preparation_scope_mismatch"
+        and reason.severity == "error"
+        for reason in preview.reasons
+    )
 
 
 def test_profile_contract_rejects_ambiguous_or_incomplete_assignments() -> None:
