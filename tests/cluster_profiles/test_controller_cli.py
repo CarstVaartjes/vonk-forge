@@ -547,6 +547,119 @@ def test_telemetry_range_uses_the_web_resolution_and_point_defaults() -> None:
     assert str(query["end"]).endswith("Z")
 
 
+def test_metrics_current_forwards_server_metric_units_and_provenance() -> None:
+    metrics = {
+        "schema_version": 2,
+        "series": [
+            {
+                "key": "gpu.power",
+                "scope": "device",
+                "device_id": "gpu0",
+                "value": 185.5,
+                "unit": "W",
+                "source": "dcgm",
+                "support_status": "supported",
+                "freshness": "fresh",
+            }
+        ],
+    }
+    client = _Client({("GET", "/api/v1/nodes/spk_node/telemetry/current"): metrics})
+
+    result, payload = _invoke(
+        client, "--json", "fleet", "metrics", "current", "spk_node"
+    )
+
+    assert result == 0
+    assert payload == metrics
+    assert client.calls == [
+        ("GET", "/api/v1/nodes/spk_node/telemetry/current", None, None)
+    ]
+
+
+def test_metrics_history_capabilities_and_workloads_use_exact_routes() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/nodes/spk_node/telemetry"): {
+                "schema_version": 2,
+                "series": [],
+            },
+            ("GET", "/api/v1/nodes/spk_node/telemetry/capabilities"): {
+                "schema_version": 2,
+                "capabilities": [],
+            },
+            ("GET", "/api/v1/nodes/spk_node/telemetry/workloads"): {
+                "schema_version": 2,
+                "workloads": [],
+            },
+        }
+    )
+
+    assert _invoke(
+        client,
+        "--json",
+        "fleet",
+        "metrics",
+        "history",
+        "spk_node",
+        "--start",
+        "2026-09-05T00:00:00Z",
+        "--end",
+        "2026-09-05T01:00:00Z",
+        "--resolution",
+        "raw",
+        "--maximum-points",
+        "100",
+    )[0] == 0
+    assert _invoke(client, "--json", "fleet", "metrics", "capabilities", "spk_node")[0] == 0
+    assert _invoke(
+        client,
+        "--json",
+        "fleet",
+        "metrics",
+        "workloads",
+        "spk_node",
+        "--run-id",
+        "run-1",
+        "--state",
+        "running",
+    )[0] == 0
+
+    assert client.calls[0][3] == {
+        "start": "2026-09-05T00:00:00Z",
+        "end": "2026-09-05T01:00:00Z",
+        "resolution": "raw",
+        "maximum_points": 100,
+    }
+    assert client.calls[1] == (
+        "GET",
+        "/api/v1/nodes/spk_node/telemetry/capabilities",
+        None,
+        None,
+    )
+    assert client.calls[2][3] == {"run_id": "run-1", "state": "running"}
+
+
+def test_metrics_export_writes_the_unchanged_server_projection(tmp_path: Path) -> None:
+    response = {"schema_version": 2, "series": [], "provenance": {"source": "agent"}}
+    destination = tmp_path / "metrics.json"
+    client = _Client({("GET", "/api/v1/nodes/spk_node/telemetry"): response})
+
+    result, payload = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "metrics",
+        "export",
+        "spk_node",
+        "--file",
+        str(destination),
+    )
+
+    assert result == 0
+    assert payload == {"node_id": "spk_node", "file": str(destination)}
+    assert json.loads(destination.read_text()) == response
+
+
 def test_fleet_search_and_attention_sort_match_friendly_web_names() -> None:
     client = _Client(
         {
@@ -1450,6 +1563,48 @@ def test_models_show_uses_library_identity_projection() -> None:
     result, payload = _invoke(client, "--json", "models", "show", "acme/demo")
     assert result == 0
     assert payload["model"]["slug"] == "demo"
+
+
+def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/library"): {
+                "models": [
+                    {
+                        "model": {
+                            "publisher": "acme",
+                            "slug": "vision",
+                            "content_sha256": "a" * 64,
+                            "capabilities": ["vision"],
+                        },
+                        "recipes": [{"capabilities": ["chat"]}],
+                    },
+                    {
+                        "model": {
+                            "publisher": "acme",
+                            "slug": "text",
+                            "content_sha256": "b" * 64,
+                            "capabilities": ["chat"],
+                        },
+                        "recipes": [{"capabilities": ["vision"]}],
+                    },
+                ],
+                "unlinked_recipes": [],
+            }
+        }
+    )
+
+    result, payload = _invoke(
+        client, "--json", "models", "list", "--capability", "vision"
+    )
+    assert result == 0
+    assert [item["model"]["slug"] for item in payload["models"]] == ["vision"]
+
+    result, payload = _invoke(
+        client, "--json", "models", "list", "--recipe-capability", "vision"
+    )
+    assert result == 0
+    assert [item["model"]["slug"] for item in payload["models"]] == ["text"]
 
 
 @pytest.mark.parametrize(

@@ -323,6 +323,40 @@ def add_controller_commands(
     telemetry.add_argument("--maximum-points", type=int, choices=range(1, 3001))
     _add_json(telemetry)
 
+    metrics = fleet_commands.add_parser(
+        "metrics", help="Inspect server-provided Spark metrics and history"
+    )
+    metric_commands = _subcommands(metrics, "metrics_command")
+    metrics_current = metric_commands.add_parser("current")
+    metrics_current.add_argument("node_id")
+    _add_json(metrics_current)
+    for metric_command in ("history", "export"):
+        metric_parser = metric_commands.add_parser(metric_command)
+        metric_parser.add_argument("node_id")
+        metric_time = metric_parser.add_mutually_exclusive_group()
+        metric_time.add_argument(
+            "--range", choices=tuple(TELEMETRY_RANGES), default="1h"
+        )
+        metric_time.add_argument("--start")
+        metric_parser.add_argument("--end")
+        metric_parser.add_argument(
+            "--resolution", choices=("raw", "minute", "fifteen-minute")
+        )
+        metric_parser.add_argument(
+            "--maximum-points", type=int, choices=range(1, 3001)
+        )
+        if metric_command == "export":
+            metric_parser.add_argument("--file", type=Path)
+        _add_json(metric_parser)
+    metrics_capabilities = metric_commands.add_parser("capabilities")
+    metrics_capabilities.add_argument("node_id")
+    _add_json(metrics_capabilities)
+    metrics_workloads = metric_commands.add_parser("workloads")
+    metrics_workloads.add_argument("node_id")
+    metrics_workloads.add_argument("--run-id")
+    metrics_workloads.add_argument("--state")
+    _add_json(metrics_workloads)
+
     profile = fleet_commands.add_parser(
         "node-profile", aliases=["profile"], help="Rename a Fleet node"
     )
@@ -727,6 +761,12 @@ def add_controller_commands(
     _paging(model_list, default=100)
     model_list.add_argument("--search", default="")
     model_list.add_argument("--capability", action="append", default=[])
+    model_list.add_argument(
+        "--recipe-capability",
+        action="append",
+        default=[],
+        help="Filter by capabilities exposed by at least one recipe",
+    )
     _add_json(model_list)
     model_show = model_commands.add_parser("show")
     model_show.add_argument("model_id")
@@ -1928,11 +1968,9 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
                     return node
         raise ValueError(f"Fleet node not found: {args.node_id}")
     if command == "telemetry":
-        return client.request(
-            "GET",
-            f"/api/v1/nodes/{_quoted(args.node_id)}/telemetry",
-            query=_telemetry_query(args),
-        )
+        return _run_metric_command(args, client, "history")
+    if command == "metrics":
+        return _run_metric_command(args, client, args.metrics_command)
     if command in {"profile", "node-profile"}:
         display_name = args.display_name.strip()
         if (
@@ -1999,6 +2037,30 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
     return _plan_or_request(
         args, client, "POST", f"/api/v1/agents/nodes/{_quoted(args.node_id)}/revoke"
     )
+
+
+def _run_metric_command(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    metric_command: str,
+) -> dict[str, object]:
+    """Forward the Controller's schema-2 telemetry projection unchanged."""
+    node_path = f"/api/v1/nodes/{_quoted(args.node_id)}/telemetry"
+    if metric_command == "current":
+        return client.request("GET", f"{node_path}/current")
+    if metric_command == "capabilities":
+        return client.request("GET", f"{node_path}/capabilities")
+    if metric_command == "workloads":
+        return client.request(
+            "GET",
+            f"{node_path}/workloads",
+            query=_query(run_id=args.run_id, state=args.state) or None,
+        )
+    result = client.request("GET", node_path, query=_telemetry_query(args))
+    if metric_command == "export" and args.file is not None:
+        args.file.write_text(json.dumps(result, sort_keys=True) + "\n")
+        return {"node_id": args.node_id, "file": str(args.file)}
+    return result
 
 
 def _artifact_job_id(value: object) -> str:
@@ -2877,6 +2939,20 @@ def _run_activity(
     return _plan_or_request(args, client, "POST", f"{path}/resume")
 
 
+def _model_supports_capabilities(
+    model: Mapping[str, object], requested: list[str]
+) -> bool:
+    """Match advertised model capabilities without inferring them from recipes."""
+    identity = model.get("model")
+    candidates: object = model.get("model_capabilities", model.get("capabilities"))
+    if isinstance(identity, Mapping) and candidates is None:
+        candidates = identity.get("capabilities")
+    if not isinstance(candidates, list):
+        return False
+    supported = {str(value) for value in candidates}
+    return all(capability in supported for capability in requested)
+
+
 def _run_models(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     command = args.models_command
     if command in {"list", "discover"}:
@@ -2889,8 +2965,20 @@ def _run_models(args: argparse.Namespace, client: ControllerClient) -> dict[str,
                     model
                     for model in models
                     if isinstance(model, Mapping)
+                    and _model_supports_capabilities(model, args.capability)
+                ]
+        if args.recipe_capability:
+            models = result.get("models")
+            if isinstance(models, list):
+                result["models"] = [
+                    model
+                    for model in models
+                    if isinstance(model, Mapping)
                     and any(
-                        any(capability in recipe.get("capabilities", []) for capability in args.capability)
+                        all(
+                            capability in recipe.get("capabilities", [])
+                            for capability in args.recipe_capability
+                        )
                         for recipe in model.get("recipes", [])
                         if isinstance(recipe, Mapping)
                     )
@@ -3046,7 +3134,10 @@ def _run_cache(
         return client.request("POST", "/api/v1/model-cache/repair-preview", payload)
     if not args.apply or not args.plan_digest or not args.request_key:
         raise ValueError("cache repair apply requires --apply, --plan-digest, and --request-key")
-    payload.update(plan_digest=args.plan_digest, request_key=args.request_key)
+    payload.update(
+        plan_digest=args.plan_digest,
+        request_key=_explicit_request_key(args.request_key),
+    )
     return client.request("POST", "/api/v1/model-cache/repair", payload)
 
 

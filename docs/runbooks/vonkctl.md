@@ -69,6 +69,22 @@ shows the current Spark roster, capacity, and freshness. The old
 single-node display-name edit; saved whole-fleet profiles use the separate
 `profiles` command group.
 
+Spark metrics are returned by the Controller with their units, source,
+freshness, support status, and aggregation metadata intact. Use the current
+projection for hardware/runtime values, history for a bounded time series,
+capabilities for support details, and workloads for run/engine metrics.
+
+```bash
+vonkctl fleet metrics current SPARK_ID --json
+vonkctl fleet metrics history SPARK_ID --range 24h --json
+vonkctl fleet metrics history SPARK_ID \
+  --start 2026-09-05T00:00:00Z --end 2026-09-05T01:00:00Z \
+  --resolution raw --maximum-points 100 --json
+vonkctl fleet metrics capabilities SPARK_ID --json
+vonkctl fleet metrics workloads SPARK_ID --run-id RUN_ID --state running --json
+vonkctl fleet metrics export SPARK_ID --range 7d --file metrics.json --json
+```
+
 ## Models, NAS cache, and profiles
 
 The task-oriented groups keep model selection, NAS caching, and whole-fleet
@@ -123,6 +139,10 @@ the common single-selection form. Repair and eviction require the digest from
 a fresh preview before `--apply`. Every consequential apply requires an
 explicit reusable `--request-key`; reuse that exact key when rerunning an
 apply after a lost connection.
+
+`models --capability` filters advertised model support. Use
+`models --recipe-capability` when the question is whether a recipe exposes a
+capability; the CLI keeps these two sources separate.
 
 ## Operations and recovery
 
