@@ -1640,7 +1640,10 @@ def production_app() -> FastAPI:
                 clock=clock,
                 cursors=cursor_codec,
                 resume_agent_upgrade=agent_upgrades.resume,
-                operation_providers=(fleet_profiles.operation_provider(),),
+                operation_providers=(
+                    fleet_profiles.operation_provider(),
+                    run_switch_operations.activity_provider(),
+                ),
             ),
             model_cache,
         ),
