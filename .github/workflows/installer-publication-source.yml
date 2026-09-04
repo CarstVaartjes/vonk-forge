@@ -3,6 +3,58 @@ name: Installer publication source
 on:
   push:
     branches: [main]
+    # One cheap fan-in anchor for the union of every development producer.
+    # Unrelated main changes must not launch installer acceptance.
+    paths:
+      - .dockerignore
+      - .github/actions/agent-package-build/**
+      - .github/actions/agent-package-compile/**
+      - .github/actions/agent-package-security/**
+      - .github/workflows/agent-release.yml
+      - .github/workflows/dev-images.yml
+      - .github/workflows/installer-publication-source.yml
+      - .github/workflows/installer-publication.yml
+      - .github/workflows/installer-setups.yml
+      - Cargo.lock
+      - Cargo.toml
+      - config/execution-harnesses/**
+      - control/**
+      - deploy/compose/**
+      - inventory/wheels/**
+      - packaging/**
+      - pyproject.toml
+      - rust/crates/vonk-agent-helper/**
+      - rust/crates/vonk-agent-protocol/**
+      - rust/crates/vonk-agent/**
+      - rust/crates/vonk-build-egress/**
+      - rust/crates/vonk-nas-setup/**
+      - rust/crates/vonk-repair-helper-probe/**
+      - rust/crates/vonk-spark-setup/**
+      - schemas/global/**
+      - scripts/accept-development-image-archive
+      - scripts/agent-package-metadata
+      - scripts/build-agent-deb
+      - scripts/build-nas-compose-bundle
+      - scripts/dev-image-acceptance-receipt
+      - scripts/dev-image-metadata
+      - scripts/install-release-publication
+      - scripts/materialize-agent-tools
+      - scripts/promote-image-aliases
+      - scripts/publish-immutable-image
+      - scripts/render-dev-compose
+      - scripts/render-production-compose
+      - scripts/test-agent-package-native-lifecycle
+      - scripts/test_agent_deb.py
+      - scripts/test_docker_firewall.sh
+      - scripts/verify-agent-binaries
+      - scripts/verify-agent-deb
+      - scripts/verify-agent-systemd
+      - scripts/verify-public-image-inputs
+      - scripts/verify-published-image
+      - scripts/verify-release-tag-authority
+      - src/cluster_profiles/**
+      - tests/acceptance/test_fresh_nas_install.py
+      - tests/acceptance/test_spark_lifecycle.py
 
 permissions:
   contents: read

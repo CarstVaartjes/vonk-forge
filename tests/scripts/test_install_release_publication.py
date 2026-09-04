@@ -1226,7 +1226,25 @@ def test_installer_publication_has_one_development_fanin_anchor() -> None:
         Loader=yaml.BaseLoader,
     )
 
-    assert source["on"]["push"] == {"branches": ["main"]}
+    producer_paths: set[str] = set()
+    for name in ("agent-release.yml", "dev-images.yml", "installer-setups.yml"):
+        producer = yaml.load(
+            (ROOT / ".github/workflows" / name).read_text(),
+            Loader=yaml.BaseLoader,
+        )
+        producer_paths.update(producer["on"]["push"]["paths"])
+    producer_paths.update(
+        {
+            ".github/workflows/installer-publication-source.yml",
+            ".github/workflows/installer-publication.yml",
+            "scripts/build-nas-compose-bundle",
+            "scripts/install-release-publication",
+            "tests/acceptance/test_fresh_nas_install.py",
+            "tests/acceptance/test_spark_lifecycle.py",
+        }
+    )
+    assert source["on"]["push"]["branches"] == ["main"]
+    assert set(source["on"]["push"]["paths"]) == producer_paths
     assert publication["on"]["workflow_run"]["workflows"] == [
         "CI",
         "Installer publication source",
