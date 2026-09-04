@@ -1682,6 +1682,78 @@ def test_high_level_apply_without_apply_flag_only_emits_plan(argv: tuple[str, ..
     assert client.calls == []
 
 
+def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/recipes/run-switch-plans/preview"): {
+                "schema_version": 2,
+                "plan_digest": "d" * 64,
+            },
+            ("POST", "/api/v1/recipes/run-switches"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+            },
+        }
+    )
+    request_key = "11111111-1111-4111-8111-111111111111"
+
+    result, payload = _invoke(
+        client,
+        "--json",
+        "models",
+        "run",
+        "--input",
+        '{"model_version_sha256":"' + "a" * 64 + '"}',
+        "--request-key",
+        request_key,
+    )
+
+    assert result == 0
+    assert payload["request_key"] == request_key
+    assert [call[1] for call in client.calls] == [
+        "/api/v1/recipes/run-switch-plans/preview",
+        "/api/v1/recipes/run-switches",
+    ]
+    assert client.calls[1][2] == {
+        "model_version_sha256": "a" * 64,
+        "plan_digest": "d" * 64,
+        "request_key": request_key,
+    }
+
+
+def test_simple_profile_switch_previews_then_applies_without_manual_digest() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/fleet-profiles/p/preview"): {
+                "schema_version": 2,
+                "plan_digest": "d" * 64,
+            },
+            ("POST", "/api/v1/fleet-profiles/p/switch"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+            },
+        }
+    )
+    request_key = "11111111-1111-4111-8111-111111111111"
+
+    result, payload = _invoke(
+        client,
+        "--json",
+        "profiles",
+        "switch",
+        "p",
+        "--request-key",
+        request_key,
+    )
+
+    assert result == 0
+    assert payload["request_key"] == request_key
+    assert client.calls[1][2] == {
+        "plan_digest": "d" * 64,
+        "request_key": request_key,
+    }
+
+
 def test_uncertain_run_apply_error_preserves_request_key_for_reconciliation() -> None:
     from cluster_profiles.control_client import ControlTransportError
 

@@ -201,8 +201,12 @@ def _add_json(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Emit stable JSON output")
 
 
-def _subcommands(parser: argparse.ArgumentParser, name: str):
-    return parser.add_subparsers(dest=name, required=True, parser_class=type(parser))
+def _subcommands(
+    parser: argparse.ArgumentParser, name: str, *, required: bool = True
+):
+    return parser.add_subparsers(
+        dest=name, required=required, parser_class=type(parser)
+    )
 
 
 def _apply(parser: argparse.ArgumentParser) -> None:
@@ -248,7 +252,12 @@ def _request_key(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _structured_input(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
+def _structured_input(
+    parser: argparse.ArgumentParser,
+    *,
+    required: bool = True,
+    prefix: str | None = None,
+) -> None:
     """Add the bounded structured-input contract used by agent callers.
 
     ``--input -`` is accepted as an explicit stdin form as well as the more
@@ -256,9 +265,10 @@ def _structured_input(parser: argparse.ArgumentParser, *, required: bool = True)
     complex command advertises the same machine-facing contract.
     """
     group = parser.add_mutually_exclusive_group(required=required)
-    group.add_argument("--input", metavar="JSON", help="Inline JSON object")
-    group.add_argument("--input-file", type=Path, help="Bounded JSON object file")
-    group.add_argument("--stdin", action="store_true", help="Read a JSON object from stdin")
+    suffix = f"{prefix}_" if prefix else ""
+    group.add_argument("--input", dest=f"{suffix}input", metavar="JSON", help="Inline JSON object")
+    group.add_argument("--input-file", dest=f"{suffix}input_file", type=Path, help="Bounded JSON object file")
+    group.add_argument("--stdin", dest=f"{suffix}stdin", action="store_true", help="Read a JSON object from stdin")
 
 
 def _plan_flags(parser: argparse.ArgumentParser, *, require_digest: bool = False) -> None:
@@ -775,7 +785,16 @@ def add_controller_commands(
     model_compare.add_argument("model_id", nargs="+", metavar="MODEL_ID")
     _add_json(model_compare)
     model_run = model_commands.add_parser("run", help="Preview or start a model run")
-    model_run_commands = _subcommands(model_run, "model_run_command")
+    _structured_input(model_run, required=False, prefix="run")
+    model_run.add_argument("--request-key", dest="run_request_key")
+    model_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the automatic run without starting it",
+    )
+    model_run_commands = _subcommands(
+        model_run, "model_run_command", required=False
+    )
     model_run_preview = model_run_commands.add_parser("preview")
     _structured_input(model_run_preview)
     _add_json(model_run_preview)
@@ -893,8 +912,13 @@ def add_controller_commands(
     _add_json(profile_prepare_apply)
     profile_switch = profile_commands.add_parser("switch")
     profile_switch.add_argument("profile_id")
-    profile_switch.add_argument("--plan-digest", required=True)
-    profile_switch.add_argument("--request-key", required=True)
+    profile_switch.add_argument("--plan-digest")
+    profile_switch.add_argument("--request-key")
+    profile_switch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the automatic switch without applying it",
+    )
     _apply(profile_switch)
     _add_json(profile_switch)
     profile_application = profile_commands.add_parser("application")
@@ -944,11 +968,17 @@ def _read_object(path: Path) -> dict[str, object]:
     return value
 
 
-def _read_structured(args: argparse.Namespace, *, required: bool = True) -> dict[str, object]:
+def _read_structured(
+    args: argparse.Namespace,
+    *,
+    required: bool = True,
+    prefix: str | None = None,
+) -> dict[str, object]:
     """Read one bounded JSON object from inline text, a file, or stdin."""
-    source = getattr(args, "input", None)
-    input_file = getattr(args, "input_file", None)
-    use_stdin = bool(getattr(args, "stdin", False))
+    suffix = f"{prefix}_" if prefix else ""
+    source = getattr(args, f"{suffix}input", None)
+    input_file = getattr(args, f"{suffix}input_file", None)
+    use_stdin = bool(getattr(args, f"{suffix}stdin", False))
     if source is None and input_file is None and not use_stdin:
         if required:
             raise ValueError("one of --input, --input-file, or --stdin is required")
@@ -2997,8 +3027,32 @@ def _run_models(args: argparse.Namespace, client: ControllerClient) -> dict[str,
 def _run_model_run(
     args: argparse.Namespace,
     client: ControllerClient,
+    request_id_factory: Callable[[], str],
 ) -> dict[str, object]:
     command = args.model_run_command
+    if command is None:
+        payload = _read_structured(args, prefix="run")
+        preview = client.request(
+            "POST", "/api/v1/recipes/run-switch-plans/preview", payload
+        )
+        if args.dry_run:
+            return preview
+        plan_digest = preview.get("plan_digest")
+        if not isinstance(plan_digest, str) or not plan_digest:
+            raise ValueError("automatic model run preview did not return plan_digest")
+        request_key = args.run_request_key or request_id_factory()
+        args.request_key = _explicit_request_key(request_key)
+        apply_payload = dict(payload)
+        apply_payload.update(plan_digest=plan_digest, request_key=args.request_key)
+        result = client.request(
+            "POST", "/api/v1/recipes/run-switches", apply_payload
+        )
+        return {
+            "plan": preview,
+            "result": result,
+            "plan_digest": plan_digest,
+            "request_key": args.request_key,
+        }
     if command in {"preview", "apply"}:
         payload = _read_structured(args)
         if command == "preview":
@@ -3226,19 +3280,41 @@ def _run_profiles(
             }
         return client.request("POST", path, payload)
     if command == "switch":
+        switch_path = f"{base}/{profile_id}/switch"
+        if args.plan_digest is None:
+            preview = client.request("POST", f"{base}/{profile_id}/preview", {})
+            if args.dry_run:
+                return preview
+            plan_digest = preview.get("plan_digest")
+            if not isinstance(plan_digest, str) or not plan_digest:
+                raise ValueError("automatic profile switch preview did not return plan_digest")
+        else:
+            preview = None
+            plan_digest = args.plan_digest
+        request_key = args.request_key or request_id_factory()
+        request_key = _explicit_request_key(request_key)
+        args.request_key = request_key
         payload = {
-            "plan_digest": args.plan_digest,
-            "request_key": _explicit_request_key(args.request_key),
+            "plan_digest": plan_digest,
+            "request_key": request_key,
         }
-        if not args.apply:
+        if not args.apply and preview is None:
             return {
                 "mode": "plan",
                 "apply": False,
                 "method": "POST",
-                "path": f"{base}/{profile_id}/switch",
+                "path": switch_path,
                 "body": payload,
             }
-        return client.request("POST", f"{base}/{profile_id}/switch", payload)
+        result = client.request("POST", switch_path, payload)
+        if preview is None:
+            return result
+        return {
+            "plan": preview,
+            "result": result,
+            "plan_digest": plan_digest,
+            "request_key": request_key,
+        }
     raise ValueError(f"unsupported profile command: {command}")
 
 
@@ -3292,7 +3368,7 @@ def run_controller(
         return _run_activity(args, client)
     if args.command == "models":
         if args.models_command == "run":
-            return _run_model_run(args, client)
+            return _run_model_run(args, client, request_id_factory)
         return _run_models(args, client)
     if args.command == "cache":
         return _run_cache(args, client, request_id_factory)

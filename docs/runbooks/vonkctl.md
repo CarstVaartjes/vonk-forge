@@ -95,6 +95,8 @@ bounded JSON object with `--input JSON`, `--input-file FILE`, or `--stdin`.
 vonkctl models discover --search qwen --all --json
 vonkctl models show MODEL_ID --json
 vonkctl models compare MODEL_ID MODEL_ID --json
+vonkctl models run --input-file run.json --json
+vonkctl models run --input-file run.json --dry-run --json
 vonkctl models run preview --input-file run.json --json
 vonkctl models run apply --input-file run.json --plan-digest DIGEST \
   --request-key REQUEST_UUID --apply --json
@@ -127,6 +129,8 @@ vonkctl profiles preview PROFILE_ID --json
 vonkctl profiles prepare preview PROFILE_ID --json
 vonkctl profiles prepare apply PROFILE_ID \
   --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
+vonkctl profiles switch PROFILE_ID --json
+vonkctl profiles switch PROFILE_ID --dry-run --json
 vonkctl profiles switch PROFILE_ID \
   --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
 vonkctl profiles status PROFILE_ID --json
