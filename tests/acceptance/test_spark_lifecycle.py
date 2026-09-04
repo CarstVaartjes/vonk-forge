@@ -1534,6 +1534,7 @@ class SparkLifecycle:
         if NODE_ID.fullmatch(node_id) is None:
             raise LifecycleError("synthetic canary node identity is invalid")
         module = _load_development_runner()
+        recipe, catalog, source_context = self._synthetic_canary_inputs(module)
         evidence = self.temporary_root / "synthetic-canary.json"
         arguments = argparse.Namespace(
             phase="synthetic",
@@ -1542,13 +1543,13 @@ class SparkLifecycle:
             admin_token_file=None,
             inference_token_file=None,
             timeout_seconds=300.0,
-            recipe=None,
-            catalog=None,
+            recipe=recipe,
+            catalog=catalog,
             library_root=REPOSITORY_ROOT,
             builder_node=node_id,
             target_node=[node_id],
             failure_node=None,
-            source_context=None,
+            source_context=source_context,
             qualification_file=None,
             evidence_file=evidence,
             poll_seconds=1.0,
@@ -1578,6 +1579,90 @@ class SparkLifecycle:
             "completed_states": completed,
             "deterministic_response_sha256": response_digest,
         }
+
+    def _synthetic_canary_inputs(self, module: object) -> tuple[Path, Path, Path]:
+        assert self.temporary_root is not None
+        target = {
+            "linux-amd64": (
+                "amd64",
+                "c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49",
+            ),
+            "linux-arm64": (
+                "arm64",
+                "9bb659dc6d5218917236f3711e866a5634bb4c2f208de9d4533aa4863f57c1d3",
+            ),
+        }.get(self.arguments.platform)
+        if target is None:
+            raise LifecycleError("synthetic canary platform is invalid")
+        architecture, image_digest = target
+        image = f"docker.io/library/python:3.12.11-slim-bookworm@sha256:{image_digest}"
+        fixture = REPOSITORY_ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
+        generated = self.temporary_root / "synthetic-canary-inputs"
+        catalog = generated / "entities"
+        source_context = generated / "context"
+        catalog.mkdir(mode=0o700, parents=True, exist_ok=True)
+        source_context.mkdir(mode=0o700, exist_ok=True)
+        try:
+            recipe = json.loads((fixture / "recipe.json").read_text(encoding="utf-8"))
+            runtime_path = fixture / "entities/05-runtime-distribution.json"
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+            expected = (fixture / "expected.json").read_bytes()
+            dockerfile = (fixture / "context/Dockerfile").read_text(encoding="utf-8")
+            dockerfile = re.sub(
+                r"docker\.io/library/python:3\.12\.11-slim-bookworm@sha256:[0-9a-f]{64}",
+                image,
+                dockerfile,
+                count=1,
+            )
+            if dockerfile.count(image) != 1:
+                raise ValueError("synthetic Dockerfile base image is invalid")
+            (source_context / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+            shutil.copyfile(fixture / "context/server.py", source_context / "server.py")
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise LifecycleError("synthetic canary fixture is invalid") from error
+        except ValueError as error:
+            raise LifecycleError("synthetic canary fixture is invalid") from error
+        if not isinstance(recipe, dict) or not isinstance(runtime, dict):
+            raise LifecycleError("synthetic canary fixture is invalid")
+        try:
+            runtime["identity"]["slug"] = f"development-vllm-shim-{architecture}"
+            runtime["image"] = image
+            runtime["platform"] = f"linux/{architecture}"
+            recipe["build"]["platform"] = f"linux/{architecture}"
+            archive, context_sha256, _ = module._source_bundle(source_context)
+            recipe["build"]["context"]["sha256"] = context_sha256
+            recipe["build"]["context"]["expected_bytes"] = len(archive)
+            distribution = recipe["runtime"]["distribution"]
+            distribution["slug"] = runtime["identity"]["slug"]
+            distribution["content_sha256"] = module._recipe_content_digest(runtime)
+        except (AttributeError, KeyError, TypeError) as error:
+            raise LifecycleError("synthetic canary fixture is invalid") from error
+
+        def write_json(path: Path, document: dict[str, object]) -> None:
+            path.write_text(
+                json.dumps(
+                    document,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+        try:
+            write_json(generated / "recipe.json", recipe)
+            (generated / "expected.json").write_bytes(expected)
+            for source in sorted((fixture / "entities").glob("*.json")):
+                target = catalog / source.name
+                if source == runtime_path:
+                    write_json(target, runtime)
+                else:
+                    shutil.copyfile(source, target)
+        except OSError as error:
+            raise LifecycleError("synthetic canary fixture is unavailable") from error
+        return generated / "recipe.json", catalog, source_context
 
     @staticmethod
     def _serial_proof(serial: str) -> str:
