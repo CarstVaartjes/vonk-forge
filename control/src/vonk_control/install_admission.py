@@ -391,7 +391,7 @@ class InstallAdmissionService:
             "image_digest": image_digest,
             "recipe_revision_id": revision.id,
             "recipe_content_sha256": recipe_digest,
-            "nodes": [_node_document(item) for item in plans],
+            "nodes": [_node_digest_document(item) for item in plans],
         }
         digest = hashlib.sha256(
             json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
@@ -585,4 +585,18 @@ def _node_document(node: InstallNodePlan) -> dict[str, object]:
             if node.inventory_observed_at
             else None
         ),
+    }
+
+
+def _node_digest_document(node: InstallNodePlan) -> dict[str, object]:
+    """Bind install work and safety envelopes, not transient observations."""
+
+    return {
+        "node_id": node.node_id,
+        "rank": node.rank,
+        "role": node.role,
+        "reused_bytes": node.reused_bytes,
+        "required_download_bytes": node.required_download_bytes,
+        "required_bytes": node.required_bytes,
+        "disk_floor_bytes": node.disk_floor_bytes,
     }
