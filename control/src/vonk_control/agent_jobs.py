@@ -38,6 +38,7 @@ from .models import (
     ReconciliationOperation,
 )
 from .models import AgentOperation as StoredOperation
+from .operation_contract import sanitize_failure_evidence, validate_progress_update
 from .recipe_builds import BUILD_ARTIFACT_FORMAT
 
 AgentFence = str | AgentClaim | AgentProgress | AgentResult
@@ -118,6 +119,23 @@ _CONTROL_OPERATIONS = (
 
 class StaleAgentAttempt(RuntimeError):
     """An agent attempted to update an operation it no longer owns."""
+
+
+def _failure_result(
+    error_code: str, reason: str, *, uncertain: bool
+) -> dict[str, object]:
+    """Build a typed failure result through the redaction boundary."""
+
+    return sanitize_failure_evidence(
+        {
+            "status": "waiting-for-operator" if uncertain else "failed",
+            "error_code": error_code,
+            "summary": reason,
+            "reason": reason,
+            "uncertain": uncertain,
+            "recovery": "inspect-before-resume" if uncertain else "retry-or-inspect",
+        }
+    )
 
 
 def _aware(value: datetime) -> datetime:
@@ -930,7 +948,12 @@ class AgentJobService:
                 deadline=deadline,
                 progress=progress,
             )
-            attempt.progress = _document(message.progress)
+            try:
+                attempt.progress = validate_progress_update(
+                    attempt.progress, message.progress
+                )
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"operation progress is invalid: {error}") from error
             attempt.lease_deadline = deadline
             operation.updated_at = now
             parent = session.get(Job, operation.parent_job_id)
@@ -954,10 +977,33 @@ class AgentJobService:
         self._finish(fence, "succeeded", result=result, reason=None)
 
     def fail(self, fence: AgentFence, reason: str) -> None:
-        self._finish(fence, "failed", result=None, reason=reason)
+        self._finish(
+            fence,
+            "failed",
+            result=_failure_result("operation_failed", reason, uncertain=False),
+            reason=None,
+        )
 
     def wait_for_operator(self, fence: AgentFence, reason: str) -> None:
-        self._finish(fence, "waiting-for-operator", result=None, reason=reason)
+        self._finish(
+            fence,
+            "waiting-for-operator",
+            result=_failure_result(
+                "operation_requires_operator", reason, uncertain=True
+            ),
+            reason=None,
+        )
+
+    def uncertain(self, fence: AgentFence, reason: str) -> None:
+        """Persist an ambiguous mutation outcome and require inspection first."""
+        self._finish(
+            fence,
+            "waiting-for-operator",
+            result=_failure_result(
+                "operation_outcome_uncertain", reason, uncertain=True
+            ),
+            reason=None,
+        )
 
     def record_result(
         self, message: AgentResult, *, source: AgentSource | None = None
@@ -1005,7 +1051,16 @@ class AgentJobService:
                     state=state,
                     result=canonical_result,
                 )
-            attempt.result = _document(message.result)
+            if state in {"failed", "waiting-for-operator"}:
+                try:
+                    message_result = sanitize_failure_evidence(message.result)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(
+                        f"operation failure evidence is invalid: {error}"
+                    ) from error
+            else:
+                message_result = _document(message.result)
+            attempt.result = message_result
             if (
                 result is not None
                 and state == "succeeded"
@@ -1204,7 +1259,9 @@ class AgentJobService:
         if isinstance(capabilities, (str, bytes)):
             raise TypeError("agent capabilities are invalid")
         values = tuple(capabilities)
-        if not values or any(not isinstance(value, str) or not value for value in values):
+        if not values or any(
+            not isinstance(value, str) or not value for value in values
+        ):
             raise ValueError("agent capabilities are invalid")
         return tuple(sorted(set(values) & _KNOWN_CAPABILITIES))
 

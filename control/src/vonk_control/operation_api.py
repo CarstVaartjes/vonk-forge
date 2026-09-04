@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -35,6 +35,16 @@ from .models import (
     ReconciliationOperation,
     RoutePublication,
     RoutePublicationOwner,
+)
+from .operation_contract import (
+    OperationEvidenceDownload,
+    OperationEvidenceProvenance,
+    OperationFailureEvidence,
+    OperationMemberProgress,
+    OperationRecovery,
+    normalize_operation_progress,
+    recovery_for_state,
+    sanitize_failure_evidence,
 )
 from .route_runtime import verify_active_route_bundle
 
@@ -185,6 +195,23 @@ class AgentsResponse(StrictModel):
 
 class JobOperationProgress(StrictModel):
     phase: str = Field(min_length=1, max_length=80)
+    completed_bytes: int | None = Field(default=None, ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
+    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
+    total_bytes_known: bool | None = None
+    checkpoint: dict[str, object] | None = None
+    members: list[OperationMemberProgress] | None = Field(default=None, max_length=1024)
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_unset_contract_fields(self, handler):
+        document = handler(self)
+        # Keep old phase-only status responses byte-for-byte stable.
+        return {
+            key: value
+            for key, value in document.items()
+            if value is not None and value != []
+        }
 
 
 class JobOperationResponse(StrictModel):
@@ -196,6 +223,18 @@ class JobOperationResponse(StrictModel):
     attempt: int = Field(ge=0)
     progress: JobOperationProgress | None = None
     updated_at: str | None = None
+    failure: OperationFailureEvidence | None = None
+    provenance: OperationEvidenceProvenance | None = None
+    evidence_download: OperationEvidenceDownload | None = None
+    recovery: OperationRecovery | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_unset_evidence(self, handler):
+        document = handler(self)
+        for key in ("failure", "provenance", "evidence_download", "recovery"):
+            if document.get(key) is None:
+                document.pop(key, None)
+        return document
 
 
 class JobProgress(StrictModel):
@@ -313,6 +352,16 @@ def job_response(
             updated_at=(
                 None if item.get("updated_at") is None else str(item["updated_at"])
             ),
+            failure=_failure_projection(item.get("result")),
+            provenance=_provenance_projection(item.get("result")),
+            evidence_download=_evidence_download_projection(item.get("result")),
+            recovery=recovery_for_state(
+                str(item["state"]),
+                uncertain=bool(
+                    isinstance(item.get("result"), Mapping)
+                    and item["result"].get("uncertain") is True
+                ),
+            ),
         )
         for item in operation_page.items
     ]
@@ -393,7 +442,63 @@ def _progress_projection(value: object) -> JobOperationProgress | None:
     phase = value.get("phase")
     if not isinstance(phase, str) or not phase.strip() or len(phase) > 80:
         return None
-    return JobOperationProgress(phase=phase)
+    try:
+        normalized = normalize_operation_progress(value)
+    except (TypeError, ValueError):
+        # Unknown extension fields from older agents must not make the whole
+        # job status unavailable; retain the stable phase only.
+        normalized = {"phase": phase}
+    return JobOperationProgress(**normalized)
+
+
+def _failure_projection(value: object) -> OperationFailureEvidence | None:
+    if not isinstance(value, Mapping):
+        return None
+    raw = value.get("failure", value)
+    if not isinstance(raw, Mapping):
+        return None
+    try:
+        safe = sanitize_failure_evidence(raw)
+        error_code = safe.get("error_code")
+        if not isinstance(error_code, str) or not re.fullmatch(
+            r"[a-z][a-z0-9_]{0,63}", error_code
+        ):
+            return None
+        summary = safe.get("summary") or safe.get("reason") or error_code
+        if not isinstance(summary, str) or not summary.strip():
+            return None
+        detail = safe.get("detail")
+        return OperationFailureEvidence(
+            error_code=error_code,
+            summary=summary,
+            detail=detail if isinstance(detail, str) else None,
+            retryable=bool(safe.get("retryable", False)),
+            uncertain=bool(safe.get("uncertain", False)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _provenance_projection(value: object) -> OperationEvidenceProvenance | None:
+    if not isinstance(value, Mapping) or not isinstance(
+        value.get("provenance"), Mapping
+    ):
+        return None
+    try:
+        return OperationEvidenceProvenance.model_validate(value["provenance"])
+    except (TypeError, ValueError):
+        return None
+
+
+def _evidence_download_projection(value: object) -> OperationEvidenceDownload | None:
+    if not isinstance(value, Mapping) or not isinstance(
+        value.get("evidence_download"), Mapping
+    ):
+        return None
+    try:
+        return OperationEvidenceDownload.model_validate(value["evidence_download"])
+    except (TypeError, ValueError):
+        return None
 
 
 def _aware(value: datetime) -> datetime:
@@ -818,6 +923,11 @@ class _DurableOperationProjection:
                             attempts[operation.id].progress
                         ).model_dump(mode="json")
                     )
+                ),
+                "result": (
+                    None
+                    if attempts.get(operation.id) is None
+                    else attempts[operation.id].result
                 ),
                 "state": operation.state,
                 "updated_at": _aware(operation.updated_at).isoformat(),
