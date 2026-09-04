@@ -139,21 +139,28 @@ class _SwitchAdapter:
         self.starts: list[dict[str, object]] = []
         self._states: dict[str, int] = {}
         self._operations: dict[str, list[FleetProfileChildOperation]] = {}
+        self._by_request: dict[str, str] = {}
 
     def start(
         self,
         *,
         application_id: str,
-        assignment,
+        assignments,
         scope_node_ids: tuple[str, ...],
         actor: str,
         request_id: str,
     ) -> FleetProfileChildOperation:
+        if request_id in self._by_request:
+            return self._operations[self._by_request[request_id]][0]
         operation_id = _uuid(500 + len(self.starts))
+        self._by_request[request_id] = operation_id
         self.starts.append(
             {
                 "application_id": application_id,
-                "assignment_id": assignment.id,
+                "assignment_ids": tuple(item.id for item in assignments),
+                "assignment_scopes": tuple(
+                    tuple(node.node_id for node in item.nodes) for item in assignments
+                ),
                 "scope_node_ids": scope_node_ids,
                 "actor": actor,
                 "request_id": request_id,
@@ -929,6 +936,123 @@ def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progres
     assert service.application(application.id).progress["step_results"]["0"][
         "result"
     ] == {"verified": True}
+
+
+def test_profile_switch_adapter_plans_disjoint_assignments_once_and_resumes() -> None:
+    sessions = _database()
+    dual_revision_id, solo_revision_id = _seed_dual_solo_without_runtime_state(sessions)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=_node_id(3),
+                state="active",
+                protocol_version=1,
+                architecture="linux-arm64",
+                capabilities=[],
+                last_seen_at=NOW,
+            )
+        )
+    adapter = _SwitchAdapter()
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Dual plus solo",
+                "scope": {
+                    "node_ids": [_node_id(1), _node_id(2), _node_id(3)]
+                },
+                "assignments": [
+                    {
+                        "recipe_revision_id": dual_revision_id,
+                        "topology_name": "pair",
+                        "desired_state": "running",
+                        "alias": "dual-chat",
+                        "nodes": [
+                            {
+                                "node_id": _node_id(1),
+                                "rank": 0,
+                                "role": "entrypoint",
+                                "endpoint_owner": True,
+                            },
+                            {
+                                "node_id": _node_id(2),
+                                "rank": 1,
+                                "role": "worker",
+                                "endpoint_owner": False,
+                            },
+                        ],
+                    },
+                    {
+                        "recipe_revision_id": solo_revision_id,
+                        "topology_name": "solo",
+                        "desired_state": "running",
+                        "alias": "solo-chat",
+                        "nodes": [
+                            {
+                                "node_id": _node_id(3),
+                                "rank": 0,
+                                "role": "entrypoint",
+                                "endpoint_owner": True,
+                            }
+                        ],
+                    },
+                ],
+            }
+        ),
+        actor="admin",
+    )
+
+    preview = service.preview(profile.id)
+    assert [step.kind for step in preview.steps] == ["switch"]
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(43),
+        actor="admin",
+    )
+    assert service.tick() is True
+    running = service.application(application.id)
+    replayed_child = adapter.start(
+        application_id=application.id,
+        assignments=service.get(profile.id).assignments,
+        scope_node_ids=tuple(preview.scope.node_ids),
+        actor="admin",
+        request_id=adapter.starts[0]["request_id"],
+    )
+    assert replayed_child.id == running.current_operation_id
+    assert len(adapter.starts) == 1
+
+    resumed = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=adapter
+    )
+    for _ in range(8):
+        if resumed.application(application.id).state == "succeeded":
+            break
+        assert resumed.tick() is True
+
+    assert resumed.application(application.id).state == "succeeded"
+    assert len(adapter.starts) == 1
+    assert adapter.starts[0]["scope_node_ids"] == (
+        _node_id(1),
+        _node_id(2),
+        _node_id(3),
+    )
+    assignment_scopes = dict(
+        zip(
+            adapter.starts[0]["assignment_ids"],
+            adapter.starts[0]["assignment_scopes"],
+            strict=True,
+        )
+    )
+    assert set(assignment_scopes.values()) == {
+        (_node_id(1), _node_id(2)),
+        (_node_id(3),),
+    }
+    assert tuple(adapter.starts[0]["assignment_ids"]) == tuple(
+        sorted(adapter.starts[0]["assignment_ids"])
+    )
 
 
 def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
