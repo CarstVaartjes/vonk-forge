@@ -334,6 +334,21 @@ def test_caddy_has_readiness_checks() -> None:
     ]
 
 
+def test_recipe_images_use_a_dedicated_persistent_volume() -> None:
+    rendered = _rendered()
+    api = rendered["services"]["control-api"]
+    api_volumes = {volume["target"]: volume for volume in api["volumes"]}
+
+    assert api["tmpfs"] == ["/tmp"]
+    assert api_volumes["/state/agent-artifacts"] == {
+        "type": "volume",
+        "source": "agent-artifacts",
+        "target": "/state/agent-artifacts",
+        "volume": {},
+    }
+    assert "agent-artifacts" in rendered["volumes"]
+
+
 def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
     services = _rendered()["services"]
     worker_volumes = {
@@ -342,8 +357,6 @@ def test_litellm_routes_use_a_dedicated_atomic_config_volume() -> None:
     api_volumes = {
         volume["target"]: volume for volume in services["control-api"]["volumes"]
     }
-    assert "/state/agent-artifacts" in services["control-api"]["tmpfs"]
-    assert "/state/agent-artifacts" not in api_volumes
     litellm_volumes = {
         volume["target"]: volume for volume in services["litellm"]["volumes"]
     }
