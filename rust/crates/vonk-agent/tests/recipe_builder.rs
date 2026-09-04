@@ -1219,6 +1219,7 @@ fn build_exports_a_docker_load_archive_from_the_rootless_builder() {
 
 #[test]
 fn import_build_and_export_share_the_recipe_deadline() {
+    const SYNTHETIC_RECIPE_DEADLINE_SECONDS: u32 = 777;
     let (archive, digest) = bundle();
     let runner = DeadlineRunner {
         inner: Runner {
@@ -1234,7 +1235,7 @@ fn import_build_and_export_share_the_recipe_deadline() {
     stage_base_archive(root.path());
     let runtime = tempdir().unwrap();
     let mut build_request = request(archive.len(), digest);
-    build_request.limits.timeout_seconds = 777;
+    build_request.limits.timeout_seconds = SYNTHETIC_RECIPE_DEADLINE_SECONDS;
 
     RecipeBuilder {
         runner: &runner,
@@ -1258,7 +1259,8 @@ fn import_build_and_export_share_the_recipe_deadline() {
         ["load", "build", "push"]
     );
     assert!(timeouts.iter().all(|(_, timeout)| {
-        *timeout > Duration::from_secs(770) && *timeout <= Duration::from_secs(777)
+        *timeout > Duration::from_secs(SYNTHETIC_RECIPE_DEADLINE_SECONDS.into())
+            && *timeout <= Duration::from_secs(SYNTHETIC_RECIPE_DEADLINE_SECONDS.into())
     }));
 }
 
