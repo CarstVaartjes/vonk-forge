@@ -1,10 +1,7 @@
 import hashlib
 import json
-import os
 import re
 import subprocess
-import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -207,7 +204,7 @@ def test_acceptance_identity_is_the_reproducible_runtime_manifest() -> None:
     assert "id: evidence" in evidence
     assert "OCI_INDEX_DIGEST: ${{ steps.build.outputs.digest }}" in evidence
     assert "workload-artifact-output/oci-index.json" in evidence
-    assert "exactly one executable manifest for the requested platform" in evidence
+    assert "scripts/select-workload-runtime-manifest" in evidence
     assert "runtime_digest=" in evidence
     assert 'printf \'runtime_digest=%s\\n\'' in evidence
     assert "runtime manifest does not match selected digest" in evidence
@@ -221,14 +218,6 @@ def _run_runtime_manifest_selector(
     index: dict[str, object] | bytes,
     architecture: str = "linux/arm64",
 ) -> subprocess.CompletedProcess[str]:
-    evidence = workflow_step(
-        "publish-workload-artifact", "Collect workload artifact evidence"
-    )
-    marker = '          runtime_digest=$(python - "$ARCHITECTURE" <<\'PY\'\n'
-    script = evidence.split(marker, maxsplit=1)[1].split(
-        "\n          PY\n          )", maxsplit=1
-    )[0]
-    script = textwrap.dedent(script)
     output = tmp_path / "workload-artifact-output"
     output.mkdir()
     raw = (
@@ -236,14 +225,16 @@ def _run_runtime_manifest_selector(
         if isinstance(index, bytes)
         else json.dumps(index, separators=(",", ":")).encode()
     )
-    (output / "oci-index.json").write_bytes(raw + b"\n")
-    env = os.environ.copy()
-    env["OCI_INDEX_DIGEST"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    index_path = output / "oci-index.json"
+    index_path.write_bytes(raw + b"\n")
+    index_digest = "sha256:" + hashlib.sha256(raw).hexdigest()
     return subprocess.run(
-        [sys.executable, "-", architecture],
-        input=script,
-        cwd=tmp_path,
-        env=env,
+        [
+            ROOT / "scripts/select-workload-runtime-manifest",
+            index_path,
+            architecture,
+            index_digest,
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -450,18 +441,7 @@ def test_exact_context_and_declared_base_images_are_verified_before_build() -> N
     assert "needs.authorize-request.outputs.context_digest" in source
     assert "DECLARED_BASE_IMAGES" in source
     assert "needs.authorize-request.outputs.base_images" in source
-    assert "Dockerfile" in source
-    assert "FROM" in source
-    assert "ARG" in source
-    assert "ARG is forbidden" in source
-    assert "variable FROM inputs are forbidden" in source
-    assert "Dockerfile frontend directives are forbidden" in source
-    assert "external COPY --from inputs are forbidden" in source
-    assert "external RUN --mount from inputs are forbidden" in source
-    assert "RUN network overrides are forbidden" in source
-    assert "remote ADD inputs are forbidden" in source
-    assert "undeclared base image" in source
-    assert "declared base images must exactly match" in source
+    assert "scripts/validate-workload-dockerfile" in source
     assert publisher.index("Verify exact source context") < publisher.index(
         "Log in to GHCR"
     )
@@ -474,20 +454,12 @@ def test_exact_context_and_declared_base_images_are_verified_before_build() -> N
 def _run_dockerfile_validator(
     tmp_path: Path, dockerfile_text: str
 ) -> subprocess.CompletedProcess[str]:
-    source = workflow_step("publish-workload-artifact", "Verify exact source context")
-    marker = '          python - "$dockerfile_path" <<\'PY\'\n'
-    script = source.split(marker, maxsplit=1)[1].split("\n          PY", maxsplit=1)[0]
-    script = textwrap.dedent(script)
     base = f"nvcr.io/nvidia/cuda@sha256:{'a' * 64}"
     dockerfile = tmp_path / "Dockerfile"
     dockerfile.write_text(dockerfile_text.replace("{base}", base))
-    env = os.environ.copy()
-    env["DECLARED_BASE_IMAGES"] = json.dumps([base])
 
     return subprocess.run(
-        [sys.executable, "-", str(dockerfile)],
-        input=script,
-        env=env,
+        [ROOT / "scripts/validate-workload-dockerfile", dockerfile, json.dumps([base])],
         check=False,
         capture_output=True,
         text=True,
@@ -552,11 +524,9 @@ def test_result_rejects_manifest_or_attestation_evidence_mismatch() -> None:
         "publish-workload-artifact", "Collect workload artifact evidence"
     )
 
-    assert "hashlib.sha256" in evidence
+    assert "scripts/select-workload-runtime-manifest" in evidence
     assert "OCI_INDEX_DIGEST" in evidence
     assert "runtime_digest" in evidence
-    assert "removeprefix(\"sha256:\")" in evidence
-    assert "raw OCI index does not match build digest" in evidence
     assert "runtime manifest does not match selected digest" in evidence
     assert 'jq -e \'if type == "object" or type == "array"' in evidence
     assert "SBOM evidence is empty" in evidence

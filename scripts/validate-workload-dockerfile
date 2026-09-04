@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Validate the hermetic Dockerfile subset accepted for workload artifacts."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import shlex
+from pathlib import Path
+
+
+def validate(dockerfile: Path, declared_json: str) -> None:
+    if dockerfile.stat().st_size > 1024 * 1024:
+        raise ValueError("Dockerfile exceeds the bounded input size")
+    dockerfile_bytes = dockerfile.read_bytes()
+    if b"\xef\xbb\xbf" in dockerfile_bytes:
+        raise ValueError("Dockerfile frontend directives are forbidden")
+    try:
+        dockerfile_text = dockerfile_bytes.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("Dockerfile must be valid UTF-8") from error
+    parsed = json.loads(declared_json)
+    if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
+        raise TypeError("declared base images are invalid")
+    declared = set(parsed)
+    if len(declared) != len(parsed):
+        raise ValueError("declared base images are invalid")
+
+    logical_lines: list[str] = []
+    pending = ""
+    for raw_line in dockerfile_text.splitlines():
+        line = raw_line.strip()
+        if re.match(
+            r'(?i)^(?:(?:#|//)\s*(?:syntax|escape)\s*=|'
+            r'\{\s*"(?:syntax|escape)"\s*:)',
+            line,
+        ):
+            raise ValueError("Dockerfile frontend directives are forbidden")
+        if not line or (line.startswith("#") and not pending):
+            continue
+        pending = f"{pending} {line}".strip()
+        if pending.endswith("\\"):
+            pending = pending[:-1].rstrip()
+            continue
+        logical_lines.append(pending)
+        pending = ""
+    if pending:
+        raise ValueError("unterminated Dockerfile continuation")
+
+    stages: set[str] = set()
+    external: set[str] = set()
+    stage_index = 0
+    for line in logical_lines:
+        if re.match(r"(?i)^ARG(?:\s|$)", line):
+            raise ValueError("ARG is forbidden in workload Dockerfiles")
+        fields = shlex.split(line)
+        command = fields[0].upper()
+        if command == "ONBUILD":
+            raise ValueError("ONBUILD is forbidden in workload Dockerfiles")
+        if command == "ADD" and re.search(r"(?i)(?:https?|git|ssh)://|git@", line):
+            raise ValueError("remote ADD inputs are forbidden")
+        if command == "ADD" and any("$" in field for field in fields[1:]):
+            raise ValueError("variable ADD inputs are forbidden")
+        if command == "COPY":
+            for field in fields[1:]:
+                if field.startswith("--from="):
+                    reference = field.removeprefix("--from=").lower()
+                    if reference not in stages:
+                        raise ValueError("external COPY --from inputs are forbidden")
+            continue
+        if command == "RUN":
+            for field in fields[1:]:
+                if not field.startswith("--"):
+                    break
+                if field.lower().startswith("--network"):
+                    if field.lower() != "--network=none":
+                        raise ValueError("RUN network overrides are forbidden")
+                    continue
+                if field.startswith("--mount="):
+                    for option in field.removeprefix("--mount=").split(","):
+                        if option.startswith("from="):
+                            reference = option.removeprefix("from=").lower()
+                            if reference not in stages:
+                                raise ValueError(
+                                    "external RUN --mount from inputs are forbidden"
+                                )
+            continue
+        if command != "FROM":
+            continue
+        if any("$" in field for field in fields[1:]):
+            raise ValueError("variable FROM inputs are forbidden")
+        operands = [field for field in fields[1:] if not field.startswith("--")]
+        if not operands:
+            raise ValueError("FROM is missing a base image")
+        image = operands[0]
+        if image.lower() not in stages:
+            if image not in declared:
+                raise ValueError(f"undeclared base image: {image}")
+            external.add(image)
+        if len(operands) >= 3 and operands[1].lower() == "as":
+            stages.add(operands[2].lower())
+        stages.add(str(stage_index))
+        stage_index += 1
+    if not external:
+        raise ValueError("Dockerfile must contain at least one external FROM")
+    if external != declared:
+        raise ValueError("declared base images must exactly match Dockerfile FROM inputs")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("dockerfile", type=Path)
+    parser.add_argument("declared_base_images")
+    arguments = parser.parse_args()
+    try:
+        validate(arguments.dockerfile, arguments.declared_base_images)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError, shlex.Error) as error:
+        parser.exit(2, f"{error}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -2,6 +2,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -108,6 +109,8 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/verify-agent-binaries",
         "scripts/verify-agent-systemd",
         "scripts/verify-supply-chain",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/accept-recipe",
         "scripts/run-development-slices",
         "scripts/qualify-recipe",
@@ -226,6 +229,8 @@ def test_supply_chain_manifest_binds_installer_publication_contract(
     (
         ".github/workflows/workload-artifacts.yml",
         "schemas/workload-artifact-build.schema.json",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/workload-artifact-metadata",
     ),
 )
@@ -237,6 +242,8 @@ def test_supply_chain_manifest_binds_workload_artifact_publication_contract(
     for required in (
         ".github/workflows/workload-artifacts.yml",
         "schemas/workload-artifact-build.schema.json",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/workload-artifact-metadata",
     ):
         candidate = repository / required
@@ -362,7 +369,7 @@ def test_verifier_does_not_require_cluster_profiles_to_be_installed(
     repository = _copy(tmp_path)
 
     result = subprocess.run(
-        ["/usr/bin/python3", SCRIPT, "--root", repository, "--json"],
+        [sys.executable, "-I", SCRIPT, "--root", repository, "--json"],
         capture_output=True,
         text=True,
         check=False,

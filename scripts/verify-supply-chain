@@ -424,6 +424,8 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "scripts/verify-public-image-inputs",
         "scripts/verify-published-image",
         "scripts/verify-supply-chain",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/workload-artifact-metadata",
     )
     input_paths += workload_package_inputs(root)
