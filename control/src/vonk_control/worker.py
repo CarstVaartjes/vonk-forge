@@ -236,7 +236,7 @@ def assemble_production_worker(
     from .artifact_sizes import DeclaredArtifactSizeResolver
     from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
-    from .fleet_profiles import FleetProfileService
+    from .fleet_profiles import FleetProfileService, RunSwitchFleetProfileAdapter
     from .install_admission import InstallAdmissionService
     from .recipe_builds import RecipeBuildService
     from .recipe_operation_worker import RecipeOperationWorker
@@ -306,6 +306,9 @@ def assemble_production_worker(
             sessions,
             clock=clock,
             recipe_operations=lifecycle,
+            switch_adapter=RunSwitchFleetProfileAdapter(
+                sessions, run_switch_operations
+            ),
         ),
         run_switches=run_switch_operations,
         recoveries=DistributedRecoveryCoordinator(

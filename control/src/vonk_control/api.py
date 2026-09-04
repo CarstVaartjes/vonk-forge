@@ -1441,12 +1441,15 @@ def production_app() -> FastAPI:
         retention_seconds=settings.artifact_job_retention_seconds,
     )
     artifact_jobs.reconcile_storage()
-    from .fleet_profiles import FleetProfileService
+    from .fleet_profiles import FleetProfileService, RunSwitchFleetProfileAdapter
 
     fleet_profiles = FleetProfileService(
         sessions,
         clock=clock,
         recipe_operations=recipe_operations,
+        switch_adapter=RunSwitchFleetProfileAdapter(
+            sessions, run_switch_operations
+        ),
     )
     from .library_placements import LibraryPlacementService
 

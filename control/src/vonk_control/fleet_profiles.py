@@ -19,6 +19,7 @@ from .fleet_profile_contract import (
     FleetProfileAssignmentInput,
     FleetProfileAssignmentPreview,
     FleetProfileChildOperation,
+    FleetProfileChildProgress,
     FleetProfileSwitchAdapter,
     FleetProfileInput,
     FleetProfileList,
@@ -51,6 +52,19 @@ from .models import (
 from .preparation_contract import RolloutPreparation
 from .recipe_contract import RecipeContractError, recipe_topology
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
+from .run_switch_contract import (
+    RunSwitchApplyRequest,
+    RunSwitchOperation,
+    RunSwitchPreviewRequest,
+    RunSwitchStopApplyRequest,
+    RunSwitchStopPreviewRequest,
+    SparkGroup,
+    SparkGroupNode,
+)
+from .run_switch_operations import (
+    RunSwitchOperationConflict,
+    RunSwitchOperationService,
+)
 
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _ACTIVE_INSTALL_STATES = frozenset(
@@ -68,6 +82,477 @@ _INTERNAL_PLACEMENT_LABEL = "vonk.internal.placement"
 
 class FleetProfileConflict(RuntimeError):
     """A Fleet profile is invalid, stale, or cannot be safely applied."""
+
+
+class RunSwitchFleetProfileAdapter:
+    """Compose one durable profile child from Run/Switch operations.
+
+    The adapter plans conflicts against the complete profile assignment set
+    before queuing any Run/Switch child.  Run/Switch remains the authority for
+    each exact model, recipe revision, mapping, cache transfer, and run
+    admission; this class only sequences those children under one profile
+    application identity.
+    """
+
+    def __init__(
+        self,
+        sessions: sessionmaker[Session],
+        run_switch: RunSwitchOperationService,
+    ) -> None:
+        self._sessions = sessions
+        self._run_switch = run_switch
+
+    def start(
+        self,
+        *,
+        application_id: str,
+        assignments: tuple[FleetProfileAssignment, ...],
+        scope_node_ids: tuple[str, ...],
+        actor: str,
+        request_id: str,
+    ) -> FleetProfileChildOperation:
+        ordered_assignments = tuple(sorted(assignments, key=lambda item: item.id))
+        if tuple(scope_node_ids) != tuple(sorted(set(scope_node_ids))):
+            raise FleetProfileConflict(
+                "profile switch scope must be the complete sorted node boundary"
+            )
+        scope = set(scope_node_ids)
+        if any(
+            node.node_id not in scope
+            for assignment in ordered_assignments
+            for node in assignment.nodes
+        ):
+            raise FleetProfileConflict(
+                "profile switch assignment contains a node outside its bound scope"
+            )
+        with self._sessions.begin() as session:
+            application = session.get(FleetProfileApplication, application_id)
+            if application is None:
+                raise KeyError(application_id)
+            existing = self._state(application)
+            if existing is not None:
+                expected_scope = list(scope_node_ids)
+                expected_assignment_ids = [item.id for item in ordered_assignments]
+                if (
+                    existing.get("scope_node_ids") != expected_scope
+                    or existing.get("assignment_ids") != expected_assignment_ids
+                ):
+                    raise FleetProfileConflict(
+                        "profile switch child was replayed with a different "
+                        "bound scope or assignments"
+                    )
+                return self._view_from_state(application, existing)
+            queue = self._plan_queue(session, ordered_assignments, scope_node_ids)
+            state: dict[str, object] = {
+                "schema_version": 2,
+                "child_id": application_id,
+                "scope_node_ids": list(scope_node_ids),
+                "assignment_ids": [item.id for item in ordered_assignments],
+                "assignments": [
+                    item.model_dump(mode="json") for item in ordered_assignments
+                ],
+                "queue": queue,
+                "position": 0,
+                "active_operation_id": None,
+                "active_kind": None,
+                "children": [],
+                "actor": actor,
+                "request_id": request_id,
+            }
+        self._save_state(application_id, state)
+        return self._advance(application_id, ordered_assignments)
+
+    def get(self, operation_id: str) -> FleetProfileChildOperation:
+        with self._sessions() as session:
+            application = session.get(FleetProfileApplication, operation_id)
+            if application is None:
+                raise KeyError(operation_id)
+            state = self._state(application)
+            if state is None:
+                raise KeyError(operation_id)
+            assignments = self._assignments_from_state(state)
+        active = state.get("active_operation_id")
+        if isinstance(active, str):
+            self._run_switch.tick()
+        return self._advance(operation_id, assignments)
+
+    def _advance(
+        self,
+        application_id: str,
+        assignments: tuple[FleetProfileAssignment, ...],
+    ) -> FleetProfileChildOperation:
+        with self._sessions.begin() as session:
+            application = session.get(FleetProfileApplication, application_id)
+            if application is None:
+                raise KeyError(application_id)
+            state = self._state(application)
+            if state is None:
+                raise KeyError(application_id)
+            active = state.get("active_operation_id")
+            position = state.get("position")
+            if isinstance(active, str):
+                try:
+                    child = self._run_switch.get(active)
+                except KeyError:
+                    return self._failed_in_session(
+                        session, application, state, "Run/Switch child is unavailable"
+                    )
+                if child.state in {"queued", "running"}:
+                    view = self._view_from_child(application_id, state, child)
+                    state["state"] = view.state
+                    if view.progress is not None:
+                        state["child_progress"] = view.progress.model_dump(mode="json")
+                    self._write_state(session, application, state)
+                    session.flush()
+                    return view
+                if child.state in {"failed", "cancelled"}:
+                    reason = child.status_reason or (
+                        f"Run/Switch child ended in {child.state}"
+                    )
+                    return self._failed_in_session(session, application, state, reason)
+                if child.state != "succeeded":
+                    return self._failed_in_session(
+                        session,
+                        application,
+                        state,
+                        f"Run/Switch child returned {child.state}",
+                    )
+                children = list(state.get("children", []))
+                children.append(
+                    {
+                        "operation_id": child.operation_id,
+                        "kind": state.get("active_kind"),
+                        "state": child.state,
+                    }
+                )
+                state["children"] = children
+                state["active_operation_id"] = None
+                state["active_kind"] = None
+                state["position"] = int(position or 0) + 1
+                self._write_state(session, application, state)
+                session.flush()
+                position = state["position"]
+            queue = state.get("queue")
+            if not isinstance(queue, list) or int(position or 0) >= len(queue):
+                state["state"] = "succeeded"
+                state["result"] = {
+                    "children": list(state.get("children", [])),
+                    "assignment_ids": list(state.get("assignment_ids", [])),
+                }
+                self._write_state(session, application, state)
+                session.flush()
+                return self._view_from_state(application, state)
+            item = queue[int(position or 0)]
+            if not isinstance(item, Mapping):
+                return self._failed_in_session(
+                    session,
+                    application,
+                    state,
+                    "Persisted profile switch queue is invalid",
+                )
+            operation = self._start_child(
+                application_id,
+                item,
+                assignments,
+                tuple(str(node_id) for node_id in state["scope_node_ids"]),
+                str(state["actor"]),
+                str(state["request_id"]),
+                int(position or 0),
+            )
+            state["active_operation_id"] = operation.operation_id
+            state["active_kind"] = item.get("kind")
+            self._write_state(session, application, state)
+            session.flush()
+            return self._view_from_child(application_id, state, operation)
+
+    def _start_child(
+        self,
+        application_id: str,
+        item: Mapping[str, object],
+        assignments: tuple[FleetProfileAssignment, ...],
+        scope_node_ids: tuple[str, ...],
+        actor: str,
+        request_id: str,
+        position: int,
+    ) -> RunSwitchOperation:
+        child_request_key = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                "vonk-forge:profile-run-switch:"
+                f"{application_id}:{position}:{item.get('kind')}:{item.get('id')}",
+            )
+        )
+        kind = item.get("kind")
+        if kind == "stop":
+            run_id = item.get("id")
+            if not isinstance(run_id, str):
+                raise FleetProfileConflict(
+                    "Profile switch stop item has no run identity"
+                )
+            preview = self._run_switch.preview_stop(
+                RunSwitchStopPreviewRequest(run_id=run_id), actor=actor
+            )
+            return self._run_switch.apply_stop(
+                RunSwitchStopApplyRequest(
+                    run_id=run_id,
+                    plan_digest=preview.plan_digest,
+                    request_key=child_request_key,
+                ),
+                actor=actor,
+            )
+        assignment_id = item.get("id")
+        assignment = next(
+            (value for value in assignments if value.id == assignment_id), None
+        )
+        if assignment is None:
+            raise FleetProfileConflict("Profile switch assignment is unavailable")
+        with self._sessions() as session:
+            revision = session.get(LocalRecipeRevision, assignment.recipe_revision_id)
+            if revision is None:
+                raise KeyError(assignment.recipe_revision_id)
+            model = revision.document.get("model")
+            model_digest = (
+                model.get("content_sha256") if isinstance(model, Mapping) else None
+            )
+        if not isinstance(model_digest, str):
+            raise FleetProfileConflict("Profile assignment has no exact model identity")
+        group = SparkGroup(
+            nodes=[
+                SparkGroupNode(
+                    node_id=node.node_id,
+                    rank=node.rank,
+                    role=node.role,
+                    endpoint_owner=node.endpoint_owner,
+                )
+                for node in sorted(assignment.nodes, key=lambda item: item.rank)
+            ]
+        )
+        request = RunSwitchApplyRequest(
+            model_version_sha256=model_digest,
+            recipe_revision_id=assignment.recipe_revision_id,
+            spark_group=group,
+            alias=assignment.alias or assignment.recipe_title.lower().replace(" ", "-"),
+            action="switch",
+            retention="retain-cached",
+            plan_digest=None,
+            request_key=child_request_key,
+        )
+        plan = self._run_switch.preview(request, actor=actor)
+        if not plan.allowed:
+            raise RunSwitchOperationConflict(
+                "profile child plan blocked: "
+                + "; ".join(reason.code for reason in plan.blockers[:8])
+            )
+        return self._run_switch.apply(
+            request.model_copy(update={"plan_digest": plan.plan_digest}), actor=actor
+        )
+
+    def _plan_queue(
+        self,
+        session: Session,
+        assignments: tuple[FleetProfileAssignment, ...],
+        scope_node_ids: tuple[str, ...],
+    ) -> list[dict[str, object]]:
+        scope = set(scope_node_ids)
+        desired = {
+            (
+                assignment.recipe_revision_id,
+                frozenset(node.node_id for node in assignment.nodes),
+            )
+            for assignment in assignments
+        }
+        preserved: set[tuple[str, frozenset[str]]] = set()
+        stops: list[dict[str, object]] = []
+        for run in session.scalars(
+            select(RecipeRun)
+            .where(RecipeRun.state.in_(_ACTIVE_RUN_STATES))
+            .order_by(RecipeRun.created_at, RecipeRun.id)
+        ):
+            members = set(self._run_member_ids(session, run))
+            if not members.intersection(scope):
+                continue
+            if not members <= scope:
+                raise RunSwitchOperationConflict(
+                    "profile switch contains a distributed run outside its "
+                    "complete scope"
+                )
+            installation = session.get(RecipeInstallation, run.installation_id)
+            identity = (
+                installation.recipe_revision_id if installation is not None else "",
+                frozenset(members),
+            )
+            if (
+                self._run_is_healthy(session, run, members)
+                and identity in desired
+                and identity not in preserved
+            ):
+                preserved.add(identity)
+                continue
+            stops.append({"kind": "stop", "id": run.id})
+        queue = stops
+        for assignment in assignments:
+            identity = (
+                assignment.recipe_revision_id,
+                frozenset(node.node_id for node in assignment.nodes),
+            )
+            if assignment.desired_state == "running" and identity not in preserved:
+                queue.append({"kind": "run", "id": assignment.id})
+        return queue
+
+    @staticmethod
+    def _run_member_ids(session: Session, run: RecipeRun) -> tuple[str, ...]:
+        members = {
+            node.node_id
+            for node in session.scalars(select(RunNode).where(RunNode.run_id == run.id))
+        }
+        members.update(
+            node.node_id
+            for node in session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == run.installation_id
+                )
+            )
+        )
+        return tuple(sorted(members))
+
+    @staticmethod
+    def _run_is_healthy(
+        session: Session, run: RecipeRun, members: set[str]
+    ) -> bool:
+        nodes = tuple(
+            session.scalars(
+                select(RunNode)
+                .where(RunNode.run_id == run.id)
+                .order_by(RunNode.rank)
+            )
+        )
+        return (
+            run.state == "running"
+            and run.route_state == "published"
+            and len(nodes) == len(members)
+            and {node.node_id for node in nodes} == members
+            and all(node.state == "running" for node in nodes)
+        )
+
+    @staticmethod
+    def _state(application: FleetProfileApplication) -> dict[str, object] | None:
+        raw = (
+            application.progress.get("switch_adapter")
+            if isinstance(application.progress, Mapping)
+            else None
+        )
+        return dict(raw) if isinstance(raw, Mapping) else None
+
+    def _save_state(self, application_id: str, state: Mapping[str, object]) -> None:
+        with self._sessions.begin() as session:
+            application = session.get(
+                FleetProfileApplication, application_id, with_for_update=True
+            )
+            if application is None:
+                raise KeyError(application_id)
+            self._write_state(session, application, state)
+
+    @staticmethod
+    def _write_state(
+        session: Session,
+        application: FleetProfileApplication,
+        state: Mapping[str, object],
+    ) -> None:
+        application.progress = {**dict(application.progress), "switch_adapter": dict(state)}
+
+    def _failed_in_session(
+        self,
+        session: Session,
+        application: FleetProfileApplication,
+        state: dict[str, object],
+        reason: str,
+    ) -> FleetProfileChildOperation:
+        state["state"] = "failed"
+        state["status_reason"] = reason[:512]
+        self._write_state(session, application, state)
+        session.flush()
+        return self._view_from_state(application, state)
+
+    @staticmethod
+    def _assignments_from_state(
+        state: Mapping[str, object],
+    ) -> tuple[FleetProfileAssignment, ...]:
+        raw = state.get("assignments")
+        if not isinstance(raw, list):
+            raise FleetProfileConflict(
+                "profile switch child has no assignment snapshot"
+            )
+        try:
+            values = tuple(FleetProfileAssignment.model_validate(item) for item in raw)
+        except ValueError as error:
+            raise FleetProfileConflict(
+                "profile switch child assignment snapshot is invalid"
+            ) from error
+        return tuple(sorted(values, key=lambda item: item.id))
+
+    def _view_from_child(
+        self,
+        application_id: str,
+        state: Mapping[str, object],
+        child: RunSwitchOperation,
+    ) -> FleetProfileChildOperation:
+        phase = child.current_phase or child.progress.phase or "prepare"
+        progress = FleetProfileChildProgress(
+            phase=phase,
+            node_ids=list(state.get("scope_node_ids", [])),
+            bytes=child.progress.completed_bytes,
+            total_bytes=child.progress.total_bytes,
+        )
+        child_state = child.state if child.state in {
+            "queued",
+            "running",
+            "waiting-for-operator",
+            "failed",
+            "succeeded",
+            "cancelled",
+        } else "running"
+        return FleetProfileChildOperation(
+            id=application_id,
+            state=child_state,
+            progress=progress,
+            status_reason=child.status_reason,
+            result={
+                "run_switch_operation_id": child.operation_id,
+                "run_switch": child.result,
+            },
+        )
+
+    @staticmethod
+    def _view_from_state(
+        application: FleetProfileApplication,
+        state: Mapping[str, object],
+    ) -> FleetProfileChildOperation:
+        child_state = state.get("state")
+        if child_state not in {
+            "queued",
+            "running",
+            "waiting-for-operator",
+            "failed",
+            "succeeded",
+            "cancelled",
+        }:
+            child_state = "running"
+        raw_progress = state.get("child_progress")
+        progress = (
+            FleetProfileChildProgress.model_validate(raw_progress)
+            if isinstance(raw_progress, Mapping)
+            else FleetProfileChildProgress(
+                phase="final-verify" if child_state == "succeeded" else "prepare",
+                node_ids=list(state.get("scope_node_ids", [])),
+            )
+        )
+        return FleetProfileChildOperation(
+            id=application.id,
+            state=child_state,
+            progress=progress,
+            status_reason=state.get("status_reason") if isinstance(state.get("status_reason"), str) else None,
+            result=state.get("result") if isinstance(state.get("result"), dict) else None,
+        )
 
 
 def _aware(value: datetime) -> datetime:
@@ -904,6 +1389,19 @@ class FleetProfileService:
                 )
             )
             run_nodes = self._run_nodes(session, [run.id for run in active_runs])
+            if self._switch_adapter is not None and not view.assignments:
+                # An empty assignment set is an explicit all-idle outcome.  If
+                # the scope currently contains a run, route reconciliation
+                # through the composite child so Run/Switch can stop the
+                # complete distributed group exactly once.
+                for run in active_runs:
+                    members = set(run_nodes.get(run.id, ()))
+                    members.update(
+                        self._installation_node_ids(session, run.installation_id)
+                    )
+                    if members & target_nodes:
+                        adapter_switch_needed = True
+                        break
             scheduled_stops = {
                 str(step["owner_id"])
                 for step in stop_steps
@@ -2189,4 +2687,8 @@ class FleetProfileService:
             return build_id
 
 
-__all__ = ["FleetProfileConflict", "FleetProfileService"]
+__all__ = [
+    "FleetProfileConflict",
+    "FleetProfileService",
+    "RunSwitchFleetProfileAdapter",
+]

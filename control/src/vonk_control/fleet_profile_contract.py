@@ -244,6 +244,12 @@ class FleetProfileChildProgress(_StrictModel):
         "target-copy",
         "start",
         "final-verify",
+        "transfer",
+        "verify",
+        "prepare",
+        "cleanup",
+        "stop",
+        "final_verify",
     ]
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     bytes: int | None = Field(default=None, ge=0)
