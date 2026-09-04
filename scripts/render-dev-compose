@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 IMAGE = re.compile(
-    r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker|hermes):"
+    r"^ghcr\.io/carstvaartjes/vonk-forge-(api|worker|hermes|litellm):"
     r"dev-sha-[0-9a-f]{40}@sha256:[0-9a-f]{64}$"
 )
 PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$")
@@ -31,6 +31,7 @@ TOKENS = {
     "api": "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}",
     "worker": "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}",
     "hermes": "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}",
+    "litellm": "${LITELLM_IMAGE:?set a digest-pinned Vonk LiteLLM image}",
 }
 
 
@@ -261,6 +262,7 @@ def render(
     api_image: str,
     worker_image: str,
     hermes_image: str,
+    litellm_image: str,
     *,
     channel: str,
 ) -> None:
@@ -269,6 +271,7 @@ def render(
     _validate("API", api_image, channel)
     _validate("worker", worker_image, channel)
     _validate("Hermes", hermes_image, channel)
+    _validate("LiteLLM", litellm_image, channel)
     if not template.is_file() or template.is_symlink():
         raise ValueError("template must be an existing regular file")
     if not output.parent.is_dir():
@@ -285,6 +288,7 @@ def render(
             TOKENS["api"]: api_image,
             TOKENS["worker"]: worker_image,
             TOKENS["hermes"]: hermes_image,
+            TOKENS["litellm"]: litellm_image,
         },
     )
     _resolve_runtime_images(document, channel)
@@ -318,6 +322,7 @@ def main() -> None:
     parser.add_argument("--api-image", required=True)
     parser.add_argument("--worker-image", required=True)
     parser.add_argument("--hermes-image", required=True)
+    parser.add_argument("--litellm-image", required=True)
     parser.add_argument("--channel", choices=("dev", "pinned"), default="pinned")
     parser.add_argument("--commit")
     arguments = parser.parse_args()
@@ -327,6 +332,7 @@ def main() -> None:
         arguments.api_image,
         arguments.worker_image,
         arguments.hermes_image,
+        arguments.litellm_image,
         channel=arguments.channel,
     )
 

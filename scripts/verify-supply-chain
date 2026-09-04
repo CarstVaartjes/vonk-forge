@@ -393,6 +393,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "deploy/compose/hermes-agent/compose.yaml",
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
+        "deploy/compose/litellm/Dockerfile",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/bootstrap-config.json",
         "deploy/compose/litellm/config_supervisor.py",
@@ -504,8 +505,20 @@ def image_errors(root: Path) -> list[str]:
             "required": True,
             "target": "managed",
         },
+        {
+            "context": "deploy/compose/litellm",
+            "dockerfile": "deploy/compose/litellm/Dockerfile",
+            "environment": "LITELLM_IMAGE",
+            "package": "vonk-forge-litellm",
+            "required": True,
+            "target": "runtime",
+        },
     ]
-    required_deployment_releases = expected_releases[:2]
+    required_deployment_releases = [
+        expected_releases[0],
+        expected_releases[1],
+        expected_releases[3],
+    ]
     hermes_is_opt_in = (
         "profiles: [hermes]" in compose
         and "HERMES_AGENT_IMAGE:-ghcr.io/carstvaartjes/vonk-forge-hermes:profile-required"
@@ -522,8 +535,8 @@ def image_errors(root: Path) -> list[str]:
         )
     ):
         errors.append(
-            "API and worker release images must be explicitly digest-pinned; "
-            "Hermes must be either digest-pinned or explicitly opt-in"
+            "API, worker, and LiteLLM release images must be explicitly "
+            "digest-pinned; Hermes must be either digest-pinned or explicitly opt-in"
         )
     for release in expected_releases:
         context = root / release["context"]

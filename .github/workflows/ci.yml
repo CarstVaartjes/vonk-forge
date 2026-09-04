@@ -516,6 +516,8 @@ jobs:
       api_dev_source: ${{ steps.release.outputs.api_dev_source }}
       worker_dev_source: ${{ steps.release.outputs.worker_dev_source }}
       hermes_image: ${{ steps.release.outputs.hermes_image }}
+      litellm_image: ${{ steps.release.outputs.litellm_image }}
+      litellm_dev_source: ${{ steps.release.outputs.litellm_dev_source }}
       tag_oid: ${{ steps.authority.outputs.tag_oid }}
     steps:
       - name: Check out tagged commit
@@ -655,6 +657,7 @@ jobs:
     outputs:
       api_digest: ${{ steps.api.outputs.digest }}
       worker_digest: ${{ steps.worker.outputs.digest }}
+      litellm_digest: ${{ steps.litellm.outputs.digest }}
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -783,6 +786,62 @@ jobs:
           fi
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
 
+      - name: Validate accepted LiteLLM image
+        id: litellm
+        shell: bash
+        env:
+          DEV_SOURCE: ${{ needs.release-metadata.outputs.litellm_dev_source }}
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh attestation verify "oci://$LITELLM_IMAGE@$digest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/litellm-attestation.json"
+          skopeo inspect --config "docker://$LITELLM_IMAGE@$digest" \
+            | jq -e --arg revision "$GITHUB_SHA" \
+              --arg source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              '(.config.Labels["org.opencontainers.image.revision"] == $revision)
+               and (.config.Labels["org.opencontainers.image.source"] == $source)' \
+              >/dev/null
+          docker buildx imagetools inspect "$LITELLM_IMAGE@$digest" \
+            --format '{{ json .Provenance }}' \
+            | jq -e --arg revision "$GITHUB_SHA" \
+              '([.. | objects | select(
+                  ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
+                  or (((.SLSA?.buildType? // "") | length) > 0)
+                  or (((.buildDefinition?.buildType? // "") | length) > 0)
+                )] | length > 0)
+               and ([.. | strings | select(. == $revision)] | length > 0)' \
+              >/dev/null
+          docker buildx imagetools inspect "$LITELLM_IMAGE@$digest" \
+            --format '{{ json .SBOM }}' \
+            | jq -e '[.. | objects | select(
+                .SPDXID? == "SPDXRef-DOCUMENT"
+                and ((.spdxVersion? // "") | startswith("SPDX-"))
+              )] | length > 0' >/dev/null
+          inspect_error="$RUNNER_TEMP/litellm-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$digest" ]] || {
+              echo "refusing to overwrite immutable LiteLLM release tag" >&2
+              exit 1
+            }
+          elif ! grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            echo "LiteLLM release tag lookup failed" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
   publish-images:
     name: Publish public container images
     needs: [validate-release-images, release-metadata]
@@ -800,6 +859,7 @@ jobs:
       api_digest: ${{ steps.api.outputs.digest }}
       worker_digest: ${{ steps.worker.outputs.digest }}
       hermes_digest: ${{ steps.hermes.outputs.digest }}
+      litellm_digest: ${{ steps.litellm.outputs.digest }}
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -919,6 +979,45 @@ jobs:
           [[ $(skopeo inspect --format '{{.Digest}}' \
             "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
           printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Revalidate release authority before LiteLLM publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
+      - name: Promote accepted LiteLLM image
+        id: litellm
+        shell: bash
+        env:
+          DIGEST: ${{ needs.validate-release-images.outputs.litellm_digest }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          inspect_error="$RUNNER_TEMP/litellm-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$DIGEST" ]] || {
+              echo "refusing to overwrite immutable LiteLLM release tag" >&2
+              exit 1
+            }
+          elif grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            docker buildx imagetools create \
+              --tag "$LITELLM_IMAGE:$IMAGE_VERSION_TAG" "$LITELLM_IMAGE@$DIGEST"
+          else
+            echo "LiteLLM release tag lookup failed" >&2
+            exit 1
+          fi
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
       - name: Reconcile existing Hermes release image
         id: existing-hermes
         shell: bash
@@ -989,7 +1088,8 @@ jobs:
             printf '%s\n' \
               "CONTROL_API_IMAGE=${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
               "CONTROL_WORKER_IMAGE=${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
-              "HERMES_AGENT_IMAGE=${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}"
+              "HERMES_AGENT_IMAGE=${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
+              "LITELLM_IMAGE=${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Render canonical production Compose
@@ -1001,7 +1101,8 @@ jobs:
             --output release-output/docker-compose.production.yml \
             --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
             --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
-            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}"
+            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
+            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
       - name: Upload production Compose
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -1036,15 +1137,18 @@ jobs:
           CONTROL_API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
           CONTROL_WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
           HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
           CONTROL_API_DIGEST: ${{ needs.publish-images.outputs.api_digest }}
           CONTROL_WORKER_DIGEST: ${{ needs.publish-images.outputs.worker_digest }}
           HERMES_AGENT_DIGEST: ${{ needs.publish-images.outputs.hermes_digest }}
+          LITELLM_DIGEST: ${{ needs.publish-images.outputs.litellm_digest }}
         run: |
           scripts/validate-container-release-digests
           printf '%s\n' \
             "CONTROL_API_IMAGE=$CONTROL_API_IMAGE@$CONTROL_API_DIGEST" \
             "CONTROL_WORKER_IMAGE=$CONTROL_WORKER_IMAGE@$CONTROL_WORKER_DIGEST" \
             "HERMES_AGENT_IMAGE=$HERMES_AGENT_IMAGE@$HERMES_AGENT_DIGEST" \
+            "LITELLM_IMAGE=$LITELLM_IMAGE@$LITELLM_DIGEST" \
             > vonk-forge-images.env
           sha256sum vonk-forge-images.env > vonk-forge-images.env.sha256
       - name: Revalidate release authority before GitHub Release
@@ -1248,6 +1352,7 @@ jobs:
           EVIDENCE_DIR: ${{ runner.temp }}/vonk-production-alias-evidence
           GH_TOKEN: ${{ github.token }}
           HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}
           TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
           TARGET_TAG: ${{ steps.target.outputs.target_tag }}
           WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
@@ -1277,7 +1382,7 @@ jobs:
             [[ -n "$key" && -n "$value" ]]
             [[ -z "${release_images[$key]+present}" ]]
             case "$key" in
-              CONTROL_API_IMAGE|CONTROL_WORKER_IMAGE|HERMES_AGENT_IMAGE)
+              CONTROL_API_IMAGE|CONTROL_WORKER_IMAGE|HERMES_AGENT_IMAGE|LITELLM_IMAGE)
                 release_images["$key"]=$value
                 ;;
               *)
@@ -1285,22 +1390,26 @@ jobs:
                 ;;
             esac
           done < "$EVIDENCE_DIR/vonk-forge-images.env"
-          [[ "${#release_images[@]}" -eq 3 ]]
+          [[ "${#release_images[@]}" -eq 4 ]]
           target_version=${TARGET_TAG#v}
           api_reference=${release_images[CONTROL_API_IMAGE]}
           worker_reference=${release_images[CONTROL_WORKER_IMAGE]}
           hermes_reference=${release_images[HERMES_AGENT_IMAGE]}
+          litellm_reference=${release_images[LITELLM_IMAGE]}
           [[ "$api_reference" == "$API_IMAGE:$TARGET_TAG@"sha256:* ]]
           [[ "$worker_reference" == "$WORKER_IMAGE:$TARGET_TAG@"sha256:* ]]
           [[ "$hermes_reference" == "$HERMES_IMAGE:$target_version@"sha256:* ]]
+          [[ "$litellm_reference" == "$LITELLM_IMAGE:$TARGET_TAG@"sha256:* ]]
           api_digest=${api_reference##*@}
           worker_digest=${worker_reference##*@}
           hermes_digest=${hermes_reference##*@}
+          litellm_digest=${litellm_reference##*@}
           [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$litellm_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
 
-          for role in api worker hermes; do
+          for role in api worker hermes litellm; do
             case "$role" in
               api)
                 image=$API_IMAGE; digest=$api_digest; tag=$TARGET_TAG
@@ -1310,6 +1419,9 @@ jobs:
                 ;;
               hermes)
                 image=$HERMES_IMAGE; digest=$hermes_digest; tag=$target_version
+                ;;
+              litellm)
+                image=$LITELLM_IMAGE; digest=$litellm_digest; tag=$TARGET_TAG
                 ;;
             esac
             [[ $(skopeo inspect --format '{{.Digest}}' \
@@ -1338,6 +1450,7 @@ jobs:
             "api_digest=$api_digest" \
             "worker_digest=$worker_digest" \
             "hermes_digest=$hermes_digest" \
+            "litellm_digest=$litellm_digest" \
             >> "$GITHUB_OUTPUT"
 
       - name: Revalidate selected authority before registry authentication
@@ -1365,6 +1478,8 @@ jobs:
           API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
           HERMES_DIGEST: ${{ steps.evidence.outputs.hermes_digest }}
           HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
+          LITELLM_DIGEST: ${{ steps.evidence.outputs.litellm_digest }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}
           LATEST_ALIAS: ${{ needs.release-metadata.outputs.latest_alias }}
           TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
           TARGET_TAG: ${{ steps.target.outputs.target_tag }}
@@ -1382,10 +1497,13 @@ jobs:
             "docker://$WORKER_IMAGE:$TARGET_TAG") == "$WORKER_DIGEST" ]]
           [[ $(skopeo inspect --format '{{.Digest}}' \
             "docker://$HERMES_IMAGE:$TARGET_VERSION") == "$HERMES_DIGEST" ]]
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$TARGET_TAG") == "$LITELLM_DIGEST" ]]
           scripts/promote-image-aliases \
             "$API_IMAGE" "$API_DIGEST" \
             "$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS" \
             "$HERMES_IMAGE" "$HERMES_DIGEST" \
+            "$LITELLM_IMAGE" "$LITELLM_DIGEST" \
             --postcondition scripts/verify-production-alias-postconditions \
             "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
 

@@ -19,6 +19,7 @@ case "$role" in
   api) expected_image=ghcr.io/carstvaartjes/vonk-forge-api ;;
   worker) expected_image=ghcr.io/carstvaartjes/vonk-forge-worker ;;
   hermes) expected_image=ghcr.io/carstvaartjes/vonk-forge-hermes ;;
+  litellm) expected_image=ghcr.io/carstvaartjes/vonk-forge-litellm ;;
   *) echo "unsupported development image role: $role" >&2; exit 64 ;;
 esac
 [[ "$(basename -- "$archive")" == "vonk-forge-$role.oci.tar" ]]

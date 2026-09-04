@@ -31,6 +31,8 @@ def test_stable_tag_emits_exact_public_package_metadata() -> None:
         "latest_alias=latest",
         "api_image=ghcr.io/carstvaartjes/vonk-forge-api",
         "worker_image=ghcr.io/carstvaartjes/vonk-forge-worker",
+        "hermes_image=ghcr.io/carstvaartjes/vonk-forge-hermes",
+        "litellm_image=ghcr.io/carstvaartjes/vonk-forge-litellm",
         (
             "api_dev_source=ghcr.io/carstvaartjes/vonk-forge-api:"
             f"dev-sha-{SHA}"
@@ -39,7 +41,10 @@ def test_stable_tag_emits_exact_public_package_metadata() -> None:
             "worker_dev_source=ghcr.io/carstvaartjes/vonk-forge-worker:"
             f"dev-sha-{SHA}"
         ),
-        "hermes_image=ghcr.io/carstvaartjes/vonk-forge-hermes",
+        (
+            "litellm_dev_source=ghcr.io/carstvaartjes/vonk-forge-litellm:"
+            f"dev-sha-{SHA}"
+        ),
     ]
 
 

@@ -183,7 +183,7 @@ services:
       retries: 10
 
   litellm:
-    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2}
+    image: ${LITELLM_IMAGE:?set a digest-pinned Vonk LiteLLM image}
     restart: unless-stopped
     logging: *bounded-logging
     entrypoint: [/bin/sh, /run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh]
@@ -194,7 +194,7 @@ services:
     environment:
       HOME: /root
       XDG_CACHE_HOME: /root/.cache
-      PRISMA_QUERY_ENGINE_BINARY: /root/.cache/prisma-python/binaries/5.4.2/ac9d7041ed77bcc8a8dbd2ab6616b39013829574/node_modules/@prisma/engines/query-engine-debian-openssl-3.0.x
+      PRISMA_QUERY_ENGINE_BINARY: /opt/vonk-litellm/prisma/query-engine
       DISABLE_ADMIN_UI: "False"
       LITELLM_UI_PATH: /tmp/litellm-ui
       LITELLM_MASTER_KEY_FILE: /run/vonk-normalized-secrets/litellm-master-key

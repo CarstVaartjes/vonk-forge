@@ -70,6 +70,7 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/hermes-agent/compose.yaml",
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
+        "deploy/compose/litellm/Dockerfile",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/config_supervisor.py",
         "deploy/compose/litellm/entrypoint.sh",
@@ -462,10 +463,15 @@ def test_image_lock_contains_the_pinned_hermes_build_base() -> None:
         "f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a"
     )
     assert "hermes-agent" not in lock["images"]
+    assert lock["build_bases"]["litellm"] == (
+        "ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:"
+        "f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2"
+    )
+    assert "litellm" not in lock["images"]
     assert not any("ai-devbox" in name for name in lock["build_bases"])
 
 
-def test_image_lock_declares_all_three_release_artifacts() -> None:
+def test_image_lock_declares_all_four_release_artifacts() -> None:
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
 
     assert lock["release_images"] == [
@@ -492,6 +498,14 @@ def test_image_lock_declares_all_three_release_artifacts() -> None:
             "package": "vonk-forge-hermes",
             "required": True,
             "target": "managed",
+        },
+        {
+            "context": "deploy/compose/litellm",
+            "dockerfile": "deploy/compose/litellm/Dockerfile",
+            "environment": "LITELLM_IMAGE",
+            "package": "vonk-forge-litellm",
+            "required": True,
+            "target": "runtime",
         },
     ]
 

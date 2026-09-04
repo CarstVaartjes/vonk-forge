@@ -12,6 +12,7 @@ COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 MAIN_REF = "refs/heads/main"
 API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api"
 WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker"
+LITELLM_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-litellm"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -34,6 +35,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("dev_alias=dev")
     print(f"api_image={API_IMAGE}")
     print(f"worker_image={WORKER_IMAGE}")
+    print(f"litellm_image={LITELLM_IMAGE}")
     print(f"artifact_name=vonk-forge-dev-compose-{selected_commit}")
     return 0
 

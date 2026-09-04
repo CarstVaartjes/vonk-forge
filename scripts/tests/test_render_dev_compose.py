@@ -19,6 +19,9 @@ WORKER_IMAGE = (
 HERMES_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 )
+LITELLM_IMAGE = (
+    f"ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-{'a' * 40}@sha256:{DIGEST}"
+)
 DEV_API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:dev"
 DEV_WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:dev"
 
@@ -41,6 +44,7 @@ def _run_renderer(
     api_image: str = API_IMAGE,
     worker_image: str = WORKER_IMAGE,
     hermes_image: str = HERMES_IMAGE,
+    litellm_image: str = LITELLM_IMAGE,
     channel: str = "pinned",
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -57,6 +61,8 @@ def _run_renderer(
             worker_image,
             "--hermes-image",
             hermes_image,
+            "--litellm-image",
+            litellm_image,
             "--channel",
             channel,
         ],
@@ -87,6 +93,7 @@ def test_render_embeds_source_owned_runtime_assets_in_a_single_compose_file(
     ]
     assert document["services"]["control-api"]["image"] == API_IMAGE
     assert document["services"]["control-worker"]["image"] == WORKER_IMAGE
+    assert document["services"]["litellm"]["image"] == LITELLM_IMAGE
     assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
     assert document["services"]["caddy"]["configs"]
     assert "configs:" in text

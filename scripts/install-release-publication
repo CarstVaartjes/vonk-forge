@@ -521,6 +521,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         "api": arguments.api_image,
         "worker": arguments.worker_image,
         "hermes": arguments.hermes_image,
+        "litellm": arguments.litellm_image,
     }
     for role, reference in images.items():
         _validate_image(reference, role, channel, version, source_sha)
@@ -1881,6 +1882,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--api-image", required=True)
     build.add_argument("--worker-image", required=True)
     build.add_argument("--hermes-image", required=True)
+    build.add_argument("--litellm-image", required=True)
     build.add_argument("--nas-setup", action="append", default=[])
     build.add_argument("--spark-setup", action="append", default=[])
     build.add_argument("--agent-package", action="append", default=[])

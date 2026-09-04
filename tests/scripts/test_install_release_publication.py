@@ -214,6 +214,8 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         f"ghcr.io/carstvaartjes/vonk-forge-worker:{image_tag}@sha256:{DIGEST}",
         "--hermes-image",
         f"ghcr.io/carstvaartjes/vonk-forge-hermes:{hermes_tag}@sha256:{DIGEST}",
+        "--litellm-image",
+        f"ghcr.io/carstvaartjes/vonk-forge-litellm:{image_tag}@sha256:{DIGEST}",
         "--nas-payload",
         str(inputs["payload"]),
         "--output",
@@ -2164,7 +2166,7 @@ def test_assemble_rejects_package_metadata_from_another_release(tmp_path: Path) 
     assert "package metadata is inconsistent" in result.stderr
 
 
-@pytest.mark.parametrize("role", ("api", "worker", "hermes"))
+@pytest.mark.parametrize("role", ("api", "worker", "hermes", "litellm"))
 def test_assemble_refuses_mutable_image_references(tmp_path: Path, role: str) -> None:
     inputs = _inputs(tmp_path)
     command = _assemble_command(tmp_path, inputs)

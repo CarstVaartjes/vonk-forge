@@ -51,7 +51,7 @@ jobs:
             jq -r '.images[]' deploy/compose/images.lock.json \
               | sort -u
           )
-          test "${#runtime_images[@]}" = 7
+          test "${#runtime_images[@]}" = 6
           for runtime_image in "${runtime_images[@]}"; do
             [[ "$runtime_image" =~ ^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$ ]]
             docker pull "$runtime_image"
@@ -74,6 +74,7 @@ jobs:
       dev_alias: ${{ steps.metadata.outputs.dev_alias }}
       api_image: ${{ steps.metadata.outputs.api_image }}
       worker_image: ${{ steps.metadata.outputs.worker_image }}
+      litellm_image: ${{ steps.metadata.outputs.litellm_image }}
       artifact_name: ${{ steps.metadata.outputs.artifact_name }}
     steps:
       - name: Check out full main history
@@ -160,7 +161,7 @@ jobs:
                   continue
                 fi
                 ready=1
-                for role in api worker hermes; do
+                for role in api worker hermes litellm; do
                   artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
                   count=$(jq --arg name "$artifact_name" \
                     '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
@@ -173,7 +174,7 @@ jobs:
                 done
                 if ((ready == 1)); then
                   download_complete=1
-                  for role in api worker hermes; do
+                  for role in api worker hermes litellm; do
                     artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
                     if ! gh run download "$GITHUB_RUN_ID" \
                       --repo "$GITHUB_REPOSITORY" \
@@ -197,7 +198,7 @@ jobs:
         run: |
           set -euo pipefail
           test -d control/web/dist
-          for role in api worker hermes; do
+          for role in api worker hermes litellm; do
             test -f "$RUNNER_TEMP/accepted-evidence/$role.role-receipt.json"
           done
 
@@ -216,18 +217,21 @@ jobs:
         env:
           API_DIGEST: ${{ steps.images.outputs.api_digest }}
           HERMES_DIGEST: ${{ steps.images.outputs.hermes_digest }}
+          LITELLM_DIGEST: ${{ steps.images.outputs.litellm_digest }}
           WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
         run: |
           set -euo pipefail
           publication_root="$RUNNER_TEMP/accepted"
           install -d -m 0700 "$publication_root"
           hermes_image="ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$HERMES_DIGEST"
+          litellm_image="ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-$GITHUB_SHA@$LITELLM_DIGEST"
           scripts/render-dev-compose \
             --template deploy/compose/compose.yaml \
             --output "$publication_root/docker-compose.pinned.yml" \
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$API_DIGEST" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$WORKER_DIGEST" \
             --hermes-image "$hermes_image" \
+            --litellm-image "$litellm_image" \
             --commit "$GITHUB_SHA"
           scripts/render-dev-compose \
             --template deploy/compose/compose.yaml \
@@ -235,6 +239,7 @@ jobs:
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev" \
             --hermes-image "$hermes_image" \
+            --litellm-image "$litellm_image" \
             --channel dev
           docker compose \
             --env-file deploy/compose/tests/test.env \
@@ -390,6 +395,22 @@ jobs:
                 org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
                 org.opencontainers.image.revision=${{ github.sha }}
 
+          - name: Build LiteLLM once to local OCI and exact registry digest
+            id: build_litellm
+            uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+            with:
+              context: deploy/compose/litellm
+              file: deploy/compose/litellm/Dockerfile
+              platforms: linux/amd64,linux/arm64
+              outputs: |
+                type=oci,dest=${{ runner.temp }}/vonk-forge-litellm.oci.tar
+                type=image,name=ghcr.io/carstvaartjes/vonk-forge-litellm,push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=true
+              sbom: true
+              provenance: mode=max
+              labels: |
+                org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+                org.opencontainers.image.revision=${{ github.sha }}
+
       - name: Remove registry write credentials before acceptance
         shell: bash
         run: |
@@ -435,6 +456,16 @@ jobs:
                 "${{ steps.build_hermes.outputs.digest }}" \
                 "$RUNNER_TEMP/hermes.role-receipt.json"
 
+          - name: Deep-scan exact LiteLLM build and bind its remote digest
+            shell: bash
+            run: |
+              scripts/accept-development-image-archive \
+                litellm "$RUNNER_TEMP/vonk-forge-litellm.oci.tar" \
+                "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+                ghcr.io/carstvaartjes/vonk-forge-litellm \
+                "${{ steps.build_litellm.outputs.digest }}" \
+                "$RUNNER_TEMP/litellm.role-receipt.json"
+
       - parallel:
           - name: Upload exact API acceptance receipt
             uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -460,6 +491,14 @@ jobs:
               retention-days: 1
               path: ${{ runner.temp }}/hermes.role-receipt.json
 
+          - name: Upload exact LiteLLM acceptance receipt
+            uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+            with:
+              name: development-role-receipt-litellm-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+              if-no-files-found: error
+              retention-days: 1
+              path: ${{ runner.temp }}/litellm.role-receipt.json
+
       - parallel:
           - name: Verify exact digest-only API manifest and attestations
             shell: bash
@@ -481,6 +520,13 @@ jobs:
               scripts/verify-published-image hermes
               ghcr.io/carstvaartjes/vonk-forge-hermes
               "${{ steps.build_hermes.outputs.digest }}" - "$GITHUB_SHA"
+
+          - name: Verify exact digest-only LiteLLM manifest and attestations
+            shell: bash
+            run: >-
+              scripts/verify-published-image litellm
+              ghcr.io/carstvaartjes/vonk-forge-litellm
+              "${{ steps.build_litellm.outputs.digest }}" - "$GITHUB_SHA"
 
           - name: Wait for checksum-bound acceptance receipt
             shell: bash
@@ -542,7 +588,7 @@ jobs:
             "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             "$RUNNER_TEMP/accepted"
-          for role in api worker hermes; do
+          for role in api worker hermes litellm; do
             accepted_digest=$(jq -er \
               --arg role "$role" \
               '.roles[$role].manifest_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
@@ -600,12 +646,23 @@ jobs:
                 "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" \
                 "$RUNNER_TEMP/hermes.accepted-digest"
 
+          - name: Publish immutable tested LiteLLM image
+            shell: bash
+            env:
+              IMAGE: ghcr.io/carstvaartjes/vonk-forge-litellm
+              DIGEST: ${{ steps.accepted.outputs.litellm_digest }}
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
+            run: |
+              scripts/publish-immutable-image litellm \
+                "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" \
+                "$RUNNER_TEMP/litellm.accepted-digest"
+
       - name: Collect immutable tested image digests
         id: publish
         shell: bash
         run: |
           set -euo pipefail
-          for identity in api worker hermes; do
+          for identity in api worker hermes litellm; do
             digest_file="$RUNNER_TEMP/$identity.accepted-digest"
             [[ -f "$digest_file" && ! -L "$digest_file" ]]
             digest=$(tr -d '\r\n' < "$digest_file")
@@ -638,6 +695,14 @@ jobs:
               IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
             run: scripts/verify-published-image hermes "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
 
+          - name: Verify immutable LiteLLM manifest and attestations
+            shell: bash
+            env:
+              DIGEST: ${{ steps.publish.outputs.litellm_digest }}
+              IMAGE: ghcr.io/carstvaartjes/vonk-forge-litellm
+              IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
+            run: scripts/verify-published-image litellm "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
+
       - name: Recheck exact main before signing
         shell: bash
         run: |
@@ -667,6 +732,13 @@ jobs:
             with:
               subject-name: ghcr.io/carstvaartjes/vonk-forge-hermes
               subject-digest: ${{ steps.publish.outputs.hermes_digest }}
+              push-to-registry: true
+
+          - name: Sign accepted LiteLLM image provenance
+            uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+            with:
+              subject-name: ghcr.io/carstvaartjes/vonk-forge-litellm
+              subject-digest: ${{ steps.publish.outputs.litellm_digest }}
               push-to-registry: true
 
       - name: Upload Compose artifact

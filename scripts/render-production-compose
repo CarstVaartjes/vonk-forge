@@ -16,9 +16,10 @@ import yaml
 API_TOKEN = "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}"
 WORKER_TOKEN = "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}"
 HERMES_TOKEN = "${HERMES_AGENT_IMAGE:?set a digest-pinned Hermes image}"
-TOKEN_COUNTS = {API_TOKEN: 1, WORKER_TOKEN: 1, HERMES_TOKEN: 1}
+LITELLM_TOKEN = "${LITELLM_IMAGE:?set a digest-pinned Vonk LiteLLM image}"
+TOKEN_COUNTS = {API_TOKEN: 1, WORKER_TOKEN: 1, HERMES_TOKEN: 1, LITELLM_TOKEN: 2}
 IMAGE_PATTERN = re.compile(
-    r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker|hermes)"
+    r"ghcr\.io/carstvaartjes/vonk-forge-(?P<role>api|worker|hermes|litellm)"
     r":v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"@sha256:[0-9a-f]{64}\Z"
 )
@@ -49,6 +50,7 @@ def render(
     api_image: str,
     worker_image: str,
     hermes_image: str,
+    litellm_image: str,
 ) -> None:
     """Render one self-contained production Compose file."""
     if not template.is_file() or template.is_symlink():
@@ -64,6 +66,7 @@ def render(
     _validate_image(api_image, "api")
     _validate_image(worker_image, "worker")
     _validate_image(hermes_image, "hermes")
+    _validate_image(litellm_image, "litellm")
 
     text = template.read_text(encoding="utf-8")
     for token, count in TOKEN_COUNTS.items():
@@ -77,6 +80,7 @@ def render(
                 API_TOKEN: "API",
                 WORKER_TOKEN: "worker",
                 HERMES_TOKEN: "Hermes",
+                LITELLM_TOKEN: "LiteLLM",
             }[token]
             raise ValueError(f"template {role} image token count changed")
     canonical_renderer = _canonical_renderer()
@@ -87,6 +91,7 @@ def render(
             API_TOKEN: api_image,
             WORKER_TOKEN: worker_image,
             HERMES_TOKEN: hermes_image,
+            LITELLM_TOKEN: litellm_image,
         },
     )
     canonical_renderer._resolve_runtime_images(document)
@@ -121,6 +126,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--api-image", required=True)
     parser.add_argument("--worker-image", required=True)
     parser.add_argument("--hermes-image", required=True)
+    parser.add_argument("--litellm-image", required=True)
     return parser.parse_args()
 
 
@@ -132,6 +138,7 @@ def main() -> None:
         arguments.api_image,
         arguments.worker_image,
         arguments.hermes_image,
+        arguments.litellm_image,
     )
 
 
