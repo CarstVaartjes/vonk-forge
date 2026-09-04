@@ -487,6 +487,24 @@ def test_preview_install_exposes_bounded_legal_admission_error() -> None:
     ]
 
 
+def test_preview_install_returns_structured_conflict_for_invalid_topology() -> None:
+    client, headers, recipes, _audits = setup()
+
+    def invalid_topology(_mapping_id, _recipe_build_id):
+        raise ValueError("mapping topology is invalid")
+
+    recipes.preview_install = invalid_topology
+    response = client.post(
+        "/api/v1/recipes/install-plans/preview",
+        headers=headers(),
+        json={"mapping_id": MAPPING, "recipe_build_id": BUILD},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "recipe.operation_conflict"
+    assert response.json()["detail"] == "mapping topology is invalid"
+
+
 def test_source_gate_build_and_cluster_mapping_are_explicit_steps() -> None:
     client, headers, recipes, audits = setup()
     checked = client.post(
