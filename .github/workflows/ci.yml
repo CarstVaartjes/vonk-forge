@@ -18,6 +18,39 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Select CI ownership areas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.areas.outputs.rust }}
+      repository: ${{ steps.areas.outputs.repository }}
+      control: ${{ steps.areas.outputs.control }}
+      web: ${{ steps.areas.outputs.web }}
+      compose: ${{ steps.areas.outputs.compose }}
+      generated: ${{ steps.areas.outputs.generated }}
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select coarse ownership areas
+        id: areas
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$GITHUB_SHA" |
+              scripts/select-ci-areas --event pull_request --github-output \
+                >> "$GITHUB_OUTPUT"
+          else
+            scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" \
+              --github-output </dev/null >> "$GITHUB_OUTPUT"
+          fi
+
   installer-setups:
     name: Build accepted installer setup programs
     if: github.event_name == 'push' && github.ref_type == 'tag'
@@ -60,6 +93,8 @@ jobs:
 
   rust-quality:
     name: Rust workspace lint
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -83,6 +118,8 @@ jobs:
 
   rust-tests:
     name: Rust workspace tests (${{ matrix.shard.label }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -130,21 +167,29 @@ jobs:
 
   rust-quality-gate:
     name: Rust workspace quality
-    needs: [rust-quality, rust-tests]
+    needs: [changes, rust-quality, rust-tests]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require Rust lint and every workspace test shard
         env:
+          SELECTED: ${{ needs.changes.outputs.rust }}
           LINT_RESULT: ${{ needs.rust-quality.result }}
           TEST_RESULT: ${{ needs.rust-tests.result }}
         run: |
-          test "$LINT_RESULT" = success
-          test "$TEST_RESULT" = success
+          if [[ "$SELECTED" == true ]]; then
+            test "$LINT_RESULT" = success
+            test "$TEST_RESULT" = success
+          else
+            test "$LINT_RESULT" = skipped
+            test "$TEST_RESULT" = skipped
+          fi
 
   rust-platform:
     name: Rust platform integration
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -210,21 +255,28 @@ jobs:
 
   rust:
     name: Rust agent contracts
-    needs: [rust-quality-gate, rust-platform]
+    needs: [changes, rust-quality-gate, rust-platform]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require Rust quality, tests, and platform integration
         env:
+          SELECTED: ${{ needs.changes.outputs.rust }}
           QUALITY_RESULT: ${{ needs.rust-quality-gate.result }}
           PLATFORM_RESULT: ${{ needs.rust-platform.result }}
         run: |
           test "$QUALITY_RESULT" = success
-          test "$PLATFORM_RESULT" = success
+          if [[ "$SELECTED" == true ]]; then
+            test "$PLATFORM_RESULT" = success
+          else
+            test "$PLATFORM_RESULT" = skipped
+          fi
 
   generated-clients:
     name: Generated control clients
+    needs: changes
+    if: needs.changes.outputs.generated == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -280,6 +332,8 @@ jobs:
 
   compose-integration:
     name: Compose integration
+    needs: changes
+    if: needs.changes.outputs.compose == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -325,6 +379,8 @@ jobs:
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
+    needs: changes
+    if: needs.changes.outputs.repository == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -369,6 +425,8 @@ jobs:
 
   control-suite:
     name: Complete control suite (${{ matrix.shard.label }})
+    needs: changes
+    if: needs.changes.outputs.control == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -411,6 +469,8 @@ jobs:
 
   web-suite:
     name: Admin web behavior
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -445,20 +505,32 @@ jobs:
 
   catalog-runtime:
     name: Catalog and service suites
-    needs: [repository-suite, control-suite, web-suite]
+    needs: [changes, repository-suite, control-suite, web-suite]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every complete service suite
         env:
+          REPOSITORY_SELECTED: ${{ needs.changes.outputs.repository }}
+          CONTROL_SELECTED: ${{ needs.changes.outputs.control }}
+          WEB_SELECTED: ${{ needs.changes.outputs.web }}
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           WEB_RESULT: ${{ needs.web-suite.result }}
         run: |
-          test "$REPOSITORY_RESULT" = success
-          test "$CONTROL_RESULT" = success
-          test "$WEB_RESULT" = success
+          require_selected_result() {
+            local selected="$1"
+            local result="$2"
+            if [[ "$selected" == true ]]; then
+              test "$result" = success
+            else
+              test "$result" = skipped
+            fi
+          }
+          require_selected_result "$REPOSITORY_SELECTED" "$REPOSITORY_RESULT"
+          require_selected_result "$CONTROL_SELECTED" "$CONTROL_RESULT"
+          require_selected_result "$WEB_SELECTED" "$WEB_RESULT"
 
   release-metadata:
     name: Validate container release tag

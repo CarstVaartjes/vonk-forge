@@ -15,6 +15,7 @@ def _copy(tmp_path: Path) -> Path:
     target = tmp_path / "repo"
     for path in (
         ".github/workflows/ci.yml",
+        "scripts/select-ci-areas",
         ".github/workflows/agent-apt-development.yml",
         ".github/workflows/agent-release.yml",
         ".github/actions/agent-package-build/action.yml",
