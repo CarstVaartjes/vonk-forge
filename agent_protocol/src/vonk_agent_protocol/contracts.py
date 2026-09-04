@@ -87,6 +87,7 @@ class AgentProtocolError(ValueError):
 
 class AgentOperation(StrEnum):
     AGENT_UPGRADE = "agent.upgrade.v1"
+    ARTIFACT_DISTRIBUTION = "artifact.distribution.v1"
     NODE_PROBE = "node.probe"
     RELEASE_INSTALL = "release.install"
     WORKLOAD_PREPARE = "workload.prepare"

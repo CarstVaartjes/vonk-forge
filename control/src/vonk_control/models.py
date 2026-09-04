@@ -930,6 +930,33 @@ class AgentOperation(Base):
     )
 
 
+class ArtifactDistributionAssignment(Base):
+    """Durable node-scoped authorization for Controller-served artifacts."""
+
+    __tablename__ = "artifact_distribution_assignments"
+    __table_args__ = (
+        UniqueConstraint("plan_digest", "node_id", name="uq_distribution_plan_node"),
+        CheckConstraint(_lower_hex("plan_digest", 64), name="ck_distribution_plan_digest"),
+        CheckConstraint(_lower_hex("model_artifact_set_sha256", 64), name="ck_distribution_model_set_digest"),
+        CheckConstraint(_lower_hex("oci_archive_sha256", 64), name="ck_distribution_archive_digest"),
+        CheckConstraint("generation >= 1", name="ck_distribution_generation"),
+        CheckConstraint("state IN ('active','revoked','expired')", name="ck_distribution_state"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), nullable=False, index=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    model_artifact_set_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    objects: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    oci_image_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    oci_archive_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class AgentOperationAttempt(Base):
     __tablename__ = "agent_operation_attempts"
     __table_args__ = (UniqueConstraint("operation_id", "attempt"),)

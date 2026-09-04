@@ -25,9 +25,10 @@ use crate::{
     workloads::{Placement, image_digest},
 };
 use vonk_agent_protocol::{
-    AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, RecipeJobEvidence,
-    RecipeJobFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
-    RecipeJobRunResult, RecipeOperationRequest, RecipeStartPhase, canonical_json, hex_sha256,
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
+    HostRuntimeAction, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
+    RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
+    RecipeStartPhase, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -424,6 +425,72 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
         lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         mut cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> ExecutionResult {
+        if claim.operation == "artifact.distribution.v1" {
+            if claim.validate().is_err() {
+                return failed("artifact distribution claim is invalid");
+            }
+            let request: ArtifactDistributionRequest =
+                match serde_json::from_value(claim.payload.clone()) {
+                    Ok(request) => request,
+                    Err(_) => return failed("artifact distribution request is invalid"),
+                };
+            if request.validate().is_err() || request.plan_digest != claim.authority_revision {
+                return failed("artifact distribution plan identity is invalid");
+            }
+            let destination = self
+                .runtime
+                .data_root
+                .join("distribution")
+                .join(&request.plan_digest);
+            return match self
+                .client
+                .download_distribution(&request.plan_digest, &destination)
+                .await
+            {
+                Ok(evidence) => {
+                    let importer = ImageImporter {
+                        data_root: self.runtime.data_root,
+                    };
+                    let archive = match importer.retain_verified_distribution_archive(
+                        &evidence.oci_archive_sha256,
+                        &evidence.oci_image_digest,
+                        evidence.oci_archive_bytes,
+                        &evidence.oci_archive_path,
+                    ) {
+                        Ok(path) => path,
+                        Err(_) => return failed("distributed OCI archive could not be retained"),
+                    };
+                    if self
+                        .execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::ImageImport,
+                            importer.distribution_runtime_arguments(
+                                &request.plan_digest,
+                                &evidence.oci_image_digest,
+                                evidence.oci_archive_bytes,
+                                &archive,
+                            ),
+                        )
+                        .await
+                        .is_err()
+                    {
+                        return failed("distributed OCI image could not be imported");
+                    }
+                    ExecutionResult {
+                        state: "succeeded",
+                        body: json!({
+                            "assignment_id": evidence.assignment_id,
+                            "model_artifact_set_sha256": evidence.model_artifact_set_sha256,
+                            "model_files": evidence.model_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+                            "oci_archive": archive.display().to_string(),
+                            "oci_image_digest": evidence.oci_image_digest,
+                            "downloaded_bytes": evidence.downloaded_bytes,
+                        }),
+                    }
+                }
+                Err(_) => failed("Controller distribution could not be verified and retained"),
+            };
+        }
         let request = match RecipeOperationRequest::parse(claim) {
             Ok(request) => request,
             Err(_) => return failed("recipe operation payload is invalid"),
@@ -507,7 +574,9 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         }
                         match importer.retain_verified_archive(&request, &staging) {
                             Ok(path) => path,
-                            Err(_) => return failed("verified OCI image archive could not be retained"),
+                            Err(_) => {
+                                return failed("verified OCI image archive could not be retained");
+                            }
                         }
                     }
                     Err(_) => return failed("OCI image archive cache is invalid"),

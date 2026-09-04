@@ -107,7 +107,14 @@ fn verified_archive_is_reused_by_its_immutable_digest() {
         schema_version: 1,
         source_node_id: format!("spk_{}", "1".repeat(32)),
     };
-    let importer = ImageImporter { data_root: root.path() };
-    let cached = importer.retain_verified_archive(&request, &archive).unwrap();
-    assert_eq!(importer.verified_cached_archive(&request).unwrap(), Some(cached));
+    let importer = ImageImporter {
+        data_root: root.path(),
+    };
+    let cached = importer
+        .retain_verified_archive(&request, &archive)
+        .unwrap();
+    assert_eq!(
+        importer.verified_cached_archive(&request).unwrap(),
+        Some(cached)
+    );
 }

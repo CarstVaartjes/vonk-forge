@@ -238,6 +238,7 @@ impl AgentClaim {
         if !matches!(
             self.operation.as_str(),
             "agent.upgrade.v1"
+                | "artifact.distribution.v1"
                 | "recipe.build.v1"
                 | "recipe.image.import.v1"
                 | "recipe.job.run.v1"
@@ -255,6 +256,29 @@ impl AgentClaim {
             || hex_sha256(&payload) != self.payload_digest
         {
             return Err(ProtocolError::Identity("claim payload digest"));
+        }
+        Ok(())
+    }
+}
+
+/// Agent command to consume one Controller assignment. The destination is
+/// selected by the agent configuration, so claims cannot choose a filesystem
+/// path; only the plan identity crosses the wire.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactDistributionRequest {
+    pub authority_revision: String,
+    pub plan_digest: String,
+    pub schema_version: u8,
+}
+
+impl ArtifactDistributionRequest {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.schema_version != 1
+            || !lower_hex(&self.authority_revision, 64)
+            || !lower_hex(&self.plan_digest, 64)
+        {
+            return Err(ProtocolError::Identity("artifact distribution request"));
         }
         Ok(())
     }
@@ -404,7 +428,10 @@ impl DistributionObject {
             || self.name.len() > 512
             || self.name.starts_with('/')
             || self.name.contains(['\\', '\0', '\r', '\n'])
-            || self.name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+            || self
+                .name
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
             || !lower_hex(&self.sha256, 64)
             || !(1..=16 * 1024_u64.pow(4)).contains(&self.bytes)
             || !matches!(self.kind.as_str(), "model" | "oci-archive" | "oci-layer")
@@ -461,7 +488,9 @@ impl DistributionAssignment {
             has_archive |= object.kind == "oci-archive" && object.sha256 == self.oci_archive_sha256;
         }
         if !has_model || !has_archive {
-            return Err(ProtocolError::Identity("distribution assignment object coverage"));
+            return Err(ProtocolError::Identity(
+                "distribution assignment object coverage",
+            ));
         }
         Ok(())
     }

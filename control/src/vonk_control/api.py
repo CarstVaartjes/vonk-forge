@@ -197,6 +197,11 @@ def build_agent_services(
         WorkloadObjectReceiptIssuer,
     )
 
+    if distribution is not None:
+        attach_sessions = getattr(distribution, "attach_sessions", None)
+        if callable(attach_sessions):
+            attach_sessions(sessions)
+
     if settings.agent_runtime != "enabled":
         # Local development still needs the durable operation queue and fleet
         # presence service, but deliberately has no enrollment or certificate

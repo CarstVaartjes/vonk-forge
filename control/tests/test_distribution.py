@@ -4,9 +4,9 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
-from vonk_agent_protocol import DistributionAssignment
+from vonk_agent_protocol import DistributionAssignment, DistributionObject
 
-from test_agent_api import NODE_A, NODE_B, agent_headers
+from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system
 
 
 def _assignment(
@@ -20,6 +20,7 @@ def _assignment(
             "generation": 1,
             "node_id": node_id,
             "expires_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+            # The fixture models the NAS cache's opaque manifest identity.
             "model_artifact_set_sha256": "b" * 64,
             "objects": [
                 {"name": "weights/model.bin", "sha256": model_digest, "bytes": 13, "kind": "model"},
@@ -40,6 +41,8 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
     archive_digest = source.put(b"oci archive")
     service = DistributionService(source, clock=clock)
     assignment = _assignment(NODE_A, model_digest, config_digest, archive_digest)
+    source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
+    source.register_runtime_image(assignment.oci_image_digest, archive_digest)
     service.register(assignment)
     service.register(
         DistributionAssignment.parse(
@@ -66,6 +69,10 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
     assert response.content == b"del pa"
     assert response.headers["etag"] == f'"sha256:{model_digest}"'
     assert response.headers["content-range"] == "bytes 2-7/13"
+    assert client.get(
+        "/agent/v1/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
+        headers={**agent_headers(NODE_A, "serial-a"), "Range": "bytes=0-1,3-4"},
+    ).status_code == 416
 
     second = client.get(
         "/agent/v1/distribution/objects/" + model_digest + "?plan_digest=" + "a" * 64,
@@ -80,10 +87,57 @@ def test_distribution_rejects_unassigned_wrong_node_and_corrupt_object(agent_sys
     model_digest = source.put(b"model payload")
     archive_digest = source.put(b"oci archive")
     service = DistributionService(source, clock=clock)
-    service.register(_assignment(NODE_A, model_digest, source.put(b"config!"), archive_digest))
+    assignment = _assignment(NODE_A, model_digest, source.put(b"config!"), archive_digest)
+    source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
+    source.register_runtime_image(assignment.oci_image_digest, archive_digest)
+    service.register(assignment)
     object.__setattr__(services, "distribution", service)
     path = "/agent/v1/distribution/objects/" + model_digest
     assert client.get(path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_B, "serial-b")).status_code == 403
     assert client.get(path + "?plan_digest=" + "e" * 64, headers=agent_headers(NODE_A, "serial-a")).status_code == 403
     source.objects[model_digest] = b"tampered payload"
     assert client.get(path + "?plan_digest=" + "a" * 64, headers=agent_headers(NODE_A, "serial-a")).status_code == 503
+
+
+def test_distribution_assignment_survives_controller_service_restart(agent_system) -> None:
+    _client, _services, _tokens, clock = agent_system
+    sessions = _services.sessions
+    source = MemoryVerifiedObjectSource()
+    assignment = _assignment(
+        NODE_A,
+        source.put(b"model payload"),
+        source.put(b"config!"),
+        source.put(b"oci archive"),
+    )
+    source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
+    source.register_runtime_image(assignment.oci_image_digest, assignment.oci_archive_sha256)
+    DistributionService(source, clock=clock, sessions=sessions).register(assignment)
+
+    restarted = DistributionService(source, clock=clock, sessions=sessions)
+    assert restarted.manifest(node_id=NODE_A, plan_digest=assignment.plan_digest)["assignment_id"] == assignment.assignment_id
+    restarted.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
+    try:
+        restarted.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
+    except Exception as error:
+        assert getattr(error, "code", None) == "distribution.revoked"
+    else:
+        raise AssertionError("revoked assignment remained authorized")
+
+
+def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> None:
+    _client, _services, _tokens, clock = agent_system
+    source = MemoryVerifiedObjectSource()
+    assignment = _assignment(
+        NODE_A,
+        source.put(b"model payload"),
+        source.put(b"config!"),
+        source.put(b"oci archive"),
+    )
+    source.register_artifact_set("c" * 64, assignment.objects)
+    source.register_runtime_image(assignment.oci_image_digest, assignment.oci_archive_sha256)
+    try:
+        DistributionService(source, clock=clock).register(assignment)
+    except Exception as error:
+        assert getattr(error, "code", None) == "distribution.model_set_mismatch"
+    else:
+        raise AssertionError("unverified cache manifest was accepted")

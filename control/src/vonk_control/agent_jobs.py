@@ -69,6 +69,7 @@ _RECIPE_CAPABILITIES = frozenset(
 _MUTATING_OPERATIONS = frozenset(
     {
         AgentOperation.AGENT_UPGRADE.value,
+        AgentOperation.ARTIFACT_DISTRIBUTION.value,
         AgentOperation.RELEASE_INSTALL.value,
         AgentOperation.WORKLOAD_PREPARE.value,
         AgentOperation.WORKLOAD_START.value,
@@ -105,6 +106,7 @@ _NEXT_CAPABILITIES = (
 _OPTIONAL_CAPABILITIES = frozenset(
     {
         AgentOperation.AGENT_UPGRADE.value,
+        AgentOperation.ARTIFACT_DISTRIBUTION.value,
         "recipe.model-uninstall.v1",
         "recipe.start.two-phase.v1",
         "recipe.run.inspect.exact.v1",
