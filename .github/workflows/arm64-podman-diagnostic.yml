@@ -48,6 +48,18 @@ jobs:
             /var/lib/vonk-forge-agent/diagnostic/graph \
             /var/lib/vonk-forge-agent/diagnostic/tmp \
             "/run/user/$uid/diagnostic"
+          sudo install -d -o root -g vonk-agent -m 0750 \
+            /etc/vonk-forge-agent
+          printf '%s\n' \
+            '[storage]' \
+            'driver = "overlay"' \
+            'runroot = "/run/user/0/unused"' \
+            'graphroot = "/var/lib/vonk-forge-agent/unused"' \
+            '' \
+            '[storage.options.overlay]' \
+            'mount_program = "/usr/bin/fuse-overlayfs"' | \
+            sudo tee /etc/vonk-forge-agent/containers-storage.conf >/dev/null
+          sudo chmod 0640 /etc/vonk-forge-agent/containers-storage.conf
           sudo install -o vonk-agent -g vonk-agent -m 0755 \
             /bin/busybox \
             /var/lib/vonk-forge-agent/diagnostic/context/busybox
@@ -83,6 +95,7 @@ jobs:
             XDG_DATA_HOME=/var/lib/vonk-forge-agent \
             XDG_RUNTIME_DIR="/run/user/$uid" \
             TMPDIR=/var/lib/vonk-forge-agent/diagnostic/tmp \
+            CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
             podman "${common[@]}" || direct_status=$?
           echo "direct_status=${direct_status:-0}"
@@ -91,6 +104,7 @@ jobs:
             HOME=/var/lib/vonk-forge-agent \
             XDG_DATA_HOME=/var/lib/vonk-forge-agent \
             XDG_RUNTIME_DIR="/run/user/$uid" \
+            CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
             DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
             systemd-run --user --wait --pipe --collect --quiet \
               --service-type=exec --unit=vonk-arm64-podman-diagnostic \
@@ -98,6 +112,7 @@ jobs:
               --setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent \
               --setenv="XDG_RUNTIME_DIR=/run/user/$uid" \
               --setenv=TMPDIR=/var/lib/vonk-forge-agent/diagnostic/tmp \
+              --setenv=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf \
               /usr/bin/podman "${common[@]}" || service_status=$?
           echo "service_status=${service_status:-0}"
           test "${direct_status:-0}" -eq 0
