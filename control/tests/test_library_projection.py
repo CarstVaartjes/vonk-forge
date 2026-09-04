@@ -739,7 +739,8 @@ def test_root_operational_summaries_are_exact_bounded_and_fair_per_recipe() -> N
     summaries = {item.slug: item for model in snapshot.models for item in model.recipes}
     alpha = summaries["alpha-history-heavy"]
     bravo_summary = summaries["bravo-current"]
-    assert len(statements) == 6
+    # The exact model-version authority is loaded once for capability projection.
+    assert len(statements) == 7
     installation_window = next(
         statement
         for statement in statements
@@ -1326,6 +1327,145 @@ def test_valid_long_v1_visual_fields_are_bounded_without_profile_projection() ->
     assert detail.topology.name == "solo"
     assert detail.placement[0].topology_name == "solo"
     assert "recipe.visual_text_truncated" in {item.code for item in detail.reasons}
+
+
+def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
+    """Model declaration is exact-variant authority; interfaces are recipe-owned."""
+
+    _engine, sessions = _database()
+    text_recipe = _document(family="a06-v1", title="A06 text recipe")
+    text_recipe["interfaces"][0]["adapter"] = "openai"
+    vision_recipe = _document(family="a06-v1", title="A06 vision recipe")
+    vision_recipe["interfaces"][0]["adapter"] = "image-job"
+    vision_recipe["interfaces"] = [{
+        "adapter": "image-job",
+        "path": "/outputs",
+        "output": {
+        "path": "/outputs",
+        "max_total_bytes": 512 * 1024**2,
+        "slots": [{
+            "id": "image",
+            "label": "Generated image",
+            "description": "The generated PNG image.",
+            "media_types": ["image/png"],
+            "extensions": [".png"],
+            "min_files": 1,
+            "max_files": 1,
+            "max_file_bytes": 512 * 1024**2,
+            "max_total_bytes": 512 * 1024**2,
+        }],
+        },
+    }]
+    vision_recipe["runtime"]["lifecycle"]["readiness"] = {
+        "strategy": "endpoint-owner",
+        "path": "/outputs",
+        "timeout_seconds": 3_600,
+    }
+    vision_recipe["validation"]["validators"] = [
+        {"interface": "image-job", "checks": ["job.completed"]}
+    ]
+    second_variant = _document(family="a06-v2", title="A06 second variant")
+    second_variant["interfaces"] = deepcopy(vision_recipe["interfaces"])
+    second_variant["runtime"]["lifecycle"]["readiness"] = deepcopy(
+        vision_recipe["runtime"]["lifecycle"]["readiness"]
+    )
+    second_variant["validation"]["validators"] = deepcopy(
+        vision_recipe["validation"]["validators"]
+    )
+    unknown_variant = _document(family="a06-unknown", title="A06 unknown variant")
+    unknown_variant["interfaces"] = vision_recipe["interfaces"]
+    unknown_variant["runtime"]["lifecycle"]["readiness"] = deepcopy(
+        vision_recipe["runtime"]["lifecycle"]["readiness"]
+    )
+    unknown_variant["validation"]["validators"] = deepcopy(
+        vision_recipe["validation"]["validators"]
+    )
+
+    def model_document(document: dict, capabilities: object) -> dict:
+        return {
+            "model": document["model"],
+            "capabilities": capabilities,
+            "capability_evidence_digest": "d" * 64,
+        }
+
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            701,
+            slug="a06-text",
+            title="A06 text",
+            document=text_recipe,
+            model_version_document=model_document(text_recipe, ["openai", "image-job"]),
+        )
+        _recipe(
+            session,
+            702,
+            slug="a06-vision",
+            title="A06 vision",
+            document=vision_recipe,
+                model_version_document=model_document(
+                    vision_recipe, ["openai", "image-job"]
+                ),
+        )
+        _recipe(
+            session,
+            703,
+            slug="a06-second-variant",
+            title="A06 second variant",
+            document=second_variant,
+            model_version_document=model_document(
+                second_variant,
+                {"openai": "supported", "image-job": "unsupported"},
+            ),
+        )
+        # The recipe points at a valid-looking exact identity with no resolved authority.
+        _recipe(
+            session,
+            704,
+            slug="a06-unknown",
+            title="A06 unknown",
+            document=unknown_variant,
+        )
+
+    snapshot = _projection(sessions).list()
+    models = {model.model.slug: model for model in snapshot.models}
+    first = models["a06-v1"]
+    assert [fact.capability for fact in first.model_capabilities.facts] == [
+        "image-job",
+        "openai",
+    ]
+    recipes = {recipe.slug: recipe for recipe in first.recipes}
+    assert [
+        fact.capability for fact in recipes["a06-text"].recipe_capabilities.facts
+    ] == ["openai"]
+    assert [
+        fact.capability for fact in recipes["a06-vision"].recipe_capabilities.facts
+    ] == ["image-job"]
+    assert first.model_capabilities.provenance is not None
+    assert first.model_capabilities.provenance.evidence_digest == "d" * 64
+    assert models["a06-v2"].model_capabilities.state == "declared"
+    assert {
+        fact.capability: fact.support
+        for fact in models["a06-v2"].model_capabilities.facts
+    } == {"openai": "supported", "image-job": "unsupported"}
+    second_recipe = models["a06-v2"].recipes[0]
+    assert second_recipe.recipe_capabilities.state == "contradictory"
+    assert second_recipe.recipe_capabilities.facts[0].evidence_status == "contradicted"
+    assert models["a06-unknown"].model_capabilities.state == "unknown"
+
+    text_detail = _projection(sessions).detail(_uuid(701))
+    assert text_detail.model_capabilities.state == "declared"
+    assert [
+        fact.capability for fact in text_detail.recipe_capabilities.facts
+    ] == ["openai"]
+    assert text_detail.model_capabilities.facts[0].capability == "image-job"
+    # The model's image capability does not turn the text-only recipe green.
+    assert "image-job" not in {
+        fact.capability for fact in text_detail.recipe_capabilities.facts
+    }
+    assert json.dumps(snapshot.model_dump(mode="json"), sort_keys=True) == json.dumps(
+        _projection(sessions).list().model_dump(mode="json"), sort_keys=True
+    )
 
 
 def test_visual_projection_exposes_sorted_signed_artifact_include_paths() -> None:

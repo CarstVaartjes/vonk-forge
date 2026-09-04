@@ -33,7 +33,11 @@ from .library_contract import (
     InstallPreviewInput,
     InstallPreviewTarget,
     LibraryInstallationSummary,
+    LibraryCapabilityFact,
+    LibraryCapabilityInventory,
+    LibraryCapabilityProvenance,
     LibraryModel,
+    ModelVersionIdentity,
     LibraryRecipeDetail,
     LibraryRecipeIdentity,
     LibraryRecipeSummary,
@@ -486,7 +490,15 @@ def _resolved_model_version_document(
 ) -> Mapping[str, object] | None:
     """Load the exact immutable model authority without projecting arbitrary fields."""
 
-    reference = recipe_document["model"]
+    return _resolved_model_version_reference(session, recipe_document["model"])
+
+
+def _resolved_model_version_reference(
+    session: Session,
+    reference: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Load one exact model-version revision addressed by a recipe reference."""
+
     revision = session.scalar(
         select(CatalogEntityRevision)
         .join(CatalogEntity, CatalogEntity.id == CatalogEntityRevision.entity_id)
@@ -501,6 +513,281 @@ def _resolved_model_version_document(
         .limit(1)
     )
     return revision.document if revision is not None else None
+
+
+def _capability_digest(value: object) -> str | None:
+    if isinstance(value, str) and len(value) == 64:
+        try:
+            int(value, 16)
+        except ValueError:
+            return None
+        return value
+    return None
+
+
+def _capability_provenance(
+    *,
+    source_kind: Literal["model-version", "recipe-revision"],
+    publisher: object,
+    slug: object,
+    content_sha256: object,
+    path: object,
+    evidence_digest: object,
+    revision_id: object = None,
+) -> LibraryCapabilityProvenance:
+    return LibraryCapabilityProvenance(
+        source_kind=source_kind,
+        publisher=_bounded_text(publisher, 128),
+        slug=_bounded_text(slug, 128),
+        content_sha256=_capability_digest(content_sha256),
+        path=(None if path is None else _bounded_text(path, 256)),
+        evidence_digest=_capability_digest(evidence_digest),
+        revision_id=(None if revision_id is None else str(revision_id)),
+    )
+
+
+def _capability_inventory(
+    *,
+    source_kind: Literal["model-version", "recipe-revision"],
+    publisher: object,
+    slug: object,
+    content_sha256: object,
+    document: Mapping[str, object] | None,
+    raw: object,
+    path: str,
+    unknown_code: str,
+    revision_id: object = None,
+) -> LibraryCapabilityInventory:
+    """Project explicit capability assertions while preserving unknown state."""
+
+    document_evidence_digest = (
+        document.get("capability_evidence_digest") if document is not None else None
+    )
+    if (
+        document_evidence_digest is None
+        and isinstance(raw, Mapping)
+        and raw.get("evidence_digest") is not None
+    ):
+        document_evidence_digest = raw.get("evidence_digest")
+    provenance = _capability_provenance(
+        source_kind=source_kind,
+        publisher=publisher,
+        slug=slug,
+        content_sha256=content_sha256,
+        path=path if document is not None else None,
+        evidence_digest=document_evidence_digest,
+        revision_id=revision_id,
+    )
+    if document is None or raw is None:
+        return LibraryCapabilityInventory(
+            state="unknown",
+            provenance=provenance,
+            reasons=[
+                _reason(
+                    unknown_code,
+                    "No authoritative capability declaration is available for this "
+                    "exact identity.",
+                    "info",
+                )
+            ],
+        )
+
+    entries: list[tuple[str | None, object, str]] = []
+    invalid = 0
+    if isinstance(raw, list):
+        entries = [(None, item, f"{path}[{index}]") for index, item in enumerate(raw)]
+    elif isinstance(raw, Mapping):
+        declared = raw.get("declared")
+        if isinstance(declared, list):
+            entries = [
+                (None, item, f"{path}.declared[{index}]")
+                for index, item in enumerate(declared)
+            ]
+        else:
+            entries = [
+                (str(name), value, f"{path}.{name}")
+                for name, value in raw.items()
+                if name not in {"evidence_digest", "source", "declared"}
+            ]
+    else:
+        invalid = 1
+
+    facts: list[LibraryCapabilityFact] = []
+    for name_hint, value, value_path in entries:
+        name: object = name_hint
+        support: object = "supported"
+        evidence_status: object = "declared"
+        evidence_digest: object = document_evidence_digest
+        if isinstance(value, str):
+            if name_hint is not None and value in {
+                "supported",
+                "unsupported",
+                "unknown",
+            }:
+                name = name_hint
+                support = value
+            else:
+                name = value if name_hint is None else name_hint
+        elif isinstance(value, Mapping):
+            name = value.get("name", name_hint)
+            support = value.get("support", value.get("status", "supported"))
+            evidence_status = value.get(
+                "evidence_status", value.get("evidence", "declared")
+            )
+            evidence_digest = value.get("evidence_digest", evidence_digest)
+        elif name_hint is None:
+            invalid += 1
+            continue
+        if not isinstance(name, str) or not name or len(name) > 64:
+            invalid += 1
+            continue
+        if support not in {"supported", "unsupported", "unknown"}:
+            support = "unknown"
+            invalid += 1
+        if evidence_status not in {"declared", "tested", "contradicted", "unknown"}:
+            evidence_status = "unknown"
+            invalid += 1
+        facts.append(
+            LibraryCapabilityFact(
+                capability=name,
+                support=support,
+                evidence_status=evidence_status,
+                evidence_digest=_capability_digest(evidence_digest),
+                provenance=_capability_provenance(
+                    source_kind=source_kind,
+                    publisher=publisher,
+                    slug=slug,
+                    content_sha256=content_sha256,
+                    path=value_path,
+                    evidence_digest=evidence_digest,
+                    revision_id=revision_id,
+                ),
+            )
+        )
+
+    # Stable ordering makes JSON comparison and client caching deterministic.
+    facts.sort(key=lambda item: (item.capability, item.support, item.evidence_status))
+    by_name: dict[str, set[str]] = {}
+    for fact in facts:
+        by_name.setdefault(fact.capability, set()).add(fact.support)
+    contradictory = {
+        name
+        for name, supports in by_name.items()
+        if {"supported", "unsupported"}.issubset(supports)
+    }
+    if contradictory:
+        facts = [
+            fact.model_copy(
+                update={"evidence_status": "contradicted"}
+            )
+            if fact.capability in contradictory
+            else fact
+            for fact in facts
+        ]
+    reasons = []
+    if invalid:
+        reasons.append(
+            _reason(
+                "capability.invalid_declaration",
+                f"{invalid} capability declaration value(s) were not well formed "
+                "and remain unknown.",
+                "warning",
+            )
+        )
+    state: Literal["declared", "unknown", "contradictory"] = "declared"
+    if contradictory:
+        state = "contradictory"
+        reasons.append(
+            _reason(
+                "capability.contradictory_declaration",
+                "The exact identity declares conflicting support values for one or "
+                "more capabilities.",
+                "error",
+            )
+        )
+    if not facts and invalid:
+        state = "unknown"
+    return LibraryCapabilityInventory(
+        state=state,
+        facts=facts[:_MAX_PROJECTED_CAPABILITIES],
+        provenance=provenance,
+        reasons=reasons,
+    )
+
+
+def _model_capabilities(
+    reference: Mapping[str, object],
+    document: Mapping[str, object] | None,
+) -> LibraryCapabilityInventory:
+    return _capability_inventory(
+        source_kind="model-version",
+        publisher=reference.get("publisher"),
+        slug=reference.get("slug"),
+        content_sha256=reference.get("content_sha256"),
+        document=document,
+        raw=None if document is None else document.get("capabilities"),
+        path="capabilities",
+        unknown_code="model.capabilities_unknown",
+    )
+
+
+def _recipe_capabilities(
+    recipe: LocalRecipe,
+    revision: LocalRecipeRevision | None,
+    document: Mapping[str, object] | None,
+    model_capabilities: LibraryCapabilityInventory,
+) -> LibraryCapabilityInventory:
+    reference_digest = None if revision is None else revision.content_sha256
+    raw = None
+    if document is not None:
+        interfaces = document.get("interfaces")
+        if isinstance(interfaces, list):
+            raw = [
+                {"name": item.get("adapter"), "support": "supported"}
+                for item in interfaces
+                if isinstance(item, Mapping)
+            ]
+    inventory = _capability_inventory(
+        source_kind="recipe-revision",
+        publisher="local-recipe",
+        slug=recipe.slug,
+        content_sha256=reference_digest,
+        document=document,
+        raw=raw,
+        path="interfaces",
+        unknown_code="recipe.capabilities_unknown",
+        revision_id=None if revision is None else revision.id,
+    )
+    model_support = {
+        fact.capability: fact.support for fact in model_capabilities.facts
+    }
+    contradictory_names = {
+        fact.capability
+        for fact in inventory.facts
+        if model_support.get(fact.capability) == "unsupported"
+    }
+    if contradictory_names:
+        inventory = inventory.model_copy(
+            update={
+                "state": "contradictory",
+                "facts": [
+                    fact.model_copy(update={"evidence_status": "contradicted"})
+                    if fact.capability in contradictory_names
+                    else fact
+                    for fact in inventory.facts
+                ],
+                "reasons": [
+                    *inventory.reasons,
+                    _reason(
+                        "capability.model_recipe_conflict",
+                        "The recipe exposes a capability explicitly marked unsupported "
+                        "by the exact model version.",
+                        "error",
+                    ),
+                ],
+            }
+        )
+    return inventory
 
 
 def _visual_recipe(
@@ -780,6 +1067,22 @@ class LibraryProjection:
             rows = list(session.execute(statement.limit(limit + 1)))
             page = rows[:limit]
             recipe_ids = [recipe.id for recipe, _revision in page]
+            model_references: dict[tuple[str, str, str], Mapping[str, object]] = {}
+            for _recipe, revision in page:
+                document, _document_reasons = _validated_document(revision)
+                if document is None or not isinstance(document.get("model"), Mapping):
+                    continue
+                reference = document["model"]
+                key = (
+                    str(reference.get("publisher")),
+                    str(reference.get("slug")),
+                    str(reference.get("content_sha256")),
+                )
+                model_references[key] = reference
+            model_documents = {
+                key: _resolved_model_version_reference(session, reference)
+                for key, reference in model_references.items()
+            }
             ranked_installations = (
                 select(
                     LocalRecipeRevision.recipe_id.label("recipe_id"),
@@ -1028,12 +1331,23 @@ class LibraryProjection:
             capabilities: list[str] = []
             topology_name: str | None = None
             model_identity: tuple[str, str, str] | None = None
+            model_capabilities = LibraryCapabilityInventory()
+            recipe_capabilities = _recipe_capabilities(
+                recipe, revision, document, model_capabilities
+            )
             if document is not None:
                 model = document["model"]
                 model_identity = (
                     str(model["publisher"]),
                     str(model["slug"]),
                     str(model["content_sha256"]),
+                )
+                model_capabilities = _model_capabilities(
+                    model,
+                    model_documents.get(model_identity),
+                )
+                recipe_capabilities = _recipe_capabilities(
+                    recipe, revision, document, model_capabilities
                 )
                 capabilities = [
                     _bounded_text(item["adapter"], 64)
@@ -1080,6 +1394,7 @@ class LibraryProjection:
                 run_returned_count=len(recipe_runs),
                 runs_truncated=run_total > len(recipe_runs),
                 reasons=_bounded_reasons(reasons, 16),
+                recipe_capabilities=recipe_capabilities,
             )
             if model_identity is None:
                 unlinked.append(summary)
@@ -1105,6 +1420,10 @@ class LibraryProjection:
                         "content_sha256": content_sha256,
                     },
                     recipes=values,
+                    model_capabilities=_model_capabilities(
+                        model_references[(publisher, slug, content_sha256)],
+                        model_documents.get((publisher, slug, content_sha256)),
+                    ),
                 )
                 for (publisher, slug, content_sha256), values in sorted(grouped.items())
             ],
@@ -1118,6 +1437,9 @@ class LibraryProjection:
         latest = self._latest_revision_ids()
         placement_evidence: _PlacementOperationalEvidence | None = None
         model_version_document: Mapping[str, object] | None = None
+        model_reference: Mapping[str, object] | None = None
+        model_capabilities = LibraryCapabilityInventory()
+        recipe_capabilities = LibraryCapabilityInventory()
         with self._sessions.begin() as session:
             row = session.execute(
                 select(LocalRecipe, LocalRecipeRevision)
@@ -1139,8 +1461,19 @@ class LibraryProjection:
             recipe, revision = row
             document, reasons = _validated_document(revision)
             if document is not None:
+                model_reference = document["model"]
                 model_version_document = _resolved_model_version_document(
                     session, document
+                )
+                model_capabilities = _model_capabilities(
+                    model_reference, model_version_document
+                )
+                recipe_capabilities = _recipe_capabilities(
+                    recipe, revision, document, model_capabilities
+                )
+            else:
+                recipe_capabilities = _recipe_capabilities(
+                    recipe, revision, None, model_capabilities
                 )
             operational_truncations: dict[str, int] = {}
             # Phase 1: prioritize active runs before the bounded public history.
@@ -1433,6 +1766,9 @@ class LibraryProjection:
                 operational_state=operational,
                 placement=[],
                 reasons=_bounded_reasons(reasons, 16),
+                model=None,
+                model_capabilities=model_capabilities,
+                recipe_capabilities=recipe_capabilities,
             )
         assert revision is not None
         assert placement_evidence is not None
@@ -1463,6 +1799,14 @@ class LibraryProjection:
             operational_state=operational,
             placement=[placement],
             reasons=_bounded_reasons(reasons, 16),
+            model=ModelVersionIdentity(
+                kind="model-version",
+                publisher=str(model_reference["publisher"]),
+                slug=str(model_reference["slug"]),
+                content_sha256=str(model_reference["content_sha256"]),
+            ),
+            model_capabilities=model_capabilities,
+            recipe_capabilities=recipe_capabilities,
         )
 
     @staticmethod

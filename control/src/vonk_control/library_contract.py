@@ -103,6 +103,40 @@ class LibraryRunSummary(_StrictModel):
     healthy: bool
 
 
+class LibraryCapabilityProvenance(_StrictModel):
+    """Exact source identity and bounded location for one capability inventory."""
+
+    source_kind: Literal["model-version", "recipe-revision"]
+    publisher: Text128
+    slug: Text128
+    content_sha256: Digest | None
+    path: Text256 | None
+    evidence_digest: Digest | None
+    revision_id: UuidId | None = None
+
+
+class LibraryCapabilityFact(_StrictModel):
+    """One explicit capability assertion; absence is never represented as support."""
+
+    capability: Text64
+    support: Literal["supported", "unsupported", "unknown"]
+    evidence_status: Literal["declared", "tested", "contradicted", "unknown"]
+    evidence_digest: Digest | None
+    provenance: LibraryCapabilityProvenance
+
+
+class LibraryCapabilityInventory(_StrictModel):
+    """Compare-friendly model or recipe capability assertions with evidence state."""
+
+    schema_version: Literal[2] = 2
+    state: Literal["declared", "unknown", "contradictory"] = "unknown"
+    facts: list[LibraryCapabilityFact] = Field(
+        default_factory=list, max_length=_MAX_PROJECTED_CAPABILITIES
+    )
+    provenance: LibraryCapabilityProvenance | None = None
+    reasons: list[ProjectionReason] = Field(default_factory=list, max_length=16)
+
+
 class LibraryRecipeSummary(LibraryRecipeIdentity):
     selected_revision: RecipeRevisionSummary | None
     capabilities: list[Text64] = Field(max_length=64)
@@ -116,6 +150,9 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     run_returned_count: int = Field(ge=0, le=64)
     runs_truncated: bool
     reasons: list[ProjectionReason] = Field(max_length=16)
+    recipe_capabilities: "LibraryCapabilityInventory" = Field(
+        default_factory=lambda: LibraryCapabilityInventory()
+    )
 
 
 class ModelVersionIdentity(_StrictModel):
@@ -129,6 +166,9 @@ class LibraryModel(_StrictModel):
     model: ModelVersionIdentity
     page_local: Literal[True] = True
     recipes: list[LibraryRecipeSummary] = Field(min_length=1, max_length=100)
+    model_capabilities: "LibraryCapabilityInventory" = Field(
+        default_factory=lambda: LibraryCapabilityInventory()
+    )
 
 
 class LibrarySnapshot(_StrictModel):
@@ -658,6 +698,13 @@ class LibraryRecipeDetail(_StrictModel):
     operational_state: OperationalState
     placement: list[TopologyPlacement] = Field(max_length=1)
     reasons: list[ProjectionReason] = Field(max_length=16)
+    model: ModelVersionIdentity | None = None
+    model_capabilities: LibraryCapabilityInventory = Field(
+        default_factory=lambda: LibraryCapabilityInventory()
+    )
+    recipe_capabilities: LibraryCapabilityInventory = Field(
+        default_factory=lambda: LibraryCapabilityInventory()
+    )
 
 
 def _utc(value: datetime) -> datetime:
