@@ -805,7 +805,7 @@ def add_controller_commands(
     cache_list.add_argument("--state")
     _add_json(cache_list)
     cache_show = cache_commands.add_parser("show")
-    cache_show.add_argument("artifact_id")
+    cache_show.add_argument("artifact_id", metavar="ARTIFACT_SET_SHA256")
     _add_json(cache_show)
     cache_download = cache_commands.add_parser("download")
     cache_download.add_argument("download_mode", nargs="?", choices=("preview", "apply"))
@@ -815,11 +815,11 @@ def add_controller_commands(
     cache_download.add_argument("--recipe-revision-id")
     _plan_flags(cache_download)
     cache_repair = cache_commands.add_parser("repair")
-    cache_repair.add_argument("artifact_id")
+    cache_repair.add_argument("artifact_id", metavar="ARTIFACT_SET_SHA256")
     cache_repair.add_argument("repair_mode", nargs="?", choices=("preview", "apply"))
     _plan_flags(cache_repair)
     cache_update = cache_commands.add_parser("update")
-    cache_update.add_argument("artifact_id", nargs="?")
+    cache_update.add_argument("artifact_id", nargs="?", metavar="ARTIFACT_SET_SHA256")
     _add_json(cache_update)
     cache_operations = cache_commands.add_parser("operations")
     cache_operations_commands = _subcommands(cache_operations, "cache_operations_command")
@@ -3054,7 +3054,7 @@ def _find_model(snapshot: Mapping[str, object], requested: str) -> dict[str, obj
 
 def _cache_payload(args: argparse.Namespace) -> dict[str, object]:
     payload = _read_structured(args, required=False)
-    for key in ("artifact_id", "plan_digest"):
+    for key in ("plan_digest",):
         value = getattr(args, key, None)
         if value is not None:
             payload.setdefault(key, value)

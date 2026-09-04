@@ -99,6 +99,8 @@ class _StrictTaskClient(_Client):
             ("POST", "/api/v1/fleet-profiles/profile-1/switch"): {"plan_digest", "request_key"},
             ("POST", "/api/v1/model-cache/eviction-preview"): {"target_bytes"},
             ("POST", "/api/v1/model-cache/evict"): {"target_bytes", "plan_digest", "request_key"},
+            ("POST", "/api/v1/model-cache/repair-preview"): {"artifact_set_sha256"},
+            ("POST", "/api/v1/model-cache/repair"): {"artifact_set_sha256", "plan_digest", "request_key"},
             ("GET", "/api/v1/operations"): {"limit", "state"},
         }
         if (method, path) not in allowed:
@@ -115,6 +117,8 @@ class _StrictTaskClient(_Client):
             return {"schema_version": 2, "plan_digest": "d" * 64}
         if path == "/api/v1/model-cache/evict":
             return {"schema_version": 2, "operation_id": "op-1"}
+        if path in {"/api/v1/model-cache/repair-preview", "/api/v1/model-cache/repair"}:
+            return {"schema_version": 2, "plan_digest": "d" * 64}
         return {"schema_version": 2, "id": "profile-1", "profiles": []}
 
 
@@ -1709,6 +1713,8 @@ def test_strict_fixture_rejects_route_query_and_body_drift() -> None:
         ("profiles", "switch", "profile-1", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
         ("cache", "eviction", "preview", "--target-bytes", "100"),
         ("cache", "eviction", "apply", "--target-bytes", "100", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
+        ("cache", "repair", "artifact-set-1", "preview"),
+        ("cache", "repair", "artifact-set-1", "apply", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
         ("operations", "list", "--status", "running"),
     )
     for command in commands:
