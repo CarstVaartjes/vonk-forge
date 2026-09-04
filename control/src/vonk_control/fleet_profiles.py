@@ -929,6 +929,11 @@ class FleetProfileService:
                         )
                     )
                     continue
+                if self._switch_adapter is not None and adapter_switch_needed:
+                    # The composite child reconciles every runtime in its complete
+                    # profile scope. Keep cross-scope validation above, but do not
+                    # enqueue a second outer stop for the same conflict.
+                    continue
                 if (
                     run.id in desired_run_ids
                     or run.id in scheduled_stops
@@ -984,6 +989,11 @@ class FleetProfileService:
                         )
                     )
                     for run in runs:
+                        if (
+                            self._switch_adapter is not None
+                            and adapter_switch_needed
+                        ):
+                            continue
                         if run.id in desired_run_ids or run.id in scheduled_stops:
                             continue
                         stop_steps.append(
@@ -1028,13 +1038,22 @@ class FleetProfileService:
             # Prepare images and installations while the current profile can
             # still serve traffic. Required stops then release runtime
             # resources before final starts and verification.
-            raw_steps = (
-                preparation_steps
-                + stop_steps
-                + uninstall_steps
-                + switch_steps
-                + start_steps
-            )
+            if self._switch_adapter is not None and adapter_switch_needed:
+                raw_steps = (
+                    preparation_steps
+                    + stop_steps
+                    + switch_steps
+                    + uninstall_steps
+                    + start_steps
+                )
+            else:
+                raw_steps = (
+                    preparation_steps
+                    + stop_steps
+                    + uninstall_steps
+                    + switch_steps
+                    + start_steps
+                )
             steps = [
                 FleetProfilePlanStep(index=index, **step)
                 for index, step in enumerate(raw_steps)
