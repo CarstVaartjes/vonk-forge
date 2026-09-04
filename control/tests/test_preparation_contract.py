@@ -1,4 +1,6 @@
 from datetime import UTC, datetime
+import hashlib
+import json
 
 import pytest
 from pydantic import ValidationError
@@ -17,6 +19,7 @@ def _ready_document() -> dict[str, object]:
         "expected_bytes": 100,
         "verified_bytes": 100,
         "missing_bytes": 0,
+        "verified_sha256": "a" * 64,
         "verified_at": NOW,
         "source": "nas-cache",
     }
@@ -27,18 +30,26 @@ def _ready_document() -> dict[str, object]:
             "expected_bytes": 100,
             "present_bytes": 100,
             "missing_bytes": 0,
-            "verified_identity": "a" * 64,
+            "verified_sha256": "a" * 64,
             "verified_at": NOW,
         }
         for node_id in (NODE_A, NODE_B)
     ]
-    image_targets = [{**target, "verified_identity": "sha256:" + "d" * 64, "imported": True} for target in targets]
+    image_targets = [
+        {
+            **target,
+            "verified_sha256": "e" * 64,
+            "imported_image_digest": "sha256:" + "d" * 64,
+        }
+        for target in targets
+    ]
     return {
         "schema_version": 2,
         "model": {
             "artifact_set_sha256": "a" * 64,
             "model_version_sha256": "b" * 64,
             "artifact_count": 3,
+            "artifact_set_bytes": 100,
             "dependency_model_version_sha256": ["c" * 64],
             "completeness": "complete",
             "controller": controller,
@@ -51,7 +62,11 @@ def _ready_document() -> dict[str, object]:
             "architecture": "linux-arm64",
             "runtime_interface": "v1",
             "build_id": "build-1",
-            "controller": {**controller, "source": "controller-build"},
+            "controller": {
+                **controller,
+                "source": "controller-build",
+                "verified_sha256": "e" * 64,
+            },
             "targets": image_targets,
         },
         "exceptions": [],
@@ -68,7 +83,7 @@ def test_ready_preparation_binds_model_image_and_complete_target_scope() -> None
 
     assert value.schema_version == 2
     assert value.model.artifact_count == 3
-    assert value.runtime_image.targets[1].imported is True
+    assert value.runtime_image.targets[1].imported_image_digest == "sha256:" + "d" * 64
     assert value.ready is True
 
 
@@ -111,11 +126,25 @@ def test_preparation_rejects_partial_scope_or_optimistic_readiness() -> None:
 
 def test_reusable_gpu_exception_requires_compatibility_artifact() -> None:
     document = _ready_document()
+    model = document["model"]
+    assert isinstance(model, dict)
+    model["recipe_revision_sha256"] = "f" * 64
+    compatibility = {
+        "recipe_revision_sha256": "f" * 64,
+        "model_version_sha256": "b" * 64,
+        "runtime_image_digest": "sha256:" + "d" * 64,
+        "parameters_sha256": "9" * 64,
+        "hardware_profile_sha256": "8" * 64,
+    }
+    compatibility_key = hashlib.sha256(
+        json.dumps(compatibility, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     document["exceptions"] = [
         {
             "kind": "engine-generation",
             "stage": "target-prepare",
-            "compatibility_key": "model=b;sm=121;driver=580",
+            "compatibility": compatibility,
+            "compatibility_key_sha256": compatibility_key,
             "state": "ready",
             "reusable": True,
             "node_ids": [NODE_A, NODE_B],
@@ -123,3 +152,91 @@ def test_reusable_gpu_exception_requires_compatibility_artifact() -> None:
     ]
     with pytest.raises(ValidationError, match="artifact digest"):
         RolloutPreparation.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda value: value["model"]["controller"].update(
+                verified_sha256="7" * 64
+            ),
+            "Controller model digest",
+        ),
+        (
+            lambda value: value["model"]["targets"][0].update(
+                verified_sha256="7" * 64
+            ),
+            "target model digest",
+        ),
+        (
+            lambda value: value["runtime_image"]["controller"].update(
+                verified_sha256="7" * 64
+            ),
+            "Controller image digest",
+        ),
+        (
+            lambda value: value["runtime_image"]["targets"][0].update(
+                imported_image_digest="sha256:" + "7" * 64
+            ),
+            "exact OCI layout and imported image",
+        ),
+    ],
+)
+def test_ready_preparation_rejects_wrong_verified_identity(mutate, message: str) -> None:
+    document = _ready_document()
+    mutate(document)
+    with pytest.raises(ValidationError, match=message):
+        RolloutPreparation.model_validate(document)
+
+
+def test_exception_identity_and_scope_must_match_rollout_authority() -> None:
+    document = _ready_document()
+    model = document["model"]
+    assert isinstance(model, dict)
+    model["recipe_revision_sha256"] = "f" * 64
+    compatibility = {
+        "recipe_revision_sha256": "f" * 64,
+        "model_version_sha256": "7" * 64,
+        "runtime_image_digest": "sha256:" + "d" * 64,
+        "parameters_sha256": "9" * 64,
+        "hardware_profile_sha256": None,
+    }
+    document["exceptions"] = [
+        {
+            "kind": "jit",
+            "stage": "target-prepare",
+            "compatibility": compatibility,
+            "compatibility_key_sha256": hashlib.sha256(
+                json.dumps(
+                    compatibility, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest(),
+            "state": "ready",
+            "reusable": True,
+            "node_ids": [NODE_A],
+            "artifact_sha256": "6" * 64,
+        }
+    ]
+    with pytest.raises(ValidationError, match="does not match the rollout authority"):
+        RolloutPreparation.model_validate(document)
+
+    out_of_scope = _ready_document()
+    model = out_of_scope["model"]
+    assert isinstance(model, dict)
+    model["recipe_revision_sha256"] = "f" * 64
+    compatibility["model_version_sha256"] = "b" * 64
+    out_of_scope["exceptions"] = [
+        {
+            **document["exceptions"][0],
+            "compatibility": compatibility,
+            "compatibility_key_sha256": hashlib.sha256(
+                json.dumps(
+                    compatibility, sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest(),
+            "node_ids": ["spk_" + "3" * 32],
+        }
+    ]
+    with pytest.raises(ValidationError, match="exceeds the rollout target scope"):
+        RolloutPreparation.model_validate(out_of_scope)
