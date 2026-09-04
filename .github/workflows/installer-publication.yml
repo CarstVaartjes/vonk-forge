@@ -843,8 +843,7 @@ jobs:
           name: installer-candidate-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           path: ${{ runner.temp }}/spark-publication
 
-      - name: Enable Docker CDI for the ARM64 recipe canary
-        if: matrix.platform == 'linux-arm64'
+      - name: Enable Docker CDI for synthetic Spark device discovery
         shell: bash
         run: |
           set -euo pipefail
