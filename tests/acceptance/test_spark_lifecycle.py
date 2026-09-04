@@ -1393,14 +1393,15 @@ class SparkLifecycle:
         profile = Path("/etc/apparmor.d/podman")
         try:
             metadata = profile.lstat()
-            contents = profile.read_text(encoding="utf-8")
         except OSError as error:
             raise LifecycleError("Podman AppArmor profile is unavailable") from error
         if (
             profile.is_symlink()
             or not stat.S_ISREG(metadata.st_mode)
-            or "profile podman /usr/bin/podman flags=(unconfined)" not in contents
-            or "userns," not in contents
+            or metadata.st_uid != 0
+            or metadata.st_gid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o644
+            or metadata.st_nlink != 1
         ):
             raise LifecycleError("Podman AppArmor profile is invalid")
         self._run_command(
