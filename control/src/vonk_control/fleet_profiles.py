@@ -685,6 +685,8 @@ class FleetProfileService:
             switch_steps: list[dict[str, object]] = []
             desired_installation_ids: set[str] = set()
             desired_run_ids: set[str] = set()
+            managed_run_ids: set[str] = set()
+            adapter_switch_needed = False
             preparation_unavailable_reported = False
             # Scope is the authoritative reconciliation boundary.  An idle
             # member has no assignment and must still participate in the plan.
@@ -774,9 +776,15 @@ class FleetProfileService:
                     and state.current_state == "running"
                 ):
                     desired_run_ids.add(state.run.id)
+                if self._switch_adapter is not None and state.run is not None:
+                    managed_run_ids.add(state.run.id)
                 actions: list[str] = []
                 item_reasons: list[FleetProfileReason] = []
-                if assignment.desired_state == "installed" and state.run is not None:
+                if (
+                    self._switch_adapter is None
+                    and assignment.desired_state == "installed"
+                    and state.run is not None
+                ):
                     actions.append("stop")
                     stop_steps.append(
                         {
@@ -789,26 +797,13 @@ class FleetProfileService:
                         }
                     )
                 if self._switch_adapter is not None:
-                    already_desired = state.current_state == assignment.desired_state or (
-                        assignment.desired_state == "installed"
-                        and state.current_state == "running"
-                    )
+                    already_desired = state.current_state == assignment.desired_state
                     if already_desired:
                         if not actions:
                             actions.append("keep")
                     else:
                         actions.append("switch")
-                        switch_steps.append(
-                            {
-                                "kind": "switch",
-                                "assignment_id": assignment.id,
-                                "recipe_revision_id": assignment.recipe_revision_id,
-                                "node_ids": [
-                                    node.node_id for node in assignment.nodes
-                                ],
-                                "label": f"Switch {assignment.recipe_title}",
-                            }
-                        )
+                        adapter_switch_needed = True
                 else:
                     if state.current_state == assignment.desired_state or (
                         assignment.desired_state == "installed"
@@ -934,7 +929,11 @@ class FleetProfileService:
                         )
                     )
                     continue
-                if run.id in desired_run_ids or run.id in scheduled_stops:
+                if (
+                    run.id in desired_run_ids
+                    or run.id in scheduled_stops
+                    or run.id in managed_run_ids
+                ):
                     continue
                 stop_steps.append(
                     {
@@ -1017,6 +1016,14 @@ class FleetProfileService:
                         ),
                         severity="warning",
                     )
+                )
+            if self._switch_adapter is not None and adapter_switch_needed:
+                switch_steps.append(
+                    {
+                        "kind": "switch",
+                        "node_ids": sorted(target_nodes),
+                        "label": f"Switch profile {view.name}",
+                    }
                 )
             # Prepare images and installations while the current profile can
             # still serve traffic. Required stops then release runtime
@@ -1502,11 +1509,10 @@ class FleetProfileService:
         if kind == "switch":
             if self._switch_adapter is None:
                 raise FleetProfileConflict("Fleet profile switch adapter is unavailable")
-            if assignment is None:
-                raise FleetProfileConflict("Fleet profile assignment is unavailable")
+            assignments = self._application_assignments(application_id)
             child = self._switch_adapter.start(
                 application_id=application_id,
-                assignment=assignment,
+                assignments=assignments,
                 scope_node_ids=self._application_scope(application_id),
                 actor=actor,
                 request_id=request_id,
@@ -2070,6 +2076,19 @@ class FleetProfileService:
             if application is None:
                 raise KeyError(application_id)
             return self._operation_scope(application)
+
+    def _application_assignments(
+        self, application_id: str
+    ) -> tuple[FleetProfileAssignment, ...]:
+        with self._sessions() as session:
+            application = session.get(FleetProfileApplication, application_id)
+            if application is None:
+                raise KeyError(application_id)
+            profile = session.get(FleetProfile, application.profile_id)
+            if profile is None:
+                raise KeyError(application.profile_id)
+            assignments = self._view(session, profile).assignments
+            return tuple(sorted(assignments, key=lambda item: item.id))
 
     def _assignment_context(
         self, application_id: str, assignment_id: str

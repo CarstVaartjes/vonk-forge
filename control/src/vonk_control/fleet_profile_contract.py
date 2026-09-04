@@ -251,6 +251,10 @@ class FleetProfileChildProgress(_StrictModel):
 
     @model_validator(mode="after")
     def byte_progress_is_consistent(self) -> FleetProfileChildProgress:
+        if self.node_ids != sorted(self.node_ids) or len(self.node_ids) != len(
+            set(self.node_ids)
+        ):
+            raise ValueError("child progress node IDs must be sorted and unique")
         if (
             self.bytes is not None
             and self.total_bytes is not None
@@ -284,12 +288,18 @@ class FleetProfileSwitchAdapter(Protocol):
         self,
         *,
         application_id: str,
-        assignment: FleetProfileAssignment,
+        assignments: tuple[FleetProfileAssignment, ...],
         scope_node_ids: tuple[str, ...],
         actor: str,
         request_id: str,
     ) -> FleetProfileChildOperation:
-        """Start preparation, target staging, Run start, and final verification."""
+        """Reconcile the complete desired assignment set as one child operation.
+
+        ``assignments`` is ordered by stable assignment identity and
+        ``scope_node_ids`` is the complete sorted profile boundary.  The
+        implementation must plan conflicts once and preserve healthy desired
+        assignments while preparing or stopping other members.
+        """
 
     def get(self, operation_id: str) -> FleetProfileChildOperation:
         """Return the durable child state for inspection or resumption."""
