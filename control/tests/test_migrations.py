@@ -169,6 +169,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0011_recipe_model_identity.py",
         "0012_recipe_run_generation.py",
         "0013_repeatable_install_plans.py",
+        "0014_fleet_profile_scope.py",
     ]
 
 
@@ -305,7 +306,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            == "0013_repeatable_install_plans"
+            == "0014_fleet_profile_scope"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -435,7 +436,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0013_repeatable_install_plans"
+            == "0014_fleet_profile_scope"
         )
 
 
@@ -517,7 +518,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0013_repeatable_install_plans"
+            == "0014_fleet_profile_scope"
         )
 
 

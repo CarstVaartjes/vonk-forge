@@ -35,12 +35,27 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/agents/upgrades/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/agents/upgrades"): frozenset({"administrator"}),
     ("POST", "/api/v1/fleet-profiles"): frozenset({"administrator"}),
+    ("POST", "/api/v1/fleet-profiles/capture-current"): frozenset(
+        {"administrator"}
+    ),
     ("PUT", "/api/v1/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
     ("DELETE", "/api/v1/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
     ("POST", "/api/v1/fleet-profiles/{profile_id}/preview"): frozenset(
         {"administrator"}
     ),
     ("POST", "/api/v1/fleet-profiles/{profile_id}/apply"): frozenset({"administrator"}),
+    ("POST", "/api/v1/fleet-profiles/{profile_id}/duplicate"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/fleet-profiles/{profile_id}/prepare"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/fleet-profiles/{profile_id}/prepare/preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/fleet-profiles/{profile_id}/switch"): frozenset(
+        {"administrator"}
+    ),
     ("POST", "/api/v1/library/placements/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/library/placements"): frozenset({"administrator"}),
     # Local catalog authoring and WorkloadRun imports change the controller's
