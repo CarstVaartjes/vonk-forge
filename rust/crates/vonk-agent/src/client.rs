@@ -200,6 +200,14 @@ pub struct DistributionDownloadEvidence {
     pub downloaded_bytes: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DistributionProgress {
+    pub object_sha256: String,
+    pub kind: String,
+    pub bytes: u64,
+    pub total_bytes: Option<u64>,
+}
+
 #[derive(Clone)]
 pub struct AgentHttpClient {
     client: Client,
@@ -683,12 +691,34 @@ impl AgentHttpClient {
         if !valid_sha256(plan_digest) {
             return Err(ClientError::Protocol);
         }
-        self.download_content_addressed(
+        self.download_distribution_object_with_progress(
+            plan_digest,
+            sha256,
+            expected_bytes,
+            destination,
+            |_| {},
+        )
+        .await
+    }
+
+    async fn download_distribution_object_with_progress<F>(
+        &self,
+        plan_digest: &str,
+        sha256: &str,
+        expected_bytes: u64,
+        destination: &Path,
+        progress: F,
+    ) -> Result<(), ClientError>
+    where
+        F: FnMut(u64),
+    {
+        self.download_content_addressed_with_progress(
             "/agent/v1/distribution/objects",
             Some(plan_digest),
             sha256,
             expected_bytes,
             destination,
+            progress,
         )
         .await
     }
@@ -727,6 +757,19 @@ impl AgentHttpClient {
         plan_digest: &str,
         destination_root: &Path,
     ) -> Result<DistributionDownloadEvidence, ClientError> {
+        self.download_distribution_with_progress(plan_digest, destination_root, |_| {})
+            .await
+    }
+
+    pub async fn download_distribution_with_progress<F>(
+        &self,
+        plan_digest: &str,
+        destination_root: &Path,
+        mut progress: F,
+    ) -> Result<DistributionDownloadEvidence, ClientError>
+    where
+        F: FnMut(DistributionProgress),
+    {
         if !valid_sha256(plan_digest) || !destination_root.is_absolute() {
             return Err(ClientError::Protocol);
         }
@@ -739,6 +782,7 @@ impl AgentHttpClient {
         tokio::fs::create_dir_all(&oci_root).await?;
         let mut model_paths = Vec::new();
         let mut downloaded_bytes = 0_u64;
+        let total_bytes = assignment.objects.iter().map(|object| object.bytes).sum();
         for object in &assignment.objects {
             let path = if object.kind == "model" {
                 model_root.join(&object.name)
@@ -756,8 +800,24 @@ impl AgentHttpClient {
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
-            self.download_distribution_object(plan_digest, &object.sha256, object.bytes, &path)
-                .await?;
+            let object_digest = object.sha256.clone();
+            let kind = object.kind.clone();
+            let base = downloaded_bytes;
+            self.download_distribution_object_with_progress(
+                plan_digest,
+                &object.sha256,
+                object.bytes,
+                &path,
+                |bytes| {
+                    progress(DistributionProgress {
+                        object_sha256: object_digest.clone(),
+                        kind: kind.clone(),
+                        bytes: base.saturating_add(bytes),
+                        total_bytes: Some(total_bytes),
+                    })
+                },
+            )
+            .await?;
             downloaded_bytes = downloaded_bytes.saturating_add(object.bytes);
             if object.kind == "model" {
                 model_paths.push(path);
@@ -794,6 +854,29 @@ impl AgentHttpClient {
         expected_bytes: u64,
         destination: &Path,
     ) -> Result<(), ClientError> {
+        self.download_content_addressed_with_progress(
+            endpoint,
+            plan_digest,
+            sha256,
+            expected_bytes,
+            destination,
+            |_| {},
+        )
+        .await
+    }
+
+    async fn download_content_addressed_with_progress<F>(
+        &self,
+        endpoint: &str,
+        plan_digest: Option<&str>,
+        sha256: &str,
+        expected_bytes: u64,
+        destination: &Path,
+        mut progress: F,
+    ) -> Result<(), ClientError>
+    where
+        F: FnMut(u64),
+    {
         if !valid_sha256(sha256) || !(1..=16 * 1024_u64.pow(4)).contains(&expected_bytes) {
             return Err(ClientError::Protocol);
         }
@@ -807,6 +890,7 @@ impl AgentHttpClient {
         }
         if existing == expected_bytes {
             if sha256_path(destination, expected_bytes).await? == sha256 {
+                progress(expected_bytes);
                 return Ok(());
             }
             // A complete object with the wrong identity is corruption, not a
@@ -867,6 +951,7 @@ impl AgentHttpClient {
                 return Err(ClientError::Protocol);
             }
             offset = end + 1;
+            progress(offset);
         }
         output.sync_all().await?;
         if sha256_path(destination, expected_bytes).await? != sha256 {

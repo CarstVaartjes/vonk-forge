@@ -14,7 +14,7 @@ use std::{
 use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     agent_upgrade::AgentUpgradeExecutor,
-    client::{AgentHttpClient, ClientError, ExactRecipeRunObservation},
+    client::{AgentHttpClient, ClientError, DistributionProgress, ExactRecipeRunObservation},
     health::{HealthEvidence, wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
     image_importer::ImageImporter,
@@ -442,11 +442,44 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 .data_root
                 .join("distribution")
                 .join(&request.plan_digest);
-            return match self
+            let (progress_sender, mut progress_receiver) =
+                tokio::sync::mpsc::unbounded_channel::<DistributionProgress>();
+            let progress_client = self.client.clone();
+            let progress_claim = claim.clone();
+            let progress_deadline = lease_deadline.clone();
+            let progress_task = tokio::spawn(async move {
+                while let Some(item) = progress_receiver.recv().await {
+                    let progress = AgentProgress {
+                        attempt: progress_claim.attempt,
+                        deadline: *progress_deadline.borrow(),
+                        fence: progress_claim.fence,
+                        job_id: progress_claim.job_id,
+                        node_id: progress_claim.node_id.clone(),
+                        operation_id: progress_claim.operation_id,
+                        progress: json!({
+                            "phase": "copying",
+                            "object_sha256": item.object_sha256,
+                            "kind": item.kind,
+                            "bytes": item.bytes,
+                            "total_bytes": item.total_bytes,
+                        }),
+                        schema_version: 1,
+                    };
+                    let _ = progress_client.heartbeat(&progress).await;
+                }
+            });
+            let download = self
                 .client
-                .download_distribution(&request.plan_digest, &destination)
-                .await
-            {
+                .download_distribution_with_progress(
+                    &request.plan_digest,
+                    &destination,
+                    move |item| {
+                        let _ = progress_sender.send(item);
+                    },
+                )
+                .await;
+            let _ = progress_task.await;
+            return match download {
                 Ok(evidence) => {
                     let importer = ImageImporter {
                         data_root: self.runtime.data_root,
