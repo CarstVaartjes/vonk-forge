@@ -27,6 +27,15 @@ ARM64_PHASES = [
     "identity-renewed",
     "direct-rust-agent-healthy",
 ]
+AMD64_PHASES = [
+    "publication-graph-verified",
+    "controller-ready",
+    "candidate-installed",
+    "paired",
+    "synthetic-device-ready",
+    "canary-completed",
+    "direct-rust-agent-healthy",
+]
 
 
 def _acceptance_module():
@@ -123,6 +132,79 @@ def _arm64_proof() -> dict[str, object]:
             "synthetic": True,
         },
     }
+
+
+def _amd64_proof() -> dict[str, object]:
+    graph = _publication_graph()
+    graph["platform"] = "linux-amd64"
+    graph["baseline_package_sha256"] = "1" * 64
+    graph["candidate_package_sha256"] = "2" * 64
+    return {
+        "canary": {
+            "completed_states": spark_lifecycle_contract.CANARY_STATES,
+            "deterministic_response_sha256": "5" * 64,
+        },
+        "controller_generation": GENERATION,
+        "direct_agent_health": {
+            "healthy": True,
+            "implementation": "rust",
+            "transport": "direct",
+        },
+        "installation": {
+            "architecture": "amd64",
+            "package_sha256": "2" * 64,
+            "version": "1.2.3",
+        },
+        "node_id": "spk_0123456789abcdef0123456789abcdef",
+        "pairing_grant_use_count": 1,
+        "publication_graph": graph,
+        "synthetic_device": {
+            "architecture": "linux-amd64",
+            "cdi_name": "nvidia.com/gpu=all",
+            "fixture_sha256": "e" * 64,
+            "physical_gpu": False,
+            "provenance": "ci-only-synthetic-cdi",
+            "synthetic": True,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("platform", "phases", "proof"),
+    [
+        ("linux-amd64", AMD64_PHASES, _amd64_proof),
+        ("linux-arm64", ARM64_PHASES, _arm64_proof),
+    ],
+)
+def test_each_architecture_requires_the_same_executable_canary(
+    platform: str,
+    phases: list[str],
+    proof,
+) -> None:
+    value = {"completed_phases": phases, "proof": proof()}
+
+    spark_lifecycle_contract.validate_lifecycle(
+        value,
+        platform=platform,
+        channel="dev",
+        version="1.2.3",
+        source_sha=SOURCE_SHA,
+        generation=GENERATION,
+    )
+
+    del value["proof"]["canary"]
+    with pytest.raises(
+        spark_lifecycle_contract.ContractError,
+        match=f"{platform.removeprefix('linux-').upper()} lifecycle proof",
+    ):
+        spark_lifecycle_contract.validate_lifecycle(
+            value,
+            platform=platform,
+            channel="dev",
+            version="1.2.3",
+            source_sha=SOURCE_SHA,
+            generation=GENERATION,
+        )
 
 
 def _record(root: Path, relative: str, content: bytes) -> dict[str, object]:

@@ -52,6 +52,8 @@ AMD64_PHASES = [
     "controller-ready",
     "candidate-installed",
     "paired",
+    "synthetic-device-ready",
+    "canary-completed",
     "direct-rust-agent-healthy",
 ]
 ARM64_PHASES = [
@@ -734,12 +736,24 @@ def _spark_gate_report(
     if platform == "linux-amd64":
         phases = AMD64_PHASES
         proof = common_proof | {
+            "canary": {
+                "completed_states": CANARY_STATES,
+                "deterministic_response_sha256": "5" * 64,
+            },
             "installation": {
                 "architecture": "amd64",
                 "package_sha256": graph["packages"][platform]["candidate_sha256"],
                 "version": plan["version"],
             },
             "node_id": node_id,
+            "synthetic_device": {
+                "architecture": platform,
+                "cdi_name": "nvidia.com/gpu=all",
+                "fixture_sha256": "e" * 64,
+                "physical_gpu": False,
+                "provenance": "ci-only-synthetic-cdi",
+                "synthetic": True,
+            },
         }
     else:
         phases = ARM64_PHASES

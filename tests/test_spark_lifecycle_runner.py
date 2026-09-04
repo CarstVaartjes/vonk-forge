@@ -35,6 +35,55 @@ def _module():
     return module
 
 
+def test_amd64_observation_runs_the_executable_recipe_canary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.arguments = SimpleNamespace(
+        channel="dev",
+        generation="a" * 64,
+        platform="linux-amd64",
+    )
+    run.control = object()
+    run.bundle = object()
+    run.temporary_root = tmp_path
+    run.graph = {
+        "candidate_package_sha256": "b" * 64,
+        "candidate_version": "1.2.3",
+    }
+    run.synthetic_fixture_sha256 = "c" * 64
+    run.agent_installed = False
+    run._create_grant = lambda: ("grant", "https://enroll", "d" * 64, "token")
+    run._bootstrap_url = lambda *, baseline: "https://install/spark"
+    run._installer_environment = lambda *, baseline: {}
+    run._prepare_podman_apparmor_profile = lambda: None
+    run._wait_for_agent_identity = lambda **_kwargs: {
+        "node_id": "spk_0123456789abcdef0123456789abcdef"
+    }
+    run._pairing_grant_use_count = lambda _grant: 1
+    run._direct_agent_health = lambda: {
+        "healthy": True,
+        "implementation": "rust",
+        "transport": "direct",
+    }
+    observed: list[str] = []
+    run._run_synthetic_canary = lambda node_id: (
+        observed.append(node_id)
+        or {
+            "completed_states": ["inference-ok"],
+            "deterministic_response_sha256": "e" * 64,
+        }
+    )
+    monkeypatch.setattr(lifecycle, "_run_spark_bootstrap", lambda *_args, **_kw: None)
+
+    proof = run.observe()
+
+    assert observed == ["spk_0123456789abcdef0123456789abcdef"]
+    assert proof["canary"]["completed_states"] == ["inference-ok"]
+    assert proof["synthetic_device"]["architecture"] == "linux-amd64"
+
+
 def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
     tmp_path: Path,
 ) -> None:

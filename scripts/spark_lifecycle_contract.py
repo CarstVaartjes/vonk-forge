@@ -22,6 +22,8 @@ PHASES = {
         "controller-ready",
         "candidate-installed",
         "paired",
+        "synthetic-device-ready",
+        "canary-completed",
         "direct-rust-agent-healthy",
     ],
     "linux-arm64": [
@@ -580,12 +582,14 @@ def _validate_amd64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
     _exact(
         proof,
         {
+            "canary",
             "controller_generation",
             "direct_agent_health",
             "installation",
             "node_id",
             "pairing_grant_use_count",
             "publication_graph",
+            "synthetic_device",
         },
         "AMD64 lifecycle proof",
     )
@@ -607,6 +611,51 @@ def _validate_amd64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
         or NODE_ID.fullmatch(proof["node_id"]) is None
     ):
         raise ContractError("AMD64 node identity proof is invalid")
+    _validate_canary(proof, platform="linux-amd64")
+
+
+def _validate_canary(proof: dict[str, Any], *, platform: str) -> None:
+    architecture = platform.removeprefix("linux-").upper()
+    canary = _object(proof.get("canary"), f"{architecture} canary proof")
+    _exact(
+        canary,
+        {"completed_states", "deterministic_response_sha256"},
+        f"{architecture} canary proof",
+    )
+    if canary.get("completed_states") != CANARY_STATES:
+        raise ContractError(f"{architecture} canary phases are incomplete")
+    _digest(
+        canary.get("deterministic_response_sha256"),
+        f"{architecture} canary response",
+    )
+
+    synthetic = _object(
+        proof.get("synthetic_device"), f"{architecture} synthetic device proof"
+    )
+    _exact(
+        synthetic,
+        {
+            "architecture",
+            "cdi_name",
+            "fixture_sha256",
+            "physical_gpu",
+            "provenance",
+            "synthetic",
+        },
+        f"{architecture} synthetic device proof",
+    )
+    _digest(
+        synthetic.get("fixture_sha256"), f"{architecture} synthetic CDI fixture"
+    )
+    if synthetic != {
+        "architecture": platform,
+        "cdi_name": "nvidia.com/gpu=all",
+        "fixture_sha256": synthetic["fixture_sha256"],
+        "physical_gpu": False,
+        "provenance": "ci-only-synthetic-cdi",
+        "synthetic": True,
+    }:
+        raise ContractError(f"{architecture} synthetic CDI provenance is invalid")
 
 
 def _validate_arm64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
@@ -687,39 +736,7 @@ def _validate_arm64(proof: dict[str, Any], graph: dict[str, Any]) -> None:
     }:
         raise ContractError("ARM64 old certificate was not durably rejected")
 
-    canary = _object(proof.get("canary"), "ARM64 canary proof")
-    _exact(
-        canary,
-        {"completed_states", "deterministic_response_sha256"},
-        "ARM64 canary proof",
-    )
-    if canary.get("completed_states") != CANARY_STATES:
-        raise ContractError("ARM64 canary phases are incomplete")
-    _digest(canary.get("deterministic_response_sha256"), "ARM64 canary response")
-
-    synthetic = _object(proof.get("synthetic_device"), "ARM64 synthetic device proof")
-    _exact(
-        synthetic,
-        {
-            "architecture",
-            "cdi_name",
-            "fixture_sha256",
-            "physical_gpu",
-            "provenance",
-            "synthetic",
-        },
-        "ARM64 synthetic device proof",
-    )
-    _digest(synthetic.get("fixture_sha256"), "ARM64 synthetic CDI fixture")
-    if synthetic != {
-        "architecture": "linux-arm64",
-        "cdi_name": "nvidia.com/gpu=all",
-        "fixture_sha256": synthetic["fixture_sha256"],
-        "physical_gpu": False,
-        "provenance": "ci-only-synthetic-cdi",
-        "synthetic": True,
-    }:
-        raise ContractError("ARM64 synthetic CDI provenance is invalid")
+    _validate_canary(proof, platform="linux-arm64")
 
 
 def validate_lifecycle(

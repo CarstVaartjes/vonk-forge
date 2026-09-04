@@ -59,6 +59,8 @@ jobs:
             '[storage.options.overlay]' \
             'mount_program = "/usr/bin/fuse-overlayfs"' | \
             sudo tee /etc/vonk-forge-agent/containers-storage.conf >/dev/null
+          sudo chown root:vonk-agent \
+            /etc/vonk-forge-agent/containers-storage.conf
           sudo chmod 0640 /etc/vonk-forge-agent/containers-storage.conf
           sudo install -o vonk-agent -g vonk-agent -m 0755 \
             /bin/busybox \
