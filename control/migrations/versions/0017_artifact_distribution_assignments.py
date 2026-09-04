@@ -46,13 +46,43 @@ def upgrade() -> None:
         sa.CheckConstraint("generation >= 1", name="ck_distribution_generation"),
         sa.CheckConstraint("state IN ('active','revoked','expired')", name="ck_distribution_state"),
     )
-    op.create_index("ix_distribution_plan_digest", "artifact_distribution_assignments", ["plan_digest"])
-    op.create_index("ix_distribution_node_id", "artifact_distribution_assignments", ["node_id"])
-    op.create_index("ix_distribution_expires_at", "artifact_distribution_assignments", ["expires_at"])
+    op.create_index(
+        "ix_artifact_distribution_assignments_plan_digest",
+        "artifact_distribution_assignments",
+        ["plan_digest"],
+    )
+    op.create_index(
+        "ix_artifact_distribution_assignments_node_id",
+        "artifact_distribution_assignments",
+        ["node_id"],
+    )
+    op.create_index(
+        "ix_artifact_distribution_assignments_expires_at",
+        "artifact_distribution_assignments",
+        ["expires_at"],
+    )
+    op.create_index(
+        "ix_artifact_distribution_assignments_state",
+        "artifact_distribution_assignments",
+        ["state"],
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_distribution_expires_at", table_name="artifact_distribution_assignments")
-    op.drop_index("ix_distribution_node_id", table_name="artifact_distribution_assignments")
-    op.drop_index("ix_distribution_plan_digest", table_name="artifact_distribution_assignments")
+    op.drop_index(
+        "ix_artifact_distribution_assignments_state",
+        table_name="artifact_distribution_assignments",
+    )
+    op.drop_index(
+        "ix_artifact_distribution_assignments_expires_at",
+        table_name="artifact_distribution_assignments",
+    )
+    op.drop_index(
+        "ix_artifact_distribution_assignments_node_id",
+        table_name="artifact_distribution_assignments",
+    )
+    op.drop_index(
+        "ix_artifact_distribution_assignments_plan_digest",
+        table_name="artifact_distribution_assignments",
+    )
     op.drop_table("artifact_distribution_assignments")

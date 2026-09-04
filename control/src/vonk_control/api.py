@@ -1545,6 +1545,13 @@ def production_app() -> FastAPI:
         sessions,
         clock=clock,
     )
+    model_cache = ModelCacheService(
+        sessions,
+        settings.model_cache_root,
+        reserve_bytes=settings.model_cache_reserve_bytes,
+        clock=clock,
+    )
+    model_cache.resume_operations()
     revision_eligible = lambda revision: revision == authority.head()
     current_revision = authority.head
     agent_services = build_agent_services(
@@ -1553,6 +1560,7 @@ def production_app() -> FastAPI:
         clock,
         revision_eligible=revision_eligible,
         current_revision=current_revision,
+        model_cache=model_cache,
     )
 
     def reconciliation_authority_input(
@@ -1721,13 +1729,6 @@ def production_app() -> FastAPI:
         reader=recipe_library,
         clock=clock,
     )
-    model_cache = ModelCacheService(
-        sessions,
-        settings.model_cache_root,
-        reserve_bytes=settings.model_cache_reserve_bytes,
-        clock=clock,
-    )
-    model_cache.resume_operations()
     audits_store = SqlAuditStore(sessions, clock)
     app = create_app(
         jobs=job_service,
