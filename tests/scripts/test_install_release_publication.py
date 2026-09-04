@@ -1216,6 +1216,33 @@ def test_acceptance_authority_rejects_incomplete_arm64_gate_ownership(
     assert not (tmp_path / "acceptance/acceptance.json").exists()
 
 
+def test_installer_publication_has_one_development_fanin_anchor() -> None:
+    source = yaml.load(
+        (ROOT / ".github/workflows/installer-publication-source.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    publication = yaml.load(
+        (ROOT / ".github/workflows/installer-publication.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+
+    assert source["on"]["push"] == {"branches": ["main"]}
+    assert publication["on"]["workflow_run"]["workflows"] == [
+        "CI",
+        "Installer publication source",
+    ]
+    assert "schedule" not in publication["on"]
+    authority = publication["jobs"]["authority"]
+    assert "Installer publication source" in authority["if"]
+    assert "Development images" not in authority["if"]
+    bind = next(
+        step
+        for step in authority["steps"]
+        if step["name"] == "Bind accepted workflow evidence to source authority"
+    )
+    assert "if ((attempt < 13))" in bind["run"]
+
+
 def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     tmp_path: Path,
 ) -> None:

@@ -3,13 +3,6 @@ name: Installer publication source
 on:
   push:
     branches: [main]
-    paths:
-      - .github/workflows/installer-publication-source.yml
-      - .github/workflows/installer-publication.yml
-      - scripts/build-nas-compose-bundle
-      - scripts/install-release-publication
-      - tests/acceptance/test_fresh_nas_install.py
-      - tests/acceptance/test_spark_lifecycle.py
 
 permissions:
   contents: read

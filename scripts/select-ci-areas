@@ -25,7 +25,6 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
         ".github/actions/",
         ".github/workflows/ci.yml",
         ".dockerignore",
-        "inventory/sbom/",
         "schemas/global/",
         "scripts/verify-supply-chain",
     )
@@ -41,7 +40,14 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
             selected["rust"] = True
         if _matches(
             path,
-            ("src/", "scripts/", "config/", "tests/", "agent_protocol/"),
+            (
+                "src/",
+                "scripts/",
+                "config/",
+                "tests/",
+                "agent_protocol/",
+                "inventory/sbom/",
+            ),
             ("pyproject.toml",),
         ):
             selected["repository"] = True
