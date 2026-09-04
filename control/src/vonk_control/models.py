@@ -1289,7 +1289,7 @@ class ModelCacheOperation(Base):
             name="ck_model_cache_operations_state",
         ),
         CheckConstraint(
-            "attempt >= 0", name="ck_model_cache_operations_attempt"
+            "attempt >= 1", name="ck_model_cache_operations_attempt"
         ),
         CheckConstraint(
             "plan_digest IS NULL OR "
@@ -1313,7 +1313,7 @@ class ModelCacheOperation(Base):
     kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     state: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     attempt: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
+        Integer, nullable=False, default=1, server_default="1"
     )
     artifact_set_sha256: Mapped[str | None] = mapped_column(
         ForeignKey("model_cache_sets.artifact_set_sha256", ondelete="SET NULL"),

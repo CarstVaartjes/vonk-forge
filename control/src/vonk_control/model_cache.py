@@ -297,12 +297,13 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789_.:-" for character in value.key)
         or not value.artifact_id
         or len(value.artifact_id) > 256
+        or re.fullmatch(r"[a-z][a-z0-9_.:-]{0,255}", value.artifact_id) is None
         or not value.path
         or len(value.path) > 512
         or value.path.startswith("/")
         or "\\" in value.path
         or "\x00" in value.path
-        or any(part in {".", ".."} for part in value.path.split("/"))
+        or any(part in {"", ".", ".."} for part in value.path.split("/"))
         or value.kind not in {"huggingface.file", "http.file", "file"}
         or len(value.sha256) != _DIGEST_LENGTH
         or value.sha256 != value.sha256.lower()
@@ -311,6 +312,8 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or isinstance(value.expected_bytes, bool)
         or value.expected_bytes <= 0
         or not value.roles
+        or len(value.roles) > 32
+        or any(not isinstance(role, str) for role in value.roles)
         or len(set(value.roles)) != len(value.roles)
         or any(not role or len(role) > 64 for role in value.roles)
     ):
@@ -371,9 +374,23 @@ def _is_hex(value: str) -> bool:
 
 
 def _validate_source(source: str) -> None:
-    parsed = urlsplit(source)
+    try:
+        parsed = urlsplit(source)
+        hostname = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError) as error:
+        raise ModelCacheResolutionError(
+            "model_cache.source_invalid", "cache source URL is invalid"
+        ) from error
     if parsed.scheme in {"http", "https"}:
-        if not parsed.hostname or parsed.username or parsed.password or parsed.fragment or parsed.query:
+        if (
+            not hostname
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+            or parsed.query
+            or port is not None
+        ):
             raise ModelCacheResolutionError(
                 "model_cache.source_invalid", "cache source URL is invalid"
             )
@@ -407,7 +424,43 @@ def _source_for_catalog_artifact(
     if kind == "huggingface.file":
         from urllib.parse import quote
 
-        if not _valid_repository(repository):
+        # Catalog repositories are immutable HTTPS URLs.  Parse and bind the
+        # repository path to the one trusted Hugging Face authority before
+        # constructing the file URL; accepting the raw URL here would permit
+        # catalog metadata to redirect the Controller to another host.
+        try:
+            parsed = urlsplit(repository)
+            hostname = parsed.hostname
+            port = parsed.port
+        except (TypeError, ValueError) as error:
+            raise ModelCacheResolutionError(
+                "model_cache.source_invalid",
+                "catalog Hugging Face repository is invalid",
+            ) from error
+        if parsed.scheme:
+            if (
+                parsed.scheme != "https"
+                or hostname is None
+                or hostname.lower().rstrip(".") != "huggingface.co"
+                or port is not None
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or not parsed.path.startswith("/")
+            ):
+                raise ModelCacheResolutionError(
+                    "model_cache.source_invalid",
+                    "catalog Hugging Face repository must use canonical HTTPS",
+                )
+            repository_path = parsed.path.strip("/")
+        else:
+            # Older catalog fixtures store the repository as the immutable
+            # Hugging Face ``namespace/name`` identifier.  It is safe to
+            # normalize that bounded identifier to the canonical authority;
+            # arbitrary URI repositories still take the guarded path above.
+            repository_path = repository
+        if not _valid_repository(repository_path):
             raise ModelCacheResolutionError(
                 "model_cache.source_invalid",
                 "catalog Hugging Face repository is invalid",
@@ -418,7 +471,7 @@ def _source_for_catalog_artifact(
                 "catalog artifact revision is not immutable",
             )
         source = (
-            f"https://huggingface.co/{repository}/resolve/{revision}/"
+            f"https://huggingface.co/{repository_path}/resolve/{revision}/"
             f"{quote(path, safe='/')}"
         )
     elif kind == "http.file":
@@ -433,14 +486,12 @@ def _source_for_catalog_artifact(
 
 def _valid_repository(value: str) -> bool:
     return (
-        1 <= len(value) <= 512
-        and value == value.strip()
-        and not value.startswith(("/", "."))
-        and "//" not in value
-        and all(
-            part and part not in {".", ".."}
-            and all(character.isalnum() or character in "._-" for character in part)
-            for part in value.split("/")
+        bool(
+            re.fullmatch(
+                r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}/"
+                r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}",
+                value,
+            )
         )
     )
 
@@ -604,13 +655,23 @@ class ModelCacheService:
             model_rows: dict[str, CatalogEntityRevision] = {}
             self._collect_model_versions(session, model_digest, model_rows)
             if recipe_document is not None:
-                for reference in recipe_document.get("dependencies", ()):
-                    if isinstance(reference, Mapping) and isinstance(
+                raw_dependencies = recipe_document.get("dependencies", ())
+                if not isinstance(raw_dependencies, list):
+                    raise ModelCacheResolutionError(
+                        "model_cache.dependencies_invalid",
+                        "recipe model dependencies are invalid",
+                    )
+                for reference in raw_dependencies:
+                    if not isinstance(reference, Mapping) or not isinstance(
                         reference.get("content_sha256"), str
                     ):
-                        self._collect_model_versions(
-                            session, reference["content_sha256"], model_rows
+                        raise ModelCacheResolutionError(
+                            "model_cache.dependencies_invalid",
+                            "recipe model dependency pin is invalid",
                         )
+                    self._collect_model_versions(
+                        session, reference["content_sha256"], model_rows
+                    )
             specs: list[ArtifactSpec] = []
             model_ref: Mapping[str, object] | None = None
             for digest, row in sorted(model_rows.items()):
@@ -886,6 +947,7 @@ class ModelCacheService:
                     schema_version=SCHEMA_VERSION,
                     kind="download",
                     state="queued",
+                    attempt=1,
                     artifact_set_sha256=set_digest,
                     plan_digest=requested_plan,
                     payload=payload,
@@ -1108,6 +1170,7 @@ class ModelCacheService:
         self._set_operation_state(operation_id, "running")
         completed = 0
         downloaded = 0
+        processed_digests: set[str] = set()
         try:
             with self._session(write=True) as session:
                 self._ensure_set(
@@ -1123,12 +1186,15 @@ class ModelCacheService:
                     downloaded_bytes=downloaded,
                     current_artifact_key=spec.key,
                 )
+                if spec.sha256 in processed_digests:
+                    # Multiple logical entries may intentionally point at the
+                    # same immutable object.  Count the entry for coverage,
+                    # but never transfer or count its bytes twice.
+                    completed += 1
+                    continue
                 if not force and self._object_is_verified(spec):
                     self._mark_artifact_verified(spec, set_digest)
-                    completed += 1
-                    downloaded += spec.expected_bytes
-                    continue
-                if force:
+                else:
                     # A forced repair always transfers a fresh payload.  The
                     # existing object is kept in place until the fresh part
                     # has passed both size and digest verification.
@@ -1140,15 +1206,7 @@ class ModelCacheService:
                         downloaded_bytes=downloaded,
                         interrupt_after_bytes=interrupt_after_bytes,
                     )
-                else:
-                    self._download_artifact(
-                        spec,
-                        set_digest,
-                        operation_id=operation_id,
-                        completed_artifacts=completed,
-                        downloaded_bytes=downloaded,
-                        interrupt_after_bytes=interrupt_after_bytes,
-                    )
+                processed_digests.add(spec.sha256)
                 completed += 1
                 downloaded += spec.expected_bytes
             self._set_operation_progress(
@@ -1194,7 +1252,9 @@ class ModelCacheService:
     ) -> None:
         part = self._partial_path(set_digest, spec.sha256)
         part.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-        offset = part.stat().st_size if part.exists() and not part.is_symlink() else 0
+        if part.is_symlink():
+            part.unlink(missing_ok=True)
+        offset = part.stat().st_size if part.exists() else 0
         if offset > spec.expected_bytes:
             part.unlink(missing_ok=True)
             offset = 0
@@ -1281,7 +1341,14 @@ class ModelCacheService:
     def _open_source(
         self, spec: ArtifactSpec, offset: int
     ) -> tuple[object, int, callable]:
-        parsed = urlsplit(spec.source)
+        try:
+            parsed = urlsplit(spec.source)
+            hostname = parsed.hostname
+            port = parsed.port
+        except (TypeError, ValueError) as error:
+            raise ModelCacheStorageError(
+                "model_cache.source_invalid", "cache source URL is invalid"
+            ) from error
         if parsed.scheme == "file":
             if not self._fixture_sources:
                 raise ModelCacheStorageError(
@@ -1304,10 +1371,11 @@ class ModelCacheService:
             return handle, offset, handle.close
         if not self._fixture_sources and (
             parsed.scheme != "https"
-            or parsed.hostname is None
-            or parsed.hostname.lower().rstrip(".")
+            or hostname is None
+            or port is not None
+            or hostname.lower().rstrip(".")
             not in self._trusted_source_hosts
-            or _is_private_host(parsed.hostname)
+            or _is_private_host(hostname)
         ):
             raise ModelCacheStorageError(
                 "model_cache.source_untrusted",
@@ -1320,6 +1388,11 @@ class ModelCacheService:
                 follow_redirects=False,
                 timeout=httpx.Timeout(30.0),
                 trust_env=False,
+            )
+        elif not self._fixture_sources and getattr(client, "follow_redirects", False):
+            raise ModelCacheStorageError(
+                "model_cache.redirect_forbidden",
+                "production cache HTTP clients must not follow redirects",
             )
         headers = {"Range": f"bytes={offset}-"} if offset else {}
         response = client.stream("GET", spec.source, headers=headers)
@@ -1548,8 +1621,11 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
-            if state == "running" and operation.state != "running":
-                operation.attempt = int(operation.attempt) + 1
+            if state == "running":
+                if operation.state in {"partial", "failed"}:
+                    operation.attempt = int(operation.attempt) + 1
+                else:
+                    operation.attempt = max(1, int(operation.attempt))
             operation.state = state
             operation.updated_at = now
             if result is not None:
@@ -1790,6 +1866,7 @@ class ModelCacheService:
                     schema_version=SCHEMA_VERSION,
                     kind="repair",
                     state="queued",
+                    attempt=1,
                     artifact_set_sha256=digest,
                     plan_digest=requested_plan,
                     payload=payload,
@@ -1907,7 +1984,7 @@ class ModelCacheService:
         if state is not None and (not isinstance(state, str) or not state.strip()):
             raise ValueError("operation state filter is invalid")
         if node_id is not None:
-            return {"operations": (), "total": 0, "next_cursor": None}
+            return {"operations": (), "total": 0, "_next_boundary": None}
         allowed_states = {
             "queued",
             "running",
@@ -1917,7 +1994,7 @@ class ModelCacheService:
             "cancelled",
         }
         if state is not None and state not in allowed_states:
-            return {"operations": (), "total": 0, "next_cursor": None}
+            return {"operations": (), "total": 0, "_next_boundary": None}
         with self._session() as session:
             filters = []
             if state is not None:
@@ -1940,9 +2017,13 @@ class ModelCacheService:
                         ModelCacheOperation.created_at.desc(),
                         ModelCacheOperation.id.desc(),
                     )
-                    .limit(limit)
+                    # Fetch one sentinel row so the provider can expose a
+                    # stable boundary instead of silently truncating pages.
+                    .limit(limit + 1)
                 )
             )
+            has_more = len(rows) > limit
+            rows = rows[:limit]
             total_filters = []
             if state is not None:
                 total_filters.append(ModelCacheOperation.state == state)
@@ -1954,10 +2035,14 @@ class ModelCacheService:
                 )
                 or 0
             )
+        next_boundary = None
+        if has_more and rows:
+            last = rows[-1]
+            next_boundary = (_iso(last.created_at) or "", last.id)
         return {
             "operations": tuple(self._operation_view(row) for row in rows),
             "total": total,
-            "next_cursor": None,
+            "_next_boundary": next_boundary,
         }
 
     def verified_artifact_file(
@@ -2237,10 +2322,60 @@ class ModelCacheService:
             if run is not None:
                 reasons.add("running-model")
         for profile in session.scalars(select(FleetProfile)):
-            if _contains_digest(profile.assignments, row.model_version_sha256, row.recipe_revision_sha256):
+            if _contains_digest(
+                profile.assignments,
+                row.model_version_sha256,
+                row.recipe_revision_sha256,
+            ) or self._profile_references_cache(session, profile, row):
                 reasons.add("saved-profile")
         row.protected = bool(reasons)
         row.protected_reasons = sorted(reasons)
+
+    @staticmethod
+    def _profile_references_cache(
+        session: Session,
+        profile: FleetProfile,
+        row: ModelCacheSet,
+    ) -> bool:
+        """Resolve profile recipe IDs before deciding a cache set is evictable."""
+        assignments = profile.assignments
+        if not isinstance(assignments, list):
+            return False
+        for assignment in assignments:
+            if not isinstance(assignment, Mapping):
+                continue
+            revision_id = assignment.get("recipe_revision_id")
+            if not isinstance(revision_id, str) or not revision_id:
+                continue
+            revision = session.get(LocalRecipeRevision, revision_id)
+            if revision is None or revision.lifecycle != "resolved":
+                continue
+            if (
+                row.recipe_revision_sha256 is not None
+                and revision.content_sha256 == row.recipe_revision_sha256
+            ):
+                return True
+            if row.model_version_sha256 is None:
+                continue
+            document = revision.document
+            model = document.get("model") if isinstance(document, Mapping) else None
+            if (
+                isinstance(model, Mapping)
+                and model.get("content_sha256") == row.model_version_sha256
+            ):
+                return True
+            dependencies = (
+                document.get("dependencies", ())
+                if isinstance(document, Mapping)
+                else ()
+            )
+            if isinstance(dependencies, list) and any(
+                isinstance(reference, Mapping)
+                and reference.get("content_sha256") == row.model_version_sha256
+                for reference in dependencies
+            ):
+                return True
+        return False
 
     def _update_flags(
         self, session: Session, row: ModelCacheSet, manifest: ArtifactSetManifest
@@ -2665,6 +2800,7 @@ class ModelCacheService:
                     schema_version=SCHEMA_VERSION,
                     kind="evict",
                     state="queued",
+                    attempt=1,
                     artifact_set_sha256=None,
                     plan_digest=requested_plan,
                     payload=payload,

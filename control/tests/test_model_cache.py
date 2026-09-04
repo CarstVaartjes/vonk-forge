@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -15,13 +16,22 @@ from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheService,
 )
-from vonk_control.model_cache_api import install_model_cache_routes
+from vonk_control.model_cache_api import (
+    ModelCacheOperationProvider,
+    install_model_cache_routes,
+)
 from vonk_control.model_cache_contract import (
     ModelCacheDownloadRequest,
     ModelCacheEvictionPreviewRequest,
     ModelCacheEvictRequest,
 )
-from vonk_control.models import Base, FleetProfile, ModelCacheArtifact
+from vonk_control.models import (
+    Base,
+    FleetProfile,
+    LocalRecipe,
+    LocalRecipeRevision,
+    ModelCacheArtifact,
+)
 from vonk_control.worker import Worker
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
@@ -154,6 +164,34 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     ) + len(b"tokenizer auxiliary bytes")
 
 
+def test_one_set_with_shared_digest_counts_one_physical_payload(
+    cache, tmp_path: Path
+) -> None:
+    service, _sessions = cache
+    model = "9" * 64
+    primary = _artifact(tmp_path, b"shared payload", model_version_sha256=model)
+    alias = dict(
+        primary,
+        artifact_id="weights-alias",
+        id="weights-alias",
+        path="weights-alias.bin",
+        roles=["auxiliary"],
+    )
+    operation = _download(
+        service,
+        [primary, alias],
+        model_version_sha256=model,
+        request_key="00000000-0000-4000-8000-000000000015",
+    )
+    assert operation.state == "succeeded"
+    assert operation.progress["downloaded_bytes"] == len(b"shared payload")
+    entry = service.get_entry(operation.artifact_set_sha256 or "")
+    assert entry["coverage"] == "complete"
+    assert entry["expected_bytes"] == len(b"shared payload")
+    assert entry["unique_bytes"] == len(b"shared payload")
+    assert service.storage_summary().unique_used_bytes == len(b"shared payload")
+
+
 def test_download_mutation_is_queued_until_the_controller_worker_runs(
     cache, tmp_path: Path
 ) -> None:
@@ -174,10 +212,92 @@ def test_download_mutation_is_queued_until_the_controller_worker_runs(
         artifacts=[artifact],
     )
     assert operation.state == "queued"
+    assert operation.attempt == 1
     assert not list(service.root.joinpath("objects").glob("*/*"))
 
     assert service.run_pending() == 1
-    assert service.get_operation(operation.id).state == "succeeded"
+    completed = service.get_operation(operation.id)
+    assert completed.state == "succeeded"
+    assert completed.attempt == 1
+
+
+def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
+    cache, tmp_path: Path
+) -> None:
+    service, _sessions = cache
+    provider = ModelCacheOperationProvider(service)
+    operation_ids: list[str] = []
+    for index in range(2):
+        model = str(index + 1) * 64
+        artifact = _artifact(
+            tmp_path,
+            f"queued-{index}".encode(),
+            artifact_id=f"weights-{index}",
+            path=f"weights-{index}.bin",
+            model_version_sha256=model,
+        )
+        preview = service.download_preview(
+            model_version_sha256=model,
+            artifacts=[artifact],
+        )
+        operation = service.start_download(
+            actor="test",
+            request_key=f"00000000-0000-4000-8000-00000000001{index}",
+            plan_digest=str(preview["plan_digest"]),
+            model_version_sha256=model,
+            artifacts=[artifact],
+        )
+        assert operation.state == "queued"
+        assert operation.attempt == 1
+        operation_ids.append(operation.id)
+
+    query = SimpleNamespace(limit=1, after=None, state=None, node_id=None)
+    first_page = provider.list_operations(query)
+    assert first_page["total"] == 2
+    assert len(first_page["items"]) == 1
+    first = first_page["items"][0]
+    assert first["node_ids"] == []
+    assert first["attempt"] == 1
+    assert first["supported_actions"] == []
+    assert first["progress"]["phase"] == "prepare"
+    assert first_page["next_cursor"]
+
+    after = (datetime.fromisoformat(str(first["created_at"])), str(first["id"]))
+    second_page = provider.list_operations(
+        SimpleNamespace(limit=1, after=after, state=None, node_id=None)
+    )
+    assert second_page["total"] == 2
+    assert len(second_page["items"]) == 1
+    assert second_page["items"][0]["id"] != first["id"]
+    assert second_page["next_cursor"] is None
+
+    queued_page = provider.list_operations(
+        SimpleNamespace(limit=100, after=None, state="queued", node_id=None)
+    )
+    assert queued_page["total"] == 2
+    assert {item["id"] for item in queued_page["items"]} == set(operation_ids)
+
+    node_page = provider.list_operations(
+        SimpleNamespace(
+            limit=100,
+            after=None,
+            state=None,
+            node_id="spk_" + "a" * 32,
+        )
+    )
+    assert node_page["items"] == []
+    assert node_page["total"] == 0
+    detail = provider.get_operation(str(first["id"]))
+    assert detail["id"] == first["id"]
+    assert detail["node_ids"] == []
+    assert detail["attempt"] == 1
+
+    assert service.run_pending(limit=2) == 2
+    succeeded_page = provider.list_operations(
+        SimpleNamespace(limit=100, after=None, state="succeeded", node_id=None)
+    )
+    assert succeeded_page["total"] == 2
+    assert all(item["state"] == "succeeded" for item in succeeded_page["items"])
 
 
 def test_interrupted_download_checkpoint_resumes_after_service_restart(
@@ -196,6 +316,7 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
         interrupt_after_bytes=1_100_000,
     )
     assert partial.state == "partial"
+    assert partial.attempt == 1
     set_digest = partial.artifact_set_sha256 or ""
     part = service.root / "partials" / set_digest / f"{artifact['sha256']}.part"
     assert 0 < part.stat().st_size < len(data)
@@ -210,6 +331,7 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     restarted.run_pending()
     resumed = restarted.get_operation(partial.id)
     assert resumed.state == "succeeded"
+    assert resumed.attempt == 2
     assert (service.root / "objects" / str(artifact["sha256"])[0:2] / str(artifact["sha256"]).strip()).read_bytes() == data
     assert restarted.get_entry(set_digest)["coverage"] == "complete"
 
@@ -294,13 +416,44 @@ def test_protection_is_derived_from_durable_references_and_blocks_eviction(
         model_version_sha256=model,
         request_key="00000000-0000-4000-8000-000000000008",
     ).artifact_set_sha256 or ""
+    recipe_id = "00000000-0000-4000-8000-000000000021"
+    recipe_revision_id = "00000000-0000-4000-8000-000000000022"
+    with sessions.begin() as session:
+        session.add(
+            LocalRecipe(
+                id=recipe_id,
+                slug="protected-recipe",
+                title="Protected recipe",
+                description="",
+                source_kind="local",
+                created_by="test",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.add(
+            LocalRecipeRevision(
+                id=recipe_revision_id,
+                recipe_id=recipe_id,
+                revision_number=1,
+                lifecycle="resolved",
+                schema_version=2,
+                document={
+                    "model": {"content_sha256": model},
+                    "dependencies": [],
+                },
+                content_sha256="f" * 64,
+                created_by="test",
+                created_at=NOW,
+            )
+        )
     with sessions.begin() as session:
         session.add(
             FleetProfile(
                 name="protected-profile",
                 description="",
                 installation_policy="keep-cached",
-                assignments=[{"model_version_sha256": model}],
+                assignments=[{"recipe_revision_id": recipe_revision_id}],
                 labels={},
                 favorite=False,
                 created_by="test",

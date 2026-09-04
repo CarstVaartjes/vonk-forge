@@ -164,7 +164,7 @@ def upgrade() -> None:
         sa.Column("schema_version", sa.Integer(), nullable=False, server_default="2"),
         sa.Column("kind", sa.String(length=16), nullable=False),
         sa.Column("state", sa.String(length=16), nullable=False),
-        sa.Column("attempt", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("attempt", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("artifact_set_sha256", sa.String(length=64), nullable=True),
         sa.Column("plan_digest", sa.String(length=64), nullable=True),
         sa.Column("payload", sa.JSON(), nullable=False),
@@ -187,7 +187,7 @@ def upgrade() -> None:
             name="ck_model_cache_operations_state",
         ),
         sa.CheckConstraint(
-            "attempt >= 0", name="ck_model_cache_operations_attempt"
+            "attempt >= 1", name="ck_model_cache_operations_attempt"
         ),
         sa.CheckConstraint(
             "plan_digest IS NULL OR (" + _lower_hex("plan_digest", 64) + ")",

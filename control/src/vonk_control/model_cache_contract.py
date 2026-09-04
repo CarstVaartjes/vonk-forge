@@ -163,7 +163,7 @@ class ModelCacheOperationResponse(StrictModel):
     request_key: str = Field(pattern=UUID_PATTERN)
     kind: Literal["download", "repair", "evict"]
     state: Literal["queued", "running", "partial", "succeeded", "failed", "cancelled"]
-    attempt: int = Field(ge=0)
+    attempt: int = Field(ge=1)
     artifact_set_sha256: Digest | None
     plan_digest: Digest | None
     progress: ModelCacheOperationProgress

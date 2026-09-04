@@ -481,8 +481,9 @@ class ModelCacheOperationProvider:
 
     family = "model-cache"
 
-    def __init__(self, service: ModelCacheService) -> None:
+    def __init__(self, service: ModelCacheService, cursors: Any | None = None) -> None:
         self._service = service
+        self._cursors = cursors
 
     def list_operations(self, query: Any = None) -> Any:
         limit = int(getattr(query, "limit", 100) or 100)
@@ -496,6 +497,9 @@ class ModelCacheOperationProvider:
             node_id=node_id,
         )
         items = [self._summary(item) for item in page["operations"]]
+        next_cursor = self._next_cursor(
+            page.get("_next_boundary"), state=state, node_id=node_id
+        )
         # The typed provider classes landed after the cache slice's base
         # revision.  Keep this module importable on that revision while
         # returning the exact dataclass expected once the shared seam is
@@ -505,14 +509,38 @@ class ModelCacheOperationProvider:
         except ImportError:
             return {
                 "items": items,
-                "next_cursor": page.get("next_cursor"),
+                "next_cursor": next_cursor,
                 "total": page["total"],
             }
         return OperationListPage(
             items=items,
-            next_cursor=page.get("next_cursor"),
+            next_cursor=next_cursor,
             total=int(page["total"]),
         )
+
+    def _next_cursor(
+        self,
+        boundary: object,
+        *,
+        state: object,
+        node_id: object,
+    ) -> str | None:
+        if not isinstance(boundary, tuple) or len(boundary) != 2:
+            return None
+        created_at, operation_id = boundary
+        if not isinstance(created_at, str) or not isinstance(operation_id, str):
+            return None
+        context = {"state": state, "node_id": node_id}
+        if self._cursors is not None:
+            return self._cursors.encode(
+                resource="model-cache-operations",
+                order="created-at-desc/id-desc/v1",
+                context=context,
+                boundary=[created_at, operation_id],
+            )
+        # This fallback is only used by the pre-Activity base revision.  The
+        # production composition always supplies the shared signed codec.
+        return f"{created_at}|{operation_id}"[:1024]
 
     def get_operation(self, operation_id: str) -> dict[str, object]:
         return self._summary(self._service.get_operation(operation_id))
@@ -544,7 +572,7 @@ class ModelCacheOperationProvider:
             "progress": self._progress(progress),
             "created_at": operation.created_at,
             "updated_at": operation.updated_at,
-            "supported_actions": self._supported_actions(operation),
+            "supported_actions": [],
             "result": result,
         }
 
@@ -584,19 +612,11 @@ class ModelCacheOperationProvider:
             progress["checkpoint"] = checkpoint
         return progress
 
-    @staticmethod
-    def _supported_actions(operation: Any) -> list[str]:
-        if operation.state == "partial":
-            return ["resume"]
-        if operation.state == "failed" and operation.kind in {"download", "repair"}:
-            return ["retry"]
-        return []
-
-
 def model_cache_operation_provider(
     service: ModelCacheService,
+    cursors: Any | None = None,
 ) -> Any:
-    provider = ModelCacheOperationProvider(service)
+    provider = ModelCacheOperationProvider(service, cursors)
     try:
         from .operation_api import OperationProvider
     except ImportError:
@@ -620,7 +640,9 @@ def register_model_cache_operation_provider(
     """
     if services is None or service is None or not hasattr(services, "operation_providers"):
         return services
-    provider = model_cache_operation_provider(service)
+    provider = model_cache_operation_provider(
+        service, getattr(services, "cursor_codec", None)
+    )
     existing = tuple(getattr(services, "operation_providers", ()))
     if any(getattr(item, "family", None) == "model-cache" for item in existing):
         return services
