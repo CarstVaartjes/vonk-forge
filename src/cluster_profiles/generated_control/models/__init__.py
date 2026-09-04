@@ -60,6 +60,10 @@ from .fleet_profile_assignment_preview import FleetProfileAssignmentPreview
 from .fleet_profile_assignment_preview_actions_item import FleetProfileAssignmentPreviewActionsItem
 from .fleet_profile_assignment_preview_current_state import FleetProfileAssignmentPreviewCurrentState
 from .fleet_profile_assignment_preview_desired_state import FleetProfileAssignmentPreviewDesiredState
+from .fleet_profile_capture_input import FleetProfileCaptureInput
+from .fleet_profile_capture_input_installation_policy import FleetProfileCaptureInputInstallationPolicy
+from .fleet_profile_capture_input_labels import FleetProfileCaptureInputLabels
+from .fleet_profile_duplicate_input import FleetProfileDuplicateInput
 from .fleet_profile_input import FleetProfileInput
 from .fleet_profile_input_installation_policy import FleetProfileInputInstallationPolicy
 from .fleet_profile_input_labels import FleetProfileInputLabels
@@ -68,10 +72,16 @@ from .fleet_profile_node import FleetProfileNode
 from .fleet_profile_plan_step import FleetProfilePlanStep
 from .fleet_profile_plan_step_kind import FleetProfilePlanStepKind
 from .fleet_profile_plan_summary import FleetProfilePlanSummary
+from .fleet_profile_prepare_preview_request import FleetProfilePreparePreviewRequest
+from .fleet_profile_prepare_request import FleetProfilePrepareRequest
 from .fleet_profile_preview import FleetProfilePreview
 from .fleet_profile_preview_request import FleetProfilePreviewRequest
 from .fleet_profile_reason import FleetProfileReason
 from .fleet_profile_reason_severity import FleetProfileReasonSeverity
+from .fleet_profile_scope import FleetProfileScope
+from .fleet_profile_scope_preview import FleetProfileScopePreview
+from .fleet_profile_status_view import FleetProfileStatusView
+from .fleet_profile_status_view_state import FleetProfileStatusViewState
 from .fleet_profile_view import FleetProfileView
 from .fleet_profile_view_installation_policy import FleetProfileViewInstallationPolicy
 from .fleet_profile_view_labels import FleetProfileViewLabels
@@ -413,6 +423,10 @@ __all__ = (
     "FleetProfileAssignmentPreviewActionsItem",
     "FleetProfileAssignmentPreviewCurrentState",
     "FleetProfileAssignmentPreviewDesiredState",
+    "FleetProfileCaptureInput",
+    "FleetProfileCaptureInputInstallationPolicy",
+    "FleetProfileCaptureInputLabels",
+    "FleetProfileDuplicateInput",
     "FleetProfileInput",
     "FleetProfileInputInstallationPolicy",
     "FleetProfileInputLabels",
@@ -421,10 +435,16 @@ __all__ = (
     "FleetProfilePlanStep",
     "FleetProfilePlanStepKind",
     "FleetProfilePlanSummary",
+    "FleetProfilePreparePreviewRequest",
+    "FleetProfilePrepareRequest",
     "FleetProfilePreview",
     "FleetProfilePreviewRequest",
     "FleetProfileReason",
     "FleetProfileReasonSeverity",
+    "FleetProfileScope",
+    "FleetProfileScopePreview",
+    "FleetProfileStatusView",
+    "FleetProfileStatusViewState",
     "FleetProfileView",
     "FleetProfileViewInstallationPolicy",
     "FleetProfileViewLabels",

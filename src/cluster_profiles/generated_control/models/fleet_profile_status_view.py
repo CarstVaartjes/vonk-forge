@@ -6,6 +6,8 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.fleet_profile_status_view_state import check_fleet_profile_status_view_state
+from ..models.fleet_profile_status_view_state import FleetProfileStatusViewState
 from ..types import UNSET, Unset
 from dateutil.parser import isoparse
 from typing import cast
@@ -14,48 +16,39 @@ import datetime
 
 if TYPE_CHECKING:
   from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
-  from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
-  from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
-  from ..models.fleet_profile_plan_step import FleetProfilePlanStep
   from ..models.fleet_profile_reason import FleetProfileReason
 
 
 
 
 
-T = TypeVar("T", bound="FleetProfilePreview")
+T = TypeVar("T", bound="FleetProfileStatusView")
 
 
 
 @_attrs_define
-class FleetProfilePreview:
+class FleetProfileStatusView:
     """
         Attributes:
-            allowed (bool):
-            assignments (list['FleetProfileAssignmentPreview']):
+            drifted (bool):
             generated_at (datetime.datetime):
-            plan_digest (str):
+            matched (bool):
             profile_digest (str):
             profile_id (str):
-            profile_name (str):
             reasons (list['FleetProfileReason']):
             scope (FleetProfileScopePreview):
-            steps (list['FleetProfilePlanStep']):
-            summary (FleetProfilePlanSummary):
+            state (FleetProfileStatusViewState):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
-    allowed: bool
-    assignments: list['FleetProfileAssignmentPreview']
+    drifted: bool
     generated_at: datetime.datetime
-    plan_digest: str
+    matched: bool
     profile_digest: str
     profile_id: str
-    profile_name: str
     reasons: list['FleetProfileReason']
     scope: 'FleetProfileScopePreview'
-    steps: list['FleetProfilePlanStep']
-    summary: 'FleetProfilePlanSummary'
+    state: FleetProfileStatusViewState
     schema_version: Union[Literal[2], Unset] = 2
 
 
@@ -64,28 +57,16 @@ class FleetProfilePreview:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
-        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
-        from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
-        from ..models.fleet_profile_plan_step import FleetProfilePlanStep
         from ..models.fleet_profile_reason import FleetProfileReason
-        allowed = self.allowed
-
-        assignments = []
-        for assignments_item_data in self.assignments:
-            assignments_item = assignments_item_data.to_dict()
-            assignments.append(assignments_item)
-
-
+        drifted = self.drifted
 
         generated_at = self.generated_at.isoformat()
 
-        plan_digest = self.plan_digest
+        matched = self.matched
 
         profile_digest = self.profile_digest
 
         profile_id = self.profile_id
-
-        profile_name = self.profile_name
 
         reasons = []
         for reasons_item_data in self.reasons:
@@ -96,14 +77,7 @@ class FleetProfilePreview:
 
         scope = self.scope.to_dict()
 
-        steps = []
-        for steps_item_data in self.steps:
-            steps_item = steps_item_data.to_dict()
-            steps.append(steps_item)
-
-
-
-        summary = self.summary.to_dict()
+        state: str = self.state
 
         schema_version = self.schema_version
 
@@ -111,17 +85,14 @@ class FleetProfilePreview:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
-            "allowed": allowed,
-            "assignments": assignments,
+            "drifted": drifted,
             "generated_at": generated_at,
-            "plan_digest": plan_digest,
+            "matched": matched,
             "profile_digest": profile_digest,
             "profile_id": profile_id,
-            "profile_name": profile_name,
             "reasons": reasons,
             "scope": scope,
-            "steps": steps,
-            "summary": summary,
+            "state": state,
         })
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
@@ -133,35 +104,20 @@ class FleetProfilePreview:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
-        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
-        from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
-        from ..models.fleet_profile_plan_step import FleetProfilePlanStep
         from ..models.fleet_profile_reason import FleetProfileReason
         d = dict(src_dict)
-        allowed = d.pop("allowed")
-
-        assignments = []
-        _assignments = d.pop("assignments")
-        for assignments_item_data in (_assignments):
-            assignments_item = FleetProfileAssignmentPreview.from_dict(assignments_item_data)
-
-
-
-            assignments.append(assignments_item)
-
+        drifted = d.pop("drifted")
 
         generated_at = isoparse(d.pop("generated_at"))
 
 
 
 
-        plan_digest = d.pop("plan_digest")
+        matched = d.pop("matched")
 
         profile_digest = d.pop("profile_digest")
 
         profile_id = d.pop("profile_id")
-
-        profile_name = d.pop("profile_name")
 
         reasons = []
         _reasons = d.pop("reasons")
@@ -178,17 +134,7 @@ class FleetProfilePreview:
 
 
 
-        steps = []
-        _steps = d.pop("steps")
-        for steps_item_data in (_steps):
-            steps_item = FleetProfilePlanStep.from_dict(steps_item_data)
-
-
-
-            steps.append(steps_item)
-
-
-        summary = FleetProfilePlanSummary.from_dict(d.pop("summary"))
+        state = check_fleet_profile_status_view_state(d.pop("state"))
 
 
 
@@ -197,19 +143,16 @@ class FleetProfilePreview:
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
-        fleet_profile_preview = cls(
-            allowed=allowed,
-            assignments=assignments,
+        fleet_profile_status_view = cls(
+            drifted=drifted,
             generated_at=generated_at,
-            plan_digest=plan_digest,
+            matched=matched,
             profile_digest=profile_digest,
             profile_id=profile_id,
-            profile_name=profile_name,
             reasons=reasons,
             scope=scope,
-            steps=steps,
-            summary=summary,
+            state=state,
             schema_version=schema_version,
         )
 
-        return fleet_profile_preview
+        return fleet_profile_status_view
