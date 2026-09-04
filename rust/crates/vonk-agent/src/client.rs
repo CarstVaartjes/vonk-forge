@@ -192,6 +192,7 @@ struct RecipeRunInspectionGrantResponse {
 pub struct DistributionDownloadEvidence {
     pub assignment_id: uuid::Uuid,
     pub model_artifact_set_sha256: String,
+    pub model_digests: Vec<String>,
     pub model_paths: Vec<std::path::PathBuf>,
     pub oci_archive_path: std::path::PathBuf,
     pub oci_archive_sha256: String,
@@ -781,6 +782,7 @@ impl AgentHttpClient {
         tokio::fs::create_dir_all(&model_root).await?;
         tokio::fs::create_dir_all(&oci_root).await?;
         let mut model_paths = Vec::new();
+        let mut model_digests = Vec::new();
         let mut downloaded_bytes = 0_u64;
         let total_bytes = assignment.objects.iter().map(|object| object.bytes).sum();
         for object in &assignment.objects {
@@ -821,6 +823,7 @@ impl AgentHttpClient {
             downloaded_bytes = downloaded_bytes.saturating_add(object.bytes);
             if object.kind == "model" {
                 model_paths.push(path);
+                model_digests.push(object.sha256.clone());
             }
         }
         let archive_path = oci_root.join(&assignment.oci_archive_sha256);
@@ -837,6 +840,7 @@ impl AgentHttpClient {
         Ok(DistributionDownloadEvidence {
             assignment_id: assignment.assignment_id,
             model_artifact_set_sha256: assignment.model_artifact_set_sha256,
+            model_digests,
             model_paths,
             oci_archive_path: archive_path,
             oci_archive_sha256,

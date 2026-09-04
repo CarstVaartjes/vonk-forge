@@ -515,12 +515,33 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert resumed.progress.members[0].completed_bytes == 512
 
     artifact_executor.children[child_id].state = "succeeded"
-    artifact_executor.children[child_id].result = {"copied_bytes": 1024}
+    artifact_executor.children[child_id].result = {
+        "copied_bytes": 1024,
+        "evidence": [{
+            "node_id": nodes[0],
+            "verified": True,
+            "verified_digests": [MODEL_ARTIFACT],
+            "verified_image_digest": "sha256:" + "1" * 64,
+            "imported_image_digest": "sha256:" + "1" * 64,
+            "verified_oci_layout_sha256": "3" * 64,
+        }],
+    }
     assert restarted.tick() is True
     completed_transfer = restarted.get(operation.operation_id)
     assert completed_transfer.progress.completed_bytes == 1024
     assert completed_transfer.progress.members[0].completed_bytes == 1024
     assert completed_transfer.progress.members[0].state == "succeeded"
+    assert any(
+        isinstance(item, dict)
+        and item.get("node_id") == nodes[0]
+        and item.get("verified") is True
+        for item in completed_transfer.result.get("phase_results", [])
+    )
+    # The next durable tick consumes the persisted transfer receipts and runs
+    # the real verify phase; no caller supplied progress is reconstructed.
+    assert restarted.tick() is True
+    verified = restarted.get(operation.operation_id)
+    assert "verify" in verified.result.get("completed_phases", [])
 
 
 def test_cleanup_adapter_cannot_evict_nas_or_return_noop(tmp_path: Path) -> None:

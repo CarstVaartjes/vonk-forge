@@ -3047,6 +3047,25 @@ class RunSwitchOperationService:
                     phase,
                     _child_progress_payload(child),
                 )
+                # Preserve terminal child receipts for the following verify
+                # phase. Byte/member projection alone cannot prove every
+                # model object and the imported OCI identity reached the
+                # target; the receipts are the durable handoff across a
+                # restart.
+                child_result = _progress_mapping(getattr(child, "result", None))
+                child_receipts = (
+                    child_result.get("evidence")
+                    if child_result is not None
+                    else None
+                )
+                if isinstance(child_receipts, list):
+                    results = list(progress.get("phase_results", []))
+                    results.extend(
+                        dict(receipt)
+                        for receipt in child_receipts
+                        if isinstance(receipt, Mapping)
+                    )
+                    progress["phase_results"] = results
                 if phase.kind in {"transfer", "verify", "cleanup"}:
                     try:
                         _validate_artifact_execution(

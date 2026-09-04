@@ -514,6 +514,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         body: json!({
                             "assignment_id": evidence.assignment_id,
                             "model_artifact_set_sha256": evidence.model_artifact_set_sha256,
+                            "verified": true,
+                            "verified_digests": evidence.model_digests,
+                            "verified_image_digest": evidence.oci_image_digest,
+                            "imported_image_digest": evidence.oci_image_digest,
+                            "verified_oci_layout_sha256": evidence.oci_archive_sha256,
                             "model_files": evidence.model_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
                             "oci_archive": archive.display().to_string(),
                             "oci_image_digest": evidence.oci_image_digest,
