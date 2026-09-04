@@ -105,6 +105,7 @@ services:
     secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
+      - agent-artifacts:/state/agent-artifacts
       - workload-tuf-publication:/workload-tuf
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
@@ -117,12 +118,11 @@ services:
       - ./prometheus/alerts.yaml:/run/vonk-source-assets/prometheus/alerts.yaml:ro
       - ./grafana/provisioning:/run/vonk-source-assets/grafana/provisioning:ro
       - ./grafana/dashboards:/run/vonk-source-assets/grafana/dashboards:ro
-    # OCI archives are transfer staging only; PostgreSQL owns the build
-    # authority and the enrolled node owns the imported runtime image. Never
-    # make the controller's temporary upload bytes part of persistent state.
-    tmpfs:
-      - /tmp
-      - /state/agent-artifacts
+    # Built OCI archives can be tens of GiB and must remain available while
+    # they are distributed to every mapped Spark. Keep them off tmpfs and in a
+    # dedicated volume so Controller restarts do not invalidate accepted
+    # builds. PostgreSQL remains the authority for their lifecycle.
+    tmpfs: [/tmp]
     networks: [application, data, agent-proxy, worker-authority, ca]
     depends_on:
       postgres: {condition: service_healthy}
@@ -397,6 +397,7 @@ networks:
 volumes:
   postgres-data: {}
   control-state: {}
+  agent-artifacts: {}
   caddy-data: {}
   caddy-config: {}
   litellm-supervisor-state: {}

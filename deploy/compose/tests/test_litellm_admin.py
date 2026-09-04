@@ -93,7 +93,7 @@ def test_native_litellm_admin_has_a_writable_root_path_and_preserves_auth_health
         "LITELLM_MASTER_KEY_FILE": "/run/vonk-normalized-secrets/litellm-master-key",
         "LITELLM_UPSTREAM_KEY_FILE": "/run/vonk-normalized-secrets/litellm-upstream-key",
         "LITELLM_UI_PATH": "/tmp/litellm-ui",
-        "PRISMA_QUERY_ENGINE_BINARY": "/root/.cache/prisma-python/binaries/5.4.2/ac9d7041ed77bcc8a8dbd2ab6616b39013829574/node_modules/@prisma/engines/query-engine-debian-openssl-3.0.x",
+        "PRISMA_QUERY_ENGINE_BINARY": "/opt/vonk-litellm/prisma/query-engine",
         "SERVER_ROOT_PATH": "/litellm",
         "STORE_MODEL_IN_DB": "False",
         "XDG_CACHE_HOME": "/root/.cache",
