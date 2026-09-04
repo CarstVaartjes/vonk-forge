@@ -1265,6 +1265,26 @@ def test_installer_publication_has_one_development_fanin_anchor() -> None:
     )
 
 
+def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
+    publication = yaml.load(
+        (ROOT / ".github/workflows/installer-publication.yml").read_text(),
+        Loader=yaml.BaseLoader,
+    )
+    acceptance = publication["jobs"]["acceptance"]
+    assert acceptance["needs"] == [
+        "authority",
+        "candidate",
+        "nas-acceptance",
+        "spark-acceptance",
+    ]
+    signing = next(
+        step
+        for step in acceptance["steps"]
+        if step["name"] == "Bind and sign complete acceptance"
+    )
+    assert 'test "${#reports[@]}" = 2' in signing["run"]
+
+
 def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
     tmp_path: Path,
 ) -> None:
