@@ -34,8 +34,8 @@ vonkctl fleet list
 vonkctl fleet list --search spark-2 --health stale --health offline --warnings-only
 vonkctl fleet show spk_0123456789abcdef0123456789abcdef --json
 vonkctl fleet telemetry spk_0123456789abcdef0123456789abcdef --range 24h --json
-vonkctl fleet profile spk_0123456789abcdef0123456789abcdef --display-name "Studio Spark"
-vonkctl fleet profile spk_0123456789abcdef0123456789abcdef --display-name "Studio Spark" --apply
+vonkctl fleet node-profile spk_0123456789abcdef0123456789abcdef --display-name "Studio Spark"
+vonkctl fleet node-profile spk_0123456789abcdef0123456789abcdef --display-name "Studio Spark" --apply
 vonkctl fleet agents --json
 vonkctl fleet enrollments --state pending --json
 vonkctl fleet enrollments --all --json
@@ -62,6 +62,68 @@ eligible nodes and package first, then apply that returned plan digest. The
 default `one-at-a-time` strategy waits for each Spark to return healthy before
 continuing. Repeat `--node-id SPARK_ID` to target a subset; omitting it selects
 every eligible Spark.
+
+`fleet current` shows observed workloads and placements, while `fleet state`
+shows the current Spark roster, capacity, and freshness. The old
+`fleet profile` spelling remains accepted as a compatibility alias for the
+single-node display-name edit; saved whole-fleet profiles use the separate
+`profiles` command group.
+
+## Models, NAS cache, and profiles
+
+The task-oriented groups keep model selection, NAS caching, and whole-fleet
+switches explicit and machine-readable. Complex requests can be supplied as a
+bounded JSON object with `--input JSON`, `--input-file FILE`, or `--stdin`.
+
+```bash
+vonkctl models discover --search qwen --all --json
+vonkctl models show MODEL_ID --json
+vonkctl models compare MODEL_ID MODEL_ID --json
+
+vonkctl cache list --all --json
+vonkctl cache show ARTIFACT_SET_SHA256 --json
+vonkctl cache download --input-file exact-artifacts.json --apply --json
+vonkctl cache repair ARTIFACT_SET_SHA256 --plan-digest DIGEST --apply --json
+vonkctl cache update ARTIFACT_SET_SHA256 --input-file new-pin.json --apply --json
+vonkctl cache eviction preview --json
+vonkctl cache eviction apply --plan-digest DIGEST --apply --json
+
+vonkctl profiles list --json
+vonkctl profiles show PROFILE_ID --json
+vonkctl profiles create --input-file profile.json --json
+vonkctl profiles update PROFILE_ID --stdin --json
+vonkctl profiles duplicate PROFILE_ID --name "Creative setup" --json
+vonkctl profiles capture-current --name "Current setup" --apply --json
+vonkctl profiles preview PROFILE_ID --json
+vonkctl profiles prepare PROFILE_ID --plan-digest DIGEST --apply --json
+vonkctl profiles switch PROFILE_ID --plan-digest DIGEST --apply --json
+vonkctl profiles match PROFILE_ID --json
+vonkctl profiles delete PROFILE_ID --apply --json
+```
+
+Cache download requests identify an exact immutable artifact set; optional
+`--model-version-sha256` and `--recipe-revision-sha256` flags are available for
+the common single-selection form. Repair and eviction require the digest from
+a fresh preview before `--apply`. A request key is generated when omitted and
+can be supplied again after a lost connection to reconcile an uncertain
+response.
+
+## Operations and recovery
+
+Operations return durable IDs that remain inspectable after the invoking
+process exits. `wait` is bounded and never cancels server work on timeout;
+`watch` performs one bounded observation and `evidence` retrieves the sanitized
+diagnostic record.
+
+```bash
+vonkctl operations list --status running --all --json
+vonkctl operations show OPERATION_ID --json
+vonkctl operations wait OPERATION_ID --timeout-seconds 60 --json
+vonkctl operations retry OPERATION_ID --request-key REQUEST_UUID --apply --json
+vonkctl operations resume OPERATION_ID --apply --json
+vonkctl operations cancel OPERATION_ID --reason "operator requested" --apply --json
+vonkctl operations evidence OPERATION_ID --json
+```
 
 ## Library and public catalog
 

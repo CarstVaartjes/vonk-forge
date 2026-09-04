@@ -9,6 +9,8 @@ import json
 import os
 import re
 import stat
+import sys
+import time
 import urllib.parse
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -246,6 +248,26 @@ def _request_key(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _structured_input(parser: argparse.ArgumentParser, *, required: bool = True) -> None:
+    """Add the bounded structured-input contract used by agent callers.
+
+    ``--input -`` is accepted as an explicit stdin form as well as the more
+    discoverable ``--stdin`` flag.  Keeping this on the parser means every
+    complex command advertises the same machine-facing contract.
+    """
+    group = parser.add_mutually_exclusive_group(required=required)
+    group.add_argument("--input", metavar="JSON", help="Inline JSON object")
+    group.add_argument("--input-file", type=Path, help="Bounded JSON object file")
+    group.add_argument("--stdin", action="store_true", help="Read a JSON object from stdin")
+
+
+def _plan_flags(parser: argparse.ArgumentParser, *, require_digest: bool = False) -> None:
+    parser.add_argument("--plan-digest", required=require_digest)
+    _request_key(parser)
+    _apply(parser)
+    _add_json(parser)
+
+
 def _action_pair(
     commands: argparse._SubParsersAction[argparse.ArgumentParser],
     name: str,
@@ -301,11 +323,23 @@ def add_controller_commands(
     telemetry.add_argument("--maximum-points", type=int, choices=range(1, 3001))
     _add_json(telemetry)
 
-    profile = fleet_commands.add_parser("profile", help="Rename a Fleet node")
+    profile = fleet_commands.add_parser(
+        "node-profile", aliases=["profile"], help="Rename a Fleet node"
+    )
     profile.add_argument("node_id")
     profile.add_argument("--display-name", required=True)
     _apply(profile)
     _add_json(profile)
+    current = fleet_commands.add_parser(
+        "current", help="Show current workloads and placements"
+    )
+    current.add_argument("--search", default="")
+    current.add_argument("--all", action="store_true")
+    _add_json(current)
+    state = fleet_commands.add_parser("state", help="Show current Spark state and capacity")
+    state.add_argument("--search", default="")
+    state.add_argument("--all", action="store_true")
+    _add_json(state)
 
     agents = fleet_commands.add_parser("agents", help="List registered agents")
     _add_json(agents)
@@ -685,6 +719,125 @@ def add_controller_commands(
     _apply(resume)
     _add_json(resume)
 
+    # Stable, task-oriented aliases for the browser's primary workflows.  The
+    # lower-level ``library`` tree remains available for expert lifecycle work.
+    models = commands.add_parser("models", help="Discover and compare model versions")
+    model_commands = _subcommands(models, "models_command")
+    model_list = model_commands.add_parser("list", aliases=["discover"])
+    _paging(model_list, default=100)
+    model_list.add_argument("--search", default="")
+    model_list.add_argument("--capability", action="append", default=[])
+    _add_json(model_list)
+    model_show = model_commands.add_parser("show")
+    model_show.add_argument("model_id")
+    _add_json(model_show)
+    model_compare = model_commands.add_parser("compare")
+    model_compare.add_argument("model_id", nargs="+", metavar="MODEL_ID")
+    _add_json(model_compare)
+
+    cache = commands.add_parser("cache", help="Manage verified NAS model artifacts")
+    cache_commands = _subcommands(cache, "cache_command")
+    cache_list = cache_commands.add_parser("list")
+    _paging(cache_list, default=100)
+    cache_list.add_argument("--search", default="")
+    cache_list.add_argument("--state")
+    _add_json(cache_list)
+    cache_show = cache_commands.add_parser("show")
+    cache_show.add_argument("artifact_id")
+    _add_json(cache_show)
+    cache_download = cache_commands.add_parser("download")
+    _structured_input(cache_download, required=False)
+    cache_download.add_argument("--model-version-sha256")
+    cache_download.add_argument("--recipe-revision-sha256")
+    _plan_flags(cache_download)
+    cache_repair = cache_commands.add_parser("repair")
+    cache_repair.add_argument("artifact_id")
+    _plan_flags(cache_repair)
+    cache_update = cache_commands.add_parser("update")
+    cache_update.add_argument("artifact_id")
+    _structured_input(cache_update, required=False)
+    _plan_flags(cache_update)
+    eviction = cache_commands.add_parser("eviction", help="Review or apply cache eviction")
+    eviction_commands = _subcommands(eviction, "eviction_command")
+    eviction_preview = eviction_commands.add_parser("preview")
+    _structured_input(eviction_preview, required=False)
+    _add_json(eviction_preview)
+    eviction_apply = eviction_commands.add_parser("apply")
+    _structured_input(eviction_apply, required=False)
+    _plan_flags(eviction_apply, require_digest=True)
+
+    profiles = commands.add_parser("profiles", help="Saved whole-fleet running profiles")
+    profile_commands = _subcommands(profiles, "profiles_command")
+    profile_list = profile_commands.add_parser("list")
+    profile_list.add_argument("--search", default="")
+    _add_json(profile_list)
+    profile_show = profile_commands.add_parser("show")
+    profile_show.add_argument("profile_id")
+    _add_json(profile_show)
+    profile_create = profile_commands.add_parser("create")
+    _structured_input(profile_create)
+    _add_json(profile_create)
+    profile_update = profile_commands.add_parser("update")
+    profile_update.add_argument("profile_id")
+    _structured_input(profile_update)
+    _add_json(profile_update)
+    profile_duplicate = profile_commands.add_parser("duplicate")
+    profile_duplicate.add_argument("profile_id")
+    profile_duplicate.add_argument("--name", required=True)
+    profile_duplicate.add_argument("--description")
+    _add_json(profile_duplicate)
+    profile_capture = profile_commands.add_parser("capture-current")
+    profile_capture.add_argument("--name", required=True)
+    profile_capture.add_argument("--description", default="")
+    profile_capture.add_argument("--installation-policy", choices=("keep-cached", "exact"), default="keep-cached")
+    _apply(profile_capture)
+    _add_json(profile_capture)
+    profile_delete = profile_commands.add_parser("delete")
+    profile_delete.add_argument("profile_id")
+    _apply(profile_delete)
+    _add_json(profile_delete)
+    profile_preview = profile_commands.add_parser("preview")
+    profile_preview.add_argument("profile_id")
+    _add_json(profile_preview)
+    for profile_action in ("prepare", "switch"):
+        action_parser = profile_commands.add_parser(profile_action)
+        action_parser.add_argument("profile_id")
+        _plan_flags(action_parser)
+    profile_match = profile_commands.add_parser("match")
+    profile_match.add_argument("profile_id")
+    _add_json(profile_match)
+
+    operations = commands.add_parser("operations", help="Inspect durable operations and evidence")
+    operation_commands = _subcommands(operations, "operations_command")
+    operation_list = operation_commands.add_parser("list")
+    _paging(operation_list, default=20)
+    operation_list.add_argument("--status")
+    operation_list.add_argument("--kind")
+    _add_json(operation_list)
+    operation_show = operation_commands.add_parser("show")
+    operation_show.add_argument("operation_id")
+    _add_json(operation_show)
+    for operation_action in ("watch", "wait"):
+        watch_parser = operation_commands.add_parser(operation_action)
+        watch_parser.add_argument("operation_id")
+        watch_parser.add_argument("--timeout-seconds", type=int, default=30)
+        watch_parser.add_argument("--interval-seconds", type=float, default=1.0)
+        watch_parser.add_argument(
+            "--request-key",
+            help="Reuse the apply idempotency key while reconciling an uncertain response",
+        )
+        _add_json(watch_parser)
+    for operation_action in ("retry", "resume", "cancel"):
+        action_parser = operation_commands.add_parser(operation_action)
+        action_parser.add_argument("operation_id")
+        if operation_action == "cancel":
+            action_parser.add_argument("--reason", default="operator requested cancellation")
+        _plan_flags(action_parser)
+    evidence = operation_commands.add_parser("evidence")
+    evidence.add_argument("operation_id")
+    evidence.add_argument("--file", type=Path)
+    _add_json(evidence)
+
 
 def _quoted(value: str) -> str:
     return urllib.parse.quote(value, safe="")
@@ -706,6 +859,98 @@ def _read_object(path: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("input JSON must be an object")
     return value
+
+
+def _read_structured(args: argparse.Namespace, *, required: bool = True) -> dict[str, object]:
+    """Read one bounded JSON object from inline text, a file, or stdin."""
+    source = getattr(args, "input", None)
+    input_file = getattr(args, "input_file", None)
+    use_stdin = bool(getattr(args, "stdin", False))
+    if source is None and input_file is None and not use_stdin:
+        if required:
+            raise ValueError("one of --input, --input-file, or --stdin is required")
+        return {}
+    if source is not None:
+        raw = source.encode()
+        if len(raw) > 1_048_576:
+            raise ValueError("inline JSON input exceeds the 1 MiB limit")
+        return _decode_structured(raw)
+    if input_file is not None:
+        return _read_object(input_file)
+    stream = getattr(sys.stdin, "buffer", sys.stdin)
+    raw = stream.read(1_048_577)
+    if isinstance(raw, str):
+        raw = raw.encode()
+    if len(raw) > 1_048_576:
+        raise ValueError("stdin JSON input exceeds the 1 MiB limit")
+    return _decode_structured(raw)
+
+
+def _decode_structured(raw: bytes) -> dict[str, object]:
+    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"input JSON contains duplicate key: {key}")
+            value[key] = item
+        return value
+
+    value = json.loads(raw, object_pairs_hook=reject_duplicates)
+    if not isinstance(value, dict):
+        raise TypeError("input JSON must be an object")
+    return value
+
+
+def _validated_request_key(args: argparse.Namespace, factory: Callable[[], str]) -> str:
+    value = args.request_key or factory()
+    if re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        value,
+    ) is None:
+        raise ValueError("--request-key must be a lowercase UUID")
+    return value
+
+
+def _load_pages(
+    client: ControllerClient,
+    path: str,
+    args: argparse.Namespace,
+    *,
+    query: Mapping[str, object] | None = None,
+    collection: str | None = None,
+) -> dict[str, object]:
+    """Follow server cursors with a hard bound and preserve stable JSON."""
+    cursor = getattr(args, "cursor", None)
+    pages: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for _ in range(_MAX_PAGES):
+        values = dict(query or {})
+        values.update(cursor=cursor, limit=getattr(args, "limit", 20))
+        page = client.request("GET", path, query=_query(**values))
+        pages.append(page)
+        next_cursor = page.get("next_cursor")
+        if not getattr(args, "all", False) or not isinstance(next_cursor, str) or not next_cursor:
+            break
+        if next_cursor in seen:
+            raise ValueError("continuation cursor repeated")
+        seen.add(next_cursor)
+        cursor = next_cursor
+    else:
+        raise ValueError("pagination exceeded the safety limit")
+    if not pages:
+        return {}
+    result = dict(pages[0])
+    if collection is None:
+        return result
+    merged: list[object] = []
+    for page in pages:
+        values = page.get(collection)
+        if isinstance(values, list):
+            merged.extend(values)
+    result[collection] = merged
+    result["loaded_pages"] = len(pages)
+    result["next_cursor"] = pages[-1].get("next_cursor")
+    return result
 
 
 def _inspect_artifact_input(
@@ -1553,18 +1798,18 @@ def _model_identity_key(model: Mapping[str, object]) -> tuple[object, object, ob
 def _load_library_snapshot(
     client: ControllerClient, args: argparse.Namespace
 ) -> dict[str, object]:
-    cursor = args.cursor
+    cursor = getattr(args, "cursor", None)
     seen: set[str] = set()
     pages: list[dict[str, object]] = []
     for _page_number in range(_MAX_PAGES):
         page = client.request(
             "GET",
             "/api/v1/library",
-            query=_query(cursor=cursor, limit=args.limit),
+            query=_query(cursor=cursor, limit=getattr(args, "limit", 100)),
         )
         pages.append(page)
         next_cursor = page.get("next_cursor")
-        if not args.all or not isinstance(next_cursor, str) or not next_cursor:
+        if not getattr(args, "all", False) or not isinstance(next_cursor, str) or not next_cursor:
             break
         if next_cursor in seen:
             raise ValueError("Library continuation cursor repeated")
@@ -1612,6 +1857,14 @@ def _load_library_snapshot(
 
 def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     command = args.fleet_command
+    if command == "current":
+        return client.request(
+            "GET", "/api/v1/fleet/workloads", query=_query(search=args.search or None, all=True if args.all else None)
+        )
+    if command == "state":
+        return client.request(
+            "GET", "/api/v1/fleet/state", query=_query(search=args.search or None, all=True if args.all else None)
+        )
     if command in {"list", "show"}:
         payload = client.request("GET", "/api/v1/fleet")
         if command == "list":
@@ -1628,7 +1881,7 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
             f"/api/v1/nodes/{_quoted(args.node_id)}/telemetry",
             query=_telemetry_query(args),
         )
-    if command == "profile":
+    if command in {"profile", "node-profile"}:
         display_name = args.display_name.strip()
         if (
             not display_name
@@ -2572,6 +2825,232 @@ def _run_activity(
     return _plan_or_request(args, client, "POST", f"{path}/resume")
 
 
+def _run_models(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
+    command = args.models_command
+    if command in {"list", "discover"}:
+        result = _load_library_snapshot(client, args)
+        result = _filter_library(result, args.search)
+        if args.capability:
+            models = result.get("models")
+            if isinstance(models, list):
+                result["models"] = [
+                    model
+                    for model in models
+                    if isinstance(model, Mapping)
+                    and any(
+                        any(capability in recipe.get("capabilities", []) for capability in args.capability)
+                        for recipe in model.get("recipes", [])
+                        if isinstance(recipe, Mapping)
+                    )
+                ]
+        return result
+    if command == "show":
+        snapshot = _load_library_snapshot(client, args)
+        return _find_model(snapshot, args.model_id)
+    values = _compare_values(args.model_id, "model")
+    return {
+        "models": [_find_model(_load_library_snapshot(client, args), value) for value in values],
+        "compared_count": len(values),
+    }
+
+
+def _find_model(snapshot: Mapping[str, object], requested: str) -> dict[str, object]:
+    models = snapshot.get("models")
+    if not isinstance(models, list):
+        raise TypeError("Library response contains no model identities")
+    query = requested.casefold()
+    matches: list[dict[str, object]] = []
+    for model in models:
+        if not isinstance(model, Mapping) or not isinstance(model.get("model"), Mapping):
+            continue
+        identity = model["model"]
+        publisher = str(identity.get("publisher", ""))
+        slug = str(identity.get("slug", ""))
+        digest = str(identity.get("content_sha256", ""))
+        aliases = {publisher, slug, f"{publisher}/{slug}", digest, f"{publisher}/{slug}@sha256:{digest}"}
+        if query in {alias.casefold() for alias in aliases}:
+            matches.append(dict(model))
+    if len(matches) > 1:
+        raise ValueError(json.dumps({"error": "ambiguous model", "candidates": matches}, sort_keys=True))
+    if not matches:
+        raise ValueError(f"model not found: {requested}")
+    return matches[0]
+
+
+def _cache_payload(args: argparse.Namespace) -> dict[str, object]:
+    payload = _read_structured(args, required=False)
+    for key in ("artifact_id", "plan_digest"):
+        value = getattr(args, key, None)
+        if value is not None:
+            payload.setdefault(key, value)
+    return payload
+
+
+def _run_cache(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.cache_command
+    if command == "list":
+        return _load_pages(
+            client,
+            "/api/v1/model-cache",
+            args,
+            query=_query(search=args.search, state=args.state),
+            collection="entries",
+        )
+    if command == "show":
+        return client.request("GET", f"/api/v1/model-cache/entries/{_quoted(args.artifact_id)}")
+    if command == "eviction":
+        variant = args.eviction_command
+        path = "/api/v1/model-cache/eviction-preview" if variant == "preview" else "/api/v1/model-cache/evict"
+        payload = _cache_payload(args)
+        if variant == "apply":
+            payload.update(
+                plan_digest=args.plan_digest,
+                request_key=_validated_request_key(args, request_id_factory),
+            )
+            return _plan_or_request(args, client, "POST", path, payload)
+        return client.request("POST", path, payload)
+    if command == "download":
+        payload = _cache_payload(args)
+        for key in ("model_version_sha256", "recipe_revision_sha256"):
+            value = getattr(args, key, None)
+            if value is not None:
+                payload.setdefault(key, value)
+        if not payload:
+            raise ValueError("cache download requires an exact artifact input")
+        if args.apply:
+            payload["request_key"] = _validated_request_key(args, request_id_factory)
+        return _plan_or_request(args, client, "POST", "/api/v1/model-cache/download", payload)
+    action = command
+    path = "/api/v1/model-cache/download" if command == "update" else f"/api/v1/model-cache/{action}"
+    payload = _cache_payload(args)
+    payload.setdefault("artifact_set_sha256", args.artifact_id)
+    if command == "update":
+        payload.setdefault("update_existing", True)
+    if command == "repair" and args.apply and not args.plan_digest:
+        raise ValueError("cache repair requires --plan-digest from a fresh preview")
+    if args.apply:
+        payload["request_key"] = _validated_request_key(args, request_id_factory)
+    return _plan_or_request(args, client, "POST", path, payload)
+
+
+def _profile_body(args: argparse.Namespace) -> dict[str, object]:
+    return _read_structured(args)
+
+
+def _run_profiles(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.profiles_command
+    base = "/api/v1/fleet-profiles"
+    if command == "list":
+        result = client.request("GET", base)
+        search = args.search.strip().casefold()
+        if search and isinstance(result.get("profiles"), list):
+            result["profiles"] = [
+                profile
+                for profile in result["profiles"]
+                if isinstance(profile, Mapping)
+                and search in str(profile.get("name", "")).casefold()
+            ]
+        return result
+    if command == "show":
+        return client.request("GET", f"{base}/{_quoted(args.profile_id)}")
+    if command in {"create", "update"}:
+        path = base if command == "create" else f"{base}/{_quoted(args.profile_id)}"
+        return client.request("POST" if command == "create" else "PUT", path, _profile_body(args))
+    if command == "duplicate":
+        source = client.request("GET", f"{base}/{_quoted(args.profile_id)}")
+        body = {
+            key: value
+            for key, value in source.items()
+            if key in {
+                "name", "description", "scope", "installation_policy",
+                "labels", "favorite", "assignments",
+            }
+        }
+        body["name"] = args.name
+        if args.description is not None:
+            body["description"] = args.description
+        return client.request("POST", base, body)
+    if command == "capture-current":
+        payload = {
+            "name": args.name,
+            "description": args.description,
+            "installation_policy": args.installation_policy,
+        }
+        return _plan_or_request(args, client, "POST", f"{base}/capture-current", payload)
+    if command == "delete":
+        return _plan_or_request(args, client, "DELETE", f"{base}/{_quoted(args.profile_id)}")
+    if command == "preview":
+        return client.request("POST", f"{base}/{_quoted(args.profile_id)}/preview", {})
+    if command == "match":
+        return client.request("GET", f"{base}/{_quoted(args.profile_id)}/match")
+    profile_id = _quoted(args.profile_id)
+    if command == "prepare":
+        path = f"{base}/{profile_id}/prepare"
+    else:
+        path = f"{base}/{profile_id}/apply" if args.apply else f"{base}/{profile_id}/preview"
+    payload: dict[str, object] = {}
+    if args.plan_digest is not None:
+        payload["plan_digest"] = args.plan_digest
+    if args.apply:
+        payload["request_key"] = _validated_request_key(args, request_id_factory)
+    if command == "prepare" and not args.apply:
+        payload["mode"] = "prepare"
+    return _plan_or_request(args, client, "POST", path, payload)
+
+
+def _run_operations(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.operations_command
+    base = "/api/v1/operations"
+    if command == "list":
+        return _load_pages(client, base, args, query=_query(status=args.status, kind=args.kind), collection="operations")
+    operation_id = _quoted(args.operation_id)
+    if command == "show":
+        return client.request("GET", f"{base}/{operation_id}")
+    if command == "evidence":
+        result = client.request("GET", f"{base}/{operation_id}/evidence")
+        if args.file is not None:
+            args.file.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
+            return {"operation_id": args.operation_id, "file": str(args.file)}
+        return result
+    if command in {"watch", "wait"}:
+        timeout = max(0, min(args.timeout_seconds, 300))
+        interval = max(0.1, min(args.interval_seconds, 30.0))
+        deadline = time.monotonic() + timeout
+        result: dict[str, object] = {}
+        while True:
+            result = client.request(
+                "GET",
+                f"{base}/{operation_id}",
+                query=_query(request_key=getattr(args, "request_key", None)) or None,
+            )
+            state = str(result.get("state", result.get("status", ""))).casefold()
+            if state in {"succeeded", "completed", "failed", "cancelled", "canceled", "blocked", "partial"} or command == "watch" or time.monotonic() >= deadline:
+                if time.monotonic() >= deadline and state not in {"succeeded", "completed", "failed", "cancelled", "canceled"}:
+                    result = {**result, "timed_out": True, "operation_id": args.operation_id}
+                return result
+            time.sleep(interval)
+    action = command
+    payload: dict[str, object] = {}
+    if action == "cancel":
+        payload["reason"] = " ".join(args.reason.split())[:512]
+    if args.apply:
+        payload.update(request_key=_validated_request_key(args, request_id_factory))
+    path = f"{base}/{operation_id}/{action}"
+    return _plan_or_request(args, client, "POST", path, payload)
+
+
 def run_controller(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -2583,4 +3062,12 @@ def run_controller(
         return _run_library(args, client, request_id_factory)
     if args.command == "activity":
         return _run_activity(args, client)
+    if args.command == "models":
+        return _run_models(args, client)
+    if args.command == "cache":
+        return _run_cache(args, client, request_id_factory)
+    if args.command == "profiles":
+        return _run_profiles(args, client, request_id_factory)
+    if args.command == "operations":
+        return _run_operations(args, client, request_id_factory)
     raise ValueError("unsupported controller command")

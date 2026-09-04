@@ -513,7 +513,15 @@ def main(
                 client,
                 request_id_factory or (lambda: str(uuid.uuid4())),
             )
-        elif args.command in {"fleet", "library", "activity"}:
+        elif args.command in {
+            "fleet",
+            "library",
+            "activity",
+            "models",
+            "cache",
+            "profiles",
+            "operations",
+        }:
             result = run_controller(
                 args,
                 client,  # type: ignore[arg-type]

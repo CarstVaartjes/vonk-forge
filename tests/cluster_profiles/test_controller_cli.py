@@ -1341,6 +1341,125 @@ def test_controller_rejects_out_of_contract_values(argv: tuple[str, ...]) -> Non
     assert payload["error_type"] == "control_api"
 
 
+def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/model-cache"): {"schema_version": 2, "entries": []},
+            ("POST", "/api/v1/model-cache/download"): {"id": "download-1"},
+            ("POST", "/api/v1/model-cache/repair"): {"id": "repair-1"},
+            ("GET", "/api/v1/fleet-profiles"): {"profiles": []},
+            ("POST", "/api/v1/fleet-profiles"): {"id": "profile-1"},
+            ("POST", "/api/v1/fleet-profiles/profile-1/preview"): {"plan_digest": "d" * 64},
+            ("POST", "/api/v1/fleet-profiles/profile-1/apply"): {"id": "application-1"},
+        }
+    )
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        assert cli.main(("--json", "cache", "list"), control_client=client) == 0
+        assert cli.main(
+            ("--json", "cache", "download", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}',
+             "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+            control_client=client,
+        ) == 0
+        assert cli.main(
+            ("--json", "cache", "repair", "a" * 64, "--plan-digest", "d" * 64,
+             "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+            control_client=client,
+        ) == 0
+        assert cli.main(("--json", "profiles", "list"), control_client=client) == 0
+        assert cli.main(
+            ("--json", "profiles", "create", "--input", '{"name":"Demo","assignments":[]}'),
+            control_client=client,
+        ) == 0
+        assert cli.main(("--json", "profiles", "preview", "profile-1"), control_client=client) == 0
+        assert cli.main(
+            ("--json", "profiles", "switch", "profile-1", "--plan-digest", "d" * 64,
+             "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+            control_client=client,
+        ) == 0
+    assert client.calls[0][0:2] == ("GET", "/api/v1/model-cache")
+    assert ("POST", "/api/v1/model-cache/download") in [call[0:2] for call in client.calls]
+    assert ("POST", "/api/v1/model-cache/repair") in [call[0:2] for call in client.calls]
+    assert ("POST", "/api/v1/fleet-profiles/profile-1/apply") in [call[0:2] for call in client.calls]
+
+
+def test_operations_wait_reobserves_until_terminal_without_cancelling() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/operations/op-1"): [
+                {"id": "op-1", "state": "running"},
+                {"id": "op-1", "state": "succeeded"},
+            ]
+        }
+    )
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        result = cli.main(
+            ("--json", "operations", "wait", "op-1", "--timeout-seconds", "1", "--interval-seconds", ".01",
+             "--request-key", "11111111-1111-4111-8111-111111111111"),
+            control_client=client,
+        )
+    assert result == 0
+    assert json.loads(stdout.getvalue())["state"] == "succeeded"
+    assert len(client.calls) == 2
+    assert client.calls[0][3] == {"request_key": "11111111-1111-4111-8111-111111111111"}
+
+
+def test_models_show_uses_library_identity_projection() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/library"): {
+                "models": [
+                    {"model": {"publisher": "acme", "slug": "demo", "content_sha256": "a" * 64}, "recipes": []}
+                ],
+                "unlinked_recipes": [],
+            }
+        }
+    )
+    result, payload = _invoke(client, "--json", "models", "show", "acme/demo")
+    assert result == 0
+    assert payload["model"]["slug"] == "demo"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("fleet", "current"),
+        ("fleet", "state"),
+        ("models", "discover"),
+        ("models", "compare", "a", "b"),
+        ("cache", "show", "a"),
+        ("cache", "update", "a"),
+        ("cache", "eviction", "preview"),
+        ("cache", "eviction", "apply", "--plan-digest", "d" * 64,
+         "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+        ("profiles", "show", "p"),
+        ("profiles", "update", "p", "--input", '{"name":"Demo","assignments":[]}'),
+        ("profiles", "duplicate", "p", "--name", "Copy"),
+        ("profiles", "capture-current", "--name", "Current"),
+        ("profiles", "delete", "p"),
+        ("profiles", "prepare", "p"),
+        ("profiles", "match", "p"),
+        ("operations", "show", "o"),
+        ("operations", "watch", "o"),
+        ("operations", "retry", "o"),
+        ("operations", "resume", "o"),
+        ("operations", "cancel", "o"),
+        ("operations", "evidence", "o"),
+    ],
+)
+def test_task_oriented_command_parser_and_dispatch_contract(argv: tuple[str, ...]) -> None:
+    response: dict[str, object] = {"models": [], "unlinked_recipes": []}
+    if argv[:2] == ("models", "compare"):
+        response["models"] = [
+            {"model": {"publisher": "a", "slug": "model", "content_sha256": "a" * 64}, "recipes": []},
+            {"model": {"publisher": "b", "slug": "model", "content_sha256": "b" * 64}, "recipes": []},
+        ]
+    client = _Client({("GET", "/api/v1/library"): response})
+    result, _payload = _invoke(client, "--json", *argv)
+    assert result == 0
+
+
 def test_artifact_job_create_declares_hashed_bounded_local_inputs(
     tmp_path: Path,
 ) -> None:
