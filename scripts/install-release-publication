@@ -164,7 +164,11 @@ def _validate_origin(origin: str) -> str:
 
 
 def _validate_image(
-    reference: str, role: str, channel: str, version: str, source_sha: str
+    reference: str,
+    role: str,
+    channel: str,
+    version: str,
+    images_source_sha: str,
 ) -> None:
     match = IMAGE.fullmatch(reference)
     if match is None:
@@ -176,7 +180,7 @@ def _validate_image(
         expected = version if role == "hermes" else f"v{version}"
         if tag != expected:
             raise PublicationError(f"{role} image version is inconsistent")
-    elif tag != f"dev-sha-{source_sha}":
+    elif tag != f"dev-sha-{images_source_sha}":
         raise PublicationError(f"{role} image version is inconsistent")
 
 
@@ -508,7 +512,12 @@ def assemble(arguments: argparse.Namespace) -> str:
     channel = arguments.channel
     version = arguments.version
     source_sha = arguments.source_sha
-    if VERSION.fullmatch(version) is None or SOURCE_SHA.fullmatch(source_sha) is None:
+    images_source_sha = arguments.images_source_sha
+    if (
+        VERSION.fullmatch(version) is None
+        or SOURCE_SHA.fullmatch(source_sha) is None
+        or SOURCE_SHA.fullmatch(images_source_sha) is None
+    ):
         raise PublicationError("release identity is invalid")
     if channel == "stable" and SEMVER.fullmatch(version) is None:
         raise PublicationError("stable version is invalid")
@@ -524,7 +533,7 @@ def assemble(arguments: argparse.Namespace) -> str:
         "litellm": arguments.litellm_image,
     }
     for role, reference in images.items():
-        _validate_image(reference, role, channel, version, source_sha)
+        _validate_image(reference, role, channel, version, images_source_sha)
     nas = _pairs(arguments.nas_setup, "NAS setup")
     spark = _pairs(arguments.spark_setup, "Spark setup")
     packages = _pairs(arguments.agent_package, "agent package")
@@ -1875,6 +1884,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--channel", choices=("dev", "stable"), required=True)
     build.add_argument("--version", required=True)
     build.add_argument("--source-sha", required=True)
+    build.add_argument("--images-source-sha", required=True)
     build.add_argument("--origin", required=True)
     build.add_argument("--expires-at", required=True, type=int)
     build.add_argument("--signing-key", required=True, type=Path)
