@@ -887,6 +887,7 @@ def add_controller_commands(
     profile_capture.add_argument("--description", default="")
     profile_capture.add_argument("--installation-policy", choices=("keep-cached", "exact"), default="keep-cached")
     profile_capture.add_argument("--request-key")
+    _structured_input(profile_capture, required=False)
     _apply(profile_capture)
     _add_json(profile_capture)
     profile_delete = profile_commands.add_parser("delete")
@@ -3244,11 +3245,10 @@ def _run_profiles(
             body,
         )
     if command == "capture-current":
-        payload = {
-            "name": args.name,
-            "description": args.description,
-            "installation_policy": args.installation_policy,
-        }
+        payload = _read_structured(args, required=False)
+        payload.setdefault("name", args.name)
+        payload.setdefault("description", args.description)
+        payload.setdefault("installation_policy", args.installation_policy)
         if args.apply:
             if not args.request_key:
                 raise ValueError("profile capture-current apply requires --request-key")
