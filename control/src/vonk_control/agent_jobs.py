@@ -1322,6 +1322,15 @@ class AgentJobService:
                 and node.observation_receipt_public_key != receipt_key
             ):
                 raise ValueError("agent observation receipt key changed")
+            if (
+                isinstance(receipt_key, str)
+                and node.observation_receipt_public_key is None
+            ):
+                # Nodes enrolled before signed run observations existed acquire
+                # their immutable receipt identity on the first authenticated
+                # contact from a capable upgraded agent.  Subsequent contacts
+                # remain change-protected by the check above.
+                node.observation_receipt_public_key = receipt_key
             node.architecture = str(runtime_identity["architecture"])
             node.semantic_version = str(runtime_identity["semantic_version"])
             node.build_digest = str(runtime_identity["build_digest"])
