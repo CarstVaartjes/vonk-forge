@@ -21,6 +21,7 @@ on:
       - control/**
       - deploy/compose/**
       - inventory/wheels/**
+      - install/**
       - packaging/**
       - pyproject.toml
       - rust/crates/vonk-agent-helper/**

@@ -1237,6 +1237,7 @@ def test_installer_publication_has_one_development_fanin_anchor() -> None:
         {
             ".github/workflows/installer-publication-source.yml",
             ".github/workflows/installer-publication.yml",
+            "install/**",
             "scripts/build-nas-compose-bundle",
             "scripts/install-release-publication",
             "tests/acceptance/test_fresh_nas_install.py",
