@@ -178,3 +178,7 @@ Stop-and-escalate to Sol (not user by default) if API truth cannot support a pro
 ## Full metrics requirement
 
 The [metrics implementation and visual acceptance contract](interface-metrics-spec-2026-09-04.md) adds the SparkDash/PAIR coverage ledger, F2 hardware and inference detail designs, provenance and aggregation rules, and acceptance cases A17–A23. It is required scope for web, Controller/native telemetry and CLI, supervised by Sol.
+
+## Controller preparation decision
+
+The [Controller-owned rollout preparation contract](controller-preparation-contract-2026-09-05.md) makes the Controller the preparation and delivery authority for both model files and runtime images. Profile preparation stages both onto selected Sparks before quick switching. This is required implementation scope.
