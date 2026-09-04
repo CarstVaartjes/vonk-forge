@@ -202,6 +202,8 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         version,
         "--source-sha",
         SOURCE_SHA,
+        "--images-source-sha",
+        SOURCE_SHA,
         "--origin",
         "https://install.vonkforge.ai",
         "--expires-at",
@@ -2195,6 +2197,40 @@ def test_assemble_refuses_mutable_image_references(tmp_path: Path, role: str) ->
 
     assert result.returncode == 2
     assert "image reference is mutable" in result.stderr
+
+
+def test_development_assembly_reuses_images_from_an_accepted_ancestor(
+    tmp_path: Path,
+) -> None:
+    inputs = _inputs(tmp_path, channel="dev")
+    command = _assemble_command(tmp_path, inputs)
+    images_source_sha = "c" * 40
+    command[command.index("--images-source-sha") + 1] = images_source_sha
+    for role in ("api", "worker", "hermes", "litellm"):
+        option = f"--{role}-image"
+        command[command.index(option) + 1] = command[
+            command.index(option) + 1
+        ].replace(f"dev-sha-{SOURCE_SHA}", f"dev-sha-{images_source_sha}")
+
+    result = subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_development_assembly_rejects_images_outside_bound_accepted_run(
+    tmp_path: Path,
+) -> None:
+    command = _assemble_command(tmp_path, _inputs(tmp_path, channel="dev"))
+    command[command.index("--images-source-sha") + 1] = "c" * 40
+
+    result = subprocess.run(
+        command, cwd=ROOT, text=True, capture_output=True, check=False
+    )
+
+    assert result.returncode == 2
+    assert "api image version is inconsistent" in result.stderr
 
 
 def test_promotion_writes_signed_atomic_manifest_after_acceptance_and_static_endpoints(

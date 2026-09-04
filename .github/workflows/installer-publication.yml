@@ -62,6 +62,7 @@ jobs:
       arm64_baseline_package: ${{ steps.accept.outputs.arm64_baseline_package }}
       compose_run_id: ${{ steps.accept.outputs.compose_run_id }}
       compose_artifact: ${{ steps.accept.outputs.compose_artifact }}
+      compose_source_sha: ${{ steps.accept.outputs.compose_source_sha }}
       setup_run_id: ${{ steps.accept.outputs.setup_run_id }}
       setup_source_sha: ${{ steps.accept.outputs.setup_source_sha }}
     steps:
@@ -199,6 +200,7 @@ jobs:
               )
               package_run_id=$TRIGGER_RUN_ID
               compose_run_id=$TRIGGER_RUN_ID
+              compose_source_sha=$SOURCE_SHA
               compose_artifact="platform-build-${release_tag#v}"
               setup_source_sha=$SOURCE_SHA
               setup_runs=$RUNNER_TEMP/installer-setup-runs.json
@@ -231,6 +233,7 @@ jobs:
           arm64_baseline_package=$(sed -n 's/^arm64_baseline_package=//p' <<< "$metadata")
           test -n "$version" && test -n "$package_artifact"
           [[ "$compose_run_id" =~ ^[1-9][0-9]*$ ]]
+          [[ "$compose_source_sha" =~ ^[0-9a-f]{40}$ ]]
 
           artifacts=$RUNNER_TEMP/accepted-artifacts.json
           gh api --paginate \
@@ -275,6 +278,7 @@ jobs:
             "arm64_baseline_package=$arm64_baseline_package" \
             "compose_run_id=$compose_run_id" \
             "compose_artifact=$compose_artifact" \
+            "compose_source_sha=$compose_source_sha" \
             "setup_run_id=$setup_run_id" \
             "setup_source_sha=$setup_source_sha" \
             >> "$GITHUB_OUTPUT"
@@ -350,6 +354,7 @@ jobs:
         env:
           CHANNEL: ${{ needs.authority.outputs.channel }}
           SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
+          IMAGES_SOURCE_SHA: ${{ needs.authority.outputs.compose_source_sha }}
           VERSION: ${{ needs.authority.outputs.version }}
           AMD64_PACKAGE: ${{ needs.authority.outputs.amd64_package }}
           ARM64_PACKAGE: ${{ needs.authority.outputs.arm64_package }}
@@ -413,6 +418,7 @@ jobs:
             --channel "$CHANNEL"
             --version "$VERSION"
             --source-sha "$SOURCE_SHA"
+            --images-source-sha "$IMAGES_SOURCE_SHA"
             --origin "$INSTALLER_PUBLIC_ORIGIN"
             --expires-at "$expires_at"
             --signing-key "$signing_key"
