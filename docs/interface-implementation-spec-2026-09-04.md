@@ -173,3 +173,8 @@ Use tiny real fixture payloads and disposable services to prove byte delivery/ve
 6. No live deployment and no physical-model acceptance claim. Remote push/PR/merge is coordinated with root after local integration and review.
 
 Stop-and-escalate to Sol (not user by default) if API truth cannot support a promised control, if cleanup crosses profile scope, or if workers disagree on an identity/state. Solve with a shared contract change; do not ship a fake button, silently cut scope or invent supported behavior.
+
+
+## Full metrics requirement
+
+The [metrics implementation and visual acceptance contract](interface-metrics-spec-2026-09-04.md) adds the SparkDash/PAIR coverage ledger, F2 hardware and inference detail designs, provenance and aggregation rules, and acceptance cases A17–A23. It is required scope for web, Controller/native telemetry and CLI, supervised by Sol.

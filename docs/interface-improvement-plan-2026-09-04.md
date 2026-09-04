@@ -234,3 +234,8 @@ Four legacy Library browser journeys are explicitly skipped, including full prev
 This follow-up used current issue bodies and source inspection. It did not rerun unchanged UI tests, execute live downloads or profile switches, or certify physical behavior. The earlier expert heuristic score was 24/40; the clarified profile semantics expose a deeper product-contract gap than that visual score captures.
 
 The plan is ready for scoped implementation/design work, but the current UI must not claim NAS cache availability or full replacement profile behavior before the supporting contracts are implemented. No GitHub mutations, commits, deployment, or physical qualification were performed.
+
+
+## Full metrics requirement
+
+The [metrics implementation and visual acceptance contract](interface-metrics-spec-2026-09-04.md) adds the SparkDash/PAIR coverage ledger, F2 hardware and inference detail designs, provenance and aggregation rules, and acceptance cases A17–A23. It is required scope for web, Controller/native telemetry and CLI, supervised by Sol.
