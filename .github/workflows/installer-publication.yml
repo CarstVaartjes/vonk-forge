@@ -939,7 +939,9 @@ jobs:
           openssl pkey -pubin -in "$public_key" -text -noout \
             | grep -Eq '^Public-Key: \((3072|4096) bit\)$'
           mapfile -t reports < <(find "$RUNNER_TEMP/gate-reports" -type f -name '*.json' | sort)
-          test "${#reports[@]}" = 3
+          # Spark agents are ARM64-only. Acceptance therefore binds one
+          # aggregate NAS report and one linux-arm64 Spark report.
+          test "${#reports[@]}" = 2
           command=(
             scripts/install-release-publication accept
             --channel "$CHANNEL"
