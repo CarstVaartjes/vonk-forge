@@ -94,14 +94,6 @@ jobs:
                 [.id, .run_number, .head_sha, .status, (.conclusion // "")] | @tsv
               ' "$exact_runs")
               if test -z "$candidate"; then
-                # The source anchor is intentionally tiny and can finish before
-                # GitHub has materialized a changed producer run. Give the
-                # scheduler one minute before concluding that path filtering
-                # omitted this producer and selecting accepted ancestry.
-                if ((attempt < 13)); then
-                  sleep 5
-                  continue
-                fi
                 break
               fi
               IFS=$'\t' read -r run_id run_number run_sha run_status run_conclusion \
@@ -166,6 +158,11 @@ jobs:
                 "$(git rev-parse --verify refs/remotes/origin/main^{commit})"; then
                 not_ready
               fi
+              # The source anchor is intentionally tiny and can finish before
+              # GitHub has materialized changed producer runs. Pay one shared
+              # scheduler grace before inspecting every producer; an absent
+              # exact run after this point means its path filter omitted it.
+              sleep 60
               IFS=$'\t' read -r package_run_id package_run_number package_source_sha \
                 < <(development_run agent-release.yml)
               metadata=$(

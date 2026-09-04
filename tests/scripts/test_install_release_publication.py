@@ -1240,7 +1240,11 @@ def test_installer_publication_has_one_development_fanin_anchor() -> None:
         for step in authority["steps"]
         if step["name"] == "Bind accepted workflow evidence to source authority"
     )
-    assert "if ((attempt < 13))" in bind["run"]
+    script = bind["run"]
+    assert script.count("sleep 60") == 1
+    assert script.index("sleep 60") < script.index(
+        "development_run agent-release.yml"
+    )
 
 
 def test_workflow_nas_gate_report_is_accepted_and_gate_drift_is_rejected(
