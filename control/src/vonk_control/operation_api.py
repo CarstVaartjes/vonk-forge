@@ -240,9 +240,29 @@ class JobOperationResponse(StrictModel):
         return document
 
 
-class OperationDetailResponse(JobOperationResponse):
+class OperationDetailResponse(StrictModel):
     schema_version: Literal[2] = 2
-    job_id: str = Field(min_length=1, max_length=128)
+    id: str = Field(min_length=1, max_length=128)
+    parent_id: str | None = Field(default=None, max_length=128)
+    node_ids: list[NodeIdentifier] = Field(max_length=1024)
+    kind: str = Field(min_length=1, max_length=80)
+    state: str = Field(min_length=1, max_length=80)
+    attempt: int = Field(ge=0)
+    progress: JobOperationProgress | None = None
+    created_at: str = Field(min_length=1, max_length=64)
+    updated_at: str | None = None
+    failure: OperationFailureEvidence | None = None
+    provenance: OperationEvidenceProvenance | None = None
+    evidence_download: OperationEvidenceDownload | None = None
+    recovery: OperationRecovery | None = None
+
+    @model_serializer(mode="wrap")
+    def _serialize_without_unset_evidence(self, handler):
+        document = handler(self)
+        for key in ("failure", "provenance", "evidence_download", "recovery"):
+            if document.get(key) is None:
+                document.pop(key, None)
+        return document
 
 
 class OperationsResponse(StrictModel):
@@ -429,6 +449,16 @@ def merge_operation_providers(
         page = provider.list_operations(query)
         total += page.total
         for item in page.items:
+            node_ids = item.get("node_ids")
+            if not isinstance(node_ids, (list, tuple)) or not all(
+                isinstance(node, str) and re.fullmatch(NODE_PATTERN, node)
+                for node in node_ids
+            ):
+                raise OperationProjectionError(
+                    f"{provider.family} provider returned invalid node_ids"
+                )
+            if node_id is not None and node_id not in node_ids:
+                continue
             boundary = _operation_boundary(item)
             if after is not None and boundary >= after:
                 raise OperationProjectionError(
@@ -697,7 +727,8 @@ def _operation_item(
         "attempt": operation.current_attempt,
         "id": operation.id,
         "kind": operation.kind,
-        "node_id": operation.node_id,
+        "node_ids": [operation.node_id],
+        "parent_id": operation.parent_job_id,
         "progress": progress,
         "result": result,
         "supported_actions": (
@@ -717,17 +748,13 @@ def operation_detail_response(
 
     return OperationDetailResponse(
         id=str(item["id"]),
-        job_id=str(item["job_id"]),
-        graph_operation_id=(
-            None
-            if item.get("graph_operation_id") is None
-            else str(item["graph_operation_id"])
-        ),
-        node_id=str(item["node_id"]),
+        parent_id=(None if item.get("parent_id") is None else str(item["parent_id"])),
+        node_ids=list(item["node_ids"]),
         kind=str(item["kind"]),
         state=str(item["state"]),
         attempt=int(item["attempt"]),
         progress=_progress_projection(item.get("progress")),
+        created_at=str(item["created_at"]),
         updated_at=(
             None if item.get("updated_at") is None else str(item["updated_at"])
         ),

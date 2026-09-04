@@ -193,8 +193,8 @@ def test_job_activity_summaries_include_their_authoritative_creation_time() -> N
 def test_generic_operation_read_contract_projects_bounded_durable_state() -> None:
     item = {
         "id": "33333333-3333-4333-8333-333333333333",
-        "job_id": "11111111-1111-4111-8111-111111111111",
-        "node_id": NODE_ID,
+        "parent_id": "11111111-1111-4111-8111-111111111111",
+        "node_ids": [NODE_ID],
         "kind": "recipe-transfer",
         "state": "uncertain",
         "attempt": 2,
@@ -220,6 +220,7 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
             },
         },
         "supported_actions": ["retry"],
+        "created_at": "2026-08-15T11:59:00Z",
         "updated_at": "2026-08-15T12:00:00Z",
     }
     services = OperationApiServices(
@@ -246,7 +247,8 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     assert listed.status_code == 200
     assert listed.json()["schema_version"] == 2
     assert listed.json()["total"] == 1
-    assert listed.json()["operations"][0]["job_id"] == item["job_id"]
+    assert listed.json()["operations"][0]["parent_id"] == item["parent_id"]
+    assert listed.json()["operations"][0]["node_ids"] == [NODE_ID]
     assert listed.json()["operations"][0]["schema_version"] == 2
     assert listed.json()["operations"][0]["recovery"] == {
         "uncertain": True,
@@ -275,8 +277,8 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     rows = {
         "cache-1": {
             "id": "cache-1",
-            "job_id": "job-cache",
-            "node_id": NODE_ID,
+            "parent_id": "job-cache",
+            "node_ids": [],
             "kind": "cache-download",
             "state": "running",
             "attempt": 1,
@@ -287,8 +289,8 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
         },
         "run-1": {
             "id": "run-1",
-            "job_id": "job-run",
-            "node_id": NODE_ID,
+            "parent_id": "job-run",
+            "node_ids": [NODE_ID, "spk_" + "2" * 32],
             "kind": "run",
             "state": "succeeded",
             "attempt": 1,
@@ -302,6 +304,11 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     def provider_for(ids: tuple[str, ...]) -> OperationProvider:
         def list_rows(query: OperationQuery) -> OperationListPage:
             selected = [rows[row_id] for row_id in ids]
+            if query.node_id is not None:
+                selected = [
+                    row for row in selected if query.node_id in row["node_ids"]
+                ]
+            total = len(selected)
             if query.after is not None:
                 selected = [
                     row
@@ -309,7 +316,7 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
                     if operation_api._operation_boundary(row) < query.after
                 ]
             selected.sort(key=operation_api._operation_boundary, reverse=True)
-            return OperationListPage(selected[: query.limit], None, len(ids))
+            return OperationListPage(selected[: query.limit], None, total)
 
         def get_row(operation_id: str) -> dict[str, object]:
             for row_id in ids:
@@ -342,15 +349,28 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
         params={"limit": "1", "cursor": first.json()["next_cursor"]},
     )
     detail = client.get("/api/v1/operations/run-1", headers=operator)
+    filtered = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"node_id": "spk_" + "2" * 32},
+    )
 
     assert first.status_code == 200
     assert first.json()["schema_version"] == 2
     assert first.json()["total"] == 2
     assert first.json()["operations"][0]["id"] == "cache-1"
+    assert first.json()["operations"][0]["node_ids"] == []
     assert second.status_code == 200
     assert second.json()["operations"][0]["id"] == "run-1"
+    assert second.json()["operations"][0]["node_ids"] == [
+        NODE_ID,
+        "spk_" + "2" * 32,
+    ]
     assert detail.status_code == 200
     assert detail.json()["kind"] == "run"
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["operations"][0]["id"] == "run-1"
 
 
 def test_fleet_exposes_visual_state_and_node_evidence() -> None:
