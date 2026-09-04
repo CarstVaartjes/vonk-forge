@@ -1647,6 +1647,7 @@ def production_app() -> FastAPI:
         lifecycle=recipe_operations,
         clock=clock,
         mappings=ClusterMappingService(sessions),
+        model_cache=model_cache,
     )
     artifact_jobs = ArtifactJobService(
         sessions,
