@@ -1129,24 +1129,16 @@ mod tests {
 
     #[test]
     fn system_runner_truncates_verbose_diagnostics_without_killing_the_process() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n")
-                .unwrap();
-            for _ in 0..1024 {
-                if stream.write_all(&[b'x'; 1024]).is_err() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(1));
-            }
-        });
+        let directory = tempdir().unwrap();
+        let payload = directory.path().join("verbose-diagnostics");
+        fs::write(&payload, [b'x'; 1024].repeat(1024)).unwrap();
         let output = SystemProcessRunner
             .run(
                 Program::Curl,
-                &["--silent".to_owned(), format!("http://{address}")],
+                &[
+                    "--silent".to_owned(),
+                    format!("file://{}", payload.display()),
+                ],
                 Duration::from_secs(5),
             )
             .unwrap();
@@ -1154,40 +1146,29 @@ mod tests {
         assert_eq!(output.stdout.len(), DIAGNOSTIC_LIMIT as usize);
         assert!(output.stdout.starts_with(DIAGNOSTIC_TRUNCATED));
         assert!(output.stdout.ends_with(&[b'x'; 1024]));
-        server.join().unwrap();
     }
 
     #[test]
     fn system_runner_honors_a_small_diagnostic_ring_without_failing_the_process() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n")
-                .unwrap();
-            for _ in 0..1024 {
-                if stream.write_all(&[b'x'; 1024]).is_err() {
-                    break;
-                }
-                thread::sleep(Duration::from_millis(1));
-            }
-        });
         let directory = tempdir().unwrap();
+        let payload = directory.path().join("verbose-diagnostics");
+        fs::write(&payload, [b'x'; 1024].repeat(1024)).unwrap();
         let output = SystemProcessRunner
             .run_bounded_directory_with_output_limit(
                 Program::Curl,
-                &["--silent".to_owned(), format!("http://{address}")],
+                &[
+                    "--silent".to_owned(),
+                    format!("file://{}", payload.display()),
+                ],
                 Duration::from_secs(5),
                 directory.path(),
-                1024 * 1024,
+                2 * 1024 * 1024,
                 16,
             )
             .unwrap();
         assert!(output.success);
         assert_eq!(output.stdout.len(), 16);
         assert_eq!(output.stdout, DIAGNOSTIC_TRUNCATED[..16]);
-        server.join().unwrap();
     }
 
     #[test]
