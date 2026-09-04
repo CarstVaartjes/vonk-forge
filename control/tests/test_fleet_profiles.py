@@ -13,7 +13,12 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.cluster_mappings import ClusterMappingPlan
-from vonk_control.fleet_profile_contract import FleetProfileInput, FleetProfileScope
+from vonk_control.fleet_profile_contract import (
+    FleetProfileChildOperation,
+    FleetProfileChildProgress,
+    FleetProfileInput,
+    FleetProfileScope,
+)
 from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
 from vonk_control.models import (
     AgentNode,
@@ -127,6 +132,72 @@ def _exact_preparation(
             "reasons": [],
         }
     )
+
+
+class _SwitchAdapter:
+    def __init__(self) -> None:
+        self.starts: list[dict[str, object]] = []
+        self._states: dict[str, int] = {}
+        self._operations: dict[str, list[FleetProfileChildOperation]] = {}
+
+    def start(
+        self,
+        *,
+        application_id: str,
+        assignment,
+        scope_node_ids: tuple[str, ...],
+        actor: str,
+        request_id: str,
+    ) -> FleetProfileChildOperation:
+        operation_id = _uuid(500 + len(self.starts))
+        self.starts.append(
+            {
+                "application_id": application_id,
+                "assignment_id": assignment.id,
+                "scope_node_ids": scope_node_ids,
+                "actor": actor,
+                "request_id": request_id,
+            }
+        )
+        progress = [
+            FleetProfileChildProgress(
+                phase="model-download", bytes=0, total_bytes=100
+            ),
+            FleetProfileChildProgress(
+                phase="container-download", bytes=100, total_bytes=100
+            ),
+            FleetProfileChildProgress(
+                phase="target-copy",
+                node_ids=list(scope_node_ids),
+                bytes=100,
+                total_bytes=100,
+            ),
+            FleetProfileChildProgress(phase="start", node_ids=list(scope_node_ids)),
+            FleetProfileChildProgress(
+                phase="final-verify", node_ids=list(scope_node_ids)
+            ),
+        ]
+        self._states[operation_id] = 0
+        self._operations[operation_id] = [
+            FleetProfileChildOperation(
+                id=operation_id, state="running", progress=item
+            )
+            for item in progress
+        ] + [
+            FleetProfileChildOperation(
+                id=operation_id,
+                state="succeeded",
+                progress=progress[-1],
+                result={"verified": True},
+            )
+        ]
+        return self._operations[operation_id][0]
+
+    def get(self, operation_id: str) -> FleetProfileChildOperation:
+        states = self._operations[operation_id]
+        index = min(self._states[operation_id] + 1, len(states) - 1)
+        self._states[operation_id] = index
+        return states[index]
 
 
 def _database() -> sessionmaker[Session]:
@@ -795,6 +866,69 @@ def test_profile_operation_projection_uses_bound_scope_and_canonical_phase() -> 
         assert row is not None
         prepared_item = service._operation_item(row)
     assert prepared_item["kind"] == "fleet-profile.prepare"
+
+
+def test_profile_switch_delegates_non_idle_assignment_and_surfaces_child_progress() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    with sessions.begin() as session:
+        session.add(
+            AgentNode(
+                node_id=_node_id(2),
+                state="active",
+                protocol_version=1,
+                architecture="linux-arm64",
+                capabilities=[],
+                last_seen_at=NOW,
+            )
+        )
+    adapter = _SwitchAdapter()
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=adapter
+    )
+    profile_input = _input(revision_id).model_copy(
+        update={"scope": FleetProfileScope(node_ids=[_node_id(1), _node_id(2)])}
+    )
+    profile = service.create(profile_input, actor="admin")
+
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    assert [step.kind for step in preview.steps] == ["switch"]
+    assert preview.assignments[0].actions == ["switch"]
+    assert preview.summary.starts == 1
+
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(42),
+        actor="admin",
+    )
+    assert service.tick() is True
+    progress = service.application(application.id).progress
+    assert progress["child_progress"]["phase"] == "model-download"
+    assert adapter.starts[0]["scope_node_ids"] == (_node_id(1), _node_id(2))
+
+    observed_phases = [progress["child_progress"]["phase"]]
+    for _ in range(8):
+        assert service.tick() is True
+        current = service.application(application.id)
+        child_progress = current.progress.get("child_progress")
+        if isinstance(child_progress, dict):
+            observed_phases.append(child_progress["phase"])
+        if current.state == "succeeded":
+            break
+
+    assert service.application(application.id).state == "succeeded"
+    assert observed_phases[:5] == [
+        "model-download",
+        "container-download",
+        "target-copy",
+        "start",
+        "final-verify",
+    ]
+    assert service.application(application.id).progress["step_results"]["0"][
+        "result"
+    ] == {"verified": True}
 
 
 def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
