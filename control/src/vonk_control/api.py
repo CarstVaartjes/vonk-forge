@@ -180,6 +180,7 @@ def build_agent_services(
     revision_eligible: Callable[[str], bool] | None = None,
     current_revision: Callable[[], str] | None = None,
     distribution: Any | None = None,
+    model_cache: Any | None = None,
 ) -> AgentApiServices:
     """Construct the fail-closed production agent runtime from one provider."""
     from .agent_jobs import AgentJobService
@@ -197,6 +198,15 @@ def build_agent_services(
         WorkloadObjectReceiptIssuer,
     )
 
+    if distribution is None and model_cache is not None:
+        from .distribution import build_distribution_service_from_components
+
+        distribution = build_distribution_service_from_components(
+            model_cache,
+            sessions,
+            settings.agent_artifact_root,
+            clock=clock,
+        )
     if distribution is not None:
         attach_sessions = getattr(distribution, "attach_sessions", None)
         if callable(attach_sessions):
