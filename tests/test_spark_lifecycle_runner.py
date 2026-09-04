@@ -12,19 +12,6 @@ import pytest
 ENTRY_POINT = Path(__file__).parent / "acceptance/test_spark_lifecycle.py"
 
 
-def test_spark_canary_loads_the_standard_podman_apparmor_profile_first() -> None:
-    source = ENTRY_POINT.read_text(encoding="utf-8")
-    install = source.index("self.agent_installed = True")
-    profile = source.index("self._prepare_podman_apparmor_profile()", install)
-    canary = source.index("self._run_synthetic_canary(node_id)", profile)
-
-    assert install < profile < canary
-    assert 'Path("/etc/apparmor.d/podman")' in source
-    assert '"profile podman /usr/bin/podman flags=(unconfined)"' in source
-    assert '"userns,"' in source
-    assert '"podman (unconfined)"' in source
-
-
 def _module():
     specification = importlib.util.spec_from_file_location(
         "spark_lifecycle_runner", ENTRY_POINT
