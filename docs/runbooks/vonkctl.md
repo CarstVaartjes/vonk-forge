@@ -79,12 +79,22 @@ bounded JSON object with `--input JSON`, `--input-file FILE`, or `--stdin`.
 vonkctl models discover --search qwen --all --json
 vonkctl models show MODEL_ID --json
 vonkctl models compare MODEL_ID MODEL_ID --json
+vonkctl models run preview --input-file run.json --json
+vonkctl models run apply --input-file run.json --plan-digest DIGEST \
+  --request-key REQUEST_UUID --apply --json
+vonkctl models run stop preview RUN_ID --json
+vonkctl models run stop apply RUN_ID --plan-digest DIGEST \
+  --request-key REQUEST_UUID --apply --json
 
 vonkctl cache list --all --json
 vonkctl cache show ARTIFACT_SET_SHA256 --json
-vonkctl cache download --input-file exact-artifacts.json --apply --json
-vonkctl cache repair ARTIFACT_SET_SHA256 --plan-digest DIGEST --apply --json
-vonkctl cache update ARTIFACT_SET_SHA256 --input-file new-pin.json --apply --json
+vonkctl cache download preview --input-file exact-artifacts.json --json
+vonkctl cache download apply --input-file exact-artifacts.json \
+  --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
+vonkctl cache repair ARTIFACT_SET_SHA256 preview --json
+vonkctl cache repair ARTIFACT_SET_SHA256 apply \
+  --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
+vonkctl cache update ARTIFACT_SET_SHA256 --json
 vonkctl cache eviction preview --json
 vonkctl cache eviction apply --plan-digest DIGEST --apply --json
 
@@ -95,9 +105,12 @@ vonkctl profiles update PROFILE_ID --stdin --json
 vonkctl profiles duplicate PROFILE_ID --name "Creative setup" --json
 vonkctl profiles capture-current --name "Current setup" --apply --json
 vonkctl profiles preview PROFILE_ID --json
-vonkctl profiles prepare PROFILE_ID --plan-digest DIGEST --apply --json
-vonkctl profiles switch PROFILE_ID --plan-digest DIGEST --apply --json
-vonkctl profiles match PROFILE_ID --json
+vonkctl profiles prepare preview PROFILE_ID --json
+vonkctl profiles prepare apply PROFILE_ID \
+  --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
+vonkctl profiles switch PROFILE_ID \
+  --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
+vonkctl profiles status PROFILE_ID --json
 vonkctl profiles delete PROFILE_ID --apply --json
 ```
 
@@ -119,9 +132,6 @@ diagnostic record.
 vonkctl operations list --status running --all --json
 vonkctl operations show OPERATION_ID --json
 vonkctl operations wait OPERATION_ID --timeout-seconds 60 --json
-vonkctl operations retry OPERATION_ID --request-key REQUEST_UUID --apply --json
-vonkctl operations resume OPERATION_ID --apply --json
-vonkctl operations cancel OPERATION_ID --reason "operator requested" --apply --json
 vonkctl operations evidence OPERATION_ID --json
 ```
 

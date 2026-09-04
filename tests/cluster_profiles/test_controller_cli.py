@@ -1350,14 +1350,15 @@ def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> N
             ("GET", "/api/v1/fleet-profiles"): {"profiles": []},
             ("POST", "/api/v1/fleet-profiles"): {"id": "profile-1"},
             ("POST", "/api/v1/fleet-profiles/profile-1/preview"): {"plan_digest": "d" * 64},
-            ("POST", "/api/v1/fleet-profiles/profile-1/apply"): {"id": "application-1"},
+            ("POST", "/api/v1/fleet-profiles/profile-1/switch"): {"id": "application-1"},
         }
     )
     stdout = StringIO()
     with redirect_stdout(stdout):
         assert cli.main(("--json", "cache", "list"), control_client=client) == 0
         assert cli.main(
-            ("--json", "cache", "download", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}',
+                ("--json", "cache", "download", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}',
+                 "--plan-digest", "d" * 64,
              "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
             control_client=client,
         ) == 0
@@ -1380,7 +1381,7 @@ def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> N
     assert client.calls[0][0:2] == ("GET", "/api/v1/model-cache")
     assert ("POST", "/api/v1/model-cache/download") in [call[0:2] for call in client.calls]
     assert ("POST", "/api/v1/model-cache/repair") in [call[0:2] for call in client.calls]
-    assert ("POST", "/api/v1/fleet-profiles/profile-1/apply") in [call[0:2] for call in client.calls]
+    assert ("POST", "/api/v1/fleet-profiles/profile-1/switch") in [call[0:2] for call in client.calls]
 
 
 def test_operations_wait_reobserves_until_terminal_without_cancelling() -> None:
@@ -1438,13 +1439,10 @@ def test_models_show_uses_library_identity_projection() -> None:
         ("profiles", "duplicate", "p", "--name", "Copy"),
         ("profiles", "capture-current", "--name", "Current"),
         ("profiles", "delete", "p"),
-        ("profiles", "prepare", "p"),
-        ("profiles", "match", "p"),
+        ("profiles", "prepare", "preview", "p"),
+        ("profiles", "status", "p"),
         ("operations", "show", "o"),
         ("operations", "watch", "o"),
-        ("operations", "retry", "o"),
-        ("operations", "resume", "o"),
-        ("operations", "cancel", "o"),
         ("operations", "evidence", "o"),
     ],
 )
@@ -1458,6 +1456,44 @@ def test_task_oriented_command_parser_and_dispatch_contract(argv: tuple[str, ...
     client = _Client({("GET", "/api/v1/library"): response})
     result, _payload = _invoke(client, "--json", *argv)
     assert result == 0
+
+
+@pytest.mark.parametrize(
+    ("argv", "method", "path"),
+    [
+        (("models", "run", "preview", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}'), "POST", "/api/v1/recipes/run-switch-plans/preview"),
+        (("models", "run", "apply", "--input", '{}', "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switches"),
+        (("models", "run", "stop", "preview", "run-1"), "POST", "/api/v1/recipes/run-switch-stops/preview"),
+        (("models", "run", "stop", "apply", "run-1", "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switch-stops"),
+    ],
+)
+def test_high_level_run_routes_are_plan_bound(
+    argv: tuple[str, ...], method: str, path: str
+) -> None:
+    client = _Client()
+    result, _payload = _invoke(client, "--json", *argv)
+    assert result == 0
+    assert client.calls[-1][0:2] == (method, path)
+
+
+def test_uncertain_run_apply_error_preserves_request_key_for_reconciliation() -> None:
+    from cluster_profiles.control_client import ControlTransportError
+
+    class _UncertainClient(_Client):
+        def request(self, *args: object, **kwargs: object) -> dict[str, object]:
+            raise ControlTransportError("connection lost")
+
+    request_key = "11111111-1111-4111-8111-111111111111"
+    client = _UncertainClient()
+    result, payload = _invoke(
+        client,
+        "--json",
+        "models", "run", "apply", "--input", '{}',
+        "--plan-digest", "d" * 64, "--request-key", request_key, "--apply",
+    )
+    assert result == 2
+    assert payload["request_key"] == request_key
+    assert payload["reconcile"]["request_key"] == request_key
 
 
 def test_artifact_job_create_declares_hashed_bounded_local_inputs(

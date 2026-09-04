@@ -425,12 +425,22 @@ def _admin_payload(result: object) -> dict[str, object]:
     return _model_payload(result)  # type: ignore[arg-type]
 
 
-def _control_error(error: BaseException) -> dict[str, object]:
+def _control_error(
+    error: BaseException, args: argparse.Namespace | None = None
+) -> dict[str, object]:
     if isinstance(error, (ControlUnavailable, ControlTransportError, OSError)):
         message = "control API unavailable"
     else:
         message = _sanitize_text(error)
-    return {"error": message, "error_type": "control_api"}
+    result: dict[str, object] = {"error": message, "error_type": "control_api"}
+    request_key = getattr(args, "request_key", None) if args is not None else None
+    if isinstance(request_key, str) and request_key:
+        result["request_key"] = request_key
+        result["reconcile"] = {
+            "operation": "inspect the durable operation with the same request key",
+            "request_key": request_key,
+        }
+    return result
 
 
 def _admin(
@@ -547,5 +557,5 @@ def main(
         ValueError,
         json.JSONDecodeError,
     ) as error:
-        _emit(_control_error(error), args)
+        _emit(_control_error(error, args), args)
         return 2

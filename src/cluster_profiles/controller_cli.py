@@ -734,6 +734,28 @@ def add_controller_commands(
     model_compare = model_commands.add_parser("compare")
     model_compare.add_argument("model_id", nargs="+", metavar="MODEL_ID")
     _add_json(model_compare)
+    model_run = model_commands.add_parser("run", help="Preview or start a model run")
+    model_run_commands = _subcommands(model_run, "model_run_command")
+    model_run_preview = model_run_commands.add_parser("preview")
+    _structured_input(model_run_preview)
+    _add_json(model_run_preview)
+    model_run_apply = model_run_commands.add_parser("apply")
+    _structured_input(model_run_apply)
+    model_run_apply.add_argument("--plan-digest", required=True)
+    model_run_apply.add_argument("--request-key", required=True)
+    _apply(model_run_apply)
+    _add_json(model_run_apply)
+    model_run_stop = model_run_commands.add_parser("stop")
+    stop_variants = _subcommands(model_run_stop, "model_run_stop_command")
+    stop_preview = stop_variants.add_parser("preview")
+    stop_preview.add_argument("run_id")
+    _add_json(stop_preview)
+    stop_apply = stop_variants.add_parser("apply")
+    stop_apply.add_argument("run_id")
+    stop_apply.add_argument("--plan-digest", required=True)
+    stop_apply.add_argument("--request-key", required=True)
+    _apply(stop_apply)
+    _add_json(stop_apply)
 
     cache = commands.add_parser("cache", help="Manage verified NAS model artifacts")
     cache_commands = _subcommands(cache, "cache_command")
@@ -746,17 +768,27 @@ def add_controller_commands(
     cache_show.add_argument("artifact_id")
     _add_json(cache_show)
     cache_download = cache_commands.add_parser("download")
+    cache_download.add_argument("download_mode", nargs="?", choices=("preview", "apply"))
     _structured_input(cache_download, required=False)
     cache_download.add_argument("--model-version-sha256")
     cache_download.add_argument("--recipe-revision-sha256")
+    cache_download.add_argument("--recipe-revision-id")
     _plan_flags(cache_download)
     cache_repair = cache_commands.add_parser("repair")
     cache_repair.add_argument("artifact_id")
+    cache_repair.add_argument("repair_mode", nargs="?", choices=("preview", "apply"))
     _plan_flags(cache_repair)
     cache_update = cache_commands.add_parser("update")
-    cache_update.add_argument("artifact_id")
-    _structured_input(cache_update, required=False)
-    _plan_flags(cache_update)
+    cache_update.add_argument("artifact_id", nargs="?")
+    _add_json(cache_update)
+    cache_operations = cache_commands.add_parser("operations")
+    cache_operations_commands = _subcommands(cache_operations, "cache_operations_command")
+    cache_operations_list = cache_operations_commands.add_parser("list")
+    _paging(cache_operations_list, default=20)
+    _add_json(cache_operations_list)
+    cache_operations_show = cache_operations_commands.add_parser("show")
+    cache_operations_show.add_argument("operation_id")
+    _add_json(cache_operations_show)
     eviction = cache_commands.add_parser("eviction", help="Review or apply cache eviction")
     eviction_commands = _subcommands(eviction, "eviction_command")
     eviction_preview = eviction_commands.add_parser("preview")
@@ -785,6 +817,7 @@ def add_controller_commands(
     profile_duplicate.add_argument("profile_id")
     profile_duplicate.add_argument("--name", required=True)
     profile_duplicate.add_argument("--description")
+    profile_duplicate.add_argument("--apply", action="store_true")
     _add_json(profile_duplicate)
     profile_capture = profile_commands.add_parser("capture-current")
     profile_capture.add_argument("--name", required=True)
@@ -799,13 +832,29 @@ def add_controller_commands(
     profile_preview = profile_commands.add_parser("preview")
     profile_preview.add_argument("profile_id")
     _add_json(profile_preview)
-    for profile_action in ("prepare", "switch"):
-        action_parser = profile_commands.add_parser(profile_action)
-        action_parser.add_argument("profile_id")
-        _plan_flags(action_parser)
-    profile_match = profile_commands.add_parser("match")
-    profile_match.add_argument("profile_id")
-    _add_json(profile_match)
+    profile_status = profile_commands.add_parser("status")
+    profile_status.add_argument("profile_id")
+    _add_json(profile_status)
+    profile_prepare = profile_commands.add_parser("prepare")
+    profile_prepare_commands = _subcommands(profile_prepare, "profile_prepare_command")
+    profile_prepare_preview = profile_prepare_commands.add_parser("preview")
+    profile_prepare_preview.add_argument("profile_id")
+    _add_json(profile_prepare_preview)
+    profile_prepare_apply = profile_prepare_commands.add_parser("apply")
+    profile_prepare_apply.add_argument("profile_id")
+    profile_prepare_apply.add_argument("--plan-digest", required=True)
+    profile_prepare_apply.add_argument("--request-key", required=True)
+    _apply(profile_prepare_apply)
+    _add_json(profile_prepare_apply)
+    profile_switch = profile_commands.add_parser("switch")
+    profile_switch.add_argument("profile_id")
+    profile_switch.add_argument("--plan-digest", required=True)
+    profile_switch.add_argument("--request-key", required=True)
+    _apply(profile_switch)
+    _add_json(profile_switch)
+    profile_application = profile_commands.add_parser("application")
+    profile_application.add_argument("application_id")
+    _add_json(profile_application)
 
     operations = commands.add_parser("operations", help="Inspect durable operations and evidence")
     operation_commands = _subcommands(operations, "operations_command")
@@ -827,12 +876,6 @@ def add_controller_commands(
             help="Reuse the apply idempotency key while reconciling an uncertain response",
         )
         _add_json(watch_parser)
-    for operation_action in ("retry", "resume", "cancel"):
-        action_parser = operation_commands.add_parser(operation_action)
-        action_parser.add_argument("operation_id")
-        if operation_action == "cancel":
-            action_parser.add_argument("--reason", default="operator requested cancellation")
-        _plan_flags(action_parser)
     evidence = operation_commands.add_parser("evidence")
     evidence.add_argument("operation_id")
     evidence.add_argument("--file", type=Path)
@@ -2854,6 +2897,25 @@ def _run_models(args: argparse.Namespace, client: ControllerClient) -> dict[str,
     }
 
 
+def _run_model_run(
+    args: argparse.Namespace,
+    client: ControllerClient,
+) -> dict[str, object]:
+    command = args.model_run_command
+    if command in {"preview", "apply"}:
+        payload = _read_structured(args)
+        if command == "preview":
+            return client.request("POST", "/api/v1/recipes/run-switch-plans/preview", payload)
+        payload.update(plan_digest=args.plan_digest, request_key=args.request_key)
+        return client.request("POST", "/api/v1/recipes/run-switches", payload)
+    variant = args.model_run_stop_command
+    payload: dict[str, object] = {"run_id": args.run_id}
+    if variant == "preview":
+        return client.request("POST", "/api/v1/recipes/run-switch-stops/preview", payload)
+    payload.update(plan_digest=args.plan_digest, request_key=args.request_key)
+    return client.request("POST", "/api/v1/recipes/run-switch-stops", payload)
+
+
 def _find_model(snapshot: Mapping[str, object], requested: str) -> dict[str, object]:
     models = snapshot.get("models")
     if not isinstance(models, list):
@@ -2883,6 +2945,10 @@ def _cache_payload(args: argparse.Namespace) -> dict[str, object]:
         value = getattr(args, key, None)
         if value is not None:
             payload.setdefault(key, value)
+    for key in ("model_version_sha256", "recipe_revision_sha256", "recipe_revision_id"):
+        value = getattr(args, key, None)
+        if value is not None:
+            payload.setdefault(key, value)
     return payload
 
 
@@ -2902,39 +2968,51 @@ def _run_cache(
         )
     if command == "show":
         return client.request("GET", f"/api/v1/model-cache/entries/{_quoted(args.artifact_id)}")
+    if command == "update":
+        return client.request(
+            "GET",
+            "/api/v1/model-cache/updates",
+            query=_query(artifact_set_sha256=args.artifact_id),
+        )
+    if command == "operations":
+        if args.cache_operations_command == "list":
+            return _load_pages(client, "/api/v1/model-cache/operations", args, collection="operations")
+        return client.request(
+            "GET", f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}"
+        )
     if command == "eviction":
         variant = args.eviction_command
         path = "/api/v1/model-cache/eviction-preview" if variant == "preview" else "/api/v1/model-cache/evict"
         payload = _cache_payload(args)
         if variant == "apply":
+            if not args.request_key:
+                raise ValueError("cache eviction apply requires --request-key")
             payload.update(
                 plan_digest=args.plan_digest,
-                request_key=_validated_request_key(args, request_id_factory),
+                request_key=args.request_key,
             )
             return _plan_or_request(args, client, "POST", path, payload)
         return client.request("POST", path, payload)
     if command == "download":
         payload = _cache_payload(args)
-        for key in ("model_version_sha256", "recipe_revision_sha256"):
-            value = getattr(args, key, None)
-            if value is not None:
-                payload.setdefault(key, value)
         if not payload:
             raise ValueError("cache download requires an exact artifact input")
-        if args.apply:
-            payload["request_key"] = _validated_request_key(args, request_id_factory)
-        return _plan_or_request(args, client, "POST", "/api/v1/model-cache/download", payload)
-    action = command
-    path = "/api/v1/model-cache/download" if command == "update" else f"/api/v1/model-cache/{action}"
+        variant = args.download_mode or ("apply" if args.apply else "preview")
+        if variant == "preview":
+            return client.request("POST", "/api/v1/model-cache/download-preview", payload)
+        if not args.apply or not args.plan_digest or not args.request_key:
+            raise ValueError("cache download apply requires --apply, --plan-digest, and --request-key")
+        payload.update(plan_digest=args.plan_digest, request_key=args.request_key)
+        return client.request("POST", "/api/v1/model-cache/download", payload)
     payload = _cache_payload(args)
     payload.setdefault("artifact_set_sha256", args.artifact_id)
-    if command == "update":
-        payload.setdefault("update_existing", True)
-    if command == "repair" and args.apply and not args.plan_digest:
-        raise ValueError("cache repair requires --plan-digest from a fresh preview")
-    if args.apply:
-        payload["request_key"] = _validated_request_key(args, request_id_factory)
-    return _plan_or_request(args, client, "POST", path, payload)
+    variant = args.repair_mode or ("apply" if args.apply else "preview")
+    if variant == "preview":
+        return client.request("POST", "/api/v1/model-cache/repair-preview", payload)
+    if not args.apply or not args.plan_digest or not args.request_key:
+        raise ValueError("cache repair apply requires --apply, --plan-digest, and --request-key")
+    payload.update(plan_digest=args.plan_digest, request_key=args.request_key)
+    return client.request("POST", "/api/v1/model-cache/repair", payload)
 
 
 def _profile_body(args: argparse.Namespace) -> dict[str, object]:
@@ -2965,19 +3043,16 @@ def _run_profiles(
         path = base if command == "create" else f"{base}/{_quoted(args.profile_id)}"
         return client.request("POST" if command == "create" else "PUT", path, _profile_body(args))
     if command == "duplicate":
-        source = client.request("GET", f"{base}/{_quoted(args.profile_id)}")
-        body = {
-            key: value
-            for key, value in source.items()
-            if key in {
-                "name", "description", "scope", "installation_policy",
-                "labels", "favorite", "assignments",
-            }
-        }
-        body["name"] = args.name
+        body: dict[str, object] = {"name": args.name}
         if args.description is not None:
             body["description"] = args.description
-        return client.request("POST", base, body)
+        return _plan_or_request(
+            args,
+            client,
+            "POST",
+            f"{base}/{_quoted(args.profile_id)}/duplicate",
+            body,
+        )
     if command == "capture-current":
         payload = {
             "name": args.name,
@@ -2989,21 +3064,39 @@ def _run_profiles(
         return _plan_or_request(args, client, "DELETE", f"{base}/{_quoted(args.profile_id)}")
     if command == "preview":
         return client.request("POST", f"{base}/{_quoted(args.profile_id)}/preview", {})
-    if command == "match":
-        return client.request("GET", f"{base}/{_quoted(args.profile_id)}/match")
+    if command == "status":
+        return client.request("GET", f"{base}/{_quoted(args.profile_id)}/status")
+    if command == "application":
+        return client.request("GET", f"{base}/applications/{_quoted(args.application_id)}")
     profile_id = _quoted(args.profile_id)
     if command == "prepare":
-        path = f"{base}/{profile_id}/prepare"
-    else:
-        path = f"{base}/{profile_id}/apply" if args.apply else f"{base}/{profile_id}/preview"
-    payload: dict[str, object] = {}
-    if args.plan_digest is not None:
-        payload["plan_digest"] = args.plan_digest
-    if args.apply:
-        payload["request_key"] = _validated_request_key(args, request_id_factory)
-    if command == "prepare" and not args.apply:
-        payload["mode"] = "prepare"
-    return _plan_or_request(args, client, "POST", path, payload)
+        variant = args.profile_prepare_command
+        path = f"{base}/{profile_id}/prepare/preview" if variant == "preview" else f"{base}/{profile_id}/prepare"
+        payload = {} if variant == "preview" else {
+            "plan_digest": args.plan_digest,
+            "request_key": args.request_key,
+        }
+        if variant == "apply" and not args.apply:
+            return {
+                "mode": "plan",
+                "apply": False,
+                "method": "POST",
+                "path": path,
+                "body": payload,
+            }
+        return client.request("POST", path, payload)
+    if command == "switch":
+        payload = {"plan_digest": args.plan_digest, "request_key": args.request_key}
+        if not args.apply:
+            return {
+                "mode": "plan",
+                "apply": False,
+                "method": "POST",
+                "path": f"{base}/{profile_id}/switch",
+                "body": payload,
+            }
+        return client.request("POST", f"{base}/{profile_id}/switch", payload)
+    raise ValueError(f"unsupported profile command: {command}")
 
 
 def _run_operations(
@@ -3019,7 +3112,7 @@ def _run_operations(
     if command == "show":
         return client.request("GET", f"{base}/{operation_id}")
     if command == "evidence":
-        result = client.request("GET", f"{base}/{operation_id}/evidence")
+        result = client.request("GET", f"{base}/{operation_id}")
         if args.file is not None:
             args.file.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
             return {"operation_id": args.operation_id, "file": str(args.file)}
@@ -3041,14 +3134,7 @@ def _run_operations(
                     result = {**result, "timed_out": True, "operation_id": args.operation_id}
                 return result
             time.sleep(interval)
-    action = command
-    payload: dict[str, object] = {}
-    if action == "cancel":
-        payload["reason"] = " ".join(args.reason.split())[:512]
-    if args.apply:
-        payload.update(request_key=_validated_request_key(args, request_id_factory))
-    path = f"{base}/{operation_id}/{action}"
-    return _plan_or_request(args, client, "POST", path, payload)
+    raise ValueError(f"unsupported operation command: {command}")
 
 
 def run_controller(
@@ -3063,6 +3149,8 @@ def run_controller(
     if args.command == "activity":
         return _run_activity(args, client)
     if args.command == "models":
+        if args.models_command == "run":
+            return _run_model_run(args, client)
         return _run_models(args, client)
     if args.command == "cache":
         return _run_cache(args, client, request_id_factory)
