@@ -241,7 +241,9 @@ class FleetProfileChildProgress(_StrictModel):
     phase: Literal[
         "model-download",
         "container-download",
+        "container-build",
         "target-copy",
+        "runtime-install",
         "start",
         "final-verify",
         "transfer",

@@ -78,6 +78,12 @@ _CHILD_FAILED_STATES = frozenset(
 )
 _INTERNAL_PLACEMENT_PREFIX = "~placement-"
 _INTERNAL_PLACEMENT_LABEL = "vonk.internal.placement"
+_PROFILE_PHASE_BY_RUN_PHASE = {
+    "transfer": "target-copy",
+    "verify": "final-verify",
+    "prepare": "runtime-install",
+    "final_verify": "final-verify",
+}
 
 
 class FleetProfileConflict(RuntimeError):
@@ -496,7 +502,8 @@ class RunSwitchFleetProfileAdapter:
         state: Mapping[str, object],
         child: RunSwitchOperation,
     ) -> FleetProfileChildOperation:
-        phase = child.current_phase or child.progress.phase or "prepare"
+        run_phase = child.current_phase or child.progress.phase or "prepare"
+        phase = _PROFILE_PHASE_BY_RUN_PHASE.get(run_phase, run_phase)
         progress = FleetProfileChildProgress(
             phase=phase,
             node_ids=list(state.get("scope_node_ids", [])),

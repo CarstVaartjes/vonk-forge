@@ -1386,6 +1386,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert child.node_ids == list(nodes)
     assert child.action == "switch"
     assert current.progress["child_progress"]["node_ids"] == list(nodes)
+    assert current.progress["child_progress"]["phase"] == "target-copy"
 
     replay = adapter.start(
         application_id=application.id,
