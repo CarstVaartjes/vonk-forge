@@ -11,7 +11,10 @@ from sqlalchemy.pool import StaticPool
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profiles import (
+    FleetProfileService,
+    RunSwitchFleetProfileAdapter,
+)
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -35,7 +38,9 @@ class Jobs:
         raise KeyError
 
 
-def _setup() -> tuple[TestClient, object, MemoryAuditStore]:
+def _setup(
+    *, composed_run_switch: bool = False
+) -> tuple[TestClient, object, MemoryAuditStore]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -83,13 +88,23 @@ def _setup() -> tuple[TestClient, object, MemoryAuditStore]:
         )
     codec = TokenCodec(b"p" * 32)
     audits = MemoryAuditStore()
+    profiles = FleetProfileService(sessions, clock=lambda: NOW)
+    if composed_run_switch:
+        from vonk_control.run_switch_operations import RunSwitchOperationService
+
+        run_switch = RunSwitchOperationService(sessions, clock=lambda: NOW)
+        profiles = FleetProfileService(
+            sessions,
+            clock=lambda: NOW,
+            switch_adapter=RunSwitchFleetProfileAdapter(sessions, run_switch),
+        )
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
         fleet=lambda: {"nodes": []},
         now=lambda: 10,
-        fleet_profiles=FleetProfileService(sessions, clock=lambda: NOW),
+        fleet_profiles=profiles,
     )
 
     def headers(role: str = "administrator") -> dict[str, str]:
@@ -124,6 +139,26 @@ def _body() -> dict[str, object]:
             }
         ],
     }
+
+
+def test_profile_api_uses_the_composed_run_switch_service() -> None:
+    client, headers, _audits = _setup(composed_run_switch=True)
+
+    created = client.post(
+        "/api/v1/fleet-profiles",
+        headers=headers(),
+        json=_body(),
+    )
+    assert created.status_code == 201
+    profile_id = created.json()["id"]
+
+    preview = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/preview",
+        headers=headers(),
+        json={},
+    )
+    assert preview.status_code == 200
+    assert [step["kind"] for step in preview.json()["steps"]] == ["switch"]
 
 
 def test_profiles_are_authenticated_role_bound_and_audited() -> None:

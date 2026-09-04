@@ -19,7 +19,11 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileInput,
     FleetProfileScope,
 )
-from vonk_control.fleet_profiles import FleetProfileConflict, FleetProfileService
+from vonk_control.fleet_profiles import (
+    FleetProfileConflict,
+    FleetProfileService,
+    RunSwitchFleetProfileAdapter,
+)
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -1296,6 +1300,202 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
     assert preview.scope.idle_node_ids == [_node_id(1), _node_id(2)]
     assert preview.steps == []
     assert preview.preparations == []
+
+
+def test_production_profile_adapter_binds_one_real_run_switch_child(
+    tmp_path: Path,
+) -> None:
+    """The profile child delegates exact preparation and run admission to RunSwitch."""
+
+    from .test_recipe_operations import setup_services
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    with sessions() as session:
+        revision = session.scalar(
+            select(LocalRecipeRevision).where(LocalRecipeRevision.lifecycle == "resolved")
+        )
+    assert revision is not None
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions, clock=lifecycle._clock, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput.model_validate(
+            {
+                "name": "Production child",
+                "scope": {"node_ids": list(nodes)},
+                "assignments": [
+                    {
+                        "recipe_revision_id": revision.id,
+                        "topology_name": "nodes_2",
+                        "desired_state": "running",
+                        "alias": "production-child",
+                        "nodes": [
+                            {
+                                "node_id": nodes[0],
+                                "rank": 0,
+                                "role": "entrypoint",
+                                "endpoint_owner": True,
+                            },
+                            {
+                                "node_id": nodes[1],
+                                "rank": 1,
+                                "role": "worker",
+                                "endpoint_owner": False,
+                            },
+                        ],
+                    }
+                ],
+            }
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    assert [step.kind for step in preview.steps] == ["switch"]
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(640),
+        actor="admin",
+    )
+
+    assert service.tick() is True
+    current = service.application(application.id)
+    assert current.current_operation_id == application.id
+    adapter_progress = current.progress["switch_adapter"]
+    child_id = adapter_progress["active_operation_id"]
+    assert isinstance(child_id, str)
+    child = run_switch.get(child_id)
+    assert child.kind == "recipe.run-switch.v2"
+    assert child.node_ids == list(nodes)
+    assert child.action == "switch"
+    assert current.progress["child_progress"]["node_ids"] == list(nodes)
+
+    replay = adapter.start(
+        application_id=application.id,
+        assignments=tuple(service._application_assignments(application.id)),
+        scope_node_ids=nodes,
+        actor="admin",
+        request_id=_uuid(641),
+    )
+    assert replay.id == application.id
+    assert replay.progress is not None
+    assert replay.progress.node_ids == list(nodes)
+
+    restarted_run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    restarted_adapter = RunSwitchFleetProfileAdapter(sessions, restarted_run_switch)
+    restarted_service = FleetProfileService(
+        sessions,
+        clock=lifecycle._clock,
+        switch_adapter=restarted_adapter,
+    )
+    assert restarted_service.tick() is True
+    resumed = restarted_service.application(application.id)
+    assert resumed.current_operation_id == application.id
+    assert resumed.progress["switch_adapter"]["active_operation_id"] == child_id
+
+
+def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
+    tmp_path: Path,
+) -> None:
+    """An empty desired set still stops a complete in-scope run through RunSwitch."""
+
+    from .test_recipe_operations import (
+        installed_recipe,
+        setup_services,
+        started_recipe,
+    )
+    from .test_run_switch_operations import (
+        CompleteArtifactInspector,
+        RecordingArtifactExecutor,
+    )
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=_uuid(642),
+    )
+    run = started_recipe(
+        sessions,
+        lifecycle,
+        installation.owner_id,
+        nodes,
+        request_id=_uuid(643),
+    )
+    run_switch = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifacts=CompleteArtifactInspector(),
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        memory_floor_bytes=50,
+    )
+    adapter = RunSwitchFleetProfileAdapter(sessions, run_switch)
+    service = FleetProfileService(
+        sessions, clock=lifecycle._clock, switch_adapter=adapter
+    )
+    profile = service.create(
+        FleetProfileInput(
+            name="All idle through RunSwitch",
+            scope=FleetProfileScope(node_ids=list(nodes)),
+            assignments=[],
+        ),
+        actor="admin",
+    )
+    preview = service.preview(profile.id)
+    assert preview.allowed is True
+    assert [step.kind for step in preview.steps] == ["switch"]
+
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(644),
+        actor="admin",
+    )
+    assert service.tick() is True
+    current = service.application(application.id)
+    assert current.current_operation_id == application.id
+    state = current.progress["switch_adapter"]
+    child_id = state["active_operation_id"]
+    assert isinstance(child_id, str)
+    child = run_switch.get(child_id)
+    assert child.kind == "recipe.stop.v2"
+    assert child.action == "stop"
+    assert child.node_ids == list(nodes)
+    with sessions() as session:
+        stored_run = session.get(RecipeRun, run.owner_id)
+        assert stored_run is not None and stored_run.state == "running"
+        assert (
+            session.scalar(select(RecipeRun.id).where(RecipeRun.id != run.owner_id))
+            is None
+        )
 
 
 def test_profile_preparations_are_stably_ordered_and_reuse_identity() -> None:
