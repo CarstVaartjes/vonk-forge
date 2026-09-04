@@ -1337,6 +1337,7 @@ class SparkLifecycle:
         finally:
             del pairing_token
         self.agent_installed = True
+        self._prepare_podman_apparmor_profile()
         candidate = self._wait_for_agent_identity(
             package_version=str(self.graph["candidate_version"]), timeout=180
         )
@@ -1381,6 +1382,40 @@ class SparkLifecycle:
                 "synthetic": True,
             },
         }
+
+    def _prepare_podman_apparmor_profile(self) -> None:
+        enabled = Path("/sys/module/apparmor/parameters/enabled")
+        if not enabled.exists() or enabled.read_text(encoding="ascii").strip() != "Y":
+            return
+        profile = Path("/etc/apparmor.d/podman")
+        try:
+            metadata = profile.lstat()
+            contents = profile.read_text(encoding="utf-8")
+        except OSError as error:
+            raise LifecycleError("Podman AppArmor profile is unavailable") from error
+        if (
+            profile.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or "profile podman /usr/bin/podman flags=(unconfined)" not in contents
+            or "userns," not in contents
+        ):
+            raise LifecycleError("Podman AppArmor profile is invalid")
+        self._run_command(
+            ["sudo", "/usr/sbin/apparmor_parser", "--replace", os.fspath(profile)],
+            cwd=Path("/"),
+            timeout=30,
+        )
+        self._run_command(
+            [
+                "sudo",
+                "/usr/bin/grep",
+                "-Fx",
+                "podman (unconfined)",
+                "/sys/kernel/security/apparmor/profiles",
+            ],
+            cwd=Path("/"),
+            timeout=30,
+        )
 
     def _create_grant(self) -> tuple[str, str, str, str]:
         assert self.control is not None

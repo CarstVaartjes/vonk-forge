@@ -218,7 +218,15 @@ def verify(
             )
     elif PACKAGE_VERSION.fullmatch(fields["Version"]) is None:
         raise VerificationError("package version is not canonical")
-    for dependency in ("acl", "crun", "iproute2", "iptables", "podman", "uidmap"):
+    for dependency in (
+        "acl",
+        "apparmor",
+        "crun",
+        "iproute2",
+        "iptables",
+        "podman",
+        "uidmap",
+    ):
         if (
             re.search(
                 rf"(?:^|,\s*){dependency}(?:\s*\([^)]*\))?(?:,|$)",

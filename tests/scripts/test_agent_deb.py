@@ -364,7 +364,7 @@ def _exact_repair_script_fixture(
     control_template = (
         b"Package: vonk-forge-agent\nVersion: @VERSION@\n"
         b"Architecture: @ARCHITECTURE@\n"
-        b"Depends: acl, crun, iproute2, iptables, podman, uidmap\n"
+        b"Depends: acl, apparmor, crun, iproute2, iptables, podman, uidmap\n"
     )
     prerm = (
         b"#!/bin/sh\n# helper-upgrade.pending helper-upgrade.receipt\n"
@@ -2347,6 +2347,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         check=True,
     ).stdout
     assert "curl" in fields
+    assert "apparmor" in fields
     assert "crun" in fields
     assert "podman" in fields
     assert "util-linux" in fields
