@@ -793,9 +793,11 @@ def add_controller_commands(
     eviction_commands = _subcommands(eviction, "eviction_command")
     eviction_preview = eviction_commands.add_parser("preview")
     _structured_input(eviction_preview, required=False)
+    eviction_preview.add_argument("--target-bytes", type=int)
     _add_json(eviction_preview)
     eviction_apply = eviction_commands.add_parser("apply")
     _structured_input(eviction_apply, required=False)
+    eviction_apply.add_argument("--target-bytes", type=int)
     _plan_flags(eviction_apply, require_digest=True)
 
     profiles = commands.add_parser("profiles", help="Saved whole-fleet running profiles")
@@ -818,11 +820,14 @@ def add_controller_commands(
     profile_duplicate.add_argument("--name", required=True)
     profile_duplicate.add_argument("--description")
     profile_duplicate.add_argument("--apply", action="store_true")
+    profile_duplicate.add_argument("--request-key")
+    _structured_input(profile_duplicate, required=False)
     _add_json(profile_duplicate)
     profile_capture = profile_commands.add_parser("capture-current")
     profile_capture.add_argument("--name", required=True)
     profile_capture.add_argument("--description", default="")
     profile_capture.add_argument("--installation-policy", choices=("keep-cached", "exact"), default="keep-cached")
+    profile_capture.add_argument("--request-key")
     _apply(profile_capture)
     _add_json(profile_capture)
     profile_delete = profile_commands.add_parser("delete")
@@ -861,7 +866,6 @@ def add_controller_commands(
     operation_list = operation_commands.add_parser("list")
     _paging(operation_list, default=20)
     operation_list.add_argument("--status")
-    operation_list.add_argument("--kind")
     _add_json(operation_list)
     operation_show = operation_commands.add_parser("show")
     operation_show.add_argument("operation_id")
@@ -871,10 +875,6 @@ def add_controller_commands(
         watch_parser.add_argument("operation_id")
         watch_parser.add_argument("--timeout-seconds", type=int, default=30)
         watch_parser.add_argument("--interval-seconds", type=float, default=1.0)
-        watch_parser.add_argument(
-            "--request-key",
-            help="Reuse the apply idempotency key while reconciling an uncertain response",
-        )
         _add_json(watch_parser)
     evidence = operation_commands.add_parser("evidence")
     evidence.add_argument("operation_id")
@@ -951,6 +951,15 @@ def _validated_request_key(args: argparse.Namespace, factory: Callable[[], str])
         value,
     ) is None:
         raise ValueError("--request-key must be a lowercase UUID")
+    return value
+
+
+def _explicit_request_key(value: str | None) -> str:
+    if value is None or re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        value,
+    ) is None:
+        raise ValueError("an explicit lowercase UUID --request-key is required")
     return value
 
 
@@ -2906,13 +2915,29 @@ def _run_model_run(
         payload = _read_structured(args)
         if command == "preview":
             return client.request("POST", "/api/v1/recipes/run-switch-plans/preview", payload)
-        payload.update(plan_digest=args.plan_digest, request_key=args.request_key)
+        payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
+        if not args.apply:
+            return {
+                "mode": "plan",
+                "apply": False,
+                "method": "POST",
+                "path": "/api/v1/recipes/run-switches",
+                "body": payload,
+            }
         return client.request("POST", "/api/v1/recipes/run-switches", payload)
     variant = args.model_run_stop_command
     payload: dict[str, object] = {"run_id": args.run_id}
     if variant == "preview":
         return client.request("POST", "/api/v1/recipes/run-switch-stops/preview", payload)
-    payload.update(plan_digest=args.plan_digest, request_key=args.request_key)
+    payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
+    if not args.apply:
+        return {
+            "mode": "plan",
+            "apply": False,
+            "method": "POST",
+            "path": "/api/v1/recipes/run-switch-stops",
+            "body": payload,
+        }
     return client.request("POST", "/api/v1/recipes/run-switch-stops", payload)
 
 
@@ -2984,12 +3009,18 @@ def _run_cache(
         variant = args.eviction_command
         path = "/api/v1/model-cache/eviction-preview" if variant == "preview" else "/api/v1/model-cache/evict"
         payload = _cache_payload(args)
+        if args.target_bytes is not None:
+            if args.target_bytes < 0:
+                raise ValueError("--target-bytes must be non-negative")
+            payload.setdefault("target_bytes", args.target_bytes)
+        if not any(key != "plan_digest" for key in payload):
+            raise ValueError("cache eviction requires --target-bytes or structured input")
         if variant == "apply":
             if not args.request_key:
                 raise ValueError("cache eviction apply requires --request-key")
             payload.update(
                 plan_digest=args.plan_digest,
-                request_key=args.request_key,
+                request_key=_explicit_request_key(args.request_key),
             )
             return _plan_or_request(args, client, "POST", path, payload)
         return client.request("POST", path, payload)
@@ -2999,15 +3030,19 @@ def _run_cache(
             raise ValueError("cache download requires an exact artifact input")
         variant = args.download_mode or ("apply" if args.apply else "preview")
         if variant == "preview":
+            if args.apply:
+                raise ValueError("cache download preview cannot be combined with --apply")
             return client.request("POST", "/api/v1/model-cache/download-preview", payload)
         if not args.apply or not args.plan_digest or not args.request_key:
             raise ValueError("cache download apply requires --apply, --plan-digest, and --request-key")
-        payload.update(plan_digest=args.plan_digest, request_key=args.request_key)
+        payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
         return client.request("POST", "/api/v1/model-cache/download", payload)
     payload = _cache_payload(args)
     payload.setdefault("artifact_set_sha256", args.artifact_id)
     variant = args.repair_mode or ("apply" if args.apply else "preview")
     if variant == "preview":
+        if args.apply:
+            raise ValueError("cache repair preview cannot be combined with --apply")
         return client.request("POST", "/api/v1/model-cache/repair-preview", payload)
     if not args.apply or not args.plan_digest or not args.request_key:
         raise ValueError("cache repair apply requires --apply, --plan-digest, and --request-key")
@@ -3016,7 +3051,10 @@ def _run_cache(
 
 
 def _profile_body(args: argparse.Namespace) -> dict[str, object]:
-    return _read_structured(args)
+    body = _read_structured(args)
+    if "scope" not in body:
+        raise ValueError("profile input requires an explicit scope")
+    return body
 
 
 def _run_profiles(
@@ -3043,9 +3081,16 @@ def _run_profiles(
         path = base if command == "create" else f"{base}/{_quoted(args.profile_id)}"
         return client.request("POST" if command == "create" else "PUT", path, _profile_body(args))
     if command == "duplicate":
-        body: dict[str, object] = {"name": args.name}
+        body = _read_structured(args, required=False)
+        if body and "scope" not in body:
+            raise ValueError("profile duplicate input requires an explicit scope")
+        body["name"] = args.name
         if args.description is not None:
             body["description"] = args.description
+        if args.apply:
+            if not args.request_key:
+                raise ValueError("profile duplicate apply requires --request-key")
+            body["request_key"] = _explicit_request_key(args.request_key)
         return _plan_or_request(
             args,
             client,
@@ -3059,6 +3104,10 @@ def _run_profiles(
             "description": args.description,
             "installation_policy": args.installation_policy,
         }
+        if args.apply:
+            if not args.request_key:
+                raise ValueError("profile capture-current apply requires --request-key")
+            payload["request_key"] = _explicit_request_key(args.request_key)
         return _plan_or_request(args, client, "POST", f"{base}/capture-current", payload)
     if command == "delete":
         return _plan_or_request(args, client, "DELETE", f"{base}/{_quoted(args.profile_id)}")
@@ -3074,7 +3123,7 @@ def _run_profiles(
         path = f"{base}/{profile_id}/prepare/preview" if variant == "preview" else f"{base}/{profile_id}/prepare"
         payload = {} if variant == "preview" else {
             "plan_digest": args.plan_digest,
-            "request_key": args.request_key,
+            "request_key": _explicit_request_key(args.request_key),
         }
         if variant == "apply" and not args.apply:
             return {
@@ -3086,7 +3135,10 @@ def _run_profiles(
             }
         return client.request("POST", path, payload)
     if command == "switch":
-        payload = {"plan_digest": args.plan_digest, "request_key": args.request_key}
+        payload = {
+            "plan_digest": args.plan_digest,
+            "request_key": _explicit_request_key(args.request_key),
+        }
         if not args.apply:
             return {
                 "mode": "plan",
@@ -3107,7 +3159,7 @@ def _run_operations(
     command = args.operations_command
     base = "/api/v1/operations"
     if command == "list":
-        return _load_pages(client, base, args, query=_query(status=args.status, kind=args.kind), collection="operations")
+        return _load_pages(client, base, args, query=_query(state=args.status), collection="operations")
     operation_id = _quoted(args.operation_id)
     if command == "show":
         return client.request("GET", f"{base}/{operation_id}")
@@ -3126,7 +3178,6 @@ def _run_operations(
             result = client.request(
                 "GET",
                 f"{base}/{operation_id}",
-                query=_query(request_key=getattr(args, "request_key", None)) or None,
             )
             state = str(result.get("state", result.get("status", ""))).casefold()
             if state in {"succeeded", "completed", "failed", "cancelled", "canceled", "blocked", "partial"} or command == "watch" or time.monotonic() >= deadline:

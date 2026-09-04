@@ -95,15 +95,18 @@ vonkctl cache repair ARTIFACT_SET_SHA256 preview --json
 vonkctl cache repair ARTIFACT_SET_SHA256 apply \
   --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
 vonkctl cache update ARTIFACT_SET_SHA256 --json
-vonkctl cache eviction preview --json
-vonkctl cache eviction apply --plan-digest DIGEST --apply --json
+vonkctl cache eviction preview --target-bytes 1073741824 --json
+vonkctl cache eviction apply --target-bytes 1073741824 \
+  --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
 
 vonkctl profiles list --json
 vonkctl profiles show PROFILE_ID --json
 vonkctl profiles create --input-file profile.json --json
 vonkctl profiles update PROFILE_ID --stdin --json
-vonkctl profiles duplicate PROFILE_ID --name "Creative setup" --json
-vonkctl profiles capture-current --name "Current setup" --apply --json
+vonkctl profiles duplicate PROFILE_ID --name "Creative setup" \
+  --request-key REQUEST_UUID --apply --json
+vonkctl profiles capture-current --name "Current setup" \
+  --request-key REQUEST_UUID --apply --json
 vonkctl profiles preview PROFILE_ID --json
 vonkctl profiles prepare preview PROFILE_ID --json
 vonkctl profiles prepare apply PROFILE_ID \
@@ -117,9 +120,9 @@ vonkctl profiles delete PROFILE_ID --apply --json
 Cache download requests identify an exact immutable artifact set; optional
 `--model-version-sha256` and `--recipe-revision-sha256` flags are available for
 the common single-selection form. Repair and eviction require the digest from
-a fresh preview before `--apply`. A request key is generated when omitted and
-can be supplied again after a lost connection to reconcile an uncertain
-response.
+a fresh preview before `--apply`. Every consequential apply requires an
+explicit reusable `--request-key`; reuse that exact key when rerunning an
+apply after a lost connection.
 
 ## Operations and recovery
 

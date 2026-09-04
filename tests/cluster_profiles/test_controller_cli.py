@@ -88,6 +88,36 @@ class _Client:
         }
 
 
+class _StrictTaskClient(_Client):
+    """Fixture transport that rejects route, query, and body drift."""
+
+    def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+        allowed = {
+            ("POST", "/api/v1/fleet-profiles"): {"name", "scope", "assignments"},
+            ("POST", "/api/v1/fleet-profiles/profile-1/duplicate"): {"name", "scope", "request_key"},
+            ("POST", "/api/v1/fleet-profiles/profile-1/preview"): set(),
+            ("POST", "/api/v1/fleet-profiles/profile-1/switch"): {"plan_digest", "request_key"},
+            ("POST", "/api/v1/model-cache/eviction-preview"): {"target_bytes"},
+            ("POST", "/api/v1/model-cache/evict"): {"target_bytes", "plan_digest", "request_key"},
+            ("GET", "/api/v1/operations"): {"limit", "state"},
+        }
+        if (method, path) not in allowed:
+            raise AssertionError(f"unexpected Controller route: {method} {path}")
+        if query is not None and set(query) != allowed[(method, path)]:
+            raise AssertionError(f"unexpected query for {path}: {query}")
+        if method == "POST" and (
+            not isinstance(payload, dict) or set(payload) != allowed[(method, path)]
+        ):
+            raise AssertionError(f"unexpected body for {path}: {payload}")
+        self.calls.append((method, path, payload, query))
+        self.extra_headers.append(extra_headers)
+        if path == "/api/v1/model-cache/eviction-preview":
+            return {"schema_version": 2, "plan_digest": "d" * 64}
+        if path == "/api/v1/model-cache/evict":
+            return {"schema_version": 2, "operation_id": "op-1"}
+        return {"schema_version": 2, "id": "profile-1", "profiles": []}
+
+
 def _invoke(client: _Client, *argv: str) -> tuple[int, dict[str, Any]]:
     stdout = StringIO()
     with redirect_stdout(stdout):
@@ -1369,7 +1399,7 @@ def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> N
         ) == 0
         assert cli.main(("--json", "profiles", "list"), control_client=client) == 0
         assert cli.main(
-            ("--json", "profiles", "create", "--input", '{"name":"Demo","assignments":[]}'),
+            ("--json", "profiles", "create", "--input", '{"name":"Demo","scope":{"node_ids":[]},"assignments":[]}'),
             control_client=client,
         ) == 0
         assert cli.main(("--json", "profiles", "preview", "profile-1"), control_client=client) == 0
@@ -1397,13 +1427,13 @@ def test_operations_wait_reobserves_until_terminal_without_cancelling() -> None:
     with redirect_stdout(stdout):
         result = cli.main(
             ("--json", "operations", "wait", "op-1", "--timeout-seconds", "1", "--interval-seconds", ".01",
-             "--request-key", "11111111-1111-4111-8111-111111111111"),
+            ),
             control_client=client,
         )
     assert result == 0
     assert json.loads(stdout.getvalue())["state"] == "succeeded"
     assert len(client.calls) == 2
-    assert client.calls[0][3] == {"request_key": "11111111-1111-4111-8111-111111111111"}
+    assert client.calls[0][3] is None
 
 
 def test_models_show_uses_library_identity_projection() -> None:
@@ -1431,11 +1461,11 @@ def test_models_show_uses_library_identity_projection() -> None:
         ("models", "compare", "a", "b"),
         ("cache", "show", "a"),
         ("cache", "update", "a"),
-        ("cache", "eviction", "preview"),
-        ("cache", "eviction", "apply", "--plan-digest", "d" * 64,
+        ("cache", "eviction", "preview", "--target-bytes", "100"),
+        ("cache", "eviction", "apply", "--target-bytes", "100", "--plan-digest", "d" * 64,
          "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
         ("profiles", "show", "p"),
-        ("profiles", "update", "p", "--input", '{"name":"Demo","assignments":[]}'),
+        ("profiles", "update", "p", "--input", '{"name":"Demo","scope":{"node_ids":[]},"assignments":[]}'),
         ("profiles", "duplicate", "p", "--name", "Copy"),
         ("profiles", "capture-current", "--name", "Current"),
         ("profiles", "delete", "p"),
@@ -1476,6 +1506,23 @@ def test_high_level_run_routes_are_plan_bound(
     assert client.calls[-1][0:2] == (method, path)
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("models", "run", "apply", "--input", '{}', "--plan-digest", "d" * 64,
+         "--request-key", "11111111-1111-4111-8111-111111111111"),
+        ("models", "run", "stop", "apply", "run-1", "--plan-digest", "d" * 64,
+         "--request-key", "11111111-1111-4111-8111-111111111111"),
+    ],
+)
+def test_high_level_apply_without_apply_flag_only_emits_plan(argv: tuple[str, ...]) -> None:
+    client = _Client()
+    result, payload = _invoke(client, "--json", *argv)
+    assert result == 0
+    assert payload["mode"] == "plan"
+    assert client.calls == []
+
+
 def test_uncertain_run_apply_error_preserves_request_key_for_reconciliation() -> None:
     from cluster_profiles.control_client import ControlTransportError
 
@@ -1494,6 +1541,24 @@ def test_uncertain_run_apply_error_preserves_request_key_for_reconciliation() ->
     assert result == 2
     assert payload["request_key"] == request_key
     assert payload["reconcile"]["request_key"] == request_key
+
+
+def test_strict_fixture_rejects_route_query_and_body_drift() -> None:
+    client = _StrictTaskClient()
+    profile = '{"name":"Demo","scope":{"node_ids":["spk_' + "1" * 32 + '"]},"assignments":[]}'
+    request_key = "11111111-1111-4111-8111-111111111111"
+    commands = (
+        ("profiles", "create", "--input", profile),
+        ("profiles", "duplicate", "profile-1", "--name", "Copy", "--input", '{"scope":{"node_ids":[]}}', "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+        ("profiles", "preview", "profile-1"),
+        ("profiles", "switch", "profile-1", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
+        ("cache", "eviction", "preview", "--target-bytes", "100"),
+        ("cache", "eviction", "apply", "--target-bytes", "100", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
+        ("operations", "list", "--status", "running"),
+    )
+    for command in commands:
+        result, _payload = _invoke(client, "--json", *command)
+        assert result == 0
 
 
 def test_artifact_job_create_declares_hashed_bounded_local_inputs(
