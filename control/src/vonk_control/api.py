@@ -179,6 +179,7 @@ def build_agent_services(
     *,
     revision_eligible: Callable[[str], bool] | None = None,
     current_revision: Callable[[], str] | None = None,
+    distribution: Any | None = None,
 ) -> AgentApiServices:
     """Construct the fail-closed production agent runtime from one provider."""
     from .agent_jobs import AgentJobService
@@ -221,6 +222,7 @@ def build_agent_services(
             source_bundles=DatabaseSourceBundleStore(sessions),
             workload_tuf_metadata_root=settings.workload_tuf_metadata_root,
             workload_tuf_target_root=settings.workload_tuf_target_root,
+            distribution=distribution,
         )
 
     if settings.agent_intermediate_certificate_path is None:
@@ -333,6 +335,7 @@ def build_agent_services(
         source_bundles=DatabaseSourceBundleStore(sessions),
         workload_tuf_metadata_root=workload_tuf_metadata_root,
         workload_tuf_target_root=workload_tuf_target_root,
+        distribution=distribution,
         workload_helper_authority=helper_authority,
         host_runtime_authority=host_runtime_authority,
         fabric_policy=(

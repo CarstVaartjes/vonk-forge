@@ -33,6 +33,59 @@ pub struct ImageImporter<'a> {
 }
 
 impl ImageImporter<'_> {
+    /// Return a verified shared archive cache entry when one exists. The
+    /// content address is the archive digest, so two assignments can reuse
+    /// one download without sharing mutable staging state.
+    pub fn cached_archive_path(&self, archive_sha256: &str) -> Result<PathBuf, ImageImportError> {
+        if archive_sha256.len() != 64
+            || !archive_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(ImageImportError::Digest);
+        }
+        Ok(self.data_root.join("oci-archives").join(archive_sha256))
+    }
+
+    pub fn verified_cached_archive(
+        &self,
+        request: &RecipeImageImportRequest,
+    ) -> Result<Option<PathBuf>, ImageImportError> {
+        let path = self.cached_archive_path(&request.oci_layout_sha256)?;
+        if !path.exists() {
+            return Ok(None);
+        }
+        match self.verify(request, &path) {
+            Ok(_) => Ok(Some(path)),
+            Err(ImageImportError::Digest) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn retain_verified_archive(
+        &self,
+        request: &RecipeImageImportRequest,
+        archive: &Path,
+    ) -> Result<PathBuf, ImageImportError> {
+        self.verify(request, archive)?;
+        let destination = self.cached_archive_path(&request.oci_layout_sha256)?;
+        if destination.exists() {
+            self.verify(request, &destination)?;
+            return Ok(destination);
+        }
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let temporary = destination.with_extension(format!("{}.partial", std::process::id()));
+        fs::copy(archive, &temporary)?;
+        if let Err(error) = self.verify(request, &temporary) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        fs::rename(&temporary, &destination)?;
+        Ok(destination)
+    }
+
     pub fn staging_path(&self, operation_id: Uuid) -> Result<PathBuf, ImageImportError> {
         let root = self
             .data_root

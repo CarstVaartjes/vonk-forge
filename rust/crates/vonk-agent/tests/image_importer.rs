@@ -89,3 +89,25 @@ fn changed_archive_is_rejected_before_host_authority() {
         .is_err()
     );
 }
+
+#[test]
+fn verified_archive_is_reused_by_its_immutable_digest() {
+    let root = tempdir().unwrap();
+    let archive = root.path().join("image.docker.tar");
+    let payload = b"shared image archive";
+    fs::write(&archive, payload).unwrap();
+    let request = RecipeImageImportRequest {
+        build_id: Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap(),
+        image_bytes: payload.len() as u64,
+        image_digest: format!("sha256:{}", "d".repeat(64)),
+        kind: "recipe.image.import.v1".to_owned(),
+        mapping_generation: 1,
+        mapping_id: Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap(),
+        oci_layout_sha256: hex_sha256(payload),
+        schema_version: 1,
+        source_node_id: format!("spk_{}", "1".repeat(32)),
+    };
+    let importer = ImageImporter { data_root: root.path() };
+    let cached = importer.retain_verified_archive(&request, &archive).unwrap();
+    assert_eq!(importer.verified_cached_archive(&request).unwrap(), Some(cached));
+}

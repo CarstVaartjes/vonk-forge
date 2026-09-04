@@ -388,6 +388,85 @@ pub struct AgentResult {
     pub state: String,
 }
 
+/// A content-addressed object authorized by one exact Controller assignment.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DistributionObject {
+    pub name: String,
+    pub sha256: String,
+    pub bytes: u64,
+    pub kind: String,
+}
+
+impl DistributionObject {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.name.is_empty()
+            || self.name.len() > 512
+            || self.name.starts_with('/')
+            || self.name.contains(['\\', '\0', '\r', '\n'])
+            || self.name.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+            || !lower_hex(&self.sha256, 64)
+            || !(1..=16 * 1024_u64.pow(4)).contains(&self.bytes)
+            || !matches!(self.kind.as_str(), "model" | "oci-archive" | "oci-layer")
+        {
+            return Err(ProtocolError::Identity("distribution object"));
+        }
+        Ok(())
+    }
+}
+
+/// Controller-issued, node-scoped authorization for a complete model and
+/// executable image set.  The assignment is carried alongside every fetch;
+/// an enrolled agent cannot turn a digest into a general object browser.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DistributionAssignment {
+    pub schema_version: u8,
+    pub assignment_id: Uuid,
+    pub plan_digest: String,
+    pub generation: u64,
+    pub node_id: String,
+    pub expires_at: DateTime<FixedOffset>,
+    pub model_artifact_set_sha256: String,
+    pub objects: Vec<DistributionObject>,
+    pub oci_image_digest: String,
+    pub oci_archive_sha256: String,
+}
+
+impl DistributionAssignment {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.schema_version != 2
+            || self.assignment_id.get_version() != Some(uuid::Version::Random)
+            || self.generation == 0
+            || !valid_node_id(&self.node_id)
+            || self.expires_at.offset().local_minus_utc() != 0
+            || !lower_hex(&self.plan_digest, 64)
+            || !lower_hex(&self.model_artifact_set_sha256, 64)
+            || !valid_oci_digest(&self.oci_image_digest)
+            || !lower_hex(&self.oci_archive_sha256, 64)
+            || self.objects.is_empty()
+            || self.objects.len() > 4096
+        {
+            return Err(ProtocolError::Identity("distribution assignment"));
+        }
+        let mut digests = BTreeSet::new();
+        let mut has_model = false;
+        let mut has_archive = false;
+        for object in &self.objects {
+            object.validate()?;
+            if !digests.insert(object.sha256.as_str()) {
+                return Err(ProtocolError::Identity("distribution object duplicate"));
+            }
+            has_model |= object.kind == "model";
+            has_archive |= object.kind == "oci-archive" && object.sha256 == self.oci_archive_sha256;
+        }
+        if !has_model || !has_archive {
+            return Err(ProtocolError::Identity("distribution assignment object coverage"));
+        }
+        Ok(())
+    }
+}
+
 impl AgentResult {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1

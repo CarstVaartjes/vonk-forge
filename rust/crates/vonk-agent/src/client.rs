@@ -9,7 +9,8 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, HostRuntimeRequest,
-    RecipeRunInspectionBinding, RecipeRunObservationReceipt, canonical_json, hex_sha256,
+    DistributionAssignment, RecipeRunInspectionBinding, RecipeRunObservationReceipt,
+    canonical_json, hex_sha256,
     parse_strict,
 };
 
@@ -648,39 +649,149 @@ impl AgentHttpClient {
         expected_bytes: u64,
         destination: &Path,
     ) -> Result<(), ClientError> {
+        self.download_content_addressed(
+            &format!("/agent/v1/artifacts/{sha256}"),
+            None,
+            sha256,
+            expected_bytes,
+            destination,
+        )
+        .await
+    }
+
+    /// Download one object from the Controller's assignment-bound delivery
+    /// API.  A partial destination is a resumable checkpoint; the assignment,
+    /// ETag, length and final SHA-256 are checked on every completed transfer.
+    pub async fn download_distribution_object(
+        &self,
+        plan_digest: &str,
+        sha256: &str,
+        expected_bytes: u64,
+        destination: &Path,
+    ) -> Result<(), ClientError> {
+        if !valid_sha256(plan_digest) {
+            return Err(ClientError::Protocol);
+        }
+        self.download_content_addressed(
+            "/agent/v1/distribution/objects",
+            Some(plan_digest),
+            sha256,
+            expected_bytes,
+            destination,
+        )
+        .await
+    }
+
+    /// Fetch and validate the assignment manifest before selecting model files
+    /// or an OCI archive. The manifest is bounded and mTLS-authenticated.
+    pub async fn distribution_manifest(
+        &self,
+        plan_digest: &str,
+    ) -> Result<DistributionAssignment, ClientError> {
+        if !valid_sha256(plan_digest) {
+            return Err(ClientError::Protocol);
+        }
+        let response = self
+            .client
+            .get(self.endpoint(&format!("/agent/v1/distribution/manifests/{plan_digest}"))?)
+            .send()
+            .await?;
+        classify_status(response.status())?;
+        let body = bounded_body(response).await?;
+        let assignment: DistributionAssignment =
+            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
+        assignment.validate().map_err(|_| ClientError::Protocol)?;
+        if assignment.plan_digest != plan_digest || assignment.node_id != self.node_id {
+            return Err(ClientError::Protocol);
+        }
+        Ok(assignment)
+    }
+
+    async fn download_content_addressed(
+        &self,
+        endpoint: &str,
+        plan_digest: Option<&str>,
+        sha256: &str,
+        expected_bytes: u64,
+        destination: &Path,
+    ) -> Result<(), ClientError> {
         if !valid_sha256(sha256) || !(1..=16 * 1024_u64.pow(4)).contains(&expected_bytes) {
             return Err(ClientError::Protocol);
         }
+        let existing = match tokio::fs::metadata(destination).await {
+            Ok(metadata) => metadata.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(ClientError::CredentialRead(error)),
+        };
+        if existing > expected_bytes {
+            return Err(ClientError::Protocol);
+        }
+        if existing == expected_bytes {
+            if sha256_path(destination, expected_bytes).await? == sha256 {
+                return Ok(());
+            }
+            // A complete object with the wrong identity is corruption, not a
+            // resumable checkpoint. Keep it for diagnostics and fail closed.
+            return Err(ClientError::Protocol);
+        }
         let mut output = tokio::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
+            .create(true)
+            .append(true)
             .open(destination)
             .await?;
-        let mut offset = 0_u64;
+        let mut offset = existing;
         while offset < expected_bytes {
             let end = expected_bytes
                 .saturating_sub(1)
                 .min(offset.saturating_add(8 * 1024 * 1024 - 1));
+            let mut url = self.endpoint(&format!("{endpoint}/{sha256}"))?;
+            if let Some(plan_digest) = plan_digest {
+                url.query_pairs_mut().append_pair("plan_digest", plan_digest);
+            }
             let response = self
                 .client
-                .get(self.endpoint(&format!("/agent/v1/artifacts/{sha256}"))?)
+                .get(url)
                 .header("range", format!("bytes={offset}-{end}"))
+                .header("if-range", format!("\"sha256:{sha256}\""))
                 .send()
                 .await?;
+            let expected_etag = format!("\"sha256:{sha256}\"");
+            let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
             if response.status() != StatusCode::PARTIAL_CONTENT
                 || response.content_length() != Some(end - offset + 1)
+                || response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    != Some(expected_etag.as_str())
+                || response
+                    .headers()
+                    .get("content-range")
+                    .and_then(|value| value.to_str().ok())
+                    != Some(expected_range.as_str())
             {
                 classify_status(response.status())?;
                 return Err(ClientError::Protocol);
             }
-            let chunk = bounded_body_limit(response, (end - offset + 1) as usize).await?;
-            if chunk.len() as u64 != end - offset + 1 {
+            let mut copied = 0_u64;
+            let expected_chunk = end - offset + 1;
+            let mut response = response;
+            while let Some(chunk) = response.chunk().await? {
+                copied = copied.saturating_add(chunk.len() as u64);
+                if copied > expected_chunk {
+                    return Err(ClientError::Protocol);
+                }
+                output.write_all(&chunk).await?;
+            }
+            if copied != expected_chunk {
                 return Err(ClientError::Protocol);
             }
-            output.write_all(&chunk).await?;
             offset = end + 1;
         }
         output.sync_all().await?;
+        if sha256_path(destination, expected_bytes).await? != sha256 {
+            return Err(ClientError::Protocol);
+        }
         Ok(())
     }
 
@@ -905,6 +1016,28 @@ fn classify_status(status: StatusCode) -> Result<(), ClientError> {
 
 async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
     bounded_body_limit(response, MAX_BODY_BYTES).await
+}
+
+async fn sha256_path(path: &Path, expected_bytes: u64) -> Result<String, ClientError> {
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut digest = Sha256::new();
+    let mut total = 0_u64;
+    loop {
+        let mut buffer = [0_u8; 1024 * 1024];
+        let count = tokio::io::AsyncReadExt::read(&mut file, &mut buffer).await?;
+        if count == 0 {
+            break;
+        }
+        total = total.saturating_add(count as u64);
+        if total > expected_bytes {
+            return Err(ClientError::Protocol);
+        }
+        digest.update(&buffer[..count]);
+    }
+    if total != expected_bytes {
+        return Err(ClientError::Protocol);
+    }
+    Ok(hex::encode(digest.finalize()))
 }
 
 async fn bounded_body_limit(

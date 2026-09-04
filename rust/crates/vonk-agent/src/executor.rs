@@ -486,18 +486,32 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let importer = ImageImporter {
                     data_root: self.runtime.data_root,
                 };
-                let archive = match importer.staging_path(claim.operation_id) {
-                    Ok(path) => path,
-                    Err(_) => return failed("image import staging is unavailable"),
+                let archive = match importer.verified_cached_archive(&request) {
+                    Ok(Some(path)) => path,
+                    Ok(None) => {
+                        let staging = match importer.staging_path(claim.operation_id) {
+                            Ok(path) => path,
+                            Err(_) => return failed("image import staging is unavailable"),
+                        };
+                        if self
+                            .client
+                            .download_artifact(
+                                &request.oci_layout_sha256,
+                                request.image_bytes,
+                                &staging,
+                            )
+                            .await
+                            .is_err()
+                        {
+                            return failed("exact OCI image archive is unavailable");
+                        }
+                        match importer.retain_verified_archive(&request, &staging) {
+                            Ok(path) => path,
+                            Err(_) => return failed("verified OCI image archive could not be retained"),
+                        }
+                    }
+                    Err(_) => return failed("OCI image archive cache is invalid"),
                 };
-                if self
-                    .client
-                    .download_artifact(&request.oci_layout_sha256, request.image_bytes, &archive)
-                    .await
-                    .is_err()
-                {
-                    return failed("exact OCI image archive is unavailable");
-                }
                 match importer.verify(&request, &archive) {
                     Ok(evidence) => match self
                         .execute_host_runtime(
