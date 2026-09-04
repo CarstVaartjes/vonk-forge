@@ -3107,27 +3107,28 @@ _TERMINAL_OPERATION_STATES = frozenset(
 
 
 def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
-    phase = observed.get("phase") or observed.get("current_phase")
+    progress = observed.get("progress")
+    if not isinstance(progress, Mapping):
+        return None
+    phase = progress.get("phase")
     pieces: list[str] = []
     if isinstance(phase, str) and phase:
         pieces.append(f"phase: {phase}")
-    completed = observed.get("bytes_completed")
-    total = observed.get("bytes_total")
+    completed = progress.get("completed_bytes")
+    total = progress.get("total_bytes")
     if isinstance(completed, int) and not isinstance(completed, bool):
         if isinstance(total, int) and not isinstance(total, bool):
             pieces.append(f"bytes: {completed}/{total}")
         else:
             pieces.append(f"bytes: {completed}")
-    members = observed.get("members") or observed.get("targets")
+    members = progress.get("members")
     if isinstance(members, list):
         labels = []
         for member in members:
             if isinstance(member, Mapping):
                 label = (
                     member.get("display_name")
-                    or member.get("node_name")
-                    or member.get("node_id")
-                    or member.get("id")
+                    or member.get("member_id")
                 )
                 if isinstance(label, str) and label:
                     labels.append(label)

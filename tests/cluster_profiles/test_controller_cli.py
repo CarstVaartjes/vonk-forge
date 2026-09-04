@@ -1852,12 +1852,23 @@ def test_simple_run_human_mode_reports_changed_operation_progress_to_stderr() ->
             ("GET", "/api/v1/operations/op-1"): [
                 {
                     "state": "running",
-                    "phase": "copying",
-                    "bytes_completed": 10,
-                    "bytes_total": 100,
-                    "targets": [{"node_id": "spk_1"}],
+                    "progress": {
+                        "phase": "copying",
+                        "completed_bytes": 10,
+                        "total_bytes": 100,
+                        "total_bytes_known": True,
+                        "members": [
+                            {
+                                "member_id": "spk_1",
+                                "phase": "copying",
+                                "completed_bytes": 10,
+                                "total_bytes": 100,
+                                "state": "running",
+                            }
+                        ],
+                    },
                 },
-                {"state": "succeeded", "phase": "running"},
+                {"state": "succeeded", "progress": {"phase": "running"}},
             ],
         }
     )
