@@ -28,6 +28,11 @@ _TOKEN_FIELDS = frozenset(
     {
         "access_token",
         "bearer_token",
+        "gh_token",
+        "github_token",
+        "gitlab_token",
+        "hf_token",
+        "huggingface_token",
         "id_token",
         "refresh_token",
         "session_token",
@@ -44,7 +49,11 @@ def is_secret_field(name: object) -> bool:
 
     if not isinstance(name, str):
         return False
-    normalized = re.sub(r"[^a-z0-9]+", "_", name.casefold()).strip("_")
+    # Split camelCase before case folding so API-shaped names cannot evade the
+    # same semantics as their snake_case and kebab-case spellings.
+    separated = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", name)
+    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", separated)
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", separated).strip("_").casefold()
     return bool(_SENSITIVE_FIELD.search(normalized)) or normalized in _TOKEN_FIELDS
 
 

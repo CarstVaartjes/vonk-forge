@@ -207,6 +207,8 @@ def test_payload_is_bounded_and_rejects_credential_fields(service) -> None:
     "payload",
     [
         {"max_tokens": 512},
+        {"token_budget": 1_024},
+        {"tokenizer": "custom"},
         {"unfamiliar_token_parameter": "opaque"},
         {"repeat": ""},
         {"json": {"nested": [True, None, 3]}},
@@ -223,9 +225,23 @@ def test_opaque_engine_parameters_are_preserved(service, payload: dict[str, obje
 
 
 @pytest.mark.parametrize(
-    "field", ["token", "password", "api_key", "private-key", "database_password"]
+    "field",
+    [
+        "token",
+        "password",
+        "api_key",
+        "apiKey",
+        "private-key",
+        "privateKey",
+        "passwordHash",
+        "database_password",
+        "hf_token",
+        "HF_TOKEN",
+        "github_token",
+        "accessToken",
+    ],
 )
-def test_exact_secret_fields_are_rejected(service, field: str) -> None:
+def test_secret_fields_are_rejected(service, field: str) -> None:
     jobs, _ = service
 
     with pytest.raises(ValueError, match="sensitive"):
