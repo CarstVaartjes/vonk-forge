@@ -91,7 +91,10 @@ def _docker_context_is_orbstack() -> bool:
     return (
         context == "orbstack"
         and info.returncode == 0
-        and "Context: orbstack" in info.stdout
+        and any(
+            line.strip().split() == ["Context:", "orbstack"]
+            for line in info.stdout.splitlines()
+        )
     )
 
 
@@ -160,7 +163,7 @@ def _app(
         if not value.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="authentication required")
         try:
-            return codec.verify(value[7:])
+            return codec.verify(value[7:], now=int(datetime.now(UTC).timestamp()))
         except AuthError:
             raise HTTPException(status_code=401, detail="authentication failed") from None
 
@@ -172,7 +175,11 @@ def _app(
         recipe_library=reader,
         managed_sync=sync,
     )
-    token = codec.issue(Actor("viewer", "acceptance"), ttl_seconds=300)
+    token = codec.issue(
+        Actor("acceptance", "administrator"),
+        now=int(datetime.now(UTC).timestamp()),
+        ttl_seconds=300,
+    )
     client = TestClient(app)
     client.headers.update({"Authorization": f"Bearer {token}"})
     return client

@@ -329,6 +329,7 @@ class RecipePackageClient:
                 "package_sha256": package.get("sha256"), "size": package.get("expected_bytes"),
                 "location": package.get("path"), "title": document.metadata.title,
                 "description": document.metadata.description, "tags": document.metadata.tags,
+                "document": document.model_dump(mode="json"),
             })
         packages: dict[str, dict[str, object]] = {}
         items: list[RecipeLibraryItem] = []
@@ -346,7 +347,7 @@ class RecipePackageClient:
             packages[key] = dict(package_entry)
             packages[key]["publication_commit"] = resolved_publication
             tags = package_entry.get("tags", [])
-            items.append(RecipeLibraryItem(library_commit=commit, source_path=str(source_path), publisher=str(publisher), slug=str(slug), title=str(package_entry.get("title", "")), description=str(package_entry.get("description", "")), tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (), content_sha256=str(digest), uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}", document={}))
+            items.append(RecipeLibraryItem(library_commit=commit, source_path=str(source_path), publisher=str(publisher), slug=str(slug), title=str(package_entry.get("title", "")), description=str(package_entry.get("description", "")), tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (), content_sha256=str(digest), uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}", document=package_entry["document"]))
         if [(item.publisher, item.slug) for item in items] != sorted((item.publisher, item.slug) for item in items):
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index is not sorted")
         return RecipeLibrarySnapshot(

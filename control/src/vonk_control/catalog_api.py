@@ -357,9 +357,9 @@ class PublicRecipeListItem(StrictModel):
     quantizations: list[str] = Field(max_length=16)
     execution_harness: str = Field(pattern=_SLUG)
     runtime_distribution: str = Field(pattern=_SLUG)
-    source_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    artifact_count: int = Field(ge=0, le=32)
-    artifact_identities: list[PublicRecipeArtifactIdentity] = Field(max_length=32)
+    source_bundle_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    artifact_count: int = Field(ge=0)
+    artifact_identities: list[PublicRecipeArtifactIdentity]
     topology_name: str = Field(min_length=1, max_length=64)
     topology_mode: str = Field(min_length=1, max_length=32)
     node_count: int = Field(ge=1)
@@ -703,6 +703,20 @@ def _public_recipe_metadata(
     build_resources = build.get("resources") if isinstance(build, Mapping) else None
     raw_fabric = topology.get("fabric")
     raw_fabric = raw_fabric if isinstance(raw_fabric, Mapping) else {}
+    summary = _document_summary(document)
+    summary["source_bundle_sha256"] = None
+    summary["artifact_count"] = len(artifact_identities)
+    summary["expected_download_bytes"] = max(
+        1,
+        sum(
+            int(identity["download_bytes"])
+            for identity in artifact_identities
+            if isinstance(identity.get("download_bytes"), int)
+        ),
+    )
+    summary["temporary_build_bytes_per_node"] = int(
+        summary.get("temporary_build_bytes_per_node") or 0
+    )
     return {
         "model_publisher": model_publisher,
         "model_slug": model_slug,
@@ -739,7 +753,7 @@ def _public_recipe_metadata(
                 "minimum_bandwidth_mbps", 0
             ),
         },
-        **_document_summary(document),
+        **summary,
     }
 
 
@@ -1406,6 +1420,29 @@ def install_catalog_routes(
             local_revisions = catalog().recipe_catalog_local_revisions(
                 [item.slug for item in snapshot.items]
             )
+            model_documents: dict[tuple[object, object], dict[str, object]] = {}
+            for entry in snapshot.catalog_entities:
+                if not isinstance(entry, Mapping):
+                    continue
+                document = entry.get("document")
+                identity = document.get("identity") if isinstance(document, Mapping) else None
+                if isinstance(document, Mapping) and isinstance(identity, Mapping):
+                    model_documents[(identity.get("publisher"), identity.get("slug"))] = dict(document)
+
+            def dependencies(item: RecipeLibraryItem) -> tuple[dict[str, object], ...]:
+                if item.dependencies:
+                    return item.dependencies
+                selected: list[dict[str, object]] = []
+                models = item.document.get("models", [])
+                if isinstance(models, list):
+                    for selection in models:
+                        reference = selection.get("model") if isinstance(selection, Mapping) else None
+                        if not isinstance(reference, Mapping):
+                            continue
+                        document = model_documents.get((reference.get("publisher"), reference.get("slug")))
+                        if document is not None:
+                            selected.append(document)
+                return tuple(selected)
         except RecipeLibraryError as error:
             return recipe_library_problem(request, error)
         except CatalogError as error:
@@ -1422,7 +1459,7 @@ def install_catalog_routes(
                     "tags": list(item.tags),
                     "uri": item.uri,
                     "content_sha256": item.content_sha256,
-                    **_public_recipe_metadata(item.document, item.dependencies),
+                    **_public_recipe_metadata(item.document, dependencies(item)),
                     **_public_recipe_release_state(
                         source_kind="recipe_library",
                         publisher=item.publisher,
