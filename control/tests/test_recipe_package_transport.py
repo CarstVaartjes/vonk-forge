@@ -10,14 +10,17 @@ import pytest
 from vonk_control.recipe_packages import RecipePackageClient
 
 
-ROOT = Path("/private/tmp/vonk-forge-recipes-contract-conversion-final")
+ROOT = Path("/private/tmp/vonk-forge-recipes-release-integration")
 
 
 def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_path: Path) -> None:
     if not (ROOT / "catalog-index.json").is_file():
-        return
+        pytest.skip("published recipe fixture is unavailable")
     index = (ROOT / "catalog-index.json").read_bytes()
-    row = json.loads(index)["recipes"][0]
+    rows = json.loads(index)["recipes"]
+    row = next(
+        row for row in rows if row["document"]["identity"]["slug"] == "deepseek-v4-flash-0731-mia-dual"
+    )
     package_path = ROOT / row["package"]["path"]
     publication = "2" * 40
     requests: list[str] = []
@@ -42,7 +45,14 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_pat
         cache_root=tmp_path / "packages",
         transport=httpx.MockTransport(handler),
     )
-    item = client.fetch(client.list().items[0].uri)
+    snapshot = client.list()
+    item = client.fetch(
+        next(
+            entry.uri
+            for entry in snapshot.items
+            if entry.slug == "deepseek-v4-flash-0731-mia-dual"
+        )
+    )
     assert requests[0].endswith("/repos/CarstVaartjes/vonk-forge-recipes/commits/main")
     assert requests[1] == (
         "https://raw.githubusercontent.com/CarstVaartjes/vonk-forge-recipes/"
@@ -54,6 +64,10 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_pat
     )
     assert item.package_handle is not None
     assert item.package_handle.publication_commit == publication
+    assert item.package_handle.package_size == row["package"]["expected_bytes"]
+    assert item.package_handle.package_sha256 == row["package"]["sha256"]
+    assert item.package_handle.archive_path.is_file()
+    assert item.package_handle.closure_path.is_dir()
 
 
 def test_publication_network_smoke_at_published_commit(tmp_path: Path) -> None:
@@ -69,5 +83,22 @@ def test_publication_network_smoke_at_published_commit(tmp_path: Path) -> None:
         snapshot = client.list()
         assert snapshot.repository == "CarstVaartjes/vonk-forge-recipes"
         assert len(snapshot.items) == 84
+        item = client.fetch(
+            next(
+                entry.uri
+                for entry in snapshot.items
+                if entry.slug == "deepseek-v4-flash-0731-mia-dual"
+            )
+        )
+        assert item.package_handle is not None
+        assert item.package_handle.publication_commit == (
+            "2001c6502bfdc66141dd7224bfde5d77734e9959"
+        )
+        assert item.package_handle.package_sha256 == (
+            "eb408d2559ab16b7aa3697eb4cf66495eb22cd6da31cec496f540ac76898a581"
+        )
+        assert item.package_handle.package_size == 72879
+        assert item.package_handle.archive_path.is_file()
+        assert item.package_handle.closure_path.is_dir()
     finally:
         client.close()
