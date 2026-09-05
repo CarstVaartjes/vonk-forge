@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import FastAPI, HTTPException, Path, Query, Request, status
+from fastapi import FastAPI, HTTPException, Path, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import JSONResponse, Response
 
@@ -24,7 +24,6 @@ from .catalog_service import (
     CatalogService,
     CatalogValidationError,
     RecipeCatalogLocalRevision,
-    RecipeDraftInput,
     RecipeRevisionView,
     RecipeSummary,
     _document_summary,
@@ -89,20 +88,14 @@ PublicRecipeQualificationBasis = Literal[
 ]
 
 CATALOG_OPERATION_IDS = {
-    ("get", "/api/v1/catalog/recipes"): "listLocalRecipes",
-    ("post", "/api/v1/catalog/recipes"): "createLocalRecipe",
-    ("get", "/api/v1/catalog/recipes/{recipe_id}"): "getLocalRecipe",
-    ("put", "/api/v1/catalog/recipes/{recipe_id}/draft"): "updateLocalRecipeDraft",
-    ("post", "/api/v1/catalog/recipes/{recipe_id}/resolve"): "resolveLocalRecipe",
-    ("post", "/api/v1/catalog/recipes/{recipe_id}/fork"): "forkLocalRecipe",
     (
         "get",
         "/api/v1/catalog/source-bundles/{sha256}",
-    ): "downloadLocalRecipeSourceBundle",
+    ): "downloadRecipeSourceBundle",
     (
         "put",
         "/api/v1/catalog/source-bundles/{sha256}",
-    ): "uploadLocalRecipeSourceBundle",
+    ): "uploadRecipeSourceBundle",
     ("post", "/api/v1/catalog/imports/recipe-library"): "importRecipeLibrary",
     (
         "post",
@@ -158,25 +151,6 @@ class CatalogProblem(StrictModel):
     request_id: str = Field(pattern=_UUID)
 
 
-class CreateRecipeRequest(StrictModel):
-    slug: str = Field(pattern=_SLUG)
-    document: dict[str, object]
-
-
-class UpdateRecipeDraftRequest(StrictModel):
-    expected_revision: int = Field(ge=1, strict=True)
-    document: dict[str, object]
-
-
-class ResolveRecipeRequest(StrictModel):
-    expected_revision: int = Field(ge=1, strict=True)
-
-
-class ForkRecipeRequest(StrictModel):
-    revision: int = Field(ge=1, strict=True)
-    slug: str = Field(pattern=_SLUG)
-
-
 class PublicImportRequest(StrictModel):
     uri: str = Field(min_length=100, max_length=256)
     expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -187,7 +161,7 @@ class RecipeLibraryImportRequest(StrictModel):
     source_path: str = Field(pattern=r"^recipes/[a-z0-9][a-z0-9-]{1,62}\.json$")
     expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     document: dict[str, object]
-    model_documents: list[dict[str, object]] = Field(min_length=1, max_length=32)
+    model_documents: list[dict[str, object]] = Field(default_factory=list, max_length=92)
 
 
 class ManagedCatalogSyncRequest(StrictModel):
@@ -395,7 +369,7 @@ class RecipeSummaryResponse(StrictModel):
     content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     execution_harness: str = Field(pattern=_SLUG)
     runtime_distribution: str = Field(pattern=_SLUG)
-    source_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_bundle_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     artifact_count: int = Field(ge=0, le=32)
     expected_download_bytes: int = Field(ge=1)
     topology_name: str = Field(min_length=1, max_length=64)
@@ -1108,7 +1082,7 @@ def install_catalog_routes(
             404: {"model": CatalogProblem},
             422: {"model": CatalogProblem},
         },
-        operation_id="downloadLocalRecipeSourceBundle",
+        operation_id="downloadRecipeSourceBundle",
     )
     def download_source_bundle(
         request: Request,
@@ -1143,7 +1117,7 @@ def install_catalog_routes(
             409: {"model": CatalogProblem},
             422: {"model": CatalogProblem},
         },
-        operation_id="uploadLocalRecipeSourceBundle",
+        operation_id="uploadRecipeSourceBundle",
     )
     async def upload_source_bundle(
         request: Request,
@@ -1216,189 +1190,6 @@ def install_catalog_routes(
             raise HTTPException(status_code=404, detail="recipe not found") from None
         except CatalogError as error:
             return _problem(request, error)
-
-    @app.get(
-        "/api/v1/catalog/recipes",
-        response_model=RecipeListResponse,
-        responses={401: {"model": CatalogProblem}, 422: {"model": CatalogProblem}},
-        operation_id="listLocalRecipes",
-    )
-    def list_recipes(
-        request: Request,
-        cursor: str | None = Query(default=None, max_length=64),
-        limit: int = Query(default=20, ge=1, le=100),
-        _actor: Actor = authenticated,
-    ):
-        result = read(
-            lambda: catalog().list_recipes(limit=limit, cursor=cursor), request
-        )
-        if isinstance(result, JSONResponse):
-            return result
-        recipes, next_cursor = result
-        return {
-            "recipes": [_summary(item) for item in recipes],
-            "next_cursor": next_cursor,
-        }
-
-    @app.post(
-        "/api/v1/catalog/recipes",
-        response_model=RecipeRevisionResponse,
-        responses={
-            401: {"model": CatalogProblem},
-            403: {"model": CatalogProblem},
-            409: {"model": CatalogProblem},
-            422: {"model": CatalogProblem},
-        },
-        status_code=status.HTTP_201_CREATED,
-        operation_id="createLocalRecipe",
-    )
-    def create_recipe(
-        body: CreateRecipeRequest, request: Request, actor: Actor = authenticated
-    ):
-        administrator(actor)
-        try:
-            _bounded(body.document)
-            result = catalog().create_recipe(
-                actor.subject, RecipeDraftInput(slug=body.slug, document=body.document)
-            )
-        except CatalogError as error:
-            return _problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.recipe.create",
-                None,
-                (result.recipe_id,),
-            )
-        )
-        return _revision(result)
-
-    @app.get(
-        "/api/v1/catalog/recipes/{recipe_id}",
-        response_model=RecipeRevisionResponse,
-        responses={401: {"model": CatalogProblem}, 404: {"model": CatalogProblem}},
-        operation_id="getLocalRecipe",
-    )
-    def get_recipe(
-        request: Request,
-        recipe_id: str = Path(pattern=_UUID),
-        _actor: Actor = authenticated,
-    ):
-        result = read(lambda: catalog().get_recipe(recipe_id), request)
-        return result if isinstance(result, JSONResponse) else _revision(result)
-
-    @app.put(
-        "/api/v1/catalog/recipes/{recipe_id}/draft",
-        response_model=RecipeRevisionResponse,
-        responses={
-            401: {"model": CatalogProblem},
-            403: {"model": CatalogProblem},
-            404: {"model": CatalogProblem},
-            409: {"model": CatalogProblem},
-            422: {"model": CatalogProblem},
-        },
-        operation_id="updateLocalRecipeDraft",
-    )
-    def update_draft(
-        body: UpdateRecipeDraftRequest,
-        request: Request,
-        recipe_id: str = Path(pattern=_UUID),
-        actor: Actor = authenticated,
-    ):
-        administrator(actor)
-        try:
-            _bounded(body.document)
-            result = catalog().update_draft(
-                recipe_id, body.expected_revision, body.document, actor.subject
-            )
-        except KeyError:
-            raise HTTPException(status_code=404, detail="recipe not found") from None
-        except CatalogError as error:
-            return _problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.recipe.update",
-                None,
-                (recipe_id, str(result.revision_number)),
-            )
-        )
-        return _revision(result)
-
-    @app.post(
-        "/api/v1/catalog/recipes/{recipe_id}/resolve",
-        response_model=RecipeRevisionResponse,
-        responses={
-            401: {"model": CatalogProblem},
-            403: {"model": CatalogProblem},
-            404: {"model": CatalogProblem},
-            409: {"model": CatalogProblem},
-            422: {"model": CatalogProblem},
-        },
-        operation_id="resolveLocalRecipe",
-    )
-    def resolve_recipe(
-        body: ResolveRecipeRequest,
-        request: Request,
-        recipe_id: str = Path(pattern=_UUID),
-        actor: Actor = authenticated,
-    ):
-        administrator(actor)
-        try:
-            result = catalog().resolve(recipe_id, body.expected_revision, actor.subject)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="recipe not found") from None
-        except CatalogError as error:
-            return _problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.recipe.resolve",
-                None,
-                (recipe_id, result.content_sha256 or ""),
-            )
-        )
-        return _revision(result)
-
-    @app.post(
-        "/api/v1/catalog/recipes/{recipe_id}/fork",
-        response_model=RecipeRevisionResponse,
-        responses={
-            401: {"model": CatalogProblem},
-            403: {"model": CatalogProblem},
-            404: {"model": CatalogProblem},
-            409: {"model": CatalogProblem},
-            422: {"model": CatalogProblem},
-        },
-        status_code=status.HTTP_201_CREATED,
-        operation_id="forkLocalRecipe",
-    )
-    def fork_recipe(
-        body: ForkRecipeRequest,
-        request: Request,
-        recipe_id: str = Path(pattern=_UUID),
-        actor: Actor = authenticated,
-    ):
-        administrator(actor)
-        try:
-            result = catalog().fork(recipe_id, body.revision, body.slug, actor.subject)
-        except KeyError:
-            raise HTTPException(status_code=404, detail="recipe not found") from None
-        except CatalogError as error:
-            return _problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.recipe.fork",
-                None,
-                (recipe_id, result.recipe_id),
-            )
-        )
-        return _revision(result)
 
     @app.get(
         "/api/v1/catalog/public-recipes",
