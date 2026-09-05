@@ -137,7 +137,7 @@ export function App({api}: {api: ControlApi}) {
     fleet: <FleetPage api={api} onBusyChange={setNavigationLocked}/>,
     library: pathname === "/library/create"
         ? <CustomRecipeBuilderPage api={api as ControlApi & CatalogApi} onNavigate={navigateUrl} onBusyChange={setNavigationBusy} onDirtyChange={setDraftDirty}/>
-      : <LibraryPage api={api} path={url} onNavigate={navigatePath} onBusyChange={setNavigationBusy}/>,
+      : <LibraryPage api={api} path={url} onNavigate={navigatePath} onNavigatePath={navigateUrl} onBusyChange={setNavigationBusy}/>,
     activity: <ActivityPage api={api}/>,
   }[page] : <section className="fleet-empty route-not-found" aria-labelledby="not-found-heading">
     <p className="fleet-kicker">Unknown workspace</p>

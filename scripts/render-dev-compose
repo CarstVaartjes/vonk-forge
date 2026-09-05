@@ -20,13 +20,28 @@ IMAGE = re.compile(
 PINNED_IMAGE = re.compile(r"^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$")
 DEFAULT_IMAGE = re.compile(r"^\$\{[A-Z0-9_]+:-([^}]+)\}$")
 DEV_MUTABLE_IMAGES = {
-    "API": "ghcr.io/carstvaartjes/vonk-forge-api:dev",
-    "worker": "ghcr.io/carstvaartjes/vonk-forge-worker:dev",
+    role: f"ghcr.io/carstvaartjes/vonk-forge-{package}:dev"
+    for role, package in (
+        ("API", "api"),
+        ("worker", "worker"),
+        ("Hermes", "hermes"),
+        ("LiteLLM", "litellm"),
+    )
 }
-DEV_MUTABLE_SERVICE_IMAGES = {
-    "control-api": DEV_MUTABLE_IMAGES["API"],
-    "control-worker": DEV_MUTABLE_IMAGES["worker"],
-}
+
+
+def channel_image(image: str, channel: str) -> str:
+    """Project an image identity onto its deployment channel, without a pin."""
+    repository = image.split("@", 1)[0].rsplit(":", 1)[0]
+    tag = (
+        "dev"
+        if channel == "dev"
+        and repository.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+        else "latest"
+    )
+    return f"{repository}:{tag}"
+
+
 TOKENS = {
     "api": "${CONTROL_API_IMAGE:?set a digest-pinned control-api image}",
     "worker": "${CONTROL_WORKER_IMAGE:?set a digest-pinned control-worker image}",
@@ -231,11 +246,29 @@ def _resolve_runtime_images(
         if default is not None:
             image = default.group(1)
             service["image"] = image
-        if channel == "dev" and DEV_MUTABLE_SERVICE_IMAGES.get(name) == image:
+        if channel in {"dev", "stable"}:
+            service["image"] = channel_image(image, channel)
             service["pull_policy"] = "always"
             continue
         if PINNED_IMAGE.fullmatch(image) is None:
             raise ValueError(f"runtime service image is not digest pinned: {name}")
+
+
+def _resolve_extension_images(value: object, channel: str) -> None:
+    """Keep reusable Compose extension definitions on the same floating tags."""
+    if isinstance(value, dict):
+        if isinstance(value.get("image"), str):
+            image = value["image"]
+            default = DEFAULT_IMAGE.fullmatch(image)
+            value["image"] = channel_image(
+                default.group(1) if default else image, channel
+            )
+            value["pull_policy"] = "always"
+        for child in value.values():
+            _resolve_extension_images(child, channel)
+    elif isinstance(value, list):
+        for child in value:
+            _resolve_extension_images(child, channel)
 
 
 def _count_template_token(
@@ -292,6 +325,8 @@ def render(
         },
     )
     _resolve_runtime_images(document, channel)
+    if channel != "pinned":
+        _resolve_extension_images(document, channel)
     _embed_runtime_assets(document, template.parent)
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_DEPLOYMENT_MODE: production" not in rendered:
@@ -323,7 +358,7 @@ def main() -> None:
     parser.add_argument("--worker-image", required=True)
     parser.add_argument("--hermes-image", required=True)
     parser.add_argument("--litellm-image", required=True)
-    parser.add_argument("--channel", choices=("dev", "pinned"), default="pinned")
+    parser.add_argument("--channel", choices=("dev", "pinned"), default="dev")
     parser.add_argument("--commit")
     arguments = parser.parse_args()
     render(

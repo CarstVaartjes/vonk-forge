@@ -3689,7 +3689,14 @@ class RunSwitchOperationService:
 
     @staticmethod
     def _operation_view(job: Job) -> RunSwitchOperation:
-        progress = job.result if isinstance(job.result, Mapping) else {}
+        progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+        # The durable progress payload contains member counters, while the
+        # Job row owns the authoritative target membership.  Keep the
+        # projection valid even when a plan is unavailable during restart or
+        # recovery and the raw payload has no copied node_ids field.
+        progress["node_ids"] = [
+            str(node_id) for node_id in job.targets if isinstance(node_id, str)
+        ]
         raw_plan = job.payload.get("plan")
         plan = _load_plan(raw_plan) if isinstance(raw_plan, Mapping) else None
         action = plan.action if plan is not None else str(job.payload.get("action", "run"))
@@ -4427,15 +4434,23 @@ def _validate_artifact_execution(
         )
         completed = result.get("downloaded_bytes")
         total = result.get("total_bytes")
-        if (
-            type(expected_bytes) is not int
-            or type(completed) is not int
-            or type(total) is not int
-            or completed < 0
-            or total < 0
-            or completed != total
-            or total > expected_bytes
-        ):
+        planned_transfer = plan.storage.missing_nas_bytes
+        if planned_transfer is None:
+            # An unknown plan total must remain unknown all the way through a
+            # terminal child result; a full manifest size is not a valid
+            # substitute for a missing transfer estimate.
+            valid_bytes = completed is None and total is None
+        else:
+            valid_bytes = (
+                type(expected_bytes) is int
+                and type(completed) is int
+                and type(total) is int
+                and completed >= 0
+                and total >= 0
+                and completed == total == planned_transfer
+                and total <= expected_bytes
+            )
+        if not valid_bytes:
             raise RunSwitchOperationConflict(
                 "run-switch.model-download-byte-evidence-mismatch"
             )

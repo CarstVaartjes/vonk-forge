@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -100,6 +102,86 @@ def test_compose_secret_staging_gives_step_ca_its_config(
         1000,
         0o400,
     ) in staged
+
+
+def test_optional_huggingface_secret_is_normalized_only_when_present(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "normalized"
+    source.mkdir()
+    token = source / "hf-token"
+    token.write_text("hf_test_secret\n")
+
+    runtime_init._stage_optional_private_key(
+        source / "hf-token",
+        destination / "hf-token",
+        owner_uid=os.geteuid(),
+        owner_gid=os.getegid(),
+    )
+
+    projected = destination / "hf-token"
+    assert projected.read_bytes() == b"hf_test_secret\n"
+    assert projected.stat().st_mode & 0o777 == 0o400
+
+    token.unlink()
+    runtime_init._stage_optional_private_key(source / "hf-token", destination / "hf-token")
+    assert not projected.exists()
+
+
+def test_optional_huggingface_secret_treats_dev_null_as_absent(tmp_path: Path) -> None:
+    if not runtime_init._is_null_device(Path("/dev/null")):
+        pytest.skip("host null-device identity is not the Linux /dev/null device")
+    destination = tmp_path / "normalized" / "hf-token"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("stale token")
+
+    runtime_init._stage_optional_private_key(Path("/dev/null"), destination)
+
+    assert not destination.exists()
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_ORBSTACK_CONTAINER_TESTS") != "1",
+    reason="OrbStack container checks are opt-in",
+)
+def test_optional_huggingface_secret_handles_bind_mounted_dev_null_in_container(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is unavailable")
+    source_module = Path(runtime_init.__file__).resolve()
+    destination = tmp_path / "normalized" / "hf-token"
+    command = (
+        "import sys; sys.path.insert(0, '/tmp/module'); "
+        "from pathlib import Path; "
+        "from vonk_control.runtime_init import _stage_optional_private_key; "
+        "destination = Path('/tmp/normalized/hf-token'); destination.parent.mkdir(parents=True, exist_ok=True); "
+        "destination.write_text('stale token'); "
+        "_stage_optional_private_key(Path('/run/secrets/hf-token'), destination); "
+        "assert not destination.exists()"
+    )
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            "/dev/null:/run/secrets/hf-token:ro",
+            "-v",
+            f"{source_module.parent.parent}:/tmp/module:ro",
+            "-v",
+            f"{tmp_path}:/tmp/normalized",
+            "python:3.12-bookworm",
+            "python",
+            "-c",
+            command,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert not destination.exists()
 
 
 def test_runtime_assets_are_staged_for_their_unprivileged_consumers(

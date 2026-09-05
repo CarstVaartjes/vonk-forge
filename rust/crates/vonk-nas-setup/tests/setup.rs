@@ -33,7 +33,7 @@ fn payload() -> CanonicalTemplatePayload {
     CanonicalTemplatePayload::from_json(
         br#"{
           "schema_version": 2,
-          "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api@sha256:abc\n",
+          "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api:latest\n",
           "preflight": ["Complete the Tailscale prerequisites."],
           "required_values": [
             {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"}
@@ -83,7 +83,7 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
     assert_eq!(entries, [".env", "docker-compose.yaml", "secrets"]);
     assert_eq!(
         std::fs::read_to_string(result.root.join("docker-compose.yaml")).expect("compose"),
-        "services:\n  api:\n    image: example.invalid/api@sha256:abc\n"
+        "services:\n  api:\n    image: example.invalid/api:latest\n"
     );
     assert_eq!(
         std::fs::read_to_string(result.root.join(".env")).expect("environment"),
@@ -126,6 +126,56 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
         assert_eq!(
             std::fs::metadata(result.root.join(".env"))
                 .expect("environment metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+}
+
+#[test]
+fn optional_secret_is_materialized_without_a_first_install_prompt() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "required_values": [],
+          "secrets": [
+            {
+              "file": "hf-token",
+              "prompt": "Hugging Face access token (optional; leave blank for public models)",
+              "generate_bytes": null,
+              "optional": true
+            }
+          ]
+        }"#,
+    )
+    .expect("valid optional-secret payload");
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("bundle prepared without an HF token");
+
+    assert!(output.is_empty(), "optional credentials must not prompt");
+    assert_eq!(
+        std::fs::read(result.root.join("secrets/hf-token")).expect("HF token file"),
+        b"\n"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        assert_eq!(
+            std::fs::metadata(result.root.join("secrets/hf-token"))
+                .expect("HF token metadata")
                 .permissions()
                 .mode()
                 & 0o777,
@@ -350,6 +400,11 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
     let temporary = tempdir().expect("temporary directory");
     write_existing_bundle(temporary.path());
     let bundle = temporary.path().join("vonk-forge");
+    std::fs::write(
+        bundle.join("docker-compose.yaml"),
+        "services:\n  api:\n    image: example.invalid/api@sha256:old\n",
+    )
+    .expect("old pinned compose");
     #[cfg(unix)]
     let old_inode = {
         use std::os::unix::fs::MetadataExt;
@@ -370,7 +425,7 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
 
     assert_eq!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("compose"),
-        "services:\n  api:\n    image: example.invalid/api@sha256:abc\n"
+        "services:\n  api:\n    image: example.invalid/api:latest\n"
     );
     assert_eq!(
         std::fs::read_to_string(bundle.join(".env")).expect("environment"),

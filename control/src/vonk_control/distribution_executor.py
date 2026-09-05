@@ -613,10 +613,9 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 "skipped": True,
                 "coverage": "complete",
                 "artifact_set_sha256": model.artifact_set_sha256,
-                # The immutable set is already complete, but this operation
-                # received no bytes.  Keep transfer progress separate from
-                # artifact-set coverage so cached reuse cannot fabricate a
-                # network transfer.
+                # The set is already covered, so this phase transferred no
+                # bytes.  ``expected_bytes`` is the immutable set size while
+                # ``new_bytes`` is the operation's transfer envelope.
                 "downloaded_bytes": 0,
                 "total_bytes": 0,
             })

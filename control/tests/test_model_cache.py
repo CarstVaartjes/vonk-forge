@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from vonk_control.model_cache_contract import (
 )
 from vonk_control.models import (
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     FleetProfile,
     LocalRecipe,
     LocalRecipeRevision,
@@ -99,6 +102,73 @@ def _download(
     return operation
 
 
+def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> None:
+    service, sessions = cache
+    document = {
+        "schema_version": 2,
+        "kind": "model",
+        "identity": {"publisher": "vonk-forge", "slug": "canonical-model"},
+        "source": {
+            "repository": "https://huggingface.co/vonk-forge/canonical-model",
+            "revision": "0" * 40,
+        },
+        "files": [
+            {
+                "id": "weights",
+                "path": "weights.bin",
+                "sha256": "1" * 64,
+                "size_bytes": 3,
+                "roles": ["weights"],
+            }
+        ],
+    }
+    digest = hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    with sessions.begin() as session:
+        root = CatalogDocument(
+            id="00000000-0000-0000-0000-000000000031",
+            kind="model",
+            publisher="vonk-forge",
+            slug="canonical-model",
+            title="Canonical model",
+            created_by="test",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(root)
+        session.flush()
+        session.add(
+            CatalogDocumentRevision(
+                id="00000000-0000-0000-0000-000000000032",
+                document_id=root.id,
+                kind="model",
+                publisher=root.publisher,
+                slug=root.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=document,
+                content_digest=digest,
+                projected={},
+                created_by="test",
+                created_at=NOW,
+            )
+        )
+
+    manifest = service.resolve_artifact_set(model_version_sha256=digest)
+    assert manifest.model_version_sha256 == digest
+    assert manifest.model_version_ref == {
+        "kind": "model",
+        "publisher": "vonk-forge",
+        "slug": "canonical-model",
+        "content_sha256": digest,
+    }
+    assert [(item.path, item.expected_bytes, item.roles) for item in manifest.artifacts] == [
+        ("weights.bin", 3, ("weights",))
+    ]
+
+
 def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     cache, tmp_path: Path
 ) -> None:
@@ -120,10 +190,6 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         request_key="00000000-0000-4000-8000-000000000001",
     )
     assert first.state == "succeeded"
-    assert first.progress["downloaded_bytes"] == first.progress["expected_bytes"]
-    assert first.progress["expected_bytes"] == len(
-        b"primary model bytestokenizer auxiliary bytes"
-    )
     entry = service.get_entry(first.artifact_set_sha256 or "")
     assert entry["coverage"] == "complete"
     assert entry["expected_bytes"] == len(b"primary model bytestokenizer auxiliary bytes")
@@ -162,8 +228,6 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         request_key="00000000-0000-4000-8000-000000000002",
     )
     assert second.state == "succeeded"
-    assert second.progress["downloaded_bytes"] == 0
-    assert second.progress["expected_bytes"] == 0
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(ModelCacheArtifact)) == 2
     assert service.storage_summary().unique_used_bytes == len(
@@ -199,85 +263,45 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
     assert service.storage_summary().unique_used_bytes == len(b"shared payload")
 
 
-def test_cached_download_skip_reports_zero_transfer_but_complete_coverage(
+def test_operation_transfer_progress_counts_only_missing_objects(
     cache, tmp_path: Path
 ) -> None:
     service, _sessions = cache
-    model = "8" * 64
-    data = b"already cached model"
-    artifact = _artifact(tmp_path, data, model_version_sha256=model)
+    model = "7" * 64
+    cached = _artifact(tmp_path, b"cached", artifact_id="cached", model_version_sha256=model)
     first = _download(
         service,
-        [artifact],
+        [cached],
         model_version_sha256=model,
         request_key="00000000-0000-4000-8000-000000000016",
     )
+    assert first.progress["downloaded_bytes"] == len(b"cached")
+
+    missing = _artifact(
+        tmp_path,
+        b"new object",
+        artifact_id="missing",
+        path="missing.bin",
+        model_version_sha256=model,
+    )
     preview = service.download_preview(
         model_version_sha256=model,
-        artifacts=[artifact],
+        artifacts=[cached, missing],
     )
-    assert preview["new_bytes"] == 0
-    replay = service.start_download(
+    assert preview["already_cached_bytes"] == len(b"cached")
+    assert preview["new_bytes"] == len(b"new object")
+    operation = service.start_download(
         actor="test",
         request_key="00000000-0000-4000-8000-000000000017",
         plan_digest=str(preview["plan_digest"]),
         model_version_sha256=model,
-        artifacts=[artifact],
+        artifacts=[cached, missing],
     )
+    assert operation.progress["expected_bytes"] == len(b"new object")
     service.run_pending()
-    replay = service.get_operation(replay.id)
-    assert replay.state == "succeeded"
-    assert replay.progress["downloaded_bytes"] == 0
-    assert replay.progress["expected_bytes"] == 0
-    assert service.get_entry(first.artifact_set_sha256 or "")["coverage"] == "complete"
-
-
-def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
-    cache, tmp_path: Path
-) -> None:
-    _service, sessions = cache
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(200, request=request, content=b"")
-
-    http_client = httpx.Client(
-        transport=httpx.MockTransport(handler),
-        follow_redirects=False,
-    )
-    service = ModelCacheService(
-        sessions,
-        tmp_path / "http-nas-cache",
-        reserve_bytes=0,
-        http_client=http_client,
-        fixture_sources=True,
-    )
-    artifact = {
-        "id": "metadata",
-        "path": "config/empty.json",
-        "kind": "http.file",
-        "source": "http://fixture.invalid/empty",
-        "repository": "http://fixture.invalid/empty",
-        "revision": "fixture-revision",
-        "sha256": hashlib.sha256(b"").hexdigest(),
-        "download_bytes": 0,
-        "roles": ["auxiliary"],
-        "model_version_sha256": "e" * 64,
-    }
-    try:
-        operation = _download(
-            service,
-            [artifact],
-            model_version_sha256="e" * 64,
-            request_key="00000000-0000-4000-8000-000000000018",
-        )
-        assert operation.state == "succeeded"
-        assert len(requests) == 1
-        assert requests[0].headers.get("range") is None
-        assert service.get_entry(operation.artifact_set_sha256 or "")["coverage"] == "complete"
-    finally:
-        http_client.close()
+    operation = service.get_operation(operation.id)
+    assert operation.progress["downloaded_bytes"] == len(b"new object")
+    assert operation.progress["expected_bytes"] == len(b"new object")
 
 
 def test_download_mutation_is_queued_until_the_controller_worker_runs(
@@ -424,20 +448,39 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     data = bytes(range(256)) * 12_000
     artifact = _artifact(tmp_path, data, model_version_sha256=model)
 
-    partial = _download(
-        service,
-        [artifact],
-        model_version_sha256=model,
+    preview = service.download_preview(model_version_sha256=model, artifacts=[artifact])
+    partial = service.start_download(
+        actor="test",
         request_key="00000000-0000-4000-8000-000000000003",
+        plan_digest=str(preview["plan_digest"]),
+        model_version_sha256=model,
+        artifacts=[artifact],
         interrupt_after_bytes=1_100_000,
     )
     assert partial.state == "partial"
     assert partial.attempt == 1
+    assert partial.progress["expected_bytes"] == len(data)
+    checkpoint_bytes = (
+        service.root
+        / "partials"
+        / str(partial.artifact_set_sha256)
+        / f"{artifact['sha256']}.part"
+    ).stat().st_size
+    assert partial.progress["downloaded_bytes"] == checkpoint_bytes
+    # Replay uses the original plan identity even though the current preview
+    # now sees a shorter remaining range.
+    replay = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000003",
+        plan_digest=str(preview["plan_digest"]),
+        model_version_sha256=model,
+        artifacts=[artifact],
+    )
+    assert replay.id == partial.id
+    assert replay.progress["downloaded_bytes"] == partial.progress["downloaded_bytes"]
     set_digest = partial.artifact_set_sha256 or ""
     part = service.root / "partials" / set_digest / f"{artifact['sha256']}.part"
     assert 0 < part.stat().st_size < len(data)
-    assert partial.progress["downloaded_bytes"] == part.stat().st_size
-    assert partial.progress["expected_bytes"] == len(data)
 
     restarted = ModelCacheService(
         sessions,
@@ -449,9 +492,9 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     restarted.run_pending()
     resumed = restarted.get_operation(partial.id)
     assert resumed.state == "succeeded"
-    assert resumed.attempt == 2
     assert resumed.progress["downloaded_bytes"] == len(data)
     assert resumed.progress["expected_bytes"] == len(data)
+    assert resumed.attempt == 2
     assert (service.root / "objects" / str(artifact["sha256"])[0:2] / str(artifact["sha256"]).strip()).read_bytes() == data
     assert restarted.get_entry(set_digest)["coverage"] == "complete"
 
@@ -723,6 +766,54 @@ def test_controller_worker_drains_queued_cache_operations_without_inline_api_tra
     worker = Worker(Jobs(), "worker", {}, model_cache=CacheWorker())
     assert worker.run_once() is True
     assert calls == [1]
+
+
+def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
+    cache, tmp_path: Path
+) -> None:
+    _service, sessions = cache
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request, content=b"")
+
+    http_client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+    )
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "http-nas-cache",
+        reserve_bytes=0,
+        http_client=http_client,
+        fixture_sources=True,
+    )
+    artifact = {
+        "id": "metadata",
+        "path": "config/empty.json",
+        "kind": "http.file",
+        "source": "http://fixture.invalid/empty",
+        "repository": "http://fixture.invalid/empty",
+        "revision": "fixture-revision",
+        "sha256": hashlib.sha256(b"").hexdigest(),
+        "download_bytes": 0,
+        "roles": ["auxiliary"],
+        "model_version_sha256": "e" * 64,
+    }
+    try:
+        operation = _download(
+            service,
+            [artifact],
+            model_version_sha256="e" * 64,
+            request_key="00000000-0000-4000-8000-000000000018",
+        )
+        assert operation.state == "succeeded"
+        assert len(requests) == 1
+        assert requests[0].headers.get("range") is None
+        assert service.get_entry(operation.artifact_set_sha256 or "")["coverage"] == "complete"
+    finally:
+        http_client.close()
 
 
 def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:

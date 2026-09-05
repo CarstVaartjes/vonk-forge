@@ -21,16 +21,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_contract import CatalogKind
 from .models import (
-    CatalogEntity,
-    CatalogEntityRevision,
+    CatalogDocumentRevision,
     FleetProfile,
     LocalRecipeRevision,
     ModelCacheArtifact,
@@ -38,19 +36,21 @@ from .models import (
     ModelCacheSet,
     ModelCacheSetArtifact,
     RecipeInstallation,
-    RecipeRevision,
     RecipeRun,
 )
+from .runtime_init import RuntimeSecretError, read_runtime_secret
 
 SCHEMA_VERSION = 2
 SOURCE_POLICY = "nas-first"
 _DIGEST_LENGTH = 64
-_EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
-_WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 _MAX_ARTIFACTS = 128
 _MAX_MANIFEST_BYTES = 1_048_576
 _CHUNK_BYTES = 1024 * 1024
-_MAX_HTTP_REDIRECTS = 0
+_MAX_HTTP_REDIRECTS = 3
+_HF_CANONICAL_HOST = "huggingface.co"
+_USE_MANIFEST_BYTES = object()
+_EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+_WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 
 
 class ModelCacheError(RuntimeError):
@@ -324,11 +324,11 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         )
     if value.expected_bytes == 0 and (
         value.sha256 != _EMPTY_SHA256
-        or any(role.casefold() in _WEIGHT_ROLES for role in value.roles)
+        or any(role.lower() in _WEIGHT_ROLES for role in value.roles)
     ):
         raise ModelCacheResolutionError(
             "model_cache.artifact_invalid",
-            "only non-weight support artifacts may be an exact empty file",
+            "only verified empty support artifacts may have zero bytes",
         )
     if value.kind != "file" and value.revision is None:
         raise ModelCacheResolutionError(
@@ -536,6 +536,7 @@ class ModelCacheService:
         http_client: httpx.Client | None = None,
         fixture_sources: bool = False,
         trusted_source_hosts: Sequence[str] = ("huggingface.co",),
+        huggingface_token_path: Path | None = None,
     ) -> None:
         if not isinstance(root, Path):
             root = Path(root)
@@ -564,6 +565,9 @@ class ModelCacheService:
             host.strip().lower().rstrip(".")
             for host in trusted_source_hosts
             if isinstance(host, str) and host.strip()
+        )
+        self._huggingface_token_path = (
+            Path(huggingface_token_path) if huggingface_token_path is not None else None
         )
         self._lock = threading.RLock()
 
@@ -640,38 +644,42 @@ class ModelCacheService:
                         "exact recipe revision is not resolved",
                     )
                 recipe_digest = resolved_recipe_digest
-                reference = recipe_document.get("model")
-                candidate = (
-                    reference.get("content_sha256")
-                    if isinstance(reference, Mapping)
-                    else None
-                )
-                if not isinstance(candidate, str):
+                references = self._recipe_model_references(recipe_document)
+                candidates = [
+                    reference["content_sha256"]
+                    for reference in references
+                    if isinstance(reference.get("content_sha256"), str)
+                ]
+                if not candidates:
                     raise ModelCacheResolutionError(
                         "model_cache.recipe_model_missing",
                         "recipe does not bind an exact model revision",
                     )
-                if model_digest is not None and candidate != model_digest:
+                if model_digest is not None and model_digest not in candidates:
                     raise ModelCacheConflict(
                         "model_cache.pin_mismatch",
                         "recipe and requested model revisions do not match",
                     )
-                model_digest = candidate
+                model_digest = model_digest or candidates[0]
             if model_digest is None:
                 raise ModelCacheResolutionError(
                     "model_cache.pin_required",
                     "an exact model revision is required after recipe resolution",
                 )
-            model_rows: dict[str, CatalogEntityRevision] = {}
+            model_rows: dict[str, CatalogDocumentRevision] = {}
             self._collect_model_versions(session, model_digest, model_rows)
             if recipe_document is not None:
-                raw_dependencies = recipe_document.get("dependencies", ())
-                if not isinstance(raw_dependencies, list):
+                for reference in self._recipe_model_references(recipe_document):
+                    self._collect_model_versions(
+                        session, str(reference["content_sha256"]), model_rows
+                    )
+                raw_dependencies = recipe_document.get("dependencies", [])
+                if raw_dependencies is not None and not isinstance(raw_dependencies, list):
                     raise ModelCacheResolutionError(
                         "model_cache.dependencies_invalid",
                         "recipe model dependencies are invalid",
                     )
-                for reference in raw_dependencies:
+                for reference in raw_dependencies or ():
                     if not isinstance(reference, Mapping) or not isinstance(
                         reference.get("content_sha256"), str
                     ):
@@ -687,12 +695,12 @@ class ModelCacheService:
             for digest, row in sorted(model_rows.items()):
                 if digest == model_digest:
                     model_ref = {
-                        "kind": "model-version",
-                        "publisher": row.entity.publisher,
-                        "slug": row.entity.slug,
+                        "kind": "model",
+                        "publisher": row.publisher,
+                        "slug": row.slug,
                         "content_sha256": digest,
                     }
-                raw_artifacts = row.document.get("artifacts")
+                raw_artifacts = self._catalog_model_artifacts(row.document)
                 if not isinstance(raw_artifacts, list):
                     raise ModelCacheResolutionError(
                         "model_cache.artifacts_missing",
@@ -719,6 +727,70 @@ class ModelCacheService:
         _validate_manifest(manifest)
         return manifest
 
+    @staticmethod
+    def _recipe_model_references(
+        document: Mapping[str, object],
+    ) -> tuple[Mapping[str, object], ...]:
+        """Return exact model pins from either canonical or local recipe docs."""
+        references: list[Mapping[str, object]] = []
+        direct = document.get("model")
+        if isinstance(direct, Mapping):
+            references.append(direct)
+        models = document.get("models")
+        if isinstance(models, list):
+            for selection in models:
+                if not isinstance(selection, Mapping):
+                    continue
+                reference = selection.get("model")
+                if isinstance(reference, Mapping):
+                    references.append(reference)
+        if not references:
+            return ()
+        valid: list[Mapping[str, object]] = []
+        for reference in references:
+            digest = reference.get("content_sha256")
+            if not isinstance(digest, str):
+                raise ModelCacheResolutionError(
+                    "model_cache.dependencies_invalid",
+                    "recipe model pin is invalid",
+                )
+            valid.append(reference)
+        return tuple(valid)
+
+    @staticmethod
+    def _catalog_model_artifacts(
+        document: Mapping[str, object],
+    ) -> list[Mapping[str, object]] | None:
+        """Normalize canonical model ``files`` into cache artifact metadata."""
+        legacy = document.get("artifacts")
+        if isinstance(legacy, list):
+            return legacy
+        files = document.get("files")
+        source = document.get("source")
+        if not isinstance(files, list) or not isinstance(source, Mapping):
+            return None
+        repository = source.get("repository")
+        revision = source.get("revision")
+        if not isinstance(repository, str) or not isinstance(revision, str):
+            return None
+        normalized: list[Mapping[str, object]] = []
+        for value in files:
+            if not isinstance(value, Mapping):
+                return None
+            normalized.append(
+                {
+                    "id": value.get("id"),
+                    "path": value.get("path"),
+                    "kind": "huggingface.file",
+                    "repository": repository,
+                    "revision": revision,
+                    "sha256": value.get("sha256"),
+                    "download_bytes": value.get("size_bytes"),
+                    "roles": value.get("roles"),
+                }
+            )
+        return normalized
+
     def _recipe_document(
         self,
         session: Session,
@@ -729,9 +801,9 @@ class ModelCacheService:
         if revision_id is not None:
             local = session.get(LocalRecipeRevision, revision_id)
             if local is None:
-                greenfield = session.get(RecipeRevision, revision_id)
-                if greenfield is not None:
-                    return greenfield.content, greenfield.revision_id, greenfield.content_digest
+                canonical = session.get(CatalogDocumentRevision, revision_id)
+                if canonical is not None and canonical.kind == "recipe" and canonical.state == "active":
+                    return canonical.document, canonical.id, canonical.content_digest
         elif digest is not None:
             local = session.scalar(
                 select(LocalRecipeRevision).where(
@@ -740,11 +812,15 @@ class ModelCacheService:
                 )
             )
             if local is None:
-                greenfield = session.scalar(
-                    select(RecipeRevision).where(RecipeRevision.content_digest == digest)
+                canonical = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.content_digest == digest,
+                        CatalogDocumentRevision.state == "active",
+                    )
                 )
-                if greenfield is not None:
-                    return greenfield.content, greenfield.revision_id, greenfield.content_digest
+                if canonical is not None:
+                    return canonical.document, canonical.id, canonical.content_digest
         if local is None or local.lifecycle != "resolved" or local.content_sha256 is None:
             raise ModelCacheResolutionError(
                 "model_cache.recipe_revision_missing",
@@ -756,7 +832,7 @@ class ModelCacheService:
         self,
         session: Session,
         digest: str,
-        rows: dict[str, CatalogEntityRevision],
+        rows: dict[str, CatalogDocumentRevision],
     ) -> None:
         if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != 64:
             raise ModelCacheResolutionError(
@@ -765,12 +841,11 @@ class ModelCacheService:
         if digest in rows:
             return
         row = session.scalar(
-            select(CatalogEntityRevision)
-            .join(CatalogEntity)
+            select(CatalogDocumentRevision)
             .where(
-                CatalogEntity.kind == CatalogKind.MODEL_VERSION.value,
-                CatalogEntityRevision.content_sha256 == digest,
-                CatalogEntityRevision.lifecycle == "resolved",
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.content_digest == digest,
+                CatalogDocumentRevision.state == "active",
             )
         )
         if row is None:
@@ -779,7 +854,7 @@ class ModelCacheService:
                 "exact model revision is not resolved",
             )
         rows[digest] = row
-        dependencies = row.document.get("dependencies", ())
+        dependencies = row.document.get("dependencies", [])
         if not isinstance(dependencies, list):
             raise ModelCacheResolutionError(
                 "model_cache.dependencies_invalid", "model dependencies are invalid"
@@ -916,6 +991,27 @@ class ModelCacheService:
             recipe_revision_id=recipe_revision_id,
             artifacts=artifacts,
         )
+        set_digest = manifest.digest
+        # A retry of the same idempotency key must return the original
+        # operation even when its partial checkpoint has changed the current
+        # preview's remaining-byte estimate.
+        with self._lock, self._session() as session:
+            existing = session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key
+                )
+            )
+            if existing is not None:
+                if (
+                    existing.kind != "download"
+                    or existing.payload.get("artifact_set_sha256") != set_digest
+                    or existing.plan_digest != requested_plan
+                ):
+                    raise ModelCacheConflict(
+                        "model_cache.request_key_reused",
+                        "request key was already used for another cache operation",
+                    )
+                return self.get_operation(existing.id)
         preview = self._download_preview_for_manifest(manifest)
         if preview["plan_digest"] != requested_plan:
             raise ModelCacheConflict("model_cache.stale_plan", "download preview is stale")
@@ -924,7 +1020,6 @@ class ModelCacheService:
                 "model_cache.download_blocked",
                 "; ".join(str(item) for item in preview["blockers"]),
             )
-        set_digest = manifest.digest
         transfer = preview.get("_transfer")
         if not isinstance(transfer, Mapping):
             transfer = self._transfer_state_for_manifest(manifest, force=False)
@@ -1070,7 +1165,7 @@ class ModelCacheService:
         }
 
     def _partial_bytes(self, set_digest: str, spec: ArtifactSpec) -> int:
-        """Return only a usable, bounded checkpoint length for an artifact."""
+        """Return only a bounded, reusable partial checkpoint length."""
         partial = self._partial_path(set_digest, spec.sha256)
         try:
             if not partial.is_file() or partial.is_symlink():
@@ -1080,10 +1175,6 @@ class ModelCacheService:
             return 0
         if size < 0 or size > spec.expected_bytes:
             return 0
-        # A full-sized checkpoint is reusable only after the same immutable
-        # verification used for a published object.  An invalid full file
-        # must be downloaded from byte zero rather than producing a zero-byte
-        # plan that later exceeds its transfer total.
         if size == spec.expected_bytes and not self._verify_file(partial, spec):
             return 0
         return size
@@ -1094,28 +1185,25 @@ class ModelCacheService:
         *,
         force: bool,
     ) -> dict[str, object]:
-        """Build durable per-operation transfer baselines.
-
-        ``ModelCacheSet.verified_bytes`` describes exact artifact coverage and
-        includes objects reused from the content-addressed cache.  Operation
-        ``downloaded_bytes`` has a narrower meaning: bytes received while
-        executing this operation.  A partial file that predates this
-        operation is therefore a baseline, while its remaining bytes form the
-        operation's planned transfer total.
-        """
+        """Create the immutable planned transfer and per-object baselines."""
         artifacts: dict[str, dict[str, int]] = {}
         total_bytes = 0
         for digest, spec in _unique_artifacts(manifest.artifacts).items():
-            if not force and self._object_is_verified(spec):
-                continue
-            baseline = self._partial_bytes(manifest.digest, spec)
+            baseline = (
+                0
+                if force
+                else (
+                    spec.expected_bytes
+                    if self._object_is_verified(spec)
+                    else self._partial_bytes(manifest.digest, spec)
+                )
+            )
             remaining = max(0, spec.expected_bytes - baseline)
-            if remaining:
-                artifacts[digest] = {
-                    "baseline_bytes": baseline,
-                    "received_bytes": 0,
-                }
-                total_bytes += remaining
+            artifacts[digest] = {
+                "baseline_bytes": baseline,
+                "received_bytes": 0,
+            }
+            total_bytes += remaining
         return {
             "schema_version": SCHEMA_VERSION,
             "total_bytes": total_bytes,
@@ -1124,16 +1212,11 @@ class ModelCacheService:
 
     @staticmethod
     def _transfer_totals(payload: Mapping[str, object]) -> tuple[int | None, int]:
-        """Read the persisted operation transfer ledger without trusting it."""
         raw_transfer = payload.get("transfer")
         if not isinstance(raw_transfer, Mapping):
             return None, 0
         raw_total = raw_transfer.get("total_bytes")
-        total = (
-            raw_total
-            if type(raw_total) is int and raw_total >= 0
-            else None
-        )
+        total = raw_total if type(raw_total) is int and raw_total >= 0 else None
         raw_artifacts = raw_transfer.get("artifacts")
         if not isinstance(raw_artifacts, Mapping):
             return total, 0
@@ -1153,7 +1236,7 @@ class ModelCacheService:
         *,
         force: bool,
     ) -> dict[str, object]:
-        """Persist a transfer ledger for old schema-2 queued rows if needed."""
+        """Persist a transfer ledger when resuming an older schema-2 row."""
         with self._session(write=True) as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
@@ -1168,44 +1251,15 @@ class ModelCacheService:
             return transfer
 
     def _operation_transfer_snapshot(
-        self, operation_id: str, manifest: ArtifactSetManifest
-    ) -> tuple[int, int, dict[str, object]]:
-        """Return total/received bytes and the immutable ledger snapshot."""
+        self, operation_id: str
+    ) -> tuple[int | None, int]:
         with self._session() as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
                 )
-            total, received = self._transfer_totals(operation.payload)
-            if total is None:
-                total = manifest.expected_bytes
-            transfer = operation.payload.get("transfer")
-            return total, received, dict(transfer) if isinstance(transfer, Mapping) else {}
-
-    def _operation_transfer_entry(
-        self, operation_id: str, digest: str
-    ) -> tuple[int | None, int, Mapping[str, object] | None]:
-        """Read one artifact's durable baseline and operation checkpoint."""
-        with self._session() as session:
-            operation = session.get(ModelCacheOperation, operation_id)
-            if operation is None:
-                raise ModelCacheNotFound(
-                    "model_cache.operation_missing", "cache operation was not found"
-                )
-            total, received = self._transfer_totals(operation.payload)
-            raw_transfer = operation.payload.get("transfer")
-            if not isinstance(raw_transfer, Mapping):
-                return total, received, None
-            raw_artifacts = raw_transfer.get("artifacts")
-            if not isinstance(raw_artifacts, Mapping):
-                return total, received, None
-            raw_entry = raw_artifacts.get(digest)
-            return (
-                total,
-                received,
-                raw_entry if isinstance(raw_entry, Mapping) else None,
-            )
+            return self._transfer_totals(operation.payload)
 
     def _ensure_set(
         self,
@@ -1283,7 +1337,7 @@ class ModelCacheService:
         phase: str,
         completed_artifacts: int = 0,
         downloaded_bytes: int = 0,
-        expected_bytes: int | None = None,
+        expected_bytes: int | None | object = _USE_MANIFEST_BYTES,
         current_artifact_key: str | None = None,
     ) -> dict[str, object]:
         return {
@@ -1294,7 +1348,7 @@ class ModelCacheService:
             "downloaded_bytes": downloaded_bytes,
             "expected_bytes": (
                 manifest.expected_bytes
-                if expected_bytes is None
+                if expected_bytes is _USE_MANIFEST_BYTES
                 else expected_bytes
             ),
             "current_artifact_key": current_artifact_key,
@@ -1324,9 +1378,12 @@ class ModelCacheService:
         transfer = self._ensure_transfer_state(
             operation_id, manifest, force=force
         )
-        transfer_total, downloaded = self._transfer_totals({"transfer": transfer})
-        if transfer_total is None:
-            transfer_total = manifest.expected_bytes
+        planned_total = transfer.get("total_bytes")
+        planned_total = (
+            planned_total
+            if type(planned_total) is int and planned_total >= 0
+            else None
+        )
         self._set_operation_state(operation_id, "running")
         completed = 0
         processed_digests: set[str] = set()
@@ -1342,8 +1399,8 @@ class ModelCacheService:
                     manifest,
                     phase="verifying" if force else "downloading",
                     completed_artifacts=completed,
-                    downloaded_bytes=downloaded,
-                    expected_bytes=transfer_total,
+                    downloaded_bytes=self._operation_transfer_snapshot(operation_id)[1],
+                    expected_bytes=planned_total,
                     current_artifact_key=spec.key,
                 )
                 if spec.sha256 in processed_digests:
@@ -1363,20 +1420,21 @@ class ModelCacheService:
                         set_digest,
                         operation_id=operation_id,
                         completed_artifacts=completed,
+                        force=force,
                         interrupt_after_bytes=interrupt_after_bytes,
                     )
                 processed_digests.add(spec.sha256)
                 completed += 1
-                _total, downloaded, _snapshot = self._operation_transfer_snapshot(
-                    operation_id, manifest
-                )
+                # The transfer ledger records only bytes received from the
+                # source during this operation.  Reused verified objects and
+                # pre-existing partial checkpoints never contribute here.
             self._set_operation_progress(
                 operation_id,
                 manifest,
                 phase="completed",
                 completed_artifacts=completed,
-                downloaded_bytes=downloaded,
-                expected_bytes=transfer_total,
+                downloaded_bytes=self._operation_transfer_snapshot(operation_id)[1],
+                expected_bytes=planned_total,
                 current_artifact_key=None,
             )
             with self._session(write=True) as session:
@@ -1409,38 +1467,22 @@ class ModelCacheService:
         *,
         operation_id: str,
         completed_artifacts: int,
+        force: bool,
         interrupt_after_bytes: int | None,
     ) -> None:
         part = self._partial_path(set_digest, spec.sha256)
         part.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         if part.is_symlink():
             part.unlink(missing_ok=True)
+        if force:
+            # Repair has an independent transfer budget and must not inherit
+            # bytes from a stale partial produced by another operation.
+            part.unlink(missing_ok=True)
         offset = part.stat().st_size if part.exists() else 0
         if offset > spec.expected_bytes:
             part.unlink(missing_ok=True)
             offset = 0
         received = offset
-        _total, _downloaded, raw_entry = self._operation_transfer_entry(
-            operation_id, spec.sha256
-        )
-        baseline = (
-            raw_entry.get("baseline_bytes", 0)
-            if isinstance(raw_entry, Mapping)
-            and type(raw_entry.get("baseline_bytes")) is int
-            and raw_entry.get("baseline_bytes") >= 0
-            else 0
-        )
-        previous_received = (
-            raw_entry.get("received_bytes", 0)
-            if isinstance(raw_entry, Mapping)
-            and type(raw_entry.get("received_bytes")) is int
-            and raw_entry.get("received_bytes") >= 0
-            else 0
-        )
-        if offset < baseline:
-            baseline = offset
-            previous_received = 0
-        checkpoint_received = max(previous_received, max(0, offset - baseline))
         if offset == spec.expected_bytes and self._verify_file(part, spec):
             self._publish_object(spec, part)
             self._mark_artifact_verified(spec, set_digest)
@@ -1452,25 +1494,6 @@ class ModelCacheService:
         stream, effective_offset, close = self._open_source(spec, offset)
         if effective_offset != offset:
             received = effective_offset
-            # If a source ignores Range, the checkpoint is discarded and the
-            # operation must receive the complete payload again.  Expand the
-            # durable total so the strict progress contract remains truthful.
-            baseline = 0
-            checkpoint_received = previous_received
-            with self._session(write=True) as session:
-                operation = session.get(ModelCacheOperation, operation_id)
-                if operation is not None:
-                    transfer_payload = dict(operation.payload)
-                    raw_transfer = transfer_payload.get("transfer")
-                    if isinstance(raw_transfer, Mapping):
-                        transfer_copy = dict(raw_transfer)
-                        old_total, old_received = self._transfer_totals(transfer_payload)
-                        transfer_copy["total_bytes"] = max(
-                            int(old_total or 0),
-                            old_received + spec.expected_bytes,
-                        )
-                        transfer_payload["transfer"] = transfer_copy
-                        operation.payload = transfer_payload
         try:
             mode = "ab" if effective_offset else "wb"
             with part.open(mode) as output:
@@ -1492,10 +1515,6 @@ class ModelCacheService:
                     output.write(chunk)
                     output.flush()
                     os.fsync(output.fileno())
-                    transfer_received = max(
-                        checkpoint_received,
-                        max(0, received - baseline),
-                    )
                     if interrupt_after_bytes is not None and received >= interrupt_after_bytes:
                         self._checkpoint_artifact(
                             spec,
@@ -1504,7 +1523,6 @@ class ModelCacheService:
                             actual_bytes=received,
                             state="partial",
                             completed_artifacts=completed_artifacts,
-                            transfer_received_bytes=transfer_received,
                         )
                         raise InterruptedError("download interrupted at a durable checkpoint")
                     self._checkpoint_artifact(
@@ -1514,7 +1532,6 @@ class ModelCacheService:
                         actual_bytes=received,
                         state="partial",
                         completed_artifacts=completed_artifacts,
-                        transfer_received_bytes=transfer_received,
                     )
         finally:
             close()
@@ -1525,11 +1542,6 @@ class ModelCacheService:
                 set_digest=set_digest,
                 actual_bytes=received,
                 state="partial",
-                completed_artifacts=completed_artifacts,
-                transfer_received_bytes=max(
-                    checkpoint_received,
-                    max(0, received - baseline),
-                ),
             )
             raise ModelCacheStorageError(
                 "model_cache.source_truncated",
@@ -1542,11 +1554,6 @@ class ModelCacheService:
                 set_digest=set_digest,
                 actual_bytes=received,
                 state="corrupt",
-                completed_artifacts=completed_artifacts,
-                transfer_received_bytes=max(
-                    checkpoint_received,
-                    max(0, received - baseline),
-                ),
             )
             raise ModelCacheStorageError(
                 "model_cache.digest_mismatch",
@@ -1612,45 +1619,18 @@ class ModelCacheService:
                 "production cache HTTP clients must not follow redirects",
             )
         headers = {"Range": f"bytes={offset}-"} if offset else {}
-        response_context = client.stream("GET", spec.source, headers=headers)
-        response = response_context.__enter__()
-        if response.status_code in {301, 302, 303, 307, 308}:
-            response_context.__exit__(None, None, None)
-            if owns_client:
-                client.close()
-            raise ModelCacheStorageError(
-                "model_cache.redirect_forbidden", "cache source redirects are not followed"
-            )
-        if response.status_code not in {200, 206}:
-            status_code = response.status_code
-            response_context.__exit__(None, None, None)
-            if owns_client:
-                client.close()
-            raise ModelCacheStorageError(
-                "model_cache.source_unavailable",
-                f"cache source request failed with status {status_code}",
-            )
+        response = self._open_http_response(client, spec.source, headers)
         effective_offset = offset
         if offset and response.status_code == 200:
             # The server ignored the range request; restart safely rather than
             # appending a complete payload to a checkpoint.
-            response_context.__exit__(None, None, None)
-            response_context = client.stream("GET", spec.source)
-            response = response_context.__enter__()
-            if response.status_code != 200:
-                status_code = response.status_code
-                response_context.__exit__(None, None, None)
-                if owns_client:
-                    client.close()
-                raise ModelCacheStorageError(
-                    "model_cache.source_unavailable",
-                    f"cache source restart failed with status {status_code}",
-                )
+            response.close()
+            response = self._open_http_response(client, spec.source, {})
             effective_offset = 0
         if response.status_code == 206:
             content_range = response.headers.get("content-range", "")
             if not content_range.startswith(f"bytes {effective_offset}-"):
-                response_context.__exit__(None, None, None)
+                response.close()
                 if owns_client:
                     client.close()
                 raise ModelCacheStorageError(
@@ -1659,11 +1639,121 @@ class ModelCacheService:
         return (
             response.iter_bytes(),
             effective_offset,
-            lambda: (
-                response_context.__exit__(None, None, None),
-                client.close() if owns_client else None,
-            ),
+            lambda: (response.close(), client.close() if owns_client else None),
         )
+
+    def _open_http_response(
+        self,
+        client: httpx.Client,
+        source: str,
+        headers: Mapping[str, str],
+    ) -> httpx.Response:
+        """Open a pinned source, authenticating only the HF authority.
+
+        Hugging Face commonly redirects a resolve URL to a signed CDN URL.
+        Redirects are followed manually so an Authorization header is never
+        copied to an arbitrary host. Public files are requested anonymously;
+        a bearer token is used only after the canonical authority reports a
+        gated/private response.
+        """
+        current_url = source
+        try:
+            source_host = urlsplit(source).hostname
+        except ValueError:
+            source_host = None
+        source_is_huggingface = _is_hf_authority(source_host)
+        authenticated = False
+        token: str | None = None
+        token_loaded = False
+        for redirect_count in range(_MAX_HTTP_REDIRECTS + 1):
+            request_headers = dict(headers)
+            if authenticated and _is_hf_canonical_url(current_url):
+                # The token is intentionally constructed only for the
+                # canonical Hugging Face authority. It is never sent to CDN
+                # redirect hosts, even when they are trusted HF domains.
+                request_headers["Authorization"] = f"Bearer {token}"
+            request = client.build_request("GET", current_url, headers=request_headers)
+            response = client.send(request, stream=True)
+            status_code = response.status_code
+            if status_code in {401, 403} and _is_hf_canonical_url(current_url):
+                if not token_loaded:
+                    token = self._load_huggingface_token()
+                    token_loaded = True
+                if token is not None and not authenticated:
+                    response.close()
+                    authenticated = True
+                    continue
+                response.close()
+                if authenticated:
+                    raise ModelCacheStorageError(
+                        "model_cache.credentials_denied",
+                        "Hugging Face credentials were rejected; verify token scope and repository access",
+                    )
+                raise ModelCacheStorageError(
+                    "model_cache.credentials_missing",
+                    "Hugging Face credentials are required for this gated model; configure HF_TOKEN_FILE",
+                )
+            if status_code in {301, 302, 303, 307, 308}:
+                location = response.headers.get("location")
+                response.close()
+                if not location:
+                    raise ModelCacheStorageError(
+                        "model_cache.redirect_forbidden",
+                        "cache source redirect did not provide a destination",
+                    )
+                redirected_url = urljoin(current_url, location)
+                if not source_is_huggingface or not _is_allowed_huggingface_redirect(
+                    redirected_url
+                ):
+                    raise ModelCacheStorageError(
+                        "model_cache.redirect_forbidden",
+                        "cache source redirected outside the trusted Hugging Face authorities",
+                    )
+                current_url = redirected_url
+                continue
+            if status_code not in {200, 206}:
+                response.close()
+                raise ModelCacheStorageError(
+                    "model_cache.source_unavailable",
+                    f"cache source request failed with status {status_code}",
+                )
+            return response
+        raise ModelCacheStorageError(
+            "model_cache.redirect_forbidden",
+            "cache source exceeded the trusted Hugging Face redirect limit",
+        )
+
+    def _load_huggingface_token(self) -> str | None:
+        path = self._huggingface_token_path
+        if path is None:
+            return None
+        try:
+            if path.is_symlink() or not path.is_file():
+                return None
+            if path.stat().st_size == 0:
+                return None
+            raw = read_runtime_secret(path)
+        except (OSError, RuntimeSecretError):
+            raise ModelCacheStorageError(
+                "model_cache.credentials_missing",
+                "Hugging Face credential file is unavailable; configure HF_TOKEN_FILE",
+            ) from None
+        value = raw.strip()
+        if not value:
+            return None
+        try:
+            token = value.decode("ascii")
+        except UnicodeDecodeError:
+            raise ModelCacheStorageError(
+                "model_cache.credentials_invalid",
+                "Hugging Face credential file must contain one ASCII bearer token",
+            ) from None
+        if any(character.isspace() for character in token) or "\x00" in token:
+            raise ModelCacheStorageError(
+                "model_cache.credentials_invalid",
+                "Hugging Face credential file must contain one bearer token",
+            )
+        return token
 
     def _verify_file(self, path: Path, spec: ArtifactSpec) -> bool:
         if path.is_symlink() or not path.is_file():
@@ -1681,6 +1771,13 @@ class ModelCacheService:
 
     def _object_is_verified(self, spec: ArtifactSpec) -> bool:
         return self._verify_file(self._object_path(spec.sha256), spec)
+
+    def _manifest_coverage_complete(self, manifest: ArtifactSetManifest) -> bool:
+        """Verify every unique object in a manifest, including empty objects."""
+        return all(
+            self._object_is_verified(spec)
+            for spec in _unique_artifacts(manifest.artifacts).values()
+        )
 
     def _publish_object(self, spec: ArtifactSpec, part: Path) -> None:
         if not self._verify_file(part, spec):
@@ -1712,9 +1809,6 @@ class ModelCacheService:
         actual_bytes: int,
         state: str,
         completed_artifacts: int = 0,
-        downloaded_bytes: int = 0,
-        transfer_received_bytes: int | None = None,
-        transfer_total_bytes: int | None = None,
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
@@ -1728,52 +1822,48 @@ class ModelCacheService:
                 manifest = ArtifactSetManifest.from_document(operation.payload["manifest"])
                 payload = dict(operation.payload)
                 raw_transfer = payload.get("transfer")
-                total = transfer_total_bytes
-                aggregate = downloaded_bytes
-                if isinstance(raw_transfer, Mapping):
-                    transfer = dict(raw_transfer)
-                    raw_artifacts = transfer.get("artifacts")
-                    if isinstance(raw_artifacts, Mapping):
-                        artifacts = dict(raw_artifacts)
-                        raw_entry = artifacts.get(spec.sha256)
-                        if isinstance(raw_entry, Mapping):
-                            entry = dict(raw_entry)
-                            if transfer_received_bytes is not None:
-                                previous = entry.get("received_bytes")
-                                previous_received = (
-                                    previous
-                                    if type(previous) is int and previous >= 0
-                                    else 0
-                                )
-                                entry["received_bytes"] = max(
-                                    previous_received,
-                                    transfer_received_bytes,
-                                )
-                                artifacts[spec.sha256] = entry
-                            transfer["artifacts"] = artifacts
-                    if total is not None:
-                        transfer["total_bytes"] = max(0, total)
-                    payload["transfer"] = transfer
-                    operation.payload = payload
-                    ledger_total, ledger_received = self._transfer_totals(payload)
-                    if ledger_total is not None:
-                        total = ledger_total
-                    aggregate = max(downloaded_bytes, ledger_received)
-                previous_progress = operation.progress.get("downloaded_bytes")
-                if type(previous_progress) is int and previous_progress >= 0:
-                    aggregate = max(aggregate, previous_progress)
-                if total is None:
-                    total = manifest.expected_bytes
-                # A durable checkpoint must never publish an impossible
-                # completed/total pair, even if a process died between the
-                # payload write and the progress write.
-                total = max(total, aggregate)
+                transfer = dict(raw_transfer) if isinstance(raw_transfer, Mapping) else {}
+                raw_artifacts = transfer.get("artifacts")
+                artifacts = dict(raw_artifacts) if isinstance(raw_artifacts, Mapping) else {}
+                raw_entry = artifacts.get(spec.sha256)
+                entry = dict(raw_entry) if isinstance(raw_entry, Mapping) else {}
+                baseline = entry.get("baseline_bytes")
+                baseline = baseline if type(baseline) is int and baseline >= 0 else 0
+                previous_received = entry.get("received_bytes")
+                previous_received = (
+                    previous_received
+                    if type(previous_received) is int and previous_received >= 0
+                    else 0
+                )
+                entry["baseline_bytes"] = baseline
+                entry["received_bytes"] = max(
+                    previous_received, max(0, actual_bytes - baseline)
+                )
+                artifacts[spec.sha256] = entry
+                transfer["schema_version"] = SCHEMA_VERSION
+                transfer["artifacts"] = artifacts
+                total = transfer.get("total_bytes")
+                total = total if type(total) is int and total >= 0 else None
+                received = sum(
+                    value.get("received_bytes", 0)
+                    for value in artifacts.values()
+                    if isinstance(value, Mapping)
+                    and type(value.get("received_bytes")) is int
+                    and value.get("received_bytes", 0) >= 0
+                )
+                payload["transfer"] = transfer
+                operation.payload = payload
+                old_progress = operation.progress if isinstance(operation.progress, Mapping) else {}
+                old_downloaded = old_progress.get("downloaded_bytes")
+                old_downloaded = old_downloaded if type(old_downloaded) is int and old_downloaded >= 0 else 0
+                old_completed = old_progress.get("completed_artifacts")
+                old_completed = old_completed if type(old_completed) is int and old_completed >= 0 else 0
                 operation.state = "running" if state != "partial" else "partial"
                 operation.progress = self._progress(
                     manifest,
                     phase="downloading" if state == "partial" else "verifying",
-                    completed_artifacts=completed_artifacts,
-                    downloaded_bytes=aggregate,
+                    completed_artifacts=max(old_completed, completed_artifacts),
+                    downloaded_bytes=max(old_downloaded, received),
                     expected_bytes=total,
                     current_artifact_key=spec.key,
                 )
@@ -1816,19 +1906,6 @@ class ModelCacheService:
                 total += artifact.expected_bytes
         return total
 
-    def _manifest_coverage_complete(self, manifest: ArtifactSetManifest) -> bool:
-        """Return whether every unique immutable object is present and verified.
-
-        Byte totals alone cannot prove coverage when an allowed support artifact
-        is empty: a missing zero-byte object has the same total as a verified
-        zero-byte object. Re-check the content-addressed files so cache state
-        remains truthful after a restart or storage reconciliation.
-        """
-        return all(
-            self._object_is_verified(spec)
-            for spec in _unique_artifacts(manifest.artifacts).values()
-        )
-
     def _finish_partial(
         self,
         operation_id: str,
@@ -1848,27 +1925,17 @@ class ModelCacheService:
             if operation is not None:
                 operation.state = "partial"
                 operation.last_error = detail[:512]
-                transfer_total, transfer_downloaded = self._transfer_totals(
-                    operation.payload
-                )
-                previous_progress = operation.progress.get("downloaded_bytes")
-                if type(previous_progress) is int and previous_progress >= 0:
-                    transfer_downloaded = max(transfer_downloaded, previous_progress)
-                completed_artifacts = operation.progress.get("completed_artifacts")
-                if (
-                    type(completed_artifacts) is not int
-                    or completed_artifacts < 0
-                ):
-                    completed_artifacts = 0
-                if transfer_total is None:
-                    transfer_total = manifest.expected_bytes
-                transfer_total = max(transfer_total, transfer_downloaded)
+                _total, received = self._transfer_totals(operation.payload)
                 operation.progress = self._progress(
                     manifest,
                     phase="downloading",
-                    completed_artifacts=completed_artifacts,
-                    downloaded_bytes=transfer_downloaded,
-                    expected_bytes=transfer_total,
+                    completed_artifacts=(
+                        operation.progress.get("completed_artifacts", 0)
+                        if isinstance(operation.progress, Mapping)
+                        else 0
+                    ),
+                    downloaded_bytes=received,
+                    expected_bytes=_total,
                     current_artifact_key=operation.current_artifact_key,
                 )
                 operation.updated_at = now
@@ -1936,36 +2003,25 @@ class ModelCacheService:
         phase: str,
         completed_artifacts: int,
         downloaded_bytes: int,
+        current_artifact_key: str | None,
         expected_bytes: int | None = None,
-        current_artifact_key: str | None = None,
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
-            previous_progress = operation.progress.get("downloaded_bytes")
-            if type(previous_progress) is int and previous_progress >= 0:
-                downloaded_bytes = max(downloaded_bytes, previous_progress)
-            raw_transfer = operation.payload.get("transfer")
-            transfer_total = expected_bytes
-            if isinstance(raw_transfer, Mapping):
-                candidate = raw_transfer.get("total_bytes")
-                if type(candidate) is int and candidate >= 0:
-                    transfer_total = (
-                        candidate
-                        if transfer_total is None
-                        else max(transfer_total, candidate)
-                    )
-            if transfer_total is None:
-                transfer_total = manifest.expected_bytes
-            transfer_total = max(transfer_total, downloaded_bytes)
+            old_progress = operation.progress if isinstance(operation.progress, Mapping) else {}
+            old_downloaded = old_progress.get("downloaded_bytes")
+            old_downloaded = old_downloaded if type(old_downloaded) is int and old_downloaded >= 0 else 0
+            old_completed = old_progress.get("completed_artifacts")
+            old_completed = old_completed if type(old_completed) is int and old_completed >= 0 else 0
             operation.progress = self._progress(
                 manifest,
                 phase=phase,
-                completed_artifacts=completed_artifacts,
-                downloaded_bytes=downloaded_bytes,
-                expected_bytes=transfer_total,
+                completed_artifacts=max(old_completed, completed_artifacts),
+                downloaded_bytes=max(old_downloaded, downloaded_bytes),
+                expected_bytes=expected_bytes,
                 current_artifact_key=current_artifact_key,
             )
             operation.current_artifact_key = current_artifact_key
@@ -2602,8 +2658,7 @@ class ModelCacheService:
                     if row.state not in {"downloading", "verifying"}:
                         row.state = (
                             "cached"
-                            if verified == manifest.expected_bytes
-                            and self._manifest_coverage_complete(manifest)
+                            if self._manifest_coverage_complete(manifest)
                             else "needs-repair"
                         )
                     row.updated_at = self._clock()
@@ -2671,20 +2726,27 @@ class ModelCacheService:
             if not isinstance(revision_id, str) or not revision_id:
                 continue
             revision = session.get(LocalRecipeRevision, revision_id)
-            if revision is None or revision.lifecycle != "resolved":
-                continue
+            if revision is not None:
+                if revision.lifecycle != "resolved":
+                    continue
+                revision_digest = revision.content_sha256
+                document = revision.document
+            else:
+                canonical = session.get(CatalogDocumentRevision, revision_id)
+                if canonical is None or canonical.kind != "recipe" or canonical.state != "active":
+                    continue
+                revision_digest = canonical.content_digest
+                document = canonical.document
             if (
                 row.recipe_revision_sha256 is not None
-                and revision.content_sha256 == row.recipe_revision_sha256
+                and revision_digest == row.recipe_revision_sha256
             ):
                 return True
             if row.model_version_sha256 is None:
                 continue
-            document = revision.document
-            model = document.get("model") if isinstance(document, Mapping) else None
-            if (
-                isinstance(model, Mapping)
-                and model.get("content_sha256") == row.model_version_sha256
+            if any(
+                reference.get("content_sha256") == row.model_version_sha256
+                for reference in ModelCacheService._recipe_model_references(document)
             ):
                 return True
             dependencies = (
@@ -2707,27 +2769,20 @@ class ModelCacheService:
         recipe_update = False
         ref = manifest.model_version_ref
         if isinstance(ref, Mapping):
-            entity = session.scalar(
-                select(CatalogEntity).where(
-                    CatalogEntity.kind == CatalogKind.MODEL_VERSION.value,
-                    CatalogEntity.publisher == ref.get("publisher"),
-                    CatalogEntity.slug == ref.get("slug"),
+            latest = session.scalar(
+                select(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.publisher == ref.get("publisher"),
+                    CatalogDocumentRevision.slug == ref.get("slug"),
+                    CatalogDocumentRevision.state == "active",
                 )
+                .order_by(CatalogDocumentRevision.revision_number.desc())
             )
-            if entity is not None:
-                latest = session.scalar(
-                    select(CatalogEntityRevision)
-                    .where(
-                        CatalogEntityRevision.entity_id == entity.id,
-                        CatalogEntityRevision.lifecycle == "resolved",
-                    )
-                    .order_by(CatalogEntityRevision.revision_number.desc())
-                )
-                model_update = bool(
-                    latest is not None
-                    and latest.content_sha256 is not None
-                    and latest.content_sha256 != row.model_version_sha256
-                )
+            model_update = bool(
+                latest is not None
+                and latest.content_digest != row.model_version_sha256
+            )
         if row.recipe_revision_sha256 is not None:
             latest_recipe = self._latest_recipe_digest(
                 session, row.recipe_revision_sha256
@@ -2753,17 +2808,25 @@ class ModelCacheService:
                 .order_by(LocalRecipeRevision.revision_number.desc())
             )
             return None if latest is None else latest.content_sha256
-        greenfield = session.scalar(
-            select(RecipeRevision).where(RecipeRevision.content_digest == digest)
+        canonical = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.content_digest == digest,
+                CatalogDocumentRevision.state == "active",
+            )
         )
-        if greenfield is None:
+        if canonical is None:
             return None
-        latest_greenfield = session.scalar(
-            select(RecipeRevision)
-            .where(RecipeRevision.recipe_id == greenfield.recipe_id)
-            .order_by(RecipeRevision.revision_number.desc())
+        latest_canonical = session.scalar(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.document_id == canonical.document_id,
+                CatalogDocumentRevision.state == "active",
+            )
+            .order_by(CatalogDocumentRevision.revision_number.desc())
         )
-        return None if latest_greenfield is None else latest_greenfield.content_digest
+        return None if latest_canonical is None else latest_canonical.content_digest
 
     def discover_updates(
         self,
@@ -2816,17 +2879,16 @@ class ModelCacheService:
                 latest_recipe = None
                 if model_update and isinstance(manifest.model_version_ref, Mapping):
                     latest = session.scalar(
-                        select(CatalogEntityRevision)
-                        .join(CatalogEntity)
+                        select(CatalogDocumentRevision)
                         .where(
-                            CatalogEntity.kind == CatalogKind.MODEL_VERSION.value,
-                            CatalogEntity.publisher == manifest.model_version_ref.get("publisher"),
-                            CatalogEntity.slug == manifest.model_version_ref.get("slug"),
-                            CatalogEntityRevision.lifecycle == "resolved",
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.publisher == manifest.model_version_ref.get("publisher"),
+                            CatalogDocumentRevision.slug == manifest.model_version_ref.get("slug"),
+                            CatalogDocumentRevision.state == "active",
                         )
-                        .order_by(CatalogEntityRevision.revision_number.desc())
+                        .order_by(CatalogDocumentRevision.revision_number.desc())
                     )
-                    latest_model = latest.content_sha256 if latest is not None else None
+                    latest_model = latest.content_digest if latest is not None else None
                 if recipe_update and row.recipe_revision_sha256 is not None:
                     latest_recipe = self._latest_recipe_digest(
                         session, row.recipe_revision_sha256
@@ -3225,8 +3287,7 @@ class ModelCacheService:
         if row.state not in {"downloading", "verifying"}:
             row.state = (
                 "cached"
-                if row.verified_bytes == manifest.expected_bytes
-                and self._manifest_coverage_complete(manifest)
+                if self._manifest_coverage_complete(manifest)
                 else "needs-repair"
             )
 
@@ -3265,6 +3326,46 @@ def _is_private_host(value: str) -> bool:
         or address.is_reserved
         or address.is_multicast
         or address.is_unspecified
+    )
+
+
+def _is_hf_authority(value: str | None) -> bool:
+    if not value:
+        return False
+    host = value.lower().rstrip(".")
+    return (
+        host == _HF_CANONICAL_HOST or host.endswith((".huggingface.co", ".hf.co"))
+    )
+
+
+def _is_hf_canonical_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname is not None
+        and parsed.hostname.lower().rstrip(".") == _HF_CANONICAL_HOST
+        and parsed.port is None
+    )
+
+
+def _is_allowed_huggingface_redirect(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname
+        and port is None
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.fragment
+        and _is_hf_authority(parsed.hostname)
+        and not _is_private_host(parsed.hostname)
     )
 
 

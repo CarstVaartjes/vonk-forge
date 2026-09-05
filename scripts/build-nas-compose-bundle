@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -40,6 +42,7 @@ SECRET_FILES = {
     "hermes-api-key": "hermes-api-key",
     "hermes-litellm-key": "hermes-litellm-key",
     "database-url": "database-url",
+    "hf-token": "hf-token",
     "postgres-password": "postgres-password",
     "litellm-database-password": "litellm-database-password",
     "token-signing-key": "token-signing-key",
@@ -227,6 +230,16 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
     if channel not in {"dev", "stable"}:
         raise BundleError("installer channel must be dev or stable")
     _validate_services(document)
+    # Validate the immutable publication input before projecting deployment tags.
+    loader = importlib.machinery.SourceFileLoader(
+        "nas_compose_renderer", str(Path(__file__).with_name("render-dev-compose"))
+    )
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    renderer = importlib.util.module_from_spec(spec)
+    loader.exec_module(renderer)
+    renderer._resolve_runtime_images(document, channel)
+    renderer._resolve_extension_images(document, channel)
     runtime_files = _materialize_embedded_configs(document)
     _materialize_relative_secret_paths(document)
     compose = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
@@ -304,6 +317,12 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 "file": "litellm-upstream-key",
                 "prompt": "LiteLLM upstream provider API key",
                 "generate_bytes": None,
+            },
+            {
+                "file": "hf-token",
+                "prompt": "Hugging Face access token (optional; leave blank for public models)",
+                "generate_bytes": None,
+                "optional": True,
             },
         ],
         "generated_secrets": {

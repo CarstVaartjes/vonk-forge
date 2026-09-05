@@ -16,9 +16,31 @@ import type {
   FleetNodeIdentity,
   FleetProfile,
   FleetProfileApplication,
+  FleetProfileApplyInput,
+  FleetProfileCaptureInput,
+  FleetProfileDuplicateInput,
   FleetProfileInput,
   FleetProfileList,
   FleetProfilePreview,
+  FleetProfileStatus,
+  RunSwitchApplyRequest,
+  RunSwitchOperation,
+  RunSwitchPlan,
+  RunSwitchPreviewRequest,
+  CacheEntryResponse,
+  ModelCacheDownloadInput,
+  ModelCacheDownloadPreviewInput,
+  ModelCacheDownloadPreviewResponse,
+  ModelCacheEvictInput,
+  ModelCacheEvictionPreviewInput,
+  ModelCacheEvictionPreviewResponse,
+  ModelCacheInventoryResponse,
+  ModelCacheOperationResponse,
+  ModelCacheOperationsResponse,
+  ModelCacheRepairInput,
+  ModelCacheRepairPreviewInput,
+  ModelCacheRepairPreviewResponse,
+  ModelCacheUpdatesResponse,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
@@ -35,6 +57,9 @@ import type {
   WorkloadRunApplied,
   WorkloadRunPreview,
   TelemetryHistory,
+  TelemetryCurrentResponse,
+  TelemetryCapabilitiesResponse,
+  TelemetryWorkloadsResponse,
   TelemetryResolution,
   VisualFleetSnapshot,
   NodeProfileUpdate,
@@ -350,10 +375,29 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async applyFleetProfile(profileId: string, planDigest: string, signal?: AbortSignal): Promise<FleetProfileApplication> {
+  async captureCurrentFleetProfile(input: FleetProfileCaptureInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profiles/capture-current", {body: input, signal}));
+  }
+
+  async duplicateFleetProfile(profileId: string, input: FleetProfileDuplicateInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/duplicate", {
+      params: {path: {profile_id: profileId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async fleetProfileStatus(profileId: string, signal?: AbortSignal): Promise<FleetProfileStatus> {
+    return resultData(await this.generated.GET("/api/v1/fleet-profiles/{profile_id}/status", {
+      params: {path: {profile_id: profileId}},
+      signal,
+    }));
+  }
+
+  async applyFleetProfile(profileId: string, input: FleetProfileApplyInput, signal?: AbortSignal): Promise<FleetProfileApplication> {
     return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/apply", {
       params: {path: {profile_id: profileId}},
-      body: {plan_digest: planDigest, request_key: crypto.randomUUID()},
+      body: input,
       signal,
     }));
   }
@@ -361,6 +405,71 @@ export class ApiClient implements ControlApi {
   async fleetProfileApplication(applicationId: string, signal?: AbortSignal): Promise<FleetProfileApplication> {
     return resultData(await this.generated.GET("/api/v1/fleet-profile-applications/{application_id}", {
       params: {path: {application_id: applicationId}},
+      signal,
+    }));
+  }
+
+  async previewRecipeRunSwitch(input: RunSwitchPreviewRequest, signal?: AbortSignal): Promise<RunSwitchPlan> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switch-plans/preview", {body: input, signal}));
+  }
+
+  async applyRecipeRunSwitch(input: RunSwitchApplyRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switches", {body: input, signal}));
+  }
+
+  async getRecipeRunSwitchOperation(operationId: string, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.GET("/api/v1/recipes/run-switches/{operation_id}", {
+      params: {path: {operation_id: operationId}},
+      signal,
+    }));
+  }
+
+  async modelCacheInventory(cursor?: string, signal?: AbortSignal): Promise<ModelCacheInventoryResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache", {params: {query: {limit: 100, cursor}}, signal}));
+  }
+
+  async modelCacheEntry(artifactSetSha256: string, signal?: AbortSignal): Promise<CacheEntryResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/entries/{artifact_set_sha256}", {
+      params: {path: {artifact_set_sha256: artifactSetSha256}},
+      signal,
+    }));
+  }
+
+  async previewModelCacheDownload(input: ModelCacheDownloadPreviewInput, signal?: AbortSignal): Promise<ModelCacheDownloadPreviewResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/download-preview", {body: input, signal}));
+  }
+
+  async downloadModelCache(input: ModelCacheDownloadInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/download", {body: input, signal}));
+  }
+
+  async previewModelCacheRepair(input: ModelCacheRepairPreviewInput, signal?: AbortSignal): Promise<ModelCacheRepairPreviewResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/repair-preview", {body: input, signal}));
+  }
+
+  async repairModelCache(input: ModelCacheRepairInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/repair", {body: input, signal}));
+  }
+
+  async previewModelCacheEviction(input: ModelCacheEvictionPreviewInput, signal?: AbortSignal): Promise<ModelCacheEvictionPreviewResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/eviction-preview", {body: input, signal}));
+  }
+
+  async evictModelCache(input: ModelCacheEvictInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/evict", {body: input, signal}));
+  }
+
+  async modelCacheUpdates(signal?: AbortSignal): Promise<ModelCacheUpdatesResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/updates", {params: {query: {limit: 100}}, signal}));
+  }
+
+  async modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/operations", {params: {query: {limit: 100, cursor}}, signal}));
+  }
+
+  async modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/operations/{operation_id}", {
+      params: {path: {operation_id: operationId}},
       signal,
     }));
   }
@@ -622,6 +731,27 @@ export class ApiClient implements ControlApi {
         path: {node_id: nodeId},
         query: {start, end, resolution, maximum_points: maximumPoints},
       },
+      signal,
+    }));
+  }
+
+  async nodeTelemetryCurrent(nodeId: string, signal?: AbortSignal): Promise<TelemetryCurrentResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/current", {
+      params: {path: {node_id: nodeId}},
+      signal,
+    }));
+  }
+
+  async nodeTelemetryCapabilities(nodeId: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/capabilities", {
+      params: {path: {node_id: nodeId}},
+      signal,
+    }));
+  }
+
+  async nodeTelemetryWorkloads(nodeId: string, runId?: string, state?: string, signal?: AbortSignal): Promise<TelemetryWorkloadsResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/workloads", {
+      params: {path: {node_id: nodeId}, query: {run_id: runId, state}},
       signal,
     }));
   }

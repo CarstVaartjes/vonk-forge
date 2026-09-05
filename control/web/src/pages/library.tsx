@@ -2,6 +2,7 @@ import {useCallback, useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
 import type {CatalogApi, ControlApi, LibraryApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, ManagedCatalogSyncSummary, PublicRecipe, VisualFleetSnapshot} from "../api/types";
 import {LibraryBrowser} from "../components/library-browser";
+import type {LibrarySubview} from "../components/library-browser";
 import {LibraryNodeNamesProvider} from "../components/library-node-names";
 import {nodeDisplayName} from "../lib/fleet";
 import {libraryRoute, modelVersionKey} from "../lib/library-route";
@@ -117,11 +118,28 @@ function restoreRouteParent(snapshot: LibrarySnapshot, recipeId: string, parent:
   };
 }
 
-export function LibraryPage({api, path, onBusyChange, onNavigate}: {
-  api: LibraryApi;
+function librarySubview(path: string): LibrarySubview {
+  const parsed = new URL(path, location.origin);
+  if (parsed.pathname === "/library/cache") return "cache";
+  if (parsed.pathname === "/library/profiles") return "profiles";
+  const value = parsed.searchParams.get("view");
+  return value === "models" || value === "cache" || value === "profiles" || value === "recipes" ? value : "recipes";
+}
+
+function libraryTabPath(path: string, view: LibrarySubview): string {
+  const parsed = new URL(path, location.origin);
+  parsed.pathname = view === "cache" ? "/library/cache" : view === "profiles" ? "/library/profiles" : "/library";
+  parsed.searchParams.delete("view");
+  if (view !== "recipes") parsed.searchParams.set("view", view);
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path}: {
+  api: ControlApi;
   path: string;
   onBusyChange?(busy: boolean): void;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
+  onNavigatePath?(path: string, replace?: boolean): void;
 }) {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>();
   const [error, setError] = useState("");
@@ -133,7 +151,8 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const [paginationWindowed, setPaginationWindowed] = useState(false);
   const [snapshotAttempt, setSnapshotAttempt] = useState(0);
   const [detailAttempt, setDetailAttempt] = useState(0);
-  const [query, setQuery] = useState("");
+  const initialQuery = new URL(path, location.origin).searchParams.get("q") ?? "";
+  const [query, setQuery] = useState(initialQuery);
   const [nodeDisplayNames, setNodeDisplayNames] = useState<Record<string, string>>({});
   const [fleet, setFleet] = useState<VisualFleetSnapshot>();
   const [fleetError, setFleetError] = useState("");
@@ -151,8 +170,19 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const heading = useRef<HTMLHeadingElement>(null);
   const parsedPath = new URL(path, location.origin);
   const route = libraryRoute(parsedPath.pathname);
+  const subview = librarySubview(path);
   const preferredNodeId = parsedPath.searchParams.get("spark") ?? undefined;
   const preferredNodeName = preferredNodeId ? nodeDisplayNames[preferredNodeId] ?? preferredNodeId : undefined;
+  useEffect(() => {
+    setQuery(new URL(path, location.origin).searchParams.get("q") ?? "");
+  }, [path]);
+  const updateQuery = useCallback((value: string) => {
+    setQuery(value);
+    if (!onNavigatePath) return;
+    const next = new URL(path, location.origin);
+    if (value) next.searchParams.set("q", value); else next.searchParams.delete("q");
+    onNavigatePath(`${next.pathname}${next.search}`, true);
+  }, [onNavigatePath, path]);
   const contextualNavigate = useCallback((event: MouseEvent<HTMLAnchorElement>, nextPath: string) => {
     if (!preferredNodeId || !nextPath.startsWith("/library") || nextPath.startsWith("/library/create")) {
       onNavigate(event, nextPath);
@@ -369,17 +399,20 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
     <header className="library-command-header">
       <div className="library-command-title">
         <h1 ref={heading} tabIndex={-1}>Library</h1>
-        <p>Exact models, installable recipes, placement, and release state in one command surface.</p>
+        <p>Choose a model. Run it on your Sparks.</p>
       </div>
       <nav className="library-toolbar-actions" aria-label="Recipe authoring">
         <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom</a>
       </nav>
     </header>
     {preferredNodeId && <aside className="library-spark-context" aria-label={`Managing models on ${preferredNodeName}`}>
-      <div><span>Individual Spark workspace</span><strong>{preferredNodeName}</strong><p>Choose a model and recipe. Compatible placement groups containing this Spark are selected first, while every lifecycle change still opens a server-authoritative review.</p></div>
+      <div><span>Individual Spark workspace</span><strong>{preferredNodeName}</strong><p>Choose a model and recipe. Compatible placement groups containing this Spark are selected first, then the Controller runs the selected group and reports durable progress.</p></div>
       <a className="button secondary" href="/library" onClick={event => onNavigate(event, "/library")}>Exit Spark workspace</a>
     </aside>}
-    {snapshot && <>
+    <nav className="library-subnav" aria-label="Library sections">
+      {(["models", "recipes", "cache", "profiles"] as const).map(view => <a key={view} className={subview === view ? "is-active" : undefined} aria-current={subview === view ? "page" : undefined} href={libraryTabPath(path, view)} onClick={event => onNavigate(event, libraryTabPath(path, view))}>{view === "models" ? "Models" : view === "recipes" ? "Recipes" : view === "cache" ? "NAS cache" : "Profiles"}</a>)}
+    </nav>
+    {snapshot && subview === "recipes" && <>
       <section className="library-command-bar" aria-label="Library command bar">
         <div className="library-overview" role="region" aria-label="Library summary">
           <div className="library-stat library-stat-accent" role="group" aria-label={`${modelCount} model version${modelCount === 1 ? "" : "s"}`}><strong>{modelCount}</strong><span>models</span></div>
@@ -403,11 +436,9 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
       <div className="library-empty-visual" aria-hidden="true"><span/><span/><span/></div>
       <h3>No recipes available</h3>
       <p>The repository does not currently expose a recipe. You can still create a custom runtime for a bespoke setup.</p>
-      <div className="button-row">
-        <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom recipe</a>
-      </div>
+      <a className="button" href="/library/create" onClick={event => onNavigate(event, "/library/create")}>Create custom runtime</a>
     </section>}
-    {browserSnapshot && (catalogLoading || publicRecipes.length > 0 || browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryNodeNamesProvider names={nodeDisplayNames}><LibraryBrowser
+    {browserSnapshot && (subview !== "recipes" || catalogLoading || publicRecipes.length > 0 || browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryNodeNamesProvider names={nodeDisplayNames}><LibraryBrowser
         api={api}
         detail={detail}
         detailError={detailError}
@@ -419,16 +450,20 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         fleet={fleet}
         fleetError={fleetError}
         onNavigate={contextualNavigate}
+        onNavigatePath={onNavigatePath}
+        onQueryChange={updateQuery}
         onBusyChange={onBusyChange}
         onRefresh={refreshLibraryAuthority}
         onRetryDetail={() => setDetailAttempt(value => value + 1)}
         onRetryCatalog={() => setCatalogAttempt(value => value + 1)}
         onRetryFleet={() => setFleetAttempt(value => value + 1)}
+        path={path}
         publicRecipes={publicRecipes}
         preferredNodeId={preferredNodeId}
         query={query}
         route={route}
         snapshot={browserSnapshot}
+        subview={subview}
         syncError={syncError}
         syncSummary={syncSummary}
         windowed={paginationWindowed}

@@ -11,9 +11,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    SerializerFunctionWrapHandler,
     StringConstraints,
-    model_serializer,
 )
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -236,16 +234,13 @@ class TelemetryPoint(_StrictModel):
     # Scalar-only rows predate the rich contract.  Keep their schema-1 fleet
     # and stream representation byte-compatible; new samples carry the
     # explicit nested schema-2 document here.
-    metrics: TelemetryMetrics | None = None
-
-    @model_serializer(mode="wrap")
-    def serialize_without_legacy_metrics(
-        self, handler: SerializerFunctionWrapHandler
-    ) -> dict[str, object]:
-        document = handler(self)
-        if self.metrics is None:
-            document.pop("metrics", None)
-        return document
+    metrics: TelemetryMetrics | None = Field(
+        default=None,
+        # Scalar-only points are the schema-1 wire exception.  Keep the
+        # optional rich document out of those responses while retaining its
+        # concrete type in the generated schema.
+        exclude_if=lambda value: value is None,
+    )
 
 
 class TelemetryMetricSummary(_StrictModel):
@@ -386,16 +381,12 @@ class TelemetryHistoryResponse(_StrictModel):
     resolution: TelemetryResolution
     maximum_points: int = Field(ge=1, le=3_000)
     points: list[TelemetryPoint | TelemetryRollupPoint] = Field(max_length=3_000)
-    metadata: TelemetryHistoryMetadata | None = None
-
-    @model_serializer(mode="wrap")
-    def serialize_without_legacy_metadata(
-        self, handler: SerializerFunctionWrapHandler
-    ) -> dict[str, object]:
-        document = handler(self)
-        if self.metadata is None:
-            document.pop("metadata", None)
-        return document
+    metadata: TelemetryHistoryMetadata | None = Field(
+        default=None,
+        # Preserve the legacy history envelope when no rich-series metadata
+        # was available, without weakening the OpenAPI response type.
+        exclude_if=lambda value: value is None,
+    )
 
 
 class TelemetryCurrentResponse(_StrictModel):

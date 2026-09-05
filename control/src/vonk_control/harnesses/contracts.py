@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from ..runtime_writable_paths import EngineTelemetryContract, RuntimeWritablePath
+
 
 @dataclass(frozen=True, slots=True)
 class HarnessMount:
@@ -20,7 +22,7 @@ class HarnessBinding:
     """Exact resolved identities bound after a compiler produces a projection."""
 
     harness_content_sha256: str
-    distribution_content_sha256: str
+    execution_content_sha256: str
     topology_node_count: int
     role: str
     rank: int
@@ -43,6 +45,9 @@ class HarnessProjection:
     output_mount: HarnessMount
     input_mount: HarnessMount | None = None
     environment: tuple[tuple[str, str], ...] = ()
+    writable_paths: tuple[RuntimeWritablePath, ...] = ()
+    telemetry: EngineTelemetryContract | None = None
+    read_only_root: bool = True
     binding: HarnessBinding | None = None
 
 

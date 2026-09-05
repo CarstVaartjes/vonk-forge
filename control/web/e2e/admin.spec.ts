@@ -77,7 +77,9 @@ test("the redesigned shell exposes the focused workspace routes", async ({page})
       await expect(page.getByRole("button", {name: /admin/i})).toBeFocused();
       await page.keyboard.press("Escape");
       await expect(page.getByRole("button", {name: "Open system navigation"})).toBeFocused();
-      await expect(primaryLinks.first()).toBeHidden();
+      // Fleet and Library remain directly reachable in the compact mobile
+      // header; the overflow drawer is reserved for account/admin actions.
+      await expect(primaryLinks.first()).toBeVisible();
     } else {
       await expect(toggle).toBeHidden();
       await expect(primaryLinks.first()).toBeVisible();

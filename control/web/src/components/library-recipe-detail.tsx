@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from "react";
-import type {LibraryRecipeDetail, LibrarySnapshot, PublicRecipe} from "../api/types";
-import type {LibraryApi, LibraryOperation} from "../api/types";
+import type {ControlApi, LibraryRecipeDetail, LibrarySnapshot, PublicRecipe, RunSwitchOperation, RunSwitchPlan, RunSwitchPreviewRequest} from "../api/types";
+import type {LibraryOperation} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {StatusPill} from "./status-pill";
 import {LibraryPlacement, primaryPlacementRecommendation} from "./library-placement";
@@ -15,6 +15,8 @@ import {LibraryRecipeVisual} from "./library-recipe-visual";
 import {ArtifactJobWorkspace} from "./artifact-job-workspace";
 import {LibraryRecipeFit} from "./library-recipe-fit";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
+import {LibraryRunSwitchProgress} from "./library-run-switch-progress";
+import type {RunSwitchApi} from "./library-run-switch-progress";
 import "./library-recipe-detail.css";
 
 type Topology = NonNullable<LibraryRecipeDetail["topology"]>;
@@ -78,17 +80,31 @@ function useNarrowViewport(query: string): boolean {
   return matches;
 }
 
-export function LibraryRecipeAuthority({api, catalogRecipe, detail, onBusyChange, onRefresh, policy, preferredNodeId}: {
-  api: LibraryApi;
+function runAlias(value: string): string {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 128);
+}
+
+export function LibraryRecipeAuthority({api, catalogRecipe, detail, modelVersionSha256, nodeNames = {}, onBusyChange, onRefresh, policy, preferredNodeId, runApi}: {
+  api: ControlApi;
   catalogRecipe?: PublicRecipe;
   detail: LibraryRecipeDetail;
+  modelVersionSha256?: string;
+  nodeNames?: Record<string, string>;
   onBusyChange?(busy: boolean): void;
   onRefresh(signal: AbortSignal): Promise<void>;
   policy: LibrarySnapshot["freshness_policy"];
   preferredNodeId?: string;
+  runApi?: RunSwitchApi & Pick<ControlApi, "previewRecipeRunSwitch" | "applyRecipeRunSwitch">;
 }) {
   const [review, setReview] = useState<LibraryActionReview>();
   const [operation, setOperation] = useState<LibraryOperation>();
+  const [runOperation, setRunOperation] = useState<RunSwitchOperation>();
+  const [runPlan, setRunPlan] = useState<RunSwitchPlan>();
+  const [runError, setRunError] = useState("");
+  const [runStarting, setRunStarting] = useState(false);
+  const [runRequestKey, setRunRequestKey] = useState("");
+  const [runRetry, setRunRetry] = useState(0);
+  const [runGroup, setRunGroup] = useState<LibraryPlacementGroup>();
   const [operationName, setOperationName] = useState<LibraryActionName>("Load");
   const narrowViewport = useNarrowViewport("(max-width: 520px)");
   const [mobileQualificationOpen, setMobileQualificationOpen] = useState(false);
@@ -123,6 +139,7 @@ export function LibraryRecipeAuthority({api, catalogRecipe, detail, onBusyChange
     setOperation(next);
   }, []);
   const actionBlocked = operation !== undefined && (!operationSettled(operation.state) || ["partial", "failed", "cancelled", "canceled", "lost"].includes(operation.state));
+  const runActive = Boolean(runOperation && !["succeeded", "failed", "cancelled", "partially_succeeded", "blocked"].includes(runOperation.state));
   const lifecycleStages = [
     lifecycleStage("Build", detail.operational_state.builds, ["succeeded"]),
     lifecycleStage("Map", detail.operational_state.mappings, ["ready"]),
@@ -133,6 +150,76 @@ export function LibraryRecipeAuthority({api, catalogRecipe, detail, onBusyChange
   const placementRecommendation = activeRun ? undefined : primaryPlacementRecommendation(detail);
   const recommendedName = placementRecommendation ? actionName(placementRecommendation.target) : undefined;
   const recommendationCopy = recommendedName ? nextActionCopy(recommendedName) : undefined;
+  const directRunAvailable = recommendedName === "Load" && Boolean(runApi);
+
+  useEffect(() => {
+    onBusyChange?.(runStarting || runActive);
+    return () => onBusyChange?.(false);
+  }, [onBusyChange, runActive, runStarting]);
+
+  useEffect(() => {
+    setRunOperation(undefined);
+    setRunPlan(undefined);
+    setRunError("");
+    setRunRequestKey("");
+    setRunGroup(undefined);
+  }, [detail.recipe.recipe_id, detail.selected_revision?.id]);
+
+  async function runGroupNow(group: LibraryPlacementGroup, retry = false) {
+    if (runStarting || runActive) return;
+    if (!runApi) {
+      setRunError("Run is unavailable until the Controller run/switch contract is connected.");
+      return;
+    }
+    const revision = detail.selected_revision;
+    if (!revision?.id || revision.lifecycle !== "resolved") {
+      setRunError("This recipe has no resolved revision to run.");
+      return;
+    }
+    if (!modelVersionSha256 || !/^[0-9a-f]{64}$/.test(modelVersionSha256)) {
+      setRunError("The exact model version digest is not reported. The Controller cannot run this recipe safely yet.");
+      return;
+    }
+    const selectedNodes = group.nodes.map(node => ({node_id: node.node_id, rank: node.rank, role: node.role, endpoint_owner: node.endpoint_owner}));
+    if (selectedNodes.length === 0 || selectedNodes.filter(node => node.endpoint_owner).length !== 1) {
+      setRunError("The selected Spark group is incomplete. Choose a complete group with one endpoint owner.");
+      return;
+    }
+    const nextRequestKey = retry && runRequestKey ? runRequestKey : crypto.randomUUID();
+    const input: RunSwitchPreviewRequest = {
+      schema_version: 2,
+      model_version_sha256: modelVersionSha256,
+      recipe_revision_id: revision.id,
+      spark_group: {nodes: selectedNodes},
+      alias: runAlias(alias) || "model",
+      action: "run",
+      retention: "retain-cached",
+      invocation: {origin: "web.library", context: {recipe_id: detail.recipe.recipe_id, node_ids: selectedNodes.map(node => node.node_id).join(",")}},
+    };
+    setRunGroup(group);
+    setRunRequestKey(nextRequestKey);
+    setRunError("");
+    setRunPlan(undefined);
+    setRunStarting(true);
+    try {
+      const plan = await runApi.previewRecipeRunSwitch(input);
+      setRunPlan(plan);
+      if (!plan.allowed || plan.blockers.length > 0) {
+        setRunError("The Controller needs attention before this model can run.");
+        return;
+      }
+      const operation = await runApi.applyRecipeRunSwitch({...input, plan_digest: plan.plan_digest, request_key: nextRequestKey});
+      setRunOperation(operation);
+    } catch (value) {
+      setRunError(value instanceof Error ? value.message.slice(0, 256) : "The Controller could not start this model.");
+    } finally {
+      setRunStarting(false);
+    }
+  }
+
+  function retryRun() {
+    if (runGroup) void runGroupNow(runGroup, true);
+  }
   return <div className="recipe-authority" role="region" aria-label={`${detail.recipe.title} recipe authority`}>
     <header className="recipe-authority-hero">
       <div>
@@ -164,7 +251,7 @@ export function LibraryRecipeAuthority({api, catalogRecipe, detail, onBusyChange
       {activeRun
         ? <a className="button secondary" href="/fleet">Open Fleet</a>
         : placementRecommendation && recommendedName && placementRecommendation.groupCount === 1
-          ? <button type="button" className="button" disabled={actionBlocked} onClick={event => openReview(placementRecommendation.target, event.currentTarget, placementRecommendation.group)}>Review {recommendedName}</button>
+          ? <button type="button" className="button" disabled={actionBlocked || directRunAvailable && (runStarting || runActive || !modelVersionSha256)} onClick={event => directRunAvailable ? void runGroupNow(placementRecommendation.group) : openReview(placementRecommendation.target, event.currentTarget, placementRecommendation.group)}>{directRunAvailable ? "Run" : `Review ${recommendedName}`}</button>
           : <button type="button" className="button secondary" onClick={() => document.getElementById("recipe-placement")?.scrollIntoView({block: "start"})}>{placementRecommendation ? "Choose a Spark group" : "Review placement"}</button>}
     </section>
     <ArtifactJobWorkspace api={api} detail={detail} onBusyChange={onBusyChange}/>
@@ -196,7 +283,11 @@ export function LibraryRecipeAuthority({api, catalogRecipe, detail, onBusyChange
       </div>
     </section>
     {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={onRefresh} operation={operation}/>}
-    <LibraryPlacement actionsDisabled={actionBlocked} detail={detail} onReview={openReview} policy={policy} preferredNodeId={preferredNodeId}/>
+    {runStarting && <section className="library-run-switch-progress is-starting" aria-label="Run progress" aria-live="polite"><strong>Checking Controller plan…</strong><span>Preparing the exact model and runtime for the selected Spark group.</span></section>}
+    {runError && <section className="library-run-switch-error" role="alert"><span>{runError}</span>{runGroup && <button type="button" className="button secondary" onClick={retryRun}>Retry run</button>}</section>}
+    {runPlan && !runOperation && !runStarting && <section className="library-run-switch-plan" aria-label="Run issues"><header><strong>Run needs attention</strong><span>The Controller did not dispatch this request.</span></header>{runPlan.blockers.length > 0 && <ul>{runPlan.blockers.map(reason => <li key={`${reason.code}:${reason.detail}`}><strong>{reason.code}</strong><span>{reason.detail}</span></li>)}</ul>}{runPlan.warnings.length > 0 && <details><summary>{runPlan.warnings.length} warning{runPlan.warnings.length === 1 ? "" : "s"}</summary><ul>{runPlan.warnings.map(reason => <li key={`${reason.code}:${reason.detail}`}>{reason.detail}</li>)}</ul></details>}<button type="button" className="button secondary" onClick={() => runGroup && void runGroupNow(runGroup, true)}>Recheck run</button></section>}
+    {runOperation && runApi && <LibraryRunSwitchProgress api={runApi} nodeNames={nodeNames} onChange={setRunOperation} onRefresh={onRefresh ? () => void onRefresh(new AbortController().signal) : undefined} onRetry={retryRun} operation={runOperation} title={detail.recipe.title}/>}
+    <LibraryPlacement actionsDisabled={actionBlocked || runStarting || runActive} detail={detail} onReview={openReview} onRun={runApi ? runGroupNow : undefined} policy={policy} preferredNodeId={preferredNodeId}/>
     {visual && <>
       <LibraryRecipeVisual document={visual}/>
       <section className="library-section" aria-label="Topology and resources">

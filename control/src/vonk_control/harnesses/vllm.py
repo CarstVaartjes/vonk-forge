@@ -344,7 +344,7 @@ class VllmHarnessCompiler:
             raise HarnessCompileError(
                 "vLLM single-node harness does not support distributed parallelism"
             )
-        environment = compile_environment(
+        recipe_environment = compile_environment(
             recipe,
             distribution,
             frozenset(
@@ -417,8 +417,9 @@ class VllmHarnessCompiler:
                     "VLLM_WORKER_MULTIPROC_METHOD",
                 }
             ),
+            engine_slug=self.slug,
         )
-        environment = (*environment, *rank_environment)
+        environment = (*recipe_environment, *rank_environment)
         return projection(
             slug=self.slug,
             command=(

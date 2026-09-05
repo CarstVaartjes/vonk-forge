@@ -40,8 +40,6 @@ from .recipe_jobs import (
 )
 from .recipe_operations import RECIPE_OPERATIONS, RecipeOperationRequest
 from .distribution import (
-    ArtifactDistributionAssignment,
-    ArtifactDistributionObject,
     DistributionAssignment,
     DistributionObject,
 )
@@ -69,8 +67,6 @@ __all__ = [
     "AgentProgress",
     "AgentProtocolError",
     "AgentResult",
-    "ArtifactDistributionAssignment",
-    "ArtifactDistributionObject",
     "ComponentDescriptor",
     "ContainerRuntimeAction",
     "HostHelperGrantClaims",

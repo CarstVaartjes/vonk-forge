@@ -1191,8 +1191,11 @@ async fn sha256_path(path: &Path, expected_bytes: u64) -> Result<String, ClientE
     let mut file = tokio::fs::File::open(path).await?;
     let mut digest = Sha256::new();
     let mut total = 0_u64;
+    // Keep the buffer on the heap: this async future is held by the default
+    // tokio worker stack, where a 1 MiB inline array can overflow it.  64 KiB
+    // matches the bounded buffers used by the adjacent OCI hashing paths.
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
-        let mut buffer = [0_u8; 1024 * 1024];
         let count = tokio::io::AsyncReadExt::read(&mut file, &mut buffer).await?;
         if count == 0 {
             break;
@@ -1271,7 +1274,9 @@ mod tests {
     use super::{AgentHttpClient, ClientError, ExactRecipeRunObservation, valid_reported_hostname};
     use crate::{oci::RecipeRunObservation, telemetry::TelemetrySample};
     use chrono::{DateTime, Utc};
+    use serde_json::{Value, json};
     use std::{
+        collections::HashMap,
         io::{Read, Write},
         net::TcpListener,
         thread,
@@ -1537,6 +1542,398 @@ mod tests {
             b"oci archive"
         );
         server.join().unwrap();
+    }
+
+    fn oci_archive_fixture() -> (Vec<u8>, String) {
+        fn descriptor(media_type: &str, bytes: &[u8]) -> Value {
+            json!({
+                "mediaType": media_type,
+                "digest": format!("sha256:{}", hex_sha256(bytes)),
+                "size": bytes.len(),
+            })
+        }
+
+        let config = br#"{"architecture":"arm64","os":"linux"}"#;
+        let layer = b"small arm64 layer";
+        let manifest = canonical_json(&json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": descriptor("application/vnd.oci.image.config.v1+json", config),
+            "layers": [descriptor("application/vnd.oci.image.layer.v1.tar", layer)],
+        }))
+        .unwrap();
+        let manifest_digest = hex_sha256(&manifest);
+        let index = canonical_json(&json!({
+            "schemaVersion": 2,
+            "manifests": [{
+                "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                "digest": format!("sha256:{manifest_digest}"),
+                "size": manifest.len(),
+                "platform": {"architecture": "arm64", "os": "linux"},
+            }],
+        }))
+        .unwrap();
+        let layout = br#"{"imageLayoutVersion":"1.0.0"}"#;
+        let mut builder = tar::Builder::new(Vec::new());
+        for (name, bytes) in [
+            ("oci-layout", layout.as_slice()),
+            ("index.json", index.as_slice()),
+            (
+                &format!("blobs/sha256/{}", hex_sha256(config)),
+                config.as_slice(),
+            ),
+            (
+                &format!("blobs/sha256/{}", hex_sha256(layer)),
+                layer.as_slice(),
+            ),
+            (
+                &format!("blobs/sha256/{manifest_digest}"),
+                manifest.as_slice(),
+            ),
+        ] {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, name, bytes)
+                .expect("OCI fixture member");
+        }
+        (
+            builder.into_inner().expect("OCI fixture archive"),
+            manifest_digest,
+        )
+    }
+
+    fn distribution_assignment_fixture(
+        model: &[u8],
+        archive: &[u8],
+        image_digest: &str,
+    ) -> vonk_agent_protocol::DistributionAssignment {
+        let model_object = vonk_agent_protocol::DistributionObject {
+            name: "weights/model.bin".to_owned(),
+            sha256: hex_sha256(model),
+            bytes: model.len() as u64,
+            kind: "model".to_owned(),
+        };
+        let archive_object = vonk_agent_protocol::DistributionObject {
+            name: "image.oci.tar".to_owned(),
+            sha256: hex_sha256(archive),
+            bytes: archive.len() as u64,
+            kind: "oci-archive".to_owned(),
+        };
+        vonk_agent_protocol::DistributionAssignment {
+            schema_version: 2,
+            assignment_id: Uuid::new_v4(),
+            plan_digest: "a".repeat(64),
+            generation: 1,
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            expires_at: DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z").unwrap(),
+            model_artifact_set_sha256: "b".repeat(64),
+            objects: vec![model_object, archive_object],
+            oci_image_digest: format!("sha256:{image_digest}"),
+            oci_archive_sha256: hex_sha256(archive),
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum DistributionFixtureMode {
+        Good,
+        CorruptFirstObject,
+    }
+
+    fn authenticated_test_client(controller: &str, node_id: &str) -> AgentHttpClient {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "x-vonk-fixture-auth",
+            reqwest::header::HeaderValue::from_static("enrolled-agent"),
+        );
+        AgentHttpClient {
+            client: reqwest::Client::builder()
+                .default_headers(headers)
+                .build()
+                .unwrap(),
+            controller: Url::parse(controller).unwrap(),
+            node_id: node_id.to_owned(),
+        }
+    }
+
+    fn distribution_fixture_server(
+        assignment: vonk_agent_protocol::DistributionAssignment,
+        objects: HashMap<String, Vec<u8>>,
+        expected_requests: usize,
+        mode: DistributionFixtureMode,
+    ) -> (AgentHttpClient, thread::JoinHandle<Vec<Vec<u8>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let manifest = canonical_json(&assignment).unwrap();
+        let node_id = assignment.node_id.clone();
+        let server = thread::spawn(move || {
+            let mut requests = Vec::new();
+            for _ in 0..expected_requests {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0_u8; 4096];
+                while !request.windows(4).any(|value| value == b"\r\n\r\n") {
+                    let size = stream.read(&mut buffer).unwrap();
+                    assert!(size > 0);
+                    request.extend_from_slice(&buffer[..size]);
+                }
+                requests.push(request.clone());
+                let headers_end = request
+                    .windows(4)
+                    .position(|value| value == b"\r\n\r\n")
+                    .unwrap()
+                    + 4;
+                let headers = String::from_utf8_lossy(&request[..headers_end]);
+                let target = headers
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap();
+                let authorized = headers
+                    .lines()
+                    .any(|line| line.eq_ignore_ascii_case("x-vonk-fixture-auth: enrolled-agent"));
+                if !authorized {
+                    write!(
+                        stream,
+                        "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                    continue;
+                }
+                if target.starts_with("/agent/v1/distribution/manifests/") {
+                    assert!(target.ends_with(&assignment.plan_digest));
+                    write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        manifest.len()
+                    )
+                    .unwrap();
+                    stream.write_all(&manifest).unwrap();
+                    continue;
+                }
+                let (path, query) = target.split_once('?').unwrap();
+                assert!(path.starts_with("/agent/v1/distribution/objects/"));
+                assert!(query == format!("plan_digest={}", assignment.plan_digest));
+                let digest = path.rsplit('/').next().unwrap();
+                let source = objects.get(digest).unwrap();
+                let range = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.strip_prefix("range: bytes=")
+                            .or_else(|| line.strip_prefix("Range: bytes="))
+                    })
+                    .unwrap();
+                let (start, end) = range
+                    .split_once('-')
+                    .map(|(start, end)| {
+                        (
+                            start.parse::<usize>().unwrap(),
+                            end.parse::<usize>().unwrap(),
+                        )
+                    })
+                    .unwrap();
+                assert!(end >= start && end < source.len());
+                assert!(end - start < 8 * 1024 * 1024);
+                let mut body = source[start..=end].to_vec();
+                if matches!(mode, DistributionFixtureMode::CorruptFirstObject)
+                    && digest == assignment.objects[0].sha256
+                    && !body.is_empty()
+                {
+                    body[0] ^= 0xff;
+                }
+                write!(
+                    stream,
+                    "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nETag: \"sha256:{}\"\r\nConnection: close\r\n\r\n",
+                    body.len(), start, end, source.len(), digest
+                )
+                .unwrap();
+                stream.write_all(&body).unwrap();
+            }
+            requests
+        });
+        (
+            authenticated_test_client(&format!("http://{address}/"), &node_id),
+            server,
+        )
+    }
+
+    #[tokio::test]
+    async fn distribution_acceptance_uses_authenticated_ranges_and_reuses_import_cache() {
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        assignment.validate().unwrap();
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive.clone());
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            4,
+            DistributionFixtureMode::Good,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let evidence = client
+            .download_distribution(&assignment.plan_digest, root.path())
+            .await
+            .unwrap();
+        assert_eq!(evidence.oci_image_digest, format!("sha256:{image_digest}"));
+        assert_eq!(std::fs::read(&evidence.oci_archive_path).unwrap(), archive);
+        assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), model);
+        let reused_evidence = client
+            .download_distribution(&assignment.plan_digest, root.path())
+            .await
+            .unwrap();
+        assert_eq!(reused_evidence.downloaded_bytes, evidence.downloaded_bytes);
+
+        let importer = crate::image_importer::ImageImporter {
+            data_root: root.path(),
+        };
+        let cached = importer
+            .retain_verified_distribution_archive(
+                &evidence.oci_archive_sha256,
+                &evidence.oci_image_digest,
+                evidence.oci_archive_bytes,
+                &evidence.oci_archive_path,
+            )
+            .unwrap();
+        let reused = importer
+            .retain_verified_distribution_archive(
+                &evidence.oci_archive_sha256,
+                &evidence.oci_image_digest,
+                evidence.oci_archive_bytes,
+                &evidence.oci_archive_path,
+            )
+            .unwrap();
+        assert_eq!(cached, reused);
+        assert_eq!(
+            importer.distribution_runtime_arguments(
+                &evidence.oci_archive_sha256,
+                &evidence.oci_image_digest,
+                evidence.oci_archive_bytes,
+                &cached,
+            )[1],
+            evidence.oci_archive_sha256
+        );
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 4);
+        assert!(requests.iter().all(|request| {
+            String::from_utf8_lossy(request)
+                .to_ascii_lowercase()
+                .contains("x-vonk-fixture-auth: enrolled-agent")
+        }));
+    }
+
+    #[tokio::test]
+    async fn distribution_acceptance_resumes_partial_object_and_rejects_corruption() {
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive.clone());
+        let root = tempfile::tempdir().unwrap();
+        let model_path = root
+            .path()
+            .join("models")
+            .join(&assignment.model_artifact_set_sha256)
+            .join("weights/model.bin");
+        std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
+        std::fs::write(&model_path, &model[..5]).unwrap();
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            3,
+            DistributionFixtureMode::Good,
+        );
+        client
+            .download_distribution(&assignment.plan_digest, root.path())
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&model_path).unwrap(), model);
+        let requests = server.join().unwrap();
+        let model_request = String::from_utf8_lossy(&requests[1]).to_ascii_lowercase();
+        assert!(model_request.contains("range: bytes=5-"));
+
+        let corrupt_root = tempfile::tempdir().unwrap();
+        let (corrupt_client, corrupt_server) = distribution_fixture_server(
+            assignment.clone(),
+            {
+                let mut values = HashMap::new();
+                values.insert(hex_sha256(model), model.to_vec());
+                values.insert(hex_sha256(&archive), archive);
+                values
+            },
+            2,
+            DistributionFixtureMode::CorruptFirstObject,
+        );
+        assert!(matches!(
+            corrupt_client
+                .download_distribution(&assignment.plan_digest, corrupt_root.path())
+                .await,
+            Err(ClientError::Protocol)
+        ));
+        assert_eq!(corrupt_server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn distribution_acceptance_rejects_unauthorized_and_wrong_complete_destination() {
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive.clone());
+        let (authorized_client, authorized_server) = distribution_fixture_server(
+            assignment.clone(),
+            objects.clone(),
+            1,
+            DistributionFixtureMode::Good,
+        );
+        let unauthorized_client = AgentHttpClient::for_http_test(
+            authorized_client.controller.as_str(),
+            &assignment.node_id,
+        );
+        assert!(matches!(
+            unauthorized_client
+                .distribution_manifest(&assignment.plan_digest)
+                .await,
+            Err(ClientError::Authentication)
+        ));
+        assert_eq!(authorized_server.join().unwrap().len(), 1);
+
+        let root = tempfile::tempdir().unwrap();
+        let model_path = root
+            .path()
+            .join("models")
+            .join(&assignment.model_artifact_set_sha256)
+            .join("weights/model.bin");
+        std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
+        std::fs::write(model_path, model).unwrap();
+        let destination = root
+            .path()
+            .join("oci-archives")
+            .join(&assignment.oci_archive_sha256);
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        std::fs::write(&destination, vec![0_u8; archive.len()]).unwrap();
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            1,
+            DistributionFixtureMode::Good,
+        );
+        assert!(matches!(
+            client
+                .download_distribution(&assignment.plan_digest, root.path())
+                .await,
+            Err(ClientError::Protocol)
+        ));
+        assert_eq!(server.join().unwrap().len(), 1);
+        assert_ne!(std::fs::read(destination).unwrap(), archive);
     }
 
     fn job_input_client(

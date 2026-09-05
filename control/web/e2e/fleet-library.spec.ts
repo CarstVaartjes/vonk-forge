@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import {expect, test, type Page} from "@playwright/test";
 import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
+import type {components} from "../src/api/generated";
 
 const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
@@ -14,6 +15,8 @@ type LibraryFixtureState = {
   detailFailuresRemaining: number;
   empty: boolean;
   lastApplyBody?: Record<string, unknown>;
+  lastRunSwitchApplyBody?: Record<string, unknown>;
+  lastRunSwitchPreviewBody?: Record<string, unknown>;
   retryCount: number;
   snapshotFailuresRemaining: number;
 };
@@ -56,11 +59,120 @@ function libraryLoadPlan() {
   };
 }
 
+function libraryRunSwitchPlan(): components["schemas"]["RunSwitchPlan"] {
+  const imageDigest = `sha256:${"d".repeat(64)}`;
+  const fitNodes = [
+    {allowed: true, node_id: "node-alpha", rank: 0, role: "leader", memory_available_bytes: 100 * GIB, memory_required_bytes: 60 * GIB, memory_free_after_bytes: 36 * GIB, disk_free_bytes: 320 * GIB, disk_required_bytes: 80 * GIB, disk_free_after_bytes: 240 * GIB},
+    {allowed: true, node_id: "node-beta", rank: 1, role: "worker", memory_available_bytes: 100 * GIB, memory_required_bytes: 60 * GIB, memory_free_after_bytes: 36 * GIB, disk_free_bytes: 320 * GIB, disk_required_bytes: 80 * GIB, disk_free_after_bytes: 240 * GIB},
+  ];
+  return {
+    schema_version: 2,
+    generated_at: "2026-09-05T00:00:00Z",
+    action: "run",
+    model_version_sha256: "e".repeat(64),
+    recipe_revision_id: "revision-chat",
+    recipe_content_sha256: "a".repeat(64),
+    alias: "qwen-chat",
+    run_id: null,
+    spark_group: {nodes: [
+      {node_id: "node-alpha", rank: 0, role: "leader", endpoint_owner: true},
+      {node_id: "node-beta", rank: 1, role: "worker", endpoint_owner: false},
+    ]},
+    mapping: {action: "reuse", mapping_id: "mapping-chat", mapping_generation: 4, nodes: [
+      {node_id: "node-alpha", rank: 0, role: "leader", endpoint_owner: true},
+      {node_id: "node-beta", rank: 1, role: "worker", endpoint_owner: false},
+    ], parameters: {}, placement_digest: "p".repeat(64), topology_name: "pair"},
+    installation_id: "installation-chat",
+    installation_state: "installed",
+    recipe_build_id: "build-chat",
+    image_digest: imageDigest,
+    start_plan_digest: null,
+    model_capabilities: [{name: "chat", declared: null, evidence: "unknown", support: "unknown", evidence_digest: null, detail: "Model capability evidence is not declared."}],
+    recipe_capabilities: [{name: "chat", declared: true, evidence: "observed", support: "supported", evidence_digest: "c".repeat(64), detail: "The selected recipe exposes chat."}],
+    freshness: [],
+    fit_current: {allowed: true, nodes: fitNodes},
+    fit_after_stop: null,
+    fit: {allowed: true, nodes: fitNodes},
+    storage: {copied_bytes: 0, missing_nas_bytes: 80 * GIB, missing_spark_bytes: 80 * GIB, nas_coverage: "complete", reclaimable_bytes: 0, reclaimed_bytes: 0, required_bytes: 80 * GIB, retention: "retain-cached", reused_bytes: 0, running_coverage: "complete", spark_coverage: "partial"},
+    runtime_storage: {build_id: "build-chat", copied_bytes: 0, image_bytes: 2 * GIB, image_digest: imageDigest, missing_image_distribution_bytes: 2 * GIB, missing_nas_bytes: 2 * GIB, missing_spark_bytes: 2 * GIB, nas_coverage: "complete", reclaimable_bytes: 0, required_bytes: 2 * GIB, reused_bytes: 0, running_coverage: "complete", spark_coverage: "partial"},
+    build: {build_id: "build-chat", build_input_sha256: "b".repeat(64), builder_node_id: "node-alpha", compatibility: {expected_architecture: "linux/arm64", observed_architecture: "linux/arm64", state: "compatible"}, image_bytes: 2 * GIB, image_digest: imageDigest, runtime: {build_id: "build-chat", copied_bytes: 0, image_bytes: 2 * GIB, image_digest: imageDigest, missing_image_distribution_bytes: 2 * GIB, missing_nas_bytes: 2 * GIB, missing_spark_bytes: 2 * GIB, nas_coverage: "complete", reclaimable_bytes: 0, required_bytes: 2 * GIB, reused_bytes: 0, running_coverage: "complete", spark_coverage: "partial"}, source: {source_bundle_sha256: "9".repeat(64), state: "available"}, state: "available"},
+    preparation: null,
+    conflicts: [],
+    stops: [],
+    reclaimed_bytes: 0,
+    phases: [{index: 0, kind: "transfer", state: "planned", node_ids: ["node-alpha", "node-beta"], detail: "Copy the model and container to the selected Sparks."}],
+    allowed: true,
+    blockers: [],
+    warnings: [],
+    invocation: {origin: "web.library"},
+    plan_digest: "f".repeat(64),
+    stop_before_prepare: false,
+    stop_before_transfer: false,
+  };
+}
+
+function libraryRunSwitchOperation(requestKey: string, state = "queued") {
+  return {
+    schema_version: 2,
+    operation_id: "00000000-0000-4000-8000-000000000707",
+    kind: "recipe.run-switch.v2",
+    action: "run",
+    state,
+    plan_digest: "f".repeat(64),
+    request_key: requestKey,
+    node_ids: ["node-alpha", "node-beta"],
+    current_phase: "transfer",
+    completed_phases: [],
+    progress: {
+      phase_index: 0,
+      phase_count: 3,
+      phase: "transfer",
+      subphase: "model-download",
+      state: state === "queued" ? "queued" : "running",
+      completed_bytes: 0,
+      total_bytes: null,
+      total_bytes_known: false,
+      members: [
+        {node_id: "node-alpha", phase: "transfer", state: "running", completed_bytes: 0, total_bytes: null},
+        {node_id: "node-beta", phase: "transfer", state: "pending", completed_bytes: 0, total_bytes: null},
+      ],
+    },
+    status_reason: null,
+    result: null,
+  };
+}
+
 function libraryOperation(state: string) {
   return {id: "operation-load", kind: "run", owner_id: "installation-chat", state, plan_digest: "load-plan-digest", nodes: ["node-alpha", "node-beta"], result: {job_id: "job-load"}};
 }
 
-function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId) {
+function switchableProfilePreview(): components["schemas"]["FleetProfilePreview"] {
+  return {
+    schema_version: 2,
+    profile_id: "00000000-0000-4000-8000-000000000101",
+    profile_name: "Studio service",
+    profile_digest: "d".repeat(64),
+    plan_digest: "e".repeat(64),
+    generated_at: "2026-09-05T00:00:00Z",
+    allowed: true,
+    scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
+    assignments: [{
+      assignment_id: "00000000-0000-4000-8000-000000000102",
+      recipe_revision_id: "revision-chat",
+      recipe_title: "Qwen pair",
+      desired_state: "running",
+      current_state: "degraded",
+      node_ids: [nodeId, borealisId],
+      actions: ["stop", "switch", "start"],
+      reasons: [],
+    }],
+    reasons: [],
+    steps: [{index: 0, kind: "switch", label: "Switch the Qwen pair on the selected Sparks.", node_ids: [nodeId, borealisId], assignment_id: "00000000-0000-4000-8000-000000000102", owner_id: null, recipe_revision_id: "revision-chat"}],
+    summary: {already_correct: 0, blockers: 0, builds: 0, distributions: 0, installs: 0, placements: 0, starts: 1, stops: 1, uninstalls: 0},
+  };
+}
+
+function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId): components["schemas"]["TelemetryPoint"] {
   return {
     id: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
     node_id: telemetryNodeId,
@@ -78,7 +190,7 @@ function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId) {
     gpu_memory_total_bytes: 128 * GIB,
     gpu_memory_free_bytes: 84 * GIB,
     temperature_c: 43.5,
-    power_watts: 22.25,
+    power_watts: 156.6,
     network_receive_bytes_per_second: 2 * 1024 ** 2,
     network_transmit_bytes_per_second: 512 * 1024,
     gap_samples: 0,
@@ -86,7 +198,159 @@ function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId) {
   };
 }
 
-function localSnapshot() {
+function richTelemetryMetrics(observedAt: string, telemetryNodeId = nodeId): components["schemas"]["TelemetryMetrics"] {
+  const series = (key: string, scope: components["schemas"]["TelemetrySeries"]["scope"], value: number | string | boolean | null, unit: string, context: Partial<components["schemas"]["TelemetrySeries"]> = {}): components["schemas"]["TelemetrySeries"] => ({
+    key, scope, value, unit, source: "spark.telemetry.fixture", measurement_kind: "measured", observed_at: observedAt, received_at: observedAt,
+    freshness: "fresh", freshness_threshold_seconds: 6, support_status: "available", aggregation: "latest", node_id: telemetryNodeId, ...context,
+  });
+  const capability = (key: string, scope: components["schemas"]["TelemetryCapability"]["scope"], unit: string, supported = true, reason: string | null = null, context: Partial<components["schemas"]["TelemetryCapability"]> = {}): components["schemas"]["TelemetryCapability"] => ({
+    key, scope, unit, source: "spark.telemetry.fixture", measurement_kind: "measured", freshness_threshold_seconds: 6, supported, reason, node_id: telemetryNodeId, ...context,
+  });
+  return {
+    schema_version: 2,
+    series: [
+      series("gpu.utilization_percent", "accelerator", 61, "%", {device_id: "0"}),
+      series("gpu.clock_sm_mhz", "accelerator", 1680, "MHz", {device_id: "0"}),
+      series("gpu.throttle_active", "accelerator", false, "boolean", {device_id: "0"}),
+      series("gpu.power_watts", "accelerator", 68.4, "W", {device_id: "0"}),
+      series("gpu.temperature_c", "accelerator", 43.5, "degC", {device_id: "0"}),
+      series("gpu.process_memory_bytes", "accelerator", 18.5 * GIB, "bytes", {device_id: "0", process_id: 4021, process_name: "vllm"}),
+      series("cpu.temperature_c", "node", 51.2, "degC"),
+      series("cpu.utilization_percent", "node", 24.5, "%"),
+      series("cpu.load_average_1m", "node", 2.1, "load"),
+      series("cpu.power_watts", "node", 88.2, "W"),
+      series("memory.available_bytes", "memory", 92 * GIB, "bytes"),
+      series("memory.total_bytes", "memory", 128 * GIB, "bytes"),
+      series("memory.bandwidth_bytes_per_second", "memory", 312.5 * GIB, "bytes/s"),
+      series("storage.read_bytes_per_second", "storage", 74.1 * 1024 ** 2, "bytes/s", {device_id: "nvme0n1"}),
+      series("storage.write_bytes_per_second", "storage", 12.7 * 1024 ** 2, "bytes/s", {device_id: "nvme0n1"}),
+      series("network.receive_bytes_per_second", "network", 2 * 1024 ** 2, "bytes/s", {interface_name: "eth0"}),
+      series("network.transmit_bytes_per_second", "network", 512 * 1024, "bytes/s", {interface_name: "eth0"}),
+      series("runtime.decode_tokens_per_second", "runtime", 112.4, "tokens/s", {run_id: "run-chat"}),
+      series("runtime.prefill_tokens_per_second", "runtime", 841.7, "tokens/s", {run_id: "run-chat"}),
+      series("runtime.kv_cache_usage_percent", "runtime", 42.8, "%", {run_id: "run-chat"}),
+      series("runtime.requests_waiting", "runtime", 2, "requests", {run_id: "run-chat"}),
+      series("runtime.ttft_p95_ms", "runtime", 184, "ms", {run_id: "run-chat"}),
+      series("runtime.e2e_p95_ms", "runtime", 921, "ms", {run_id: "run-chat"}),
+      series("runtime.itl_p95_ms", "runtime", 24.2, "ms", {run_id: "run-chat"}),
+      series("runtime.prefix_cache_hit_percent", "runtime", 91, "%", {run_id: "run-chat"}),
+      series("runtime.mtp_acceptance_percent", "runtime", 78, "%", {run_id: "run-chat"}),
+      series("runtime.preemptions_total", "runtime", 0, "count", {run_id: "run-chat"}),
+    ],
+    capabilities: [
+      capability("gpu.utilization_percent", "accelerator", "%", true, null, {device_id: "0"}),
+      capability("gpu.clock_sm_mhz", "accelerator", "MHz", true, null, {device_id: "0"}),
+      capability("gpu.throttle_active", "accelerator", "boolean", true, null, {device_id: "0"}),
+      capability("gpu.power_watts", "accelerator", "W", true, null, {device_id: "0"}),
+      capability("gpu.temperature_c", "accelerator", "degC", true, null, {device_id: "0"}),
+      capability("gpu.process_memory_bytes", "accelerator", "bytes", true, null, {device_id: "0", process_id: 4021, process_name: "vllm"}),
+      capability("cpu.temperature_c", "node", "degC"),
+      capability("cpu.utilization_percent", "node", "%"),
+      capability("cpu.load_average_1m", "node", "load"),
+      capability("cpu.power_watts", "node", "W"),
+      capability("memory.available_bytes", "memory", "bytes"),
+      capability("memory.total_bytes", "memory", "bytes"),
+      capability("memory.bandwidth_bytes_per_second", "memory", "bytes/s"),
+      capability("storage.read_bytes_per_second", "storage", "bytes/s", true, null, {device_id: "nvme0n1"}),
+      capability("storage.write_bytes_per_second", "storage", "bytes/s", true, null, {device_id: "nvme0n1"}),
+      capability("network.receive_bytes_per_second", "network", "bytes/s", true, null, {interface_name: "eth0"}),
+      capability("network.transmit_bytes_per_second", "network", "bytes/s", true, null, {interface_name: "eth0"}),
+      capability("runtime.decode_tokens_per_second", "runtime", "tokens/s", true, null, {run_id: "run-chat"}),
+      capability("runtime.prefill_tokens_per_second", "runtime", "tokens/s", true, null, {run_id: "run-chat"}),
+      capability("runtime.kv_cache_usage_percent", "runtime", "%", true, null, {run_id: "run-chat"}),
+      capability("runtime.requests_waiting", "runtime", "requests", true, null, {run_id: "run-chat"}),
+      capability("runtime.ttft_p95_ms", "runtime", "ms", true, null, {run_id: "run-chat"}),
+      capability("runtime.e2e_p95_ms", "runtime", "ms", true, null, {run_id: "run-chat"}),
+      capability("runtime.itl_p95_ms", "runtime", "ms", true, null, {run_id: "run-chat"}),
+      capability("runtime.prefix_cache_hit_percent", "runtime", "%", true, null, {run_id: "run-chat"}),
+      capability("runtime.mtp_acceptance_percent", "runtime", "%", true, null, {run_id: "run-chat"}),
+      capability("runtime.preemptions_total", "runtime", "count", true, null, {run_id: "run-chat"}),
+      capability("gpu.power_limit_watts", "accelerator", "W", false, "This Spark does not expose configured power limits.", {device_id: "0"}),
+    ],
+    runtimes: [{run_id: "run-chat", engine_id: "engine-qwen", backend: "vllm", version: "0.8.5", endpoint: "http://aurora.fixture.invalid:8000", model: "Qwen 3", model_version: "qwen/3", recipe_revision: "revision-chat", context_limit_tokens: 32768, serving_node_ids: [nodeId, borealisId], ranks: [0, 1], readiness: "running", error: null, adapter: "openai-chat", adapter_version: "2", adapter_supported: true, adapter_reason: null}],
+    workloads: [{run_id: "run-chat", request_id: "req-42", job_id: null, model: "Qwen 3", recipe_revision: "revision-chat", engine_id: "engine-qwen", state: "running", origin_node_id: nodeId, executor_node_ids: [nodeId, borealisId], created_at: observedAt, started_at: observedAt, ended_at: null, elapsed_seconds: 4.2, failure: null, title: "Interactive request", progress_value: null, progress_max: null, eta_seconds: null, eta_source: null}],
+    provenance: {collector: "vonk-controller", collector_version: "fixture-2", host_uptime_seconds: 98231, source_observed_at: observedAt},
+  };
+}
+
+function richTelemetry(observedAt: string, sequence = 5, telemetryNodeId = nodeId): components["schemas"]["TelemetryPoint"] {
+  return {...telemetry(observedAt, sequence, telemetryNodeId), metrics: richTelemetryMetrics(observedAt, telemetryNodeId)};
+}
+
+type HistoryMetricValues = {
+  gpu: number;
+  gpuTemperature: number;
+  gpuPower: number;
+  cpuTemperature: number;
+  cpuUtilization: number;
+  cpuPower: number;
+  memoryAvailable: number;
+  memoryBandwidth: number;
+  storageRead: number;
+  storageWrite: number;
+  networkReceive: number;
+  networkTransmit: number;
+  decode: number;
+  prefill: number;
+  queue: number;
+  ttft: number;
+  e2e: number;
+  itl: number;
+};
+
+function setRichHistoryValue(point: components["schemas"]["TelemetryPoint"], key: string, value: number, context: Partial<components["schemas"]["TelemetrySeries"]> = {}) {
+  const series = point.metrics?.series.find(item => item.key === key && item.device_id === (context.device_id ?? item.device_id) && item.interface_name === (context.interface_name ?? item.interface_name) && item.run_id === (context.run_id ?? item.run_id));
+  if (!series) throw new Error(`Fixture metric ${key} is missing`);
+  series.value = value;
+}
+
+function richHistoryPoint(observedAt: string, sequence: number, values: HistoryMetricValues, telemetryNodeId = nodeId): components["schemas"]["TelemetryPoint"] {
+  const point = richTelemetry(observedAt, sequence, telemetryNodeId);
+  setRichHistoryValue(point, "gpu.utilization_percent", values.gpu, {device_id: "0"});
+  setRichHistoryValue(point, "gpu.temperature_c", values.gpuTemperature, {device_id: "0"});
+  setRichHistoryValue(point, "gpu.power_watts", values.gpuPower, {device_id: "0"});
+  setRichHistoryValue(point, "cpu.temperature_c", values.cpuTemperature);
+  setRichHistoryValue(point, "cpu.utilization_percent", values.cpuUtilization);
+  setRichHistoryValue(point, "cpu.power_watts", values.cpuPower);
+  setRichHistoryValue(point, "memory.available_bytes", values.memoryAvailable);
+  setRichHistoryValue(point, "memory.bandwidth_bytes_per_second", values.memoryBandwidth * GIB);
+  setRichHistoryValue(point, "storage.read_bytes_per_second", values.storageRead * 1024 ** 2, {device_id: "nvme0n1"});
+  setRichHistoryValue(point, "storage.write_bytes_per_second", values.storageWrite * 1024 ** 2, {device_id: "nvme0n1"});
+  setRichHistoryValue(point, "network.receive_bytes_per_second", values.networkReceive, {interface_name: "eth0"});
+  setRichHistoryValue(point, "network.transmit_bytes_per_second", values.networkTransmit, {interface_name: "eth0"});
+  setRichHistoryValue(point, "runtime.decode_tokens_per_second", values.decode, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.prefill_tokens_per_second", values.prefill, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.requests_waiting", values.queue, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.ttft_p95_ms", values.ttft, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.e2e_p95_ms", values.e2e, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.itl_p95_ms", values.itl, {run_id: "run-chat"});
+  point.gpu_utilization_percent = values.gpu;
+  point.temperature_c = values.gpuTemperature;
+  point.power_watts = values.gpuPower + values.cpuPower;
+  point.cpu_utilization_percent = values.cpuUtilization;
+  point.memory_available_bytes = values.memoryAvailable;
+  point.network_receive_bytes_per_second = values.networkReceive;
+  point.network_transmit_bytes_per_second = values.networkTransmit;
+  return point;
+}
+
+function richHistoryRollup(first: components["schemas"]["TelemetryPoint"], last: components["schemas"]["TelemetryPoint"], start: string, end: string, resolution: string): components["schemas"]["TelemetryRollupPoint"] {
+  const metrics = Object.fromEntries((first.metrics?.series ?? []).flatMap(series => {
+    const counterpart = last.metrics?.series.find(item => item.key === series.key && item.scope === series.scope && item.unit === series.unit && item.device_id === series.device_id && item.process_id === series.process_id && item.interface_name === series.interface_name && item.run_id === series.run_id);
+    const values = [series.value, counterpart?.value].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    if (values.length === 0) return [];
+    const minimum = Math.min(...values);
+    const maximum = Math.max(...values);
+    return [[`${series.key}:${series.device_id ?? series.interface_name ?? series.run_id ?? "node"}`, {
+      count: values.length, minimum, mean: values.reduce((total, value) => total + value, 0) / values.length, maximum,
+      key: series.key, scope: series.scope, device_id: series.device_id, process_id: series.process_id, process_name: series.process_name,
+      interface_name: series.interface_name, run_id: series.run_id, unit: series.unit, source: series.source, measurement_kind: series.measurement_kind, aggregation: "mean",
+    } satisfies components["schemas"]["TelemetryMetricSummary"]]];
+  }));
+  return {node_id: first.node_id, resolution: resolution === "fifteen-minute" ? "fifteen-minute" : "minute", bucket_start: start, bucket_end: end, source_sample_count: first === last ? 1 : 2, gap_samples: 0, metrics};
+}
+
+function localSnapshot(): components["schemas"]["FleetSnapshot"] {
   const observedAt = new Date().toISOString();
   return {
     schema_version: 1,
@@ -102,7 +366,7 @@ function localSnapshot() {
       labels: {role: "inference"},
       connection: {agent_state: "active", certificate_state: "valid", online_state: "online", offline_reason: null, last_seen_at: observedAt, last_seen_age_seconds: 0},
       inventory: null,
-      telemetry: {age_seconds: 0, freshness: "live", sample: telemetry(observedAt)},
+      telemetry: {age_seconds: 0, freshness: "live", sample: richTelemetry(observedAt, 5)},
       installed: [{
         installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
       }],
@@ -120,14 +384,14 @@ function localSnapshot() {
       ip_address: "192.168.1.212",
       lifecycle: "managed",
       labels: {role: "inference"},
-      connection: {agent_state: "inactive", certificate_state: "expired", online_state: "offline", offline_reason: "certificate-expired", last_seen_at: null, last_seen_age_seconds: null},
+      connection: {agent_state: "retired", certificate_state: "expired", online_state: "offline", offline_reason: "certificate-expired", last_seen_at: null, last_seen_age_seconds: null},
       inventory: null,
       telemetry: null,
       installed: [{
         installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
       }],
       loaded: [{
-        run_id: "run-chat", installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "lost", rank_age_seconds: null, rank_fresh: false, run_state: "lost", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "member-rank-unhealthy",
+        run_id: "run-chat", installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "lost", rank_age_seconds: 0, rank_fresh: false, run_state: "lost", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "rank-not-running",
       }],
       reservations: {disk_bytes: 0, unified_memory_bytes: 0, host_memory_bytes: 0, gpu_memory_bytes: 0, port_count: 0},
       warnings: [{code: "node.offline", detail: "Certificate renewal is required.", severity: "error"}, {code: "telemetry.missing", detail: "No telemetry sample is available.", severity: "warning"}, {code: "run.degraded", detail: "The Qwen pair has an unhealthy member rank.", severity: "warning"}],
@@ -138,17 +402,19 @@ function localSnapshot() {
 async function installLocalFleetFixture(page: Page) {
   const snapshot = localSnapshot();
   const profile = {
-    schema_version: 1, id: "00000000-0000-4000-8000-000000000101", name: "Studio service", description: "Keep the studio Qwen endpoint available on the Spark pair.",
+    schema_version: 2, id: "00000000-0000-4000-8000-000000000101", name: "Studio service", description: "Keep the studio Qwen endpoint available on the Spark pair.",
     installation_policy: "keep-cached", labels: {purpose: "interactive"}, favorite: true, profile_digest: "d".repeat(64), created_by: "admin",
     created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
+    scope: {node_ids: [nodeId, borealisId]},
     assignments: [{id: "00000000-0000-4000-8000-000000000102", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", recipe_title: "Qwen pair", model_title: "Qwen 3", topology_name: "pair", desired_state: "running", alias: "chat", nodes: [
       {node_id: nodeId, rank: 0, role: "leader", endpoint_owner: true},
       {node_id: borealisId, rank: 1, role: "worker", endpoint_owner: false},
     ]}],
   };
   const profilePreview = {
-    schema_version: 1, profile_id: profile.id, profile_name: profile.name, profile_digest: profile.profile_digest, plan_digest: "e".repeat(64), generated_at: snapshot.generated_at, allowed: false,
-    summary: {already_correct: 0, blockers: 1, distributions: 0, installs: 0, placements: 0, starts: 0, stops: 0, uninstalls: 0},
+    schema_version: 2, profile_id: profile.id, profile_name: profile.name, profile_digest: profile.profile_digest, plan_digest: "e".repeat(64), generated_at: snapshot.generated_at, allowed: false,
+    scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
+    summary: {already_correct: 0, blockers: 1, builds: 0, distributions: 0, installs: 0, placements: 0, starts: 0, stops: 0, uninstalls: 0},
     assignments: [{assignment_id: profile.assignments[0].id, recipe_revision_id: "revision-chat", recipe_title: "Qwen pair", desired_state: "running", current_state: "degraded", node_ids: [nodeId, borealisId], actions: [], reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}]}],
     reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}], steps: [],
   };
@@ -162,8 +428,30 @@ async function installLocalFleetFixture(page: Page) {
     body: `retry: 60000\nid: ${snapshot.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot})}\n\n`,
   }));
   await page.route("**/api/v1/fleet", route => route.fulfill({json: snapshot}));
-  await page.route("**/api/v1/fleet-profiles", route => route.fulfill({json: {schema_version: 1, generated_at: snapshot.generated_at, profiles: [profile]}}));
+  await page.route("**/api/v1/fleet-profiles", route => route.fulfill({json: {schema_version: 2, generated_at: snapshot.generated_at, profiles: [profile]}}));
   await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: profilePreview}));
+  await page.route("**/api/v1/fleet-profiles/*/status", route => route.fulfill({json: {
+    schema_version: 2, profile_id: profile.id, profile_digest: profile.profile_digest, generated_at: snapshot.generated_at,
+    state: "drifted", matched: false, drifted: true, scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
+    reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}],
+  }}));
+  await page.route("**/api/v1/fleet-profiles/*/apply", async route => {
+    const body = await route.request().postDataJSON() as {request_key?: string; plan_digest?: string};
+    return route.fulfill({status: 202, json: {
+      schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
+      plan_digest: body.plan_digest ?? "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
+      state: "running", current_operation_id: null, current_step: 1, total_steps: 4,
+      progress: {phase: "transfer", subphase: "model-copy", message: `Copying model to ${nodeId}`, completed_bytes: 32 * GIB, total_bytes: 80 * GIB, total_bytes_known: true, request_key: body.request_key ?? null, members: [{node_id: nodeId, state: "running", completed_bytes: 32 * GIB, total_bytes: 80 * GIB}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: 80 * GIB}]},
+      status_reason: null, result: null,
+    }});
+  });
+  await page.route("**/api/v1/fleet-profile-applications/*", route => route.fulfill({json: {
+    schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
+    plan_digest: "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at, state: "running",
+    current_operation_id: null, current_step: 1, total_steps: 4,
+    progress: {phase: "transfer", subphase: "model-copy", message: `Copying model to ${nodeId}`, completed_bytes: 32 * GIB, total_bytes: 80 * GIB, total_bytes_known: true, members: [{node_id: nodeId, state: "running", completed_bytes: 32 * GIB, total_bytes: 80 * GIB}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: 80 * GIB}]},
+    status_reason: null, result: null,
+  }}));
   await page.route("**/api/v1/nodes/*/profile", async route => {
     const nodeId = route.request().url().split("/").at(-2) ?? "";
     const input = await route.request().postDataJSON() as {display_name: string};
@@ -213,6 +501,19 @@ async function installLocalFleetFixture(page: Page) {
     libraryState.lastApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
     return route.fulfill({json: libraryOperation("queued")});
   });
+  await page.route("**/api/v1/recipes/run-switch-plans/preview", async route => {
+    libraryState.lastRunSwitchPreviewBody = await route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({json: libraryRunSwitchPlan()});
+  });
+  await page.route("**/api/v1/recipes/run-switches", async route => {
+    libraryState.lastRunSwitchApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
+    const requestKey = String(libraryState.lastRunSwitchApplyBody.request_key ?? "");
+    return route.fulfill({status: 202, json: libraryRunSwitchOperation(requestKey)});
+  });
+  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707", async route => {
+    const requestKey = String(libraryFixtures.get(page)?.lastRunSwitchApplyBody?.request_key ?? "");
+    return route.fulfill({json: libraryRunSwitchOperation(requestKey, "running")});
+  });
   await page.route("**/api/v1/recipes/operations/operation-load", route => route.fulfill({json: libraryOperation("partial")}));
   await page.route("**/api/v1/recipes/operations/operation-load/retry", route => {
     libraryState.retryCount += 1;
@@ -223,28 +524,50 @@ async function installLocalFleetFixture(page: Page) {
     operation_total: 2, operations: [], progress: {completed: 1, failed: 1, running: 0, total: 2},
     target_total: 2, targets: ["node-alpha", "node-beta"],
   }}));
+  await page.route("**/api/v1/nodes/*/telemetry/current", route => {
+    const url = new URL(route.request().url());
+    const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
+    const observedAt = new Date().toISOString();
+    return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", sample: richTelemetry(observedAt, 5, requestedNodeId)}});
+  });
+  await page.route("**/api/v1/nodes/*/telemetry/capabilities", route => {
+    const url = new URL(route.request().url());
+    const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
+    const observedAt = new Date().toISOString();
+    return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", capabilities: richTelemetryMetrics(observedAt, requestedNodeId).capabilities}});
+  });
+  await page.route("**/api/v1/nodes/*/telemetry/workloads", route => {
+    const url = new URL(route.request().url());
+    const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
+    const observedAt = new Date().toISOString();
+    const metrics = richTelemetryMetrics(observedAt, requestedNodeId);
+    return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", run_id: null, state: null, runtimes: metrics.runtimes, workloads: metrics.workloads}});
+  });
   await page.route("**/api/v1/nodes/*/telemetry?*", route => {
     const url = new URL(route.request().url());
     const start = url.searchParams.get("start") ?? snapshot.generated_at;
     const end = url.searchParams.get("end") ?? snapshot.generated_at;
     const resolution = url.searchParams.get("resolution") ?? "raw";
     const maximumPoints = Number(url.searchParams.get("maximum_points") ?? 360);
-    const first = telemetry(start, 1);
-    const last = {...telemetry(end, 2), gpu_utilization_percent: 72, temperature_c: 45};
-    const points = resolution === "raw" ? [first, last] : [{
-      node_id: nodeId,
-      resolution,
-      bucket_start: start,
-      bucket_end: end,
-      source_sample_count: 2,
-      gap_samples: 0,
-      metrics: {
-        gpu_utilization_percent: {count: 2, minimum: 61, mean: 66.5, maximum: 72},
-        memory_available_bytes: {count: 2, minimum: 90 * GIB, mean: 91 * GIB, maximum: 92 * GIB},
-        temperature_c: {count: 2, minimum: 43.5, mean: 44.25, maximum: 45},
-      },
-    }];
-    return route.fulfill({json: {schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points}});
+    const first = richHistoryPoint(start, 1, {
+      gpu: 42, gpuTemperature: 48, gpuPower: 60, cpuTemperature: 50, cpuUtilization: 18, cpuPower: 80,
+      memoryAvailable: 100 * GIB, memoryBandwidth: 290, storageRead: 64, storageWrite: 10,
+      networkReceive: 1.5 * 1024 ** 2, networkTransmit: 400 * 1024, decode: 96, prefill: 700,
+      queue: 1, ttft: 220, e2e: 950, itl: 22,
+    });
+    const last = richHistoryPoint(end, 2, {
+      gpu: 72, gpuTemperature: 55, gpuPower: 68.4, cpuTemperature: 51.2, cpuUtilization: 32, cpuPower: 88.2,
+      memoryAvailable: 92 * GIB, memoryBandwidth: 312.5, storageRead: 74.1, storageWrite: 12.7,
+      networkReceive: 2 * 1024 ** 2, networkTransmit: 512 * 1024, decode: 112.4, prefill: 841.7,
+      queue: 2, ttft: 184, e2e: 921, itl: 24.2,
+    });
+    const bucketSeconds = resolution === "fifteen-minute" ? 15 * 60 : 60;
+    const firstBucketEnd = new Date(new Date(start).getTime() + bucketSeconds * 1_000).toISOString();
+    const lastBucketStart = new Date(new Date(end).getTime() - bucketSeconds * 1_000).toISOString();
+    const points = resolution === "raw"
+      ? [first, last]
+      : [richHistoryRollup(first, first, start, firstBucketEnd, resolution), richHistoryRollup(last, last, lastBucketStart, end, resolution)];
+    return route.fulfill({json: {schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points, metadata: {requested_start: start, requested_end: end, actual_start: start, actual_end: end, requested_resolution: resolution, actual_resolution: resolution, timezone: "UTC", point_count: points.length, coverage_seconds: 3600, gap_samples: 0, downsampled: resolution !== "raw"}}});
   });
 }
 
@@ -268,12 +591,10 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
 
   await expect(page.getByRole("heading", {name: "Fleet", exact: true})).toBeVisible();
   const fleetSummary = page.getByRole("region", {name: "Fleet summary"});
-  await expect(fleetSummary).toContainText("1 loaded recipe");
   await expect(fleetSummary.getByText("Live", {exact: true})).toBeVisible();
   await expect(fleetSummary.getByText("Offline", {exact: true})).toBeVisible();
-  await expect(page.getByRole("heading", {name: "Workload map"})).toBeVisible();
-  await expect(page.getByRole("table").getByText("Qwen 3")).toBeVisible();
-  await expect(page.getByText("1 blocked", {exact: true})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "Spark roster"})).toBeVisible();
+  await expect(page.getByRole("article", {name: /Aurora —/})).toBeVisible();
   const aurora = page.getByRole("article", {name: /Aurora — (Live|Delayed)/});
   await expect(aurora).toContainText("NVIDIA GB10 · P0");
   await expect(aurora.getByRole("img", {name: "GPU 24h trend"})).toBeVisible();
@@ -290,11 +611,11 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await page.keyboard.press("Enter");
   await expect(page.getByRole("complementary", {name: "Aurora details"})).toBeVisible();
   await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
-  await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/1 reported buckets/);
+  await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/2 reported buckets/);
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("link", {name: "Install model or recipe"}).click();
+  await page.getByRole("link", {name: "Download to Library"}).click();
   await expect(page).toHaveURL(new RegExp(`/library\\?spark=${nodeId}$`));
   await expect(page.getByRole("complementary", {name: "Managing models on Aurora"})).toBeVisible();
 });
@@ -348,7 +669,7 @@ test("Node history and lifecycle controls work on desktop and mobile", async ({p
     await page.getByRole("button", {name: "View Aurora details"}).click();
     await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
     const detail = page.getByRole("complementary", {name: "Aurora details"});
-    await expect(detail.getByRole("link", {name: "Install model or recipe"})).toBeVisible();
+    await expect(detail.getByRole("link", {name: "Download to Library"})).toBeVisible();
     await expect(detail.getByRole("button", {name: "Stop Aurora solo on this Spark"})).toBeVisible();
     await expect(detail.getByText("Stop all 2 active runs before removing this recipe from all 2 Sparks.")).toBeVisible();
     await testInfo.attach(`fleet-spark-lifecycle-${width}.png`, {body: await detail.screenshot(), contentType: "image/png"});
@@ -368,6 +689,30 @@ test("Node history and lifecycle controls work on desktop and mobile", async ({p
   }
 });
 
+test("Spark metrics use typed history identities and keep the focused detail usable", async ({page}, testInfo) => {
+  for (const [width, height] of [[1280, 900], [360, 800]] as const) {
+    await page.setViewportSize({width, height});
+    await page.goto("/fleet");
+    await page.screenshot({path: testInfo.outputPath(`fleet-first-${width}.png`)});
+    await page.getByRole("button", {name: "View Aurora details"}).click();
+    const detail = page.getByRole("complementary", {name: "Aurora details"});
+    await expect(detail.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
+    await detail.getByRole("tab", {name: "Metrics"}).click();
+    const metrics = detail.getByRole("tabpanel", {name: "Metrics"});
+    await metrics.scrollIntoViewIfNeeded();
+    await expect(metrics.getByRole("heading", {name: "Metrics"})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Gpu · Utilization Percent GPU 0 history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Cpu · Temperature C Node aggregate history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Runtime · Requests Waiting Run run-chat history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Runtime · Ttft P95 Ms Run run-chat history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Runtime · Decode Tokens Per Second Run run-chat history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Runtime · Itl P95 Ms Run run-chat history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByText("Last observed").first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => ({body: document.body.scrollWidth, document: document.documentElement.scrollWidth, viewport: innerWidth}))).toEqual({body: width, document: width, viewport: width});
+    await page.screenshot({path: testInfo.outputPath(`spark-metrics-${width}.png`)});
+  }
+});
+
 test("Fleet has no document overflow from phone through large desktop", async ({page}) => {
   await page.goto("/fleet");
   await page.getByRole("button", {name: "View Aurora details"}).click();
@@ -384,7 +729,7 @@ test("Fleet has no document overflow from phone through large desktop", async ({
   await page.setViewportSize({width: 360, height: 800});
   await expect(page.locator(".node-detail")).toHaveCSS("position", "static");
   await page.setViewportSize({width: 1920, height: 900});
-  await expect(page.locator(".node-detail")).toHaveCSS("position", "sticky");
+  await expect(page.locator(".node-detail")).toHaveCSS("position", "static");
   await page.getByRole("button", {name: "Close Aurora details"}).click();
   const columns = await page.locator(".node-grid").evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length);
   expect(columns).toBeGreaterThanOrEqual(2);
@@ -443,11 +788,11 @@ test("Fleet compact and topology views persist, reflow, and keep technical IDs o
   await expect(page.locator(".fleet-controls-popover")).toBeHidden();
   await expect(page.locator(".fleet-controls-menu > summary")).toBeFocused();
   await expect(page.getByRole("heading", {name: "Fleet"})).toBeVisible();
-  await expect(page.locator(".workload-matrix-scroll")).toBeHidden();
-  const mobileWorkloads = page.getByRole("list", {name: "Workloads by Spark"});
-  await expect(mobileWorkloads).toBeVisible();
-  await expect(mobileWorkloads.locator(".workload-stack-row").first()).toContainText("Aurora");
-  await expect(mobileWorkloads.locator(".workload-stack-row").first()).toContainText("Borealis");
+  await expect(page.locator(".workload-matrix-scroll")).toHaveCount(0);
+  const mobileRoster = page.getByRole("region", {name: "Fleet nodes compact table"});
+  await expect(mobileRoster).toBeVisible();
+  await expect(mobileRoster).toContainText("Aurora");
+  await expect(mobileRoster).toContainText("Borealis");
   await expectNoSeriousAccessibilityViolations(page);
   await page.screenshot({path: testInfo.outputPath("fleet-compact-mobile.png"), fullPage: true});
 });
@@ -534,149 +879,6 @@ test("Add Spark preserves an in-flight and revealed one-time grant until an expl
   await expect(page).toHaveURL(/\/library$/);
 });
 
-test.skip("Library keeps URL drill-down below 900px and three coordinated panes above it", async ({page}, testInfo) => {
-  await page.setViewportSize({width: 360, height: 800});
-  await page.goto("/library");
-
-  const models = page.getByRole("region", {name: "Models"});
-  const recipes = page.getByRole("region", {name: "Recipe inventory"});
-  const detail = page.getByRole("region", {name: "Recipe detail"});
-  await expect(models).toBeVisible();
-  await expect(recipes).toBeHidden();
-  await expect(detail).toBeHidden();
-
-  await models.getByRole("link", {name: new RegExp(qwenModelName)}).focus();
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
-  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
-  await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(detail).toBeHidden();
-
-  await page.getByRole("link", {name: /Qwen Chat/}).click();
-  await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
-  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
-  await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(detail).toBeVisible();
-  await expect(page.getByRole("complementary", {name: "Sparks"})).toBeVisible();
-
-  await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await page.goBack();
-  await expect(page).toHaveURL(/\/library$/);
-  await expect(models).toBeVisible();
-
-  await models.getByRole("link", {name: /Unlinked/}).click();
-  await expect(page).toHaveURL(/\/library\/models\/~unlinked$/);
-  const unlinked = page.getByRole("region", {name: "Unlinked recipes"});
-  await unlinked.getByRole("link", {name: /Custom Runtime/}).click();
-  await expect(page).toHaveURL(/\/library\/recipes\/recipe-unlinked$/);
-  const backToUnlinked = page.getByRole("link", {name: "Back to Unlinked recipes"});
-  await expect(backToUnlinked).toHaveAttribute("href", "/library/models/~unlinked");
-  await backToUnlinked.click();
-  await expect(page).toHaveURL(/\/library\/models\/~unlinked$/);
-  await expect(unlinked).toBeVisible();
-
-  await page.setViewportSize({width: 1280, height: 900});
-  await models.getByRole("link", {name: new RegExp(qwenModelName)}).click();
-  await page.getByRole("link", {name: /Qwen Chat/}).click();
-  await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(detail).toBeVisible();
-
-  for (const width of [320, 360, 768, 899, 900, 1280, 1920]) {
-    await page.setViewportSize({width, height: width < 900 ? 800 : 900});
-    await expect.poll(() => page.evaluate(() => ({
-      body: document.body.scrollWidth,
-      document: document.documentElement.scrollWidth,
-      viewport: window.innerWidth,
-    }))).toEqual({body: width, document: width, viewport: width});
-  }
-
-  await page.setViewportSize({width: 899, height: 900});
-  await expect(models).toBeHidden();
-  await expect(detail).toBeVisible();
-  await page.setViewportSize({width: 900, height: 900});
-  await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(detail).toBeVisible();
-
-  await page.setViewportSize({width: 1280, height: 900});
-  await page.evaluate(() => {
-    const frame = document.createElement("iframe");
-    frame.title = "Fractional Library viewport";
-    frame.style.width = "899.5px";
-    frame.style.height = "800px";
-    frame.src = "/library/recipes/recipe-chat";
-    document.body.append(frame);
-  });
-  const fractionalFrame = page.frameLocator('iframe[title="Fractional Library viewport"]');
-  await expect.poll(() => page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.getBoundingClientRect().width)).toBe(899.5);
-  await fractionalFrame.locator(".library-browser-shell").waitFor();
-  await fractionalFrame.locator("html").evaluate(() => {
-    for (const sheet of Array.from(document.styleSheets)) {
-      for (const rule of Array.from(sheet.cssRules)) {
-        if (rule instanceof CSSMediaRule && /(?:899|900)px/.test(rule.conditionText)) rule.media.mediaText = "not all";
-      }
-    }
-  });
-  await expect(fractionalFrame.getByRole("region", {name: "Models"})).toBeHidden();
-  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(fractionalFrame.getByRole("region", {name: "Recipe detail"})).toBeVisible();
-  await page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.remove());
-
-  await page.setViewportSize({width: 360, height: 800});
-  await page.evaluate(() => scrollTo(0, 0));
-  await page.screenshot({path: testInfo.outputPath("library-mobile.png")});
-});
-
-test.skip("Library view modes persist and compare friendly recipes without document overflow", async ({page}) => {
-  await page.setViewportSize({width: 1280, height: 900});
-  await page.goto("/library");
-
-  const models = page.getByRole("region", {name: "Models"});
-  const modelLink = models.getByRole("link", {name: /Qwen 3/});
-  await expect(modelLink).not.toContainText(/qwen\/3@/);
-  const modelRow = modelLink.locator("xpath=ancestor::article");
-  await modelRow.getByText("Technical details").click();
-  await expect(modelRow).toContainText("e".repeat(64));
-  await expect(modelRow.getByRole("button", {name: "Copy Model digest"})).toBeVisible();
-
-  await page.getByRole("button", {name: "Compact"}).click();
-  await expect(page.getByRole("region", {name: "Compact recipe list"})).toBeVisible();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("vonk-forge.library.view-mode"))).toBe("compact");
-  await page.reload();
-  await expect(page.getByRole("button", {name: "Compact"})).toHaveAttribute("aria-pressed", "true");
-
-  await page.getByRole("button", {name: "Compare"}).click();
-  const picker = page.getByRole("region", {name: "Choose recipes to compare"});
-  await picker.getByRole("checkbox", {name: /Qwen Chat/}).check();
-  await picker.getByRole("checkbox", {name: /Qwen Code/}).check();
-  const comparison = page.getByRole("region", {name: "Recipe comparison"});
-  await expect(comparison.getByLabel("Startup memory: 144.0 GiB")).toHaveCount(2);
-  await expect(comparison.getByText("2 Sparks")).toHaveCount(2);
-  await expect(comparison.getByText("Ready")).toHaveCount(2);
-
-  for (const width of [320, 360, 768, 1280]) {
-    await page.setViewportSize({width, height: width < 768 ? 800 : 900});
-    await expect.poll(() => page.evaluate(() => ({
-      body: document.body.scrollWidth,
-      document: document.documentElement.scrollWidth,
-      viewport: window.innerWidth,
-    }))).toEqual({body: width, document: width, viewport: width});
-  }
-
-  await page.setViewportSize({width: 360, height: 800});
-  await page.goto("/library");
-  const kpiLayout = await page.locator(".library-overview").evaluate(element => ({
-    horizontallyScrollable: element.scrollWidth > element.clientWidth,
-    rows: new Set(Array.from(element.children).map(child => (child as HTMLElement).offsetTop)).size,
-  }));
-  expect(kpiLayout).toEqual({horizontallyScrollable: false, rows: 3});
-});
-
 test("Library mirrors the repository table with Installed on first and contained responsive scrolling", async ({page}, testInfo) => {
   const update = libraryCatalogUpdate();
   await page.unroute("**/api/v1/catalog/public-recipes");
@@ -733,110 +935,108 @@ test("Library separates installation capacity from load memory admission", async
   await testInfo.attach("installable-load-blocked.png", {body: await placement.screenshot(), contentType: "image/png"});
 });
 
-test.skip("Library fixture journey keeps visual authority primary through preview, partial retry, and Advanced recovery", async ({page}, testInfo) => {
+test("Library uses the schema 2 one-click Run path when the Controller exposes run-switch", async ({page}) => {
   await page.setViewportSize({width: 1280, height: 900});
   await page.goto("/library/recipes/recipe-chat");
 
-  const models = page.getByRole("region", {name: "Models"});
-  const recipes = page.getByRole("region", {name: `Recipes for ${qwenModelName}`});
   const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
-  await expect(models.getByRole("link", {name: /Unlinked/})).toBeVisible();
-  await expect(recipes.getByRole("link", {name: /Qwen Chat/})).toBeVisible();
-  await expect(recipes.getByRole("link", {name: /Qwen Code/})).toBeVisible();
-  await expect(authority).toContainText("Immutable revision 3");
-  await expect(authority).toContainText("Bounded search is incomplete");
-  await expect(authority).toContainText("Inventory fresh · 10s");
-  await expect(authority).toContainText("Spark node + Spark node");
-  const nextAction = authority.getByRole("region", {name: "Recommended next action"});
-  await expect(nextAction).toContainText("Load and publish the model");
-  await expect(nextAction.getByRole("button", {name: "Review Load"})).toBeVisible();
-  const placementEvidence = authority.getByRole("group", {name: "Capacity and placement evidence"});
-  await expect(placementEvidence).not.toHaveAttribute("open");
-  await expect(placementEvidence.getByText("Inventory fresh · 10s")).not.toBeVisible();
-  const authorityContrast = await authority.evaluate(element => {
-    const channels = (value: string) => value.match(/[\d.]+/g)!.slice(0, 3).map(Number);
-    const luminance = (value: string) => {
-      const linear = channels(value).map(channel => {
-        const normalized = channel / 255;
-        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
-    };
-    const foreground = luminance(getComputedStyle(element).color);
-    const pane = element.closest<HTMLElement>(".library-pane")!;
-    const background = luminance(getComputedStyle(pane).backgroundColor);
-    return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
-  });
-  expect(authorityContrast).toBeGreaterThanOrEqual(4.5);
+  const run = authority.getByRole("button", {name: "Run", exact: true}).first();
+  await expect(run).toBeVisible();
+  await expect(authority.getByRole("button", {name: "Review Load"})).toHaveCount(0);
+  await run.click();
 
-  const selector = authority.getByRole("button", {name: "Select complete group Spark node and Spark node"});
-  await expect(selector).toHaveAttribute("aria-pressed", "true");
-  const review = nextAction.getByRole("button", {name: "Review Load"});
-  await review.click();
-  let dialog = page.getByRole("dialog", {name: "Review Load"});
-  await expect(dialog).toContainText("Existing recipes remain loaded. Forge will not unload anything automatically.");
-  await expect(dialog).toContainText("Authoritative capacity evidence permits Qwen Code to coexist.");
-  await dialog.getByRole("button", {name: "Cancel"}).click();
-  await expect(dialog).toBeHidden();
-  await expect(review).toBeFocused();
-
-  await review.click();
-  dialog = page.getByRole("dialog", {name: "Review Load"});
-  await dialog.getByRole("button", {name: "Load selected installation"}).click();
-  const progress = page.getByRole("region", {name: "Load operation progress"});
-  await expect(progress).toContainText("Operation incomplete");
-  await expect(progress).toContainText("1 of 2 ranks completed · 1 failed");
   const state = libraryFixtures.get(page)!;
-  expect(state.lastApplyBody).toMatchObject({alias: "qwen-chat", installation_id: "installation-chat", plan_digest: "load-plan-digest"});
-  await progress.getByRole("button", {name: "Retry incomplete operation"}).click();
-  await expect.poll(() => state.retryCount).toBe(1);
-  await expect(progress).toContainText("Operation incomplete");
-
-  const advanced = page.getByRole("group", {name: "Advanced recipe document"});
-  await advanced.getByText("Advanced recipe document").click();
-  const editor = advanced.getByRole("textbox", {name: "Recipe JSON"});
-  const firstValid = {...fullLibraryDetail.visual_recipe!, model: {...fullLibraryDetail.visual_recipe!.model, slug: "qwen-e2e"}};
-  await editor.fill(JSON.stringify(firstValid, null, 2));
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen E 2 E");
-  const invalid = {...firstValid, model: {...firstValid.model, content_sha256: "not-a-digest"}};
-  await editor.fill(JSON.stringify(invalid, null, 2));
-  await expect(advanced.getByRole("alert")).toContainText("$.model.content_sha256 must be 64 lowercase hexadecimal characters.");
-  await expect(editor).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen E 2 E");
-
-  const upload = advanced.getByLabel("Upload recipe JSON");
-  const uploaded = {...firstValid, model: {...firstValid.model, slug: "qwen-uploaded"}};
-  await upload.focus();
-  await upload.setInputFiles({name: "recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(uploaded))});
-  await expect(advanced.getByRole("alert")).toHaveCount(0);
-  await expect(upload).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen Uploaded");
-  await expect(page.getByRole("link", {name: "Source and build"})).toHaveCount(0);
-  await expect(page.getByRole("link", {name: "Cluster mapping"})).toHaveCount(0);
-  await expect(page.getByRole("link", {name: "Raw editor"})).toHaveCount(0);
-
-  await page.evaluate(() => scrollTo(0, 0));
-  await page.screenshot({path: testInfo.outputPath("library-desktop.png")});
+  await expect.poll(() => state.lastRunSwitchPreviewBody).toMatchObject({schema_version: 2, model_version_sha256: "e".repeat(64), recipe_revision_id: "revision-chat", action: "run", retention: "retain-cached"});
+  await expect.poll(() => state.lastRunSwitchApplyBody).toMatchObject({schema_version: 2, plan_digest: "f".repeat(64), request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  const progress = authority.getByRole("region", {name: "Qwen Chat progress"});
+  await expect(progress).toContainText("Copying model to node-alpha");
+  await expect(progress).toContainText("Total bytes unavailable");
+  await expect(progress.getByRole("progressbar", {name: "Run progress"})).toHaveAttribute("aria-valuetext", "Total bytes unavailable");
 });
 
-test.skip("Library local fixture recovers from errors and exposes an empty-state escape hatch", async ({page}) => {
+test("Library keeps partial Run progress visible for each Spark", async ({page}) => {
+  await page.goto("/library/recipes/recipe-chat");
+  const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
+  const run = authority.getByRole("button", {name: "Run", exact: true}).last();
+  await run.scrollIntoViewIfNeeded();
+  await run.click({force: true});
+
+  const state = libraryFixtures.get(page)!;
+  await expect.poll(() => state.lastRunSwitchPreviewBody).toBeTruthy();
+  await expect.poll(() => state.lastRunSwitchApplyBody).toBeTruthy();
+  const progress = authority.getByRole("region", {name: "Qwen Chat progress"});
+  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("node-alpha");
+  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("In progress");
+  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("node-beta");
+  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("Waiting");
+  await expect(progress.getByRole("progressbar", {name: "Run progress"})).not.toHaveAttribute("aria-valuenow");
+});
+
+test("Profiles keep the saved view primary and show durable per-Spark switch progress", async ({page}, testInfo) => {
+  await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
+
+  for (const [width, height] of [[1280, 900], [360, 800]] as const) {
+    await page.setViewportSize({width, height});
+    await page.goto("/library/profiles");
+
+    const saved = page.getByRole("region", {name: "Studio service saved profile"});
+    await expect(saved).toBeVisible();
+    await expect(saved.getByRole("button", {name: "Edit profile"})).toBeVisible();
+    await expect(saved.getByRole("button", {name: "Switch profile"})).toBeEnabled();
+    await page.screenshot({path: testInfo.outputPath(`profiles-saved-${width}.png`)});
+
+    await saved.getByRole("button", {name: "Switch profile"}).click();
+    const progress = page.getByRole("region", {name: "Profile switch progress"});
+    await expect(progress).toContainText("Copying model to Aurora");
+    await expect(progress).toContainText("32 GiB of 80 GiB");
+    await expect(progress.getByRole("list", {name: "Profile switch targets"})).toContainText("Aurora");
+    await expect(progress.getByRole("list", {name: "Profile switch targets"})).toContainText("Borealis");
+    await expect(progress.getByRole("progressbar", {name: "Profile switch progress"})).toHaveAttribute("aria-valuenow", "40");
+    await progress.scrollIntoViewIfNeeded();
+    await page.screenshot({path: testInfo.outputPath(`profiles-switch-progress-${width}.png`)});
+  }
+});
+
+test("Library retries a failed snapshot and recipe detail request", async ({page}) => {
   const state = libraryFixtures.get(page)!;
   state.snapshotFailuresRemaining = 1;
-  await page.goto("/library");
+  await page.goto("/library?view=models");
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry Library"}).click();
   await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
 
   state.detailFailuresRemaining = 1;
-  await page.getByRole("link", {name: new RegExp(qwenModelName)}).click();
-  await page.getByRole("link", {name: /Qwen Chat/}).click();
+  await page.locator(".library-subnav").getByRole("link", {name: "Recipes", exact: true}).click();
+  await page.getByRole("link", {name: "Qwen Chat", exact: true}).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry recipe detail"}).click();
   await expect(page.getByRole("region", {name: "Qwen Chat recipe authority"})).toBeVisible();
+});
 
+test("Empty Library offers a direct escape to the custom runtime builder", async ({page}) => {
+  const state = libraryFixtures.get(page)!;
   state.empty = true;
   await page.goto("/library");
-  await expect(page.getByRole("heading", {name: "Bring your first recipe into the Library"})).toBeVisible();
-  await expect(page.getByRole("region", {name: "Empty Library"}).getByRole("link", {name: "Browse public recipes"})).toBeVisible();
-  await expect(page.getByRole("link", {name: /advanced/i})).toHaveCount(0);
+  const empty = page.getByRole("region", {name: "Empty Library"});
+  await expect(empty).toBeVisible();
+  await empty.getByRole("link", {name: "Create custom runtime"}).click();
+  await expect(page).toHaveURL(/\/library\/create$/);
+  await expect(page.getByRole("heading", {name: "Create custom recipe"})).toBeVisible();
+});
+
+test("Library route changes restore heading focus and browser back state", async ({page}) => {
+  await page.goto("/library?view=models");
+  await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
+  await page.locator(".library-subnav").getByRole("link", {name: "Recipes", exact: true}).click();
+  await expect(page).toHaveURL(/\/library$/);
+  await page.getByRole("link", {name: "Qwen Chat", exact: true}).click();
+  await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
+  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/library$/);
+  await expect(page.getByRole("region", {name: "Recipe catalog"})).toBeVisible();
+  await page.locator(".library-subnav").getByRole("link", {name: "Models", exact: true}).click();
+  await expect(page).toHaveURL(/\/library\?view=models$/);
+  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
 });

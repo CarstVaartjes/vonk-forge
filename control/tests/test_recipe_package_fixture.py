@@ -17,7 +17,11 @@ from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from vonk_control.models import Base, CatalogEntity, LocalRecipe, LocalRecipeRevision, ManagedRecipeLibraryLink
-from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
+from vonk_control.recipe_packages import (
+    PACKAGE_MEDIA_TYPE,
+    RecipePackageClient,
+    RecipePackageError,
+)
 from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.recipe_packages import load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
@@ -58,8 +62,68 @@ def test_publisher_fixture_imports_all_84_and_reuses_persistent_packages(tmp_pat
     restarted.close()
 
 
+@pytest.mark.skipif(
+    not Path("/private/tmp/vonk-recipe-package-fixture").is_dir(),
+    reason="cross-repository publisher fixture was not generated",
+)
+@pytest.mark.parametrize("tampered_field", ["publisher", "content_sha256"])
+def test_publisher_package_binds_manifest_metadata_identity_and_digest(
+    tmp_path: Path, tampered_field: str
+) -> None:
+    fixture = Path("/private/tmp/vonk-recipe-package-fixture")
+    index_path = Path("/private/tmp/vonk-forge-recipes-packages/catalog-index.json")
+    if not index_path.is_file():
+        pytest.skip("recipe publisher checkout is not available")
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    row = index["recipes"][0]
+    package_name = Path(row["package"]["path"]).name
+    files: dict[str, bytes] = {}
+    with tarfile.open(fixture / package_name, mode="r:*") as archive:
+        for member in archive.getmembers():
+            stream = archive.extractfile(member)
+            assert stream is not None
+            files[member.name] = stream.read()
+    manifest = json.loads(files["manifest.json"])
+    manifest["metadata"][0][tampered_field] = (
+        "broken-publisher" if tampered_field == "publisher" else "0" * 64
+    )
+    files["manifest.json"] = _canonical(manifest) + b"\n"
+    tampered = _repack(files)
+    row["package"]["sha256"] = hashlib.sha256(tampered).hexdigest()
+    row["package"]["expected_bytes"] = len(tampered)
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        if request.url.path.endswith("index.json"):
+            return httpx.Response(200, headers={"content-type": "application/json"}, content=_canonical(index) + b"\n")
+        return httpx.Response(200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=tampered)
+
+    client = RecipePackageClient(
+        "http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler)
+    )
+    with pytest.raises(RecipePackageError, match="invalid"):
+        client.prepare(client.list())
+    assert len([path for path in calls if path.endswith(".tar.gz")]) == 1
+    client.close()
+
+
 def _canonical(value: object) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _repack(files: dict[str, bytes]) -> bytes:
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        for path in sorted(files):
+            info = tarfile.TarInfo(path)
+            info.size = len(files[path])
+            info.mode = 0o644
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            info.mtime = 0
+            archive.addfile(info, io.BytesIO(files[path]))
+    return gzip.compress(stream.getvalue(), compresslevel=9, mtime=0)
 
 
 def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
@@ -90,17 +154,7 @@ def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
     ]
     manifest["total_bytes"] = sum(int(entry["size"]) for entry in manifest["files"])
     files["manifest.json"] = _canonical(manifest) + b"\n"
-    stream = io.BytesIO()
-    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as archive:
-        for path in sorted(files):
-            info = tarfile.TarInfo(path)
-            info.size = len(files[path])
-            info.mode = 0o644
-            info.uid = info.gid = 0
-            info.uname = info.gname = ""
-            info.mtime = 0
-            archive.addfile(info, io.BytesIO(files[path]))
-    changed = gzip.compress(stream.getvalue(), compresslevel=9, mtime=0)
+    changed = _repack(files)
     return changed, {"sha256": hashlib.sha256(changed).hexdigest(), "expected_bytes": len(changed), "recipe_content_sha256": digest}
 
 

@@ -17,6 +17,46 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     assert settings.operator_jurisdiction is None
 
 
+def test_optional_huggingface_token_uses_file_path_without_exposing_value(
+    tmp_path: Path, monkeypatch
+) -> None:
+    token = tmp_path / "hf-token"
+    token.write_text("hf_test_secret\n")
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(token))
+
+    settings = Settings.from_env_and_secrets()
+
+    assert settings.huggingface_token_path == token
+    assert "hf_test_secret" not in repr(settings)
+
+
+def test_optional_huggingface_token_allows_missing_or_empty_normalized_secret(
+    tmp_path: Path, monkeypatch
+) -> None:
+    missing = tmp_path / "missing-hf-token"
+    empty = tmp_path / "empty-hf-token"
+    empty.touch()
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(missing))
+    assert Settings.from_env_and_secrets().huggingface_token_path is None
+
+    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(empty))
+    assert Settings.from_env_and_secrets().huggingface_token_path is None
+
+
+def test_optional_huggingface_token_rejects_symlink(tmp_path: Path, monkeypatch) -> None:
+    token = tmp_path / "hf-token"
+    token.write_text("hf_test_secret")
+    link = tmp_path / "hf-token-link"
+    link.symlink_to(token)
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(link))
+
+    with pytest.raises(SettingsError, match="regular non-symlink"):
+        Settings.from_env_and_secrets()
+
+
 def test_operator_jurisdiction_is_explicit_and_strict(monkeypatch) -> None:
     monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
     monkeypatch.setenv("VONK_OPERATOR_JURISDICTION", "NL")

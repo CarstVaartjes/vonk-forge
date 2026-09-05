@@ -5,7 +5,13 @@ on:
     workflows:
       - CI
       - Installer publication source
+      - Rust Vonk Forge agent development
+      - Development images
+      - Installer setup programs
     types: [completed]
+  schedule:
+    # Refresh only re-signs the already published immutable generation.
+    - cron: '17 3 * * *'
 
 permissions:
   actions: read
@@ -19,9 +25,10 @@ concurrency:
        github.event.workflow_run.head_sha) ||
       github.run_id
     }}
-  # One source anchor emits exactly one development fan-in event per main
-  # generation. Stable publication remains anchored to the completed CI tag.
-  cancel-in-progress: true
+  # Producer completions retry readiness for their source. Never interrupt
+  # an in-flight publication transaction when a later completion event arrives.
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   authority:
@@ -30,9 +37,15 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       ((github.event.workflow_run.name == 'Installer publication source' &&
        github.event.workflow_run.head_branch == 'main') ||
-       github.event.workflow_run.name == 'CI')
+       github.event.workflow_run.name == 'CI' ||
+       (github.event.workflow_run.name == 'Rust Vonk Forge agent development' &&
+        github.event.workflow_run.head_branch == 'main') ||
+       (github.event.workflow_run.name == 'Development images' &&
+        github.event.workflow_run.head_branch == 'main') ||
+       (github.event.workflow_run.name == 'Installer setup programs' &&
+        github.event.workflow_run.head_branch == 'main'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
     permissions:
       actions: read
       contents: read
@@ -62,6 +75,13 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      - name: Install readiness runtime
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.12.1"
+          python-version: "3.12"
+          enable-cache: true
+
       - name: Bind accepted workflow evidence to source authority
         id: accept
         shell: bash
@@ -78,64 +98,15 @@ jobs:
             exit 0
           }
           development_run() {
-            local workflow=$1 exact_runs candidate
-            exact_runs=$RUNNER_TEMP/${workflow%.yml}-exact-runs.json
-            for attempt in $(seq 1 360); do
-              gh api --paginate \
-                -H 'Accept: application/vnd.github+json' \
-                -H 'X-GitHub-Api-Version: 2022-11-28' \
-                "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=push&head_sha=$SOURCE_SHA&per_page=100" \
-                --jq '.workflow_runs[]' | jq -s . > "$exact_runs"
-              candidate=$(jq -r --arg sha "$SOURCE_SHA" '
-                [.[] | select(
-                  .head_sha == $sha and .head_branch == "main" and
-                  .event == "push"
-                )] | sort_by(.created_at) | reverse | .[0] // empty |
-                [.id, .run_number, .head_sha, .status, (.conclusion // "")] | @tsv
-              ' "$exact_runs")
-              if test -z "$candidate"; then
-                break
-              fi
-              IFS=$'\t' read -r run_id run_number run_sha run_status run_conclusion \
-                <<< "$candidate"
-              if test "$run_status" != completed; then
-                sleep 5
-                continue
-              fi
-              test "$run_conclusion" = success
-              printf '%s\t%s\t%s\n' "$run_id" "$run_number" "$run_sha"
-              return 0
-            done
-            if test -n "$candidate"; then
-              echo "$workflow did not complete for $SOURCE_SHA" >&2
-              return 1
+            local workflow=$1 variable=$2 result status
+            if result=$(uv run --no-project --with pyyaml==6.0.3 \
+              scripts/resolve-publication-producer "$workflow" "$SOURCE_SHA"); then
+              printf -v "$variable" '%s' "$result"
+            else
+              status=$?
+              if [[ "$status" == 2 ]]; then not_ready; fi
+              return "$status"
             fi
-
-            # A path-filtered producer has no run for an unchanged component.
-            # Reuse only the newest successful main run whose source is an
-            # ancestor of this exact generation.
-            local completed_runs=$RUNNER_TEMP/${workflow%.yml}-completed-runs.json
-            gh api --paginate \
-              -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=push&status=completed&branch=main&per_page=100" \
-              --jq '.workflow_runs[]' | jq -s . > "$completed_runs"
-            while IFS=$'\t' read -r run_id run_number run_sha; do
-              if git merge-base --is-ancestor "$run_sha" "$SOURCE_SHA"; then
-                printf '%s\t%s\t%s\n' "$run_id" "$run_number" "$run_sha"
-                return 0
-              fi
-            done < <(
-              jq -r '
-                [.[] | select(
-                  .head_branch == "main" and .event == "push" and
-                  .status == "completed" and .conclusion == "success"
-                )] | sort_by(.created_at) | reverse | .[] |
-                [.id, .run_number, .head_sha] | @tsv
-              ' "$completed_runs"
-            )
-            echo "no accepted ancestral run for $workflow at $SOURCE_SHA" >&2
-            return 1
           }
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$TRIGGER_RUN_ID" =~ ^[1-9][0-9]*$ ]]
@@ -145,35 +116,29 @@ jobs:
           git fetch --force --tags origin
 
           case "$TRIGGER_NAME" in
-            'Installer publication source')
+            'Installer publication source'|'Rust Vonk Forge agent development'|'Development images'|'Installer setup programs')
               channel=dev
               authority_ref=refs/heads/main
               tag_oid=
-              # A successful prerequisite can finish after main has already
-              # advanced. That generation is intentionally no longer
-              # publishable, but it is an expected stale trigger rather than a
-              # broken deployment. End this fan-in run cleanly while the
-              # current main generation continues independently.
-              if test "$SOURCE_SHA" != \
-                "$(git rev-parse --verify refs/remotes/origin/main^{commit})"; then
-                not_ready
-              fi
-              # The source anchor is intentionally tiny and can finish before
-              # GitHub has materialized changed producer runs. Pay one shared
-              # scheduler grace before inspecting every producer; an absent
-              # exact run after this point means its path filter omitted it.
-              sleep 60
+              # A late producer completion may be the last readiness event
+              # after main advances. Re-evaluate the current source; immutable
+              # ancestor reuse still requires unchanged producer inputs.
+              SOURCE_SHA=$(git rev-parse --verify refs/remotes/origin/main^{commit})
+              git checkout --detach "$SOURCE_SHA"
+              development_run agent-release.yml package_evidence
               IFS=$'\t' read -r package_run_id package_run_number package_source_sha \
-                < <(development_run agent-release.yml)
+                <<< "$package_evidence"
               metadata=$(
                 scripts/agent-package-metadata \
                   development branch main "$package_source_sha" "$package_run_number"
               )
+              development_run dev-images.yml compose_evidence
               IFS=$'\t' read -r compose_run_id _ compose_source_sha \
-                < <(development_run dev-images.yml)
+                <<< "$compose_evidence"
               compose_artifact="vonk-forge-dev-compose-$compose_source_sha"
+              development_run installer-setups.yml setup_evidence
               IFS=$'\t' read -r setup_run_id _ setup_source_sha \
-                < <(development_run installer-setups.yml)
+                <<< "$setup_evidence"
               ;;
             CI)
               channel=stable
@@ -287,6 +252,7 @@ jobs:
     concurrency:
       group: vonk-forge-installer-r2-${{ needs.authority.outputs.channel }}
       cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       contents: read
@@ -370,7 +336,7 @@ jobs:
           expires_at=$(($(date +%s) + 604800))
           case "$CHANNEL" in
             dev) compose_name=docker-compose.pinned.yml ;;
-            stable) compose_name=docker-compose.production.yml ;;
+            stable) compose_name=docker-compose.pinned.yml ;;
             *) exit 64 ;;
           esac
           mapfile -t compose_paths < <(find "$RUNNER_TEMP/compose" -type f -name "$compose_name")
@@ -607,6 +573,21 @@ jobs:
           set -euo pipefail
           test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
+          candidate_release="$RUNNER_TEMP/candidate-release.json"
+          candidate_signature="$RUNNER_TEMP/candidate-release.sig"
+          for object in release.json release.sig; do
+            curl --fail --location --silent --show-error \
+              --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              "$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/$object" \
+              --output "$RUNNER_TEMP/candidate-$object"
+          done
+          scripts/render-accepted-compose-overlay \
+            --release "$candidate_release" --signature "$candidate_signature" \
+            --public-key install/installer-release-public.pem \
+            --channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --generation "$VONK_ACCEPTANCE_GENERATION" \
+            --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
+          export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
           uv run python tests/acceptance/test_fresh_nas_install.py
 
       - name: Delete isolated disposable Tailscale tailnet
@@ -679,6 +660,21 @@ jobs:
           set -euo pipefail
           test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
           export VONK_ACCEPTANCE_CANDIDATE_URL="$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/bootstraps/nas"
+          candidate_release="$RUNNER_TEMP/candidate-release.json"
+          candidate_signature="$RUNNER_TEMP/candidate-release.sig"
+          for object in release.json release.sig; do
+            curl --fail --location --silent --show-error \
+              --proto '=https' --proto-redir '=https' --tlsv1.2 \
+              "$INSTALLER_PUBLIC_ORIGIN/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/$object" \
+              --output "$RUNNER_TEMP/candidate-$object"
+          done
+          scripts/render-accepted-compose-overlay \
+            --release "$candidate_release" --signature "$candidate_signature" \
+            --public-key install/installer-release-public.pem \
+            --channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --generation "$VONK_ACCEPTANCE_GENERATION" \
+            --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
+          export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
           uv run python tests/acceptance/test_fresh_nas_install.py
 
       - name: Write exact NAS lane evidence
@@ -858,6 +854,15 @@ jobs:
           test "$INSTALLER_PUBLIC_ORIGIN" = https://install.vonkforge.ai
           test "$VONK_ACCEPTANCE_PLATFORM" = linux-arm64
           mkdir -p "$RUNNER_TEMP/spark-acceptance"
+          release_root="$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION"
+          scripts/render-accepted-compose-overlay \
+            --release "$release_root/release.json" \
+            --signature "$release_root/release.sig" \
+            --public-key install/installer-release-public.pem \
+            --channel "$VONK_ACCEPTANCE_CHANNEL" \
+            --generation "$VONK_ACCEPTANCE_GENERATION" \
+            --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
+          export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
           uv run python tests/acceptance/test_spark_lifecycle.py run \
             --candidate-release "$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/release.json" \
             --baseline-release "$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/acceptance-baseline/release.json" \
@@ -983,9 +988,11 @@ jobs:
     concurrency:
       group: vonk-forge-installer-r2-${{ needs.authority.outputs.channel }}
       cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       contents: read
+      packages: write
     steps:
       - name: Check out exact promotion tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1006,42 +1013,27 @@ jobs:
           name: installer-acceptance-${{ needs.authority.outputs.channel }}-${{ needs.candidate.outputs.generation }}
           path: ${{ runner.temp }}/acceptance
 
-      - name: Install R2 publication client
+      - name: Install publication clients
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes rclone
+          sudo apt-get install --no-install-recommends --yes rclone skopeo
 
-      - name: Revalidate source authority before promotion
+      - name: Log in to GHCR for accepted channel promotion
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote accepted images and advance installer pointer last
         shell: bash
         env:
-          AUTHORITY_REF: ${{ needs.authority.outputs.authority_ref }}
           CHANNEL: ${{ needs.authority.outputs.channel }}
+          AUTHORITY_REF: ${{ needs.authority.outputs.authority_ref }}
           SOURCE_SHA: ${{ needs.authority.outputs.source_sha }}
           TAG_OID: ${{ needs.authority.outputs.tag_oid }}
-        run: |
-          set -euo pipefail
-          git fetch --force --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main
-          case "$CHANNEL" in
-            dev)
-              test "$AUTHORITY_REF" = refs/heads/main
-              test "$SOURCE_SHA" = \
-                "$(git rev-parse --verify refs/remotes/origin/main^{commit})"
-              ;;
-            stable)
-              git fetch --force --tags origin
-              tag=${AUTHORITY_REF#refs/tags/}
-              scripts/verify-release-tag-authority \
-                "$tag" "$TAG_OID" "$SOURCE_SHA"
-              ;;
-            *) exit 64 ;;
-          esac
-
-      - name: Publish acceptance evidence and advance pointer last
-        shell: bash
-        env:
           RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           RCLONE_CONFIG_R2_NO_CHECK_BUCKET: "true"
@@ -1054,15 +1046,13 @@ jobs:
           set -euo pipefail
           [[ "$R2_INSTALLER_PUBLIC_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
           [[ "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" =~ ^[0-9a-f]{64}$ ]]
-          scripts/install-release-publication promote \
-            --bundle "$RUNNER_TEMP/installer-publication/installer-publication" \
-            --accepted-evidence "$RUNNER_TEMP/acceptance/receipt.json" \
-            --accepted-evidence-signature "$RUNNER_TEMP/acceptance/receipt.sig" \
-            --acceptance-public-key "$RUNNER_TEMP/acceptance/installer-acceptance-public.pem" \
-            --acceptance-public-key-sha256 "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" \
-            --rclone-remote "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
+          scripts/promote-accepted-channel run \
+            "$RUNNER_TEMP/installer-publication/installer-publication" \
+            "$RUNNER_TEMP/acceptance" \
+            "$VONK_INSTALLER_ACCEPTANCE_KEY_FINGERPRINT" \
+            "r2:$R2_INSTALLER_PUBLIC_BUCKET" \
+            "$CHANNEL" "$AUTHORITY_REF" "$SOURCE_SHA" "$TAG_OID" \
             | tee "$RUNNER_TEMP/promotion-receipt.jsonl"
-          test "$(tail -n 1 "$RUNNER_TEMP/promotion-receipt.jsonl" | jq -r .phase)" = pointer
 
       - name: Upload promotion receipt
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1089,6 +1079,7 @@ jobs:
     concurrency:
       group: vonk-forge-installer-r2-${{ matrix.channel }}
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:
