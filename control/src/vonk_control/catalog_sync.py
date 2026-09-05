@@ -270,6 +270,12 @@ class ManagedRecipeCatalogSyncService:
                             "catalog.sync_recipe_not_executable",
                             "managed recipe does not explicitly declare an executable contract",
                         )
+                    package_handle = getattr(hydrated, "package_handle", None)
+                    if package_mode and package_handle is None:
+                        raise CatalogSyncError(
+                            "catalog.sync_package_handle_missing",
+                            "managed package has no durable verified closure handle",
+                        )
                     self._store_source_bundle(hydrated, actor)
                     revision = self._catalog.import_recipe_library(
                         actor,
@@ -288,7 +294,7 @@ class ManagedRecipeCatalogSyncService:
                             if hydrated.release_history
                             else None
                         ),
-                        package_handle=getattr(hydrated, "package_handle", None),
+                        package_handle=package_handle,
                         package_sha256=getattr(hydrated, "package_sha256", None),
                         source_bundle_sha256=getattr(
                             hydrated, "source_bundle_sha256", None
