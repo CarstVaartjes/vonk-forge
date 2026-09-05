@@ -35,14 +35,45 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/agents/upgrades/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/agents/upgrades"): frozenset({"administrator"}),
     ("POST", "/api/v1/fleet-profiles"): frozenset({"administrator"}),
+    ("POST", "/api/v1/fleet-profiles/capture-current"): frozenset(
+        {"administrator"}
+    ),
     ("PUT", "/api/v1/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
     ("DELETE", "/api/v1/fleet-profiles/{profile_id}"): frozenset({"administrator"}),
     ("POST", "/api/v1/fleet-profiles/{profile_id}/preview"): frozenset(
         {"administrator"}
     ),
     ("POST", "/api/v1/fleet-profiles/{profile_id}/apply"): frozenset({"administrator"}),
+    ("POST", "/api/v1/fleet-profiles/{profile_id}/duplicate"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/fleet-profiles/{profile_id}/prepare"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/fleet-profiles/{profile_id}/prepare/preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/fleet-profiles/{profile_id}/switch"): frozenset(
+        {"administrator"}
+    ),
     ("POST", "/api/v1/library/placements/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/library/placements"): frozenset({"administrator"}),
+    ("POST", "/api/v1/model-cache/download-preview"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/download"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/repair-preview"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/repair"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/eviction-preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/evict"): frozenset({"administrator"}),
     # Local catalog authoring and WorkloadRun imports change the controller's
     # authoritative PostgreSQL state. Keep them administrator-only and list
     # preview calls too: previews accept untrusted source documents and are
@@ -91,6 +122,14 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/recipes/installations"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/run-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/runs"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/run-switch-plans/preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/recipes/run-switches"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/run-switch-stops/preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/recipes/run-switch-stops"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/job-runs"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/runs/{run_id}/artifact-jobs"): frozenset(
         {"operator", "administrator"}

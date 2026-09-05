@@ -114,6 +114,49 @@ def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
     ]
 
 
+def test_mia_vllm_runtime_spec_injects_trusted_optional_cache_paths() -> None:
+    document, resolved_entities = _exact_builtin_inputs()
+    distribution = resolved_entities["runtime_distribution"].document
+    distribution["identity"] = {"publisher": "anemll", "slug": "anemll-vllm-mia"}
+    distribution["capabilities"] = {
+        "runtime_environment": {
+            "allowed_names": [
+                "FLASHINFER_WORKSPACE_BASE",
+                "TILELANG_CACHE_DIR",
+                "B12X_CUTE_COMPILE_CACHE_DIR",
+                "TORCH_FR_DUMP_TEMP_FILE",
+                "TORCH_NCCL_DEBUG_INFO_PIPE_FILE",
+            ]
+        }
+    }
+    distribution_digest = catalog_content_sha256(distribution)
+    document["runtime"]["distribution"].update(
+        {
+            "publisher": "anemll",
+            "slug": "anemll-vllm-mia",
+            "content_sha256": distribution_digest,
+        }
+    )
+    resolved_entities["runtime_distribution"] = SimpleNamespace(
+        document=distribution, content_sha256=distribution_digest
+    )
+    spec = compile_runtime_spec(
+        document,
+        resolved_entities=resolved_entities,
+        parameters={item["name"]: item["default"] for item in document["parameters"]},
+        role="entrypoint",
+        rank=0,
+        recipe_build_id="00000000-0000-4000-8000-000000000001",
+        image_digest="sha256:" + "d" * 64,
+    )
+    values = {item["name"]: item["value"] for item in spec["runtime"]["environment"]}
+    assert values["FLASHINFER_WORKSPACE_BASE"] == "/outputs/cache/flashinfer"
+    assert (
+        values["TORCH_NCCL_DEBUG_INFO_PIPE_FILE"]
+        == "/outputs/cache/nccl-fr/fr_dump_pipe_"
+    )
+
+
 def _distributed_sglang_runtime_inputs():
     document, resolved_entities = _exact_builtin_inputs()
     harness = json.loads(SGLANG_HARNESS.read_text(encoding="utf-8"))
@@ -370,6 +413,7 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         "entrypoint",
         "arguments",
         "environment",
+        "writable_paths",
     }
     assert spec["runtime"]["image"] == (
         "localhost/vonk/recipe-build-00000000-0000-4000-8000-000000000001"
@@ -389,7 +433,13 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         "8000",
     ]
     assert spec["runtime"]["arguments"] == []
-    assert spec["runtime"]["environment"] == []
+    runtime_environment = {
+        item["name"]: item["value"] for item in spec["runtime"]["environment"]
+    }
+    assert runtime_environment["XDG_CACHE_HOME"] == "/outputs/cache"
+    assert runtime_environment["VLLM_CACHE_ROOT"] == "/outputs/cache/vllm"
+    assert runtime_environment["TMPDIR"] == "/outputs/tmp"
+    assert spec["runtime"]["writable_paths"]
     assert spec["endpoint"] == {
         "protocol": "openai",
         "port": 8000,

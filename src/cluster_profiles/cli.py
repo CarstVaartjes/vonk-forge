@@ -102,6 +102,19 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _normalize_legacy_telemetry_args(argv: tuple[str, ...]) -> tuple[str, ...]:
+    """Map the pre-group ``fleet telemetry NODE`` spelling to history."""
+    commands = {"current", "capabilities", "history", "workloads"}
+    for index in range(len(argv) - 2):
+        if argv[index : index + 2] != ("fleet", "telemetry"):
+            continue
+        candidate = argv[index + 2]
+        if candidate.startswith("-") or candidate in commands:
+            continue
+        return argv[: index + 2] + ("history",) + argv[index + 2 :]
+    return argv
+
+
 def _sanitize_text(value: object) -> str:
     text = str(value).replace("\x00", "")
     text = _SENSITIVE_ASSIGNMENT.sub(
@@ -425,12 +438,26 @@ def _admin_payload(result: object) -> dict[str, object]:
     return _model_payload(result)  # type: ignore[arg-type]
 
 
-def _control_error(error: BaseException) -> dict[str, object]:
+def _control_error(
+    error: BaseException, args: argparse.Namespace | None = None
+) -> dict[str, object]:
     if isinstance(error, (ControlUnavailable, ControlTransportError, OSError)):
         message = "control API unavailable"
     else:
         message = _sanitize_text(error)
-    return {"error": message, "error_type": "control_api"}
+    result: dict[str, object] = {"error": message, "error_type": "control_api"}
+    request_key = getattr(args, "request_key", None) if args is not None else None
+    operation_id = getattr(args, "operation_id", None) if args is not None else None
+    if isinstance(request_key, str) and request_key:
+        result["request_key"] = request_key
+        result["reconcile"] = {
+            "operation": "inspect the durable operation with the same request key",
+            "request_key": request_key,
+        }
+        if isinstance(operation_id, str) and operation_id:
+            result["operation_id"] = operation_id
+            result["reconcile"]["operation_id"] = operation_id
+    return result
 
 
 def _admin(
@@ -486,6 +513,7 @@ def main(
     """Run the API-backed CLI."""
     del root
     raw_argv = tuple(argv) if argv is not None else tuple(sys.argv[1:])
+    raw_argv = _normalize_legacy_telemetry_args(raw_argv)
     try:
         args = _parser().parse_args(raw_argv)
     except _UsageError as error:
@@ -513,7 +541,15 @@ def main(
                 client,
                 request_id_factory or (lambda: str(uuid.uuid4())),
             )
-        elif args.command in {"fleet", "library", "activity"}:
+        elif args.command in {
+            "fleet",
+            "library",
+            "activity",
+            "models",
+            "cache",
+            "profiles",
+            "operations",
+        }:
             result = run_controller(
                 args,
                 client,  # type: ignore[arg-type]
@@ -539,5 +575,8 @@ def main(
         ValueError,
         json.JSONDecodeError,
     ) as error:
-        _emit(_control_error(error), args)
+        _emit(_control_error(error, args), args)
         return 2
+    except KeyboardInterrupt:
+        _emit(_control_error(ControlClientError("operation interrupted"), args), args)
+        return 130

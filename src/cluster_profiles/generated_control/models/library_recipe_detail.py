@@ -11,12 +11,16 @@ from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
 from typing import Literal, Union, cast
+from typing import Union
 import datetime
 
 if TYPE_CHECKING:
+  from ..models.model_version_identity import ModelVersionIdentity
+  from ..models.library_model_version_facts import LibraryModelVersionFacts
   from ..models.operational_state import OperationalState
   from ..models.library_recipe_identity import LibraryRecipeIdentity
   from ..models.recipe_revision_summary import RecipeRevisionSummary
+  from ..models.library_capability_inventory import LibraryCapabilityInventory
   from ..models.recipe_topology import RecipeTopology
   from ..models.topology_placement import TopologyPlacement
   from ..models.library_projection_reason import LibraryProjectionReason
@@ -42,6 +46,12 @@ class LibraryRecipeDetail:
             selected_revision (Union['RecipeRevisionSummary', None]):
             topology (Union['RecipeTopology', None]):
             visual_recipe (Union['VisualRecipeDocument', None]):
+            model (Union['ModelVersionIdentity', None, Unset]):
+            model_capabilities (Union[Unset, LibraryCapabilityInventory]): Compare-friendly model or recipe capability
+                assertions with evidence state.
+            model_version (Union['LibraryModelVersionFacts', None, Unset]):
+            recipe_capabilities (Union[Unset, LibraryCapabilityInventory]): Compare-friendly model or recipe capability
+                assertions with evidence state.
             schema_version (Union[Literal[1], Unset]):  Default: 1.
      """
 
@@ -53,6 +63,10 @@ class LibraryRecipeDetail:
     selected_revision: Union['RecipeRevisionSummary', None]
     topology: Union['RecipeTopology', None]
     visual_recipe: Union['VisualRecipeDocument', None]
+    model: Union['ModelVersionIdentity', None, Unset] = UNSET
+    model_capabilities: Union[Unset, 'LibraryCapabilityInventory'] = UNSET
+    model_version: Union['LibraryModelVersionFacts', None, Unset] = UNSET
+    recipe_capabilities: Union[Unset, 'LibraryCapabilityInventory'] = UNSET
     schema_version: Union[Literal[1], Unset] = 1
 
 
@@ -60,9 +74,12 @@ class LibraryRecipeDetail:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.model_version_identity import ModelVersionIdentity
+        from ..models.library_model_version_facts import LibraryModelVersionFacts
         from ..models.operational_state import OperationalState
         from ..models.library_recipe_identity import LibraryRecipeIdentity
         from ..models.recipe_revision_summary import RecipeRevisionSummary
+        from ..models.library_capability_inventory import LibraryCapabilityInventory
         from ..models.recipe_topology import RecipeTopology
         from ..models.topology_placement import TopologyPlacement
         from ..models.library_projection_reason import LibraryProjectionReason
@@ -105,6 +122,30 @@ class LibraryRecipeDetail:
         else:
             visual_recipe = self.visual_recipe
 
+        model: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.model, Unset):
+            model = UNSET
+        elif isinstance(self.model, ModelVersionIdentity):
+            model = self.model.to_dict()
+        else:
+            model = self.model
+
+        model_capabilities: Union[Unset, dict[str, Any]] = UNSET
+        if not isinstance(self.model_capabilities, Unset):
+            model_capabilities = self.model_capabilities.to_dict()
+
+        model_version: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.model_version, Unset):
+            model_version = UNSET
+        elif isinstance(self.model_version, LibraryModelVersionFacts):
+            model_version = self.model_version.to_dict()
+        else:
+            model_version = self.model_version
+
+        recipe_capabilities: Union[Unset, dict[str, Any]] = UNSET
+        if not isinstance(self.recipe_capabilities, Unset):
+            recipe_capabilities = self.recipe_capabilities.to_dict()
+
         schema_version = self.schema_version
 
 
@@ -120,6 +161,14 @@ class LibraryRecipeDetail:
             "topology": topology,
             "visual_recipe": visual_recipe,
         })
+        if model is not UNSET:
+            field_dict["model"] = model
+        if model_capabilities is not UNSET:
+            field_dict["model_capabilities"] = model_capabilities
+        if model_version is not UNSET:
+            field_dict["model_version"] = model_version
+        if recipe_capabilities is not UNSET:
+            field_dict["recipe_capabilities"] = recipe_capabilities
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -129,9 +178,12 @@ class LibraryRecipeDetail:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.model_version_identity import ModelVersionIdentity
+        from ..models.library_model_version_facts import LibraryModelVersionFacts
         from ..models.operational_state import OperationalState
         from ..models.library_recipe_identity import LibraryRecipeIdentity
         from ..models.recipe_revision_summary import RecipeRevisionSummary
+        from ..models.library_capability_inventory import LibraryCapabilityInventory
         from ..models.recipe_topology import RecipeTopology
         from ..models.topology_placement import TopologyPlacement
         from ..models.library_projection_reason import LibraryProjectionReason
@@ -226,6 +278,66 @@ class LibraryRecipeDetail:
         visual_recipe = _parse_visual_recipe(d.pop("visual_recipe"))
 
 
+        def _parse_model(data: object) -> Union['ModelVersionIdentity', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                model_type_0 = ModelVersionIdentity.from_dict(data)
+
+
+
+                return model_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['ModelVersionIdentity', None, Unset], data)
+
+        model = _parse_model(d.pop("model", UNSET))
+
+
+        _model_capabilities = d.pop("model_capabilities", UNSET)
+        model_capabilities: Union[Unset, LibraryCapabilityInventory]
+        if isinstance(_model_capabilities,  Unset):
+            model_capabilities = UNSET
+        else:
+            model_capabilities = LibraryCapabilityInventory.from_dict(_model_capabilities)
+
+
+
+
+        def _parse_model_version(data: object) -> Union['LibraryModelVersionFacts', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                model_version_type_0 = LibraryModelVersionFacts.from_dict(data)
+
+
+
+                return model_version_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['LibraryModelVersionFacts', None, Unset], data)
+
+        model_version = _parse_model_version(d.pop("model_version", UNSET))
+
+
+        _recipe_capabilities = d.pop("recipe_capabilities", UNSET)
+        recipe_capabilities: Union[Unset, LibraryCapabilityInventory]
+        if isinstance(_recipe_capabilities,  Unset):
+            recipe_capabilities = UNSET
+        else:
+            recipe_capabilities = LibraryCapabilityInventory.from_dict(_recipe_capabilities)
+
+
+
+
         schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
@@ -239,6 +351,10 @@ class LibraryRecipeDetail:
             selected_revision=selected_revision,
             topology=topology,
             visual_recipe=visual_recipe,
+            model=model,
+            model_capabilities=model_capabilities,
+            model_version=model_version,
+            recipe_capabilities=recipe_capabilities,
             schema_version=schema_version,
         )
 

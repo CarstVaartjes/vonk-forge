@@ -39,6 +39,12 @@ from .recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from .recipe_operations import RECIPE_OPERATIONS, RecipeOperationRequest
+from .distribution import (
+    ArtifactDistributionAssignment,
+    ArtifactDistributionObject,
+    DistributionAssignment,
+    DistributionObject,
+)
 from .telemetry import TelemetryReport
 from .workload_packages import (
     ComponentDescriptor,
@@ -63,6 +69,8 @@ __all__ = [
     "AgentProgress",
     "AgentProtocolError",
     "AgentResult",
+    "ArtifactDistributionAssignment",
+    "ArtifactDistributionObject",
     "ComponentDescriptor",
     "ContainerRuntimeAction",
     "HostHelperGrantClaims",
@@ -84,6 +92,8 @@ __all__ = [
     "RecipeJobRunRequest",
     "RecipeJobRunResult",
     "RecipeOperationRequest",
+    "DistributionAssignment",
+    "DistributionObject",
     "RecipeRunObservationReceiptClaims",
     "TelemetryReport",
     "RestartUnit",

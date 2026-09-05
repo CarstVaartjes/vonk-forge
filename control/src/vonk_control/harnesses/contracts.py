@@ -6,6 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from ..runtime_writable_paths import RuntimeWritablePath
+
 
 @dataclass(frozen=True, slots=True)
 class HarnessMount:
@@ -43,6 +45,7 @@ class HarnessProjection:
     output_mount: HarnessMount
     input_mount: HarnessMount | None = None
     environment: tuple[tuple[str, str], ...] = ()
+    writable_paths: tuple[RuntimeWritablePath, ...] = ()
     binding: HarnessBinding | None = None
 
 

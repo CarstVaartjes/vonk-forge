@@ -87,6 +87,7 @@ class AgentProtocolError(ValueError):
 
 class AgentOperation(StrEnum):
     AGENT_UPGRADE = "agent.upgrade.v1"
+    ARTIFACT_DISTRIBUTION = "artifact.distribution.v1"
     NODE_PROBE = "node.probe"
     RELEASE_INSTALL = "release.install"
     WORKLOAD_PREPARE = "workload.prepare"
@@ -196,8 +197,17 @@ def _validate_safe_keys(
                     )
                 )
             )
+            typed_distribution_object_name = (
+                operation is AgentOperation.ARTIFACT_DISTRIBUTION
+                and len(path) == 3
+                and path[0] == "distribution_assignment"
+                and path[1] == "objects"
+                and isinstance(path[2], int)
+                and key == "name"
+            )
             if _is_path_key(key) and not (
                 typed_recipe_build_key
+                or typed_distribution_object_name
                 or (
                     operation is AgentOperation.RECIPE_JOB_RUN
                     and path == ("output_limits",)
@@ -253,6 +263,14 @@ def _validate_safe_keys(
                 operation is AgentOperation.AGENT_UPGRADE
                 and path == ("package_url",)
                 and AGENT_PACKAGE_URL.fullmatch(value) is not None
+            )
+            or (
+                operation is AgentOperation.ARTIFACT_DISTRIBUTION
+                and len(path) == 4
+                and path[0] == "distribution_assignment"
+                and path[1] == "objects"
+                and isinstance(path[2], int)
+                and path[3] == "name"
             )
             or (
                 typed_result_strings

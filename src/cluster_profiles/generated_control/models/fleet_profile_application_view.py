@@ -44,7 +44,7 @@ class FleetProfileApplicationView:
             status_reason (Union[None, str]):
             total_steps (int):
             updated_at (datetime.datetime):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
     created_at: datetime.datetime
@@ -60,7 +60,7 @@ class FleetProfileApplicationView:
     status_reason: Union[None, str]
     total_steps: int
     updated_at: datetime.datetime
-    schema_version: Union[Literal[1], Unset] = 1
+    schema_version: Union[Literal[2], Unset] = 2
 
 
 
@@ -199,9 +199,9 @@ class FleetProfileApplicationView:
 
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
+        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        if schema_version != 2 and not isinstance(schema_version, Unset):
+            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
         fleet_profile_application_view = cls(
             created_at=created_at,
