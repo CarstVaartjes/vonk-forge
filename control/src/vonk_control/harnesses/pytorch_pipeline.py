@@ -106,6 +106,7 @@ class PytorchPipelineHarnessCompiler:
             recipe,
             distribution,
             frozenset({"HF_HUB_OFFLINE", "PYTORCH_CUDA_ALLOC_CONF"}),
+            engine_slug=self.slug,
         )
         return projection(
             slug=self.slug,

@@ -236,6 +236,11 @@ ALLOWED_ENVIRONMENT = {
     "pytorch-pipeline": ("HF_HUB_OFFLINE", "1"),
 }
 
+VLLM_PLATFORM_ENVIRONMENT = (
+    ("XDG_CACHE_HOME", "/outputs/cache"),
+    ("VLLM_CACHE_ROOT", "/outputs/cache/vllm"),
+)
+
 
 def _harness_document(slug: str) -> dict[str, object]:
     return json.loads((HARNESS_ROOT / f"{slug}.json").read_text(encoding="utf-8"))
@@ -1099,7 +1104,7 @@ def test_vllm_accepts_glm_sparse_mla_runtime_contract() -> None:
     assert "--hf-overrides" in projection.command
     assert "--compilation-config" in projection.command
     assert "--no-enable-flashinfer-autotune" in projection.command
-    assert set(projection.environment) == {
+    assert set(projection.environment) == set(VLLM_PLATFORM_ENVIRONMENT) | {
         (item["name"], item["value"]) for item in recipe["runtime"]["environment"]
     }
 
@@ -1470,17 +1475,17 @@ def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     assert ("VLLM_USE_FLASHINFER_MOE_FP4", "0") in projection.environment
 
 
-def test_vllm_accepts_mia_dspark_cache_graph_and_scheduler_environment() -> None:
+def test_vllm_rejects_recipe_owned_optional_runtime_paths() -> None:
     recipe = _recipe("vllm")
     expected = {
-        "B12X_CUTE_COMPILE_CACHE_DIR": "/cache/b12x-cute-compile",
+        "B12X_CUTE_COMPILE_CACHE_DIR": "/outputs/cache/b12x-cute-compile",
         "DSPARK_MAX_INFLIGHT_PREFILLS": "2",
-        "FLASHINFER_WORKSPACE_BASE": "/cache/flashinfer",
-        "TILELANG_CACHE_DIR": "/cache/tilelang",
-        "TRITON_CACHE_DIR": "/cache/triton",
+        "FLASHINFER_WORKSPACE_BASE": "/outputs/cache/flashinfer",
+        "TILELANG_CACHE_DIR": "/outputs/cache/tilelang",
+        "TRITON_CACHE_DIR": "/outputs/cache/triton",
         "TORCH_FR_BUFFER_SIZE": "2000",
-        "TORCH_FR_DUMP_TEMP_FILE": "/outputs/nccl/comm_lib_trace_rank_",
-        "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/outputs/nccl/fr_dump_pipe_",
+        "TORCH_FR_DUMP_TEMP_FILE": "/outputs/cache/nccl-fr/comm_lib_trace_rank_",
+        "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/outputs/cache/nccl-fr/fr_dump_pipe_",
         "TORCH_NCCL_DUMP_ON_TIMEOUT": "1",
         "TORCH_NCCL_ENABLE_MONITORING": "1",
         "VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM": "1",
@@ -1509,9 +1514,31 @@ def test_vllm_accepts_mia_dspark_cache_graph_and_scheduler_environment() -> None
         distribution
     )
 
-    projection = _compile("vllm", recipe=recipe, distribution=distribution)
+    with pytest.raises(HarnessCompileError, match="platform-owned"):
+        _compile("vllm", recipe=recipe, distribution=distribution)
 
-    assert set(projection.environment) == set(expected.items())
+
+def test_vllm_injects_platform_owned_writable_cache_environment() -> None:
+    projection = _compile("vllm")
+
+    assert projection.environment == VLLM_PLATFORM_ENVIRONMENT
+
+
+@pytest.mark.parametrize("name", ["XDG_CACHE_HOME", "VLLM_CACHE_ROOT"])
+def test_vllm_rejects_recipe_override_of_platform_cache_environment(
+    name: str,
+) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["environment"] = [{"name": name, "value": "/outputs/other"}]
+    harness = _harness_document("vllm")
+    distribution = _distribution("vllm", harness)
+    distribution["capabilities"] = {"runtime_environment": {"allowed_names": [name]}}
+    recipe["runtime"]["distribution"]["content_sha256"] = catalog_content_sha256(
+        distribution
+    )
+
+    with pytest.raises(HarnessCompileError, match="platform-owned"):
+        _compile("vllm", recipe=recipe, distribution=distribution)
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
@@ -1562,7 +1589,12 @@ def test_builtin_harness_emits_only_allowlisted_environment(slug: str) -> None:
 
     projection = _compile(slug, recipe=recipe)
 
-    assert projection.environment == ((name, value),)
+    expected = (
+        (*VLLM_PLATFORM_ENVIRONMENT, (name, value))
+        if slug == "vllm"
+        else ((name, value),)
+    )
+    assert projection.environment == expected
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
@@ -1582,7 +1614,15 @@ def test_builtin_harness_accepts_distribution_environment_authority(slug: str) -
 
     projection = _compile(slug, recipe=recipe, distribution=distribution)
 
-    assert projection.environment == (("UPSTREAM_RUNTIME_TUNING", "enabled"),)
+    expected = (
+        (
+            *VLLM_PLATFORM_ENVIRONMENT,
+            ("UPSTREAM_RUNTIME_TUNING", "enabled"),
+        )
+        if slug == "vllm"
+        else (("UPSTREAM_RUNTIME_TUNING", "enabled"),)
+    )
+    assert projection.environment == expected
 
 
 @pytest.mark.parametrize("unsafe", ["LD_PRELOAD", "PATH", "VONK_MASTER_ADDR"])

@@ -153,7 +153,7 @@ class ModelCacheOperationProgress(StrictModel):
     completed_artifacts: int = Field(ge=0)
     total_artifacts: int = Field(ge=0)
     downloaded_bytes: int = Field(ge=0)
-    expected_bytes: int = Field(ge=0)
+    expected_bytes: int | None = Field(default=None, ge=0)
     current_artifact_key: str | None = Field(default=None, pattern=ARTIFACT_KEY_PATTERN)
 
 

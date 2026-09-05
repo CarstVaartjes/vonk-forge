@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.library_projection import LibraryProjection
+from vonk_control.library_contract import LibrarySnapshot
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -740,7 +741,7 @@ def test_root_operational_summaries_are_exact_bounded_and_fair_per_recipe() -> N
     summaries = {item.slug: item for model in snapshot.models for item in model.recipes}
     alpha = summaries["alpha-history-heavy"]
     bravo_summary = summaries["bravo-current"]
-    # One bounded catalog-authority read supplies exact model-version facts.
+    # One bounded catalog-authority read supplies exact model facts and capabilities.
     assert len(statements) == 7
     installation_window = next(
         statement
@@ -1332,7 +1333,7 @@ def test_valid_long_v1_visual_fields_are_bounded_without_profile_projection() ->
 
 
 def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
-    """Recipe interfaces stay separate while model capability authority is absent."""
+    """Recipe interfaces stay separate from the exact model authority."""
 
     _engine, sessions = _database()
     # openai is the recipe's chat surface; image-job is its image/vision surface.
@@ -1414,6 +1415,62 @@ def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
                 }
             )
             catalog["sizes"] = {"download_bytes": 2_048, "installed_bytes": 3_072}
+            catalog["capabilities"] = {
+                "schema_version": 2,
+                "facts": [
+                    {
+                        "capability": "image-understanding",
+                        "support": "unsupported",
+                        "evidence_status": "declared",
+                        "evidence_digest": None,
+                    }
+                ],
+                "provenance": {
+                    "source_url": "https://models.example.test/a06-v2-evidence",
+                    "source_revision": "0123456789abcdef0123456789abcdef01234567",
+                    "evidence_digest": "e" * 64,
+                },
+            }
+        elif document["model"]["slug"] == "a06-unknown":
+            catalog["capabilities"] = {
+                "schema_version": 2,
+                "facts": [
+                    {
+                        "capability": "image-understanding",
+                        "support": "unknown",
+                        "evidence_status": "unknown",
+                        "evidence_digest": None,
+                    }
+                ],
+                "provenance": {
+                    "source_url": "https://models.example.test/a06-unknown-evidence",
+                    "source_revision": "0123456789abcdef0123456789abcdef01234567",
+                    "evidence_digest": "f" * 64,
+                },
+            }
+        else:
+            catalog["capabilities"] = {
+                "schema_version": 2,
+                "facts": [
+                    {
+                        "capability": "chat",
+                        "support": "supported",
+                        "evidence_status": "declared",
+                        "evidence_digest": None,
+                    },
+                    {
+                        "capability": "image-understanding",
+                        "support": "supported",
+                        "evidence_status": "tested",
+                        "evidence_digest": "d" * 64,
+                    },
+                ],
+                "provenance": {
+                    "source_url": "https://models.example.test/a06-v1-evidence",
+                    "source_revision": "0123456789abcdef0123456789abcdef01234567",
+                    "evidence_digest": "c" * 64,
+                },
+            }
         validate_catalog_document(catalog)
         digest = catalog_content_sha256(catalog)
         document["model"]["content_sha256"] = digest
@@ -1462,11 +1519,22 @@ def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
     models = {model.model.slug: model for model in snapshot.models}
     first = models["a06-v1"]
     assert first.model_capabilities.schema_version == 2
-    assert first.model_capabilities.state == "unknown"
-    assert first.model_capabilities.facts == []
-    assert "model.capabilities_unknown" in {
-        reason.code for reason in first.model_capabilities.reasons
-    }
+    assert first.model_capabilities.state == "declared"
+    assert [fact.capability for fact in first.model_capabilities.facts] == [
+        "chat",
+        "image-understanding",
+    ]
+    assert first.model_capabilities.facts[1].evidence_status == "tested"
+    assert first.model_capabilities.facts[1].evidence_digest == "d" * 64
+    assert first.model_capabilities.provenance is not None
+    assert (
+        first.model_capabilities.provenance.source_kind
+        == "model-capability-evidence"
+    )
+    assert first.model_capabilities.provenance.evidence_digest == "c" * 64
+    assert first.model_capabilities.provenance.source_url == (
+        "https://models.example.test/a06-v1-evidence"
+    )
     recipes = {recipe.slug: recipe for recipe in first.recipes}
     assert [
         fact.capability for fact in recipes["a06-text"].recipe_capabilities.facts
@@ -1474,7 +1542,6 @@ def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
     assert [
         fact.capability for fact in recipes["a06-vision"].recipe_capabilities.facts
     ] == ["image-job"]
-    assert first.model_capabilities.provenance is not None
     assert first.model_capabilities.provenance.content_sha256 == first.model.content_sha256
     assert first.model_version is not None
     assert first.model_version.schema_version == 2
@@ -1500,7 +1567,8 @@ def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
     assert second_model.model_version.sizes is not None
     assert second_model.model_version.sizes.installed_bytes == 3_072
     assert second_model.model_version.artifacts[0].id == "weights-gguf"
-    assert models["a06-v2"].model_capabilities.state == "unknown"
+    assert models["a06-v2"].model_capabilities.state == "declared"
+    assert models["a06-v2"].model_capabilities.facts[0].support == "unsupported"
     second_recipe = models["a06-v2"].recipes[0]
     assert [
         fact.capability for fact in second_recipe.recipe_capabilities.facts
@@ -1508,11 +1576,14 @@ def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
     assert models["a06-unknown"].model_capabilities.state == "unknown"
 
     text_detail = _projection(sessions).detail(_uuid(701))
-    assert text_detail.model_capabilities.state == "unknown"
+    assert text_detail.model_capabilities.state == "declared"
     assert [
         fact.capability for fact in text_detail.recipe_capabilities.facts
     ] == ["openai"]
-    assert text_detail.model_capabilities.facts == []
+    assert [fact.capability for fact in text_detail.model_capabilities.facts] == [
+        "chat",
+        "image-understanding",
+    ]
     assert text_detail.model_version is not None
     assert text_detail.model_version.identity == first.model_version.identity
     # Recipe exposure does not turn the model support status green.
@@ -1520,6 +1591,26 @@ def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
     assert json.dumps(snapshot.model_dump(mode="json"), sort_keys=True) == json.dumps(
         _projection(sessions).list().model_dump(mode="json"), sort_keys=True
     )
+
+
+def test_model_capability_schema_is_schema2_and_compare_friendly() -> None:
+    schema = LibrarySnapshot.model_json_schema()
+    facts = schema["$defs"]["LibraryModelVersionFacts"]
+    capability = schema["$defs"]["LibraryCapabilityInventory"]
+
+    assert facts["properties"]["schema_version"]["const"] == 2
+    assert capability["properties"]["schema_version"]["const"] == 2
+    assert set(facts["properties"]) >= {
+        "identity",
+        "model",
+        "family",
+        "format",
+        "sizes",
+        "artifacts",
+    }
+    assert schema["$defs"]["LibraryCapabilityFact"]["properties"]["support"][
+        "enum"
+    ] == ["supported", "unsupported", "unknown"]
 
 
 def test_visual_projection_exposes_sorted_signed_artifact_include_paths() -> None:

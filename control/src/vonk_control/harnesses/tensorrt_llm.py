@@ -81,6 +81,7 @@ class TensorRtLlmHarnessCompiler:
             recipe,
             distribution,
             frozenset({"NCCL_DEBUG", "HF_HUB_OFFLINE"}),
+            engine_slug=self.slug,
         )
         return projection(
             slug=self.slug,

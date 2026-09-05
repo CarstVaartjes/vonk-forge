@@ -5,7 +5,8 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0017_artifact_distribution_assignments"
+# Keep the Alembic revision itself within alembic_version's VARCHAR(32).
+revision = "0017_dist_assignments"
 down_revision = "0016_rich_telemetry_metrics"
 branch_labels = None
 depends_on = None

@@ -64,8 +64,17 @@ pub struct RuntimeSpec {
     pub entrypoint: Vec<String>,
     pub arguments: Vec<RuntimeArgument>,
     pub environment: Vec<RuntimeEnvironment>,
+    pub writable_paths: Vec<RuntimeWritablePath>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placement_environment: Option<PlacementEnvironmentSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeWritablePath {
+    pub name: String,
+    pub path: String,
+    pub persistent: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -97,6 +106,15 @@ pub enum ArgumentValue {
     Boolean(bool),
     Integer(i64),
     String(String),
+}
+
+impl ArgumentValue {
+    fn as_string(&self) -> Option<&str> {
+        match self {
+            Self::String(value) => Some(value),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -324,6 +342,11 @@ impl RuntimeSpec {
                 return Err(WorkloadError::Invalid("runtime environment"));
             }
         }
+        validate_runtime_writable_paths(
+            self.adapter.as_str(),
+            &self.writable_paths,
+            &self.environment,
+        )?;
         if self.placement_environment.as_ref().is_some_and(|binding| {
             binding.local_address != "VONK_LOCAL_ADDR"
                 || binding.master_address != "VONK_MASTER_ADDR"
@@ -333,6 +356,150 @@ impl RuntimeSpec {
         }
         Ok(())
     }
+}
+
+fn validate_runtime_writable_paths(
+    adapter: &str,
+    paths: &[RuntimeWritablePath],
+    environment: &[RuntimeEnvironment],
+) -> Result<(), WorkloadError> {
+    const COMMON: &[(&str, &str, bool)] = &[
+        ("home", "/outputs/cache/home", true),
+        ("xdg-cache", "/outputs/cache", true),
+        ("xdg-config", "/outputs/cache/config", true),
+        ("temporary", "/outputs/tmp", false),
+    ];
+    const PYTHON: &[(&str, &str, bool)] = &[
+        ("huggingface", "/outputs/cache/huggingface", true),
+        (
+            "transformers",
+            "/outputs/cache/huggingface/transformers",
+            true,
+        ),
+        ("torch", "/outputs/cache/torch", true),
+        ("torch-extensions", "/outputs/cache/torch_extensions", true),
+        ("torchinductor", "/outputs/cache/torchinductor", true),
+        ("triton", "/outputs/cache/triton", true),
+        ("cuda", "/outputs/cache/cuda", true),
+        ("uv", "/outputs/cache/uv", true),
+    ];
+    const VLLM: &[(&str, &str, bool)] = &[("vllm", "/outputs/cache/vllm", true)];
+    let expected_paths: Vec<(&str, &str, bool)> = match adapter {
+        "vllm" => COMMON.iter().chain(PYTHON).chain(VLLM).copied().collect(),
+        "sglang" | "tensorrt-llm" | "ds4" | "diffusers" | "comfyui" | "pytorch-pipeline" => {
+            COMMON.iter().chain(PYTHON).copied().collect()
+        }
+        "llama-cpp" => COMMON.to_vec(),
+        _ => return Err(WorkloadError::Invalid("runtime writable paths")),
+    };
+    if paths.len() != expected_paths.len() || paths.len() > 64 {
+        return Err(WorkloadError::Invalid("runtime writable paths"));
+    }
+    let mut names = BTreeSet::new();
+    let mut values = BTreeSet::new();
+    for (path, expected) in paths.iter().zip(expected_paths) {
+        if !valid_name(&path.name)
+            || !names.insert(path.name.as_str())
+            || path.name != expected.0
+            || path.path != expected.1
+            || path.persistent != expected.2
+            || !path.path.starts_with("/outputs/")
+            || path.path.contains("//")
+            || path.path.split('/').any(|part| matches!(part, "." | ".."))
+            || path.path.ends_with('/')
+            || !values.insert(path.path.as_str())
+        {
+            return Err(WorkloadError::Invalid("runtime writable paths"));
+        }
+    }
+    let expected: Vec<(&str, &str)> = match adapter {
+        "vllm" => [
+            ("HOME", "/outputs/cache/home"),
+            ("XDG_CACHE_HOME", "/outputs/cache"),
+            ("XDG_CONFIG_HOME", "/outputs/cache/config"),
+            ("TMPDIR", "/outputs/tmp"),
+            ("HF_HOME", "/outputs/cache/huggingface"),
+            (
+                "TRANSFORMERS_CACHE",
+                "/outputs/cache/huggingface/transformers",
+            ),
+            ("VLLM_CACHE_ROOT", "/outputs/cache/vllm"),
+            ("TRITON_CACHE_DIR", "/outputs/cache/triton"),
+            ("TORCH_HOME", "/outputs/cache/torch"),
+            ("TORCH_EXTENSIONS_DIR", "/outputs/cache/torch_extensions"),
+            ("TORCHINDUCTOR_CACHE_DIR", "/outputs/cache/torchinductor"),
+            ("CUDA_CACHE_PATH", "/outputs/cache/cuda"),
+            ("UV_CACHE_DIR", "/outputs/cache/uv"),
+        ]
+        .into_iter()
+        .collect(),
+        "llama-cpp" => [
+            ("HOME", "/outputs/cache/home"),
+            ("XDG_CACHE_HOME", "/outputs/cache"),
+            ("XDG_CONFIG_HOME", "/outputs/cache/config"),
+            ("TMPDIR", "/outputs/tmp"),
+        ]
+        .into_iter()
+        .collect(),
+        "sglang" | "tensorrt-llm" | "ds4" | "diffusers" | "comfyui" | "pytorch-pipeline" => [
+            ("HOME", "/outputs/cache/home"),
+            ("XDG_CACHE_HOME", "/outputs/cache"),
+            ("XDG_CONFIG_HOME", "/outputs/cache/config"),
+            ("TMPDIR", "/outputs/tmp"),
+            ("HF_HOME", "/outputs/cache/huggingface"),
+            (
+                "TRANSFORMERS_CACHE",
+                "/outputs/cache/huggingface/transformers",
+            ),
+            ("TORCH_HOME", "/outputs/cache/torch"),
+            ("TORCH_EXTENSIONS_DIR", "/outputs/cache/torch_extensions"),
+            ("TORCHINDUCTOR_CACHE_DIR", "/outputs/cache/torchinductor"),
+            ("TRITON_CACHE_DIR", "/outputs/cache/triton"),
+        ]
+        .into_iter()
+        .collect(),
+        _ => return Err(WorkloadError::Invalid("runtime writable environment")),
+    };
+    for (name, expected_value) in &expected {
+        let Some(value) = environment.iter().find(|item| item.name == *name) else {
+            return Err(WorkloadError::Invalid("runtime writable environment"));
+        };
+        if value.value.as_ref().and_then(ArgumentValue::as_string) != Some(expected_value) {
+            return Err(WorkloadError::Invalid("runtime writable environment"));
+        }
+    }
+    for item in environment {
+        let optional_path = matches!(
+            item.name.as_str(),
+            "FLASHINFER_WORKSPACE_BASE"
+                | "VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR"
+                | "TILELANG_CACHE_DIR"
+                | "TILELANG_TMP_DIR"
+                | "B12X_CUTE_COMPILE_CACHE_DIR"
+                | "TVM_CACHE_DIR"
+                | "TVM_FFI_CACHE_DIR"
+                | "TORCH_FR_DUMP_TEMP_FILE"
+                | "TORCH_NCCL_DEBUG_INFO_PIPE_FILE"
+        );
+        if optional_path {
+            let Some(value) = item.value.as_ref().and_then(ArgumentValue::as_string) else {
+                return Err(WorkloadError::Invalid("runtime writable environment"));
+            };
+            if !value.starts_with("/outputs/cache/")
+                || value.contains("//")
+                || value.split('/').any(|part| matches!(part, "." | ".."))
+            {
+                return Err(WorkloadError::Invalid("runtime writable environment"));
+            }
+            continue;
+        }
+        if let Some((_, expected_value)) = expected.iter().find(|(name, _)| *name == item.name) {
+            if item.value.as_ref().and_then(ArgumentValue::as_string) != Some(*expected_value) {
+                return Err(WorkloadError::Invalid("runtime writable environment"));
+            }
+        }
+    }
+    Ok(())
 }
 
 impl ArtifactSpec {

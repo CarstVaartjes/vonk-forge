@@ -191,6 +191,47 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
     assert service.storage_summary().unique_used_bytes == len(b"shared payload")
 
 
+def test_operation_transfer_progress_counts_only_missing_objects(
+    cache, tmp_path: Path
+) -> None:
+    service, _sessions = cache
+    model = "7" * 64
+    cached = _artifact(tmp_path, b"cached", artifact_id="cached", model_version_sha256=model)
+    first = _download(
+        service,
+        [cached],
+        model_version_sha256=model,
+        request_key="00000000-0000-4000-8000-000000000016",
+    )
+    assert first.progress["downloaded_bytes"] == len(b"cached")
+
+    missing = _artifact(
+        tmp_path,
+        b"new object",
+        artifact_id="missing",
+        path="missing.bin",
+        model_version_sha256=model,
+    )
+    preview = service.download_preview(
+        model_version_sha256=model,
+        artifacts=[cached, missing],
+    )
+    assert preview["already_cached_bytes"] == len(b"cached")
+    assert preview["new_bytes"] == len(b"new object")
+    operation = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000017",
+        plan_digest=str(preview["plan_digest"]),
+        model_version_sha256=model,
+        artifacts=[cached, missing],
+    )
+    assert operation.progress["expected_bytes"] == len(b"new object")
+    service.run_pending()
+    operation = service.get_operation(operation.id)
+    assert operation.progress["downloaded_bytes"] == len(b"new object")
+    assert operation.progress["expected_bytes"] == len(b"new object")
+
+
 def test_download_mutation_is_queued_until_the_controller_worker_runs(
     cache, tmp_path: Path
 ) -> None:
@@ -335,15 +376,36 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     data = bytes(range(256)) * 12_000
     artifact = _artifact(tmp_path, data, model_version_sha256=model)
 
-    partial = _download(
-        service,
-        [artifact],
-        model_version_sha256=model,
+    preview = service.download_preview(model_version_sha256=model, artifacts=[artifact])
+    partial = service.start_download(
+        actor="test",
         request_key="00000000-0000-4000-8000-000000000003",
+        plan_digest=str(preview["plan_digest"]),
+        model_version_sha256=model,
+        artifacts=[artifact],
         interrupt_after_bytes=1_100_000,
     )
     assert partial.state == "partial"
     assert partial.attempt == 1
+    assert partial.progress["expected_bytes"] == len(data)
+    checkpoint_bytes = (
+        service.root
+        / "partials"
+        / str(partial.artifact_set_sha256)
+        / f"{artifact['sha256']}.part"
+    ).stat().st_size
+    assert partial.progress["downloaded_bytes"] == checkpoint_bytes
+    # Replay uses the original plan identity even though the current preview
+    # now sees a shorter remaining range.
+    replay = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000003",
+        plan_digest=str(preview["plan_digest"]),
+        model_version_sha256=model,
+        artifacts=[artifact],
+    )
+    assert replay.id == partial.id
+    assert replay.progress["downloaded_bytes"] == partial.progress["downloaded_bytes"]
     set_digest = partial.artifact_set_sha256 or ""
     part = service.root / "partials" / set_digest / f"{artifact['sha256']}.part"
     assert 0 < part.stat().st_size < len(data)
@@ -358,6 +420,8 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     restarted.run_pending()
     resumed = restarted.get_operation(partial.id)
     assert resumed.state == "succeeded"
+    assert resumed.progress["downloaded_bytes"] == len(data)
+    assert resumed.progress["expected_bytes"] == len(data)
     assert resumed.attempt == 2
     assert (service.root / "objects" / str(artifact["sha256"])[0:2] / str(artifact["sha256"]).strip()).read_bytes() == data
     assert restarted.get_entry(set_digest)["coverage"] == "complete"

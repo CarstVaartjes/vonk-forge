@@ -106,13 +106,17 @@ class LibraryRunSummary(_StrictModel):
 class LibraryCapabilityProvenance(_StrictModel):
     """Exact source identity and bounded location for one capability inventory."""
 
-    source_kind: Literal["model-version", "recipe-revision"]
+    source_kind: Literal[
+        "model-version", "recipe-revision", "model-capability-evidence"
+    ]
     publisher: Text128
     slug: Text128
     content_sha256: Digest | None
     path: Text256 | None
     evidence_digest: Digest | None
     revision_id: UuidId | None = None
+    source_url: Text512 | None = None
+    source_revision: Text80 | None = None
 
 
 class LibraryCapabilityFact(_StrictModel):

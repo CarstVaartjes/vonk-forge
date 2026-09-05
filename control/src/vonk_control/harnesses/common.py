@@ -9,6 +9,11 @@ from math import isfinite
 from pathlib import PurePosixPath
 
 from ..runtime_environment import distribution_allowed_environment
+from ..runtime_writable_paths import (
+    reject_recipe_environment,
+    validate_paths as validate_runtime_paths,
+    writable_paths as engine_writable_paths,
+)
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
@@ -126,6 +131,15 @@ def validate_projection(projection: HarnessProjection) -> None:
         != len(projection.environment)
     ):
         raise HarnessCompileError("harness projection environment is invalid")
+    if projection.writable_paths:
+        try:
+            validate_runtime_paths(
+                projection.slug,
+                projection.writable_paths,
+                dict(projection.environment),
+            )
+        except (TypeError, ValueError) as error:
+            raise HarnessCompileError(str(error)) from error
     if (
         type(projection.model_mounts) is not tuple
         or not projection.model_mounts
@@ -314,6 +328,8 @@ def compile_environment(
     recipe: Mapping[str, object],
     distribution: Mapping[str, object],
     allowlist: frozenset[str],
+    *,
+    engine_slug: str | None = None,
 ) -> tuple[tuple[str, str], ...]:
     runtime = recipe.get("runtime")
     environment = runtime.get("environment") if isinstance(runtime, Mapping) else None
@@ -335,6 +351,8 @@ def compile_environment(
             raise HarnessCompileError("harness environment is not allowlisted")
         result.append((name, _safe_scalar(item.get("value"), "harness environment")))
         names.add(name)
+    if engine_slug is not None:
+        reject_recipe_environment(engine_slug, result)
     return tuple(result)
 
 
@@ -637,6 +655,8 @@ def projection(
         if job_input_contract(recipe) is not None or allow_local_media_input
         else None
     )
+    runtime_paths = engine_writable_paths(slug)
+    validate_runtime_paths(slug, runtime_paths, dict(environment))
     value = HarnessProjection(
         slug=slug,
         contract_version=1,
@@ -653,6 +673,7 @@ def projection(
         ),
         input_mount=input_mount,
         environment=environment,
+        writable_paths=runtime_paths,
     )
     return value
 

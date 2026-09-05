@@ -17,6 +17,8 @@ from .catalog_contract import (
 )
 from .harnesses import HarnessRegistry
 from .harnesses.common import HarnessCompileError
+from .runtime_writable_paths import document as runtime_writable_path_document
+from .runtime_writable_paths import compile_environment as compile_runtime_environment
 from .models import CatalogEntity, CatalogEntityRevision
 from .recipe_contract import (
     recipe_content_sha256,
@@ -105,6 +107,11 @@ def compile_runtime_spec(
     ]
     if not role_artifacts:
         raise RecipeRuntimeSpecError("mapped role has no runtime artifacts")
+    effective_environment = compile_runtime_environment(
+        projection.slug,
+        projection.environment,
+        getattr(resolved_entities.get("runtime_distribution"), "document", None),
+    )
     compiled_runtime: dict[str, object] = {
         "interface": "vonk.runtime.v1",
         "adapter": projection.slug,
@@ -115,8 +122,13 @@ def compile_runtime_spec(
         "arguments": [],
         "environment": [
             {"name": name, "value": value, "secret": None}
-            for name, value in projection.environment
+            for name, value in effective_environment
         ],
+        "writable_paths": runtime_writable_path_document(
+            projection.slug,
+            effective_environment,
+            getattr(resolved_entities.get("runtime_distribution"), "document", None),
+        ),
     }
     if topology.get("mode") == "distributed":
         distribution_document = getattr(
