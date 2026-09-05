@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+from .preparation_contract import RolloutPreparation
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -49,6 +51,24 @@ class FleetProfileNode(_StrictModel):
     endpoint_owner: bool = False
 
 
+class FleetProfileScope(_StrictModel):
+    """The complete set of Sparks reconciled by a profile.
+
+    Scope is deliberately independent from assignments.  A member with no
+    assignment is an intentional idle outcome when the profile is applied.
+    """
+
+    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> FleetProfileScope:
+        if len(self.node_ids) != len(set(self.node_ids)):
+            raise ValueError("profile scope node IDs must be unique")
+        if self.node_ids != sorted(self.node_ids):
+            raise ValueError("profile scope node IDs must be sorted")
+        return self
+
+
 class FleetProfileAssignmentInput(_StrictModel):
     recipe_revision_id: UuidId
     topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
@@ -90,6 +110,7 @@ class FleetProfileInput(_StrictModel):
     installation_policy: Literal["keep-cached", "exact"] = "keep-cached"
     labels: dict[LabelName, LabelValue] = Field(default_factory=dict, max_length=16)
     favorite: bool = False
+    scope: FleetProfileScope
     assignments: list[FleetProfileAssignmentInput] = Field(
         default_factory=list, max_length=64
     )
@@ -112,17 +133,24 @@ class FleetProfileInput(_StrictModel):
         ]
         if len(aliases) != len(set(aliases)):
             raise ValueError("running profile assignment aliases must be unique")
+        scope = set(self.scope.node_ids)
+        assigned = {
+            node.node_id for assignment in self.assignments for node in assignment.nodes
+        }
+        if not assigned <= scope:
+            raise ValueError("profile assignment nodes must be inside profile scope")
         return self
 
 
 class FleetProfileView(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     id: UuidId
     name: Name
     description: Description
     installation_policy: Literal["keep-cached", "exact"]
     labels: dict[LabelName, LabelValue]
     favorite: bool
+    scope: FleetProfileScope
     assignments: list[FleetProfileAssignment]
     profile_digest: Digest
     created_by: Annotated[str, StringConstraints(min_length=1, max_length=200)]
@@ -131,7 +159,7 @@ class FleetProfileView(_StrictModel):
 
 
 class FleetProfileList(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     generated_at: datetime
     profiles: list[FleetProfileView] = Field(max_length=128)
 
@@ -159,10 +187,16 @@ class FleetProfileAssignmentPreview(_StrictModel):
             "distribute-image",
             "install",
             "start",
+            "switch",
             "keep",
         ]
     ] = Field(max_length=7)
     reasons: list[FleetProfileReason] = Field(max_length=32)
+
+
+class FleetProfileScopePreview(_StrictModel):
+    node_ids: list[NodeId] = Field(max_length=32)
+    idle_node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
 
 
 class FleetProfilePlanStep(_StrictModel):
@@ -175,6 +209,7 @@ class FleetProfilePlanStep(_StrictModel):
         "distribute-image",
         "install",
         "start",
+        "switch",
     ]
     assignment_id: UuidId | None = None
     owner_id: UuidId | None = None
@@ -195,15 +230,102 @@ class FleetProfilePlanSummary(_StrictModel):
     blockers: int = Field(ge=0, le=2048)
 
 
+class FleetProfileAssignmentPreparation(_StrictModel):
+    assignment_id: UuidId
+    preparation: RolloutPreparation
+
+
+class FleetProfileChildProgress(_StrictModel):
+    """Typed progress emitted by the profile-owned Run switch adapter."""
+
+    phase: Literal[
+        "model-download",
+        "container-download",
+        "container-build",
+        "target-copy",
+        "runtime-install",
+        "start",
+        "final-verify",
+        "transfer",
+        "verify",
+        "prepare",
+        "cleanup",
+        "stop",
+        "final_verify",
+    ]
+    node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
+    bytes: int | None = Field(default=None, ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def byte_progress_is_consistent(self) -> FleetProfileChildProgress:
+        if self.node_ids != sorted(self.node_ids) or len(self.node_ids) != len(
+            set(self.node_ids)
+        ):
+            raise ValueError("child progress node IDs must be sorted and unique")
+        if (
+            self.bytes is not None
+            and self.total_bytes is not None
+            and self.bytes > self.total_bytes
+        ):
+            raise ValueError("child progress bytes cannot exceed total bytes")
+        return self
+
+
+class FleetProfileChildOperation(_StrictModel):
+    """Stable child operation envelope independent of the Run service module."""
+
+    id: UuidId
+    state: Literal[
+        "queued",
+        "running",
+        "waiting-for-operator",
+        "succeeded",
+        "failed",
+        "cancelled",
+    ]
+    progress: FleetProfileChildProgress | None = None
+    status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+    result: dict[str, object] | None = None
+
+
+class FleetProfileSwitchAdapter(Protocol):
+    """Profile boundary for the integrated automatic Run switch service."""
+
+    def start(
+        self,
+        *,
+        application_id: str,
+        assignments: tuple[FleetProfileAssignment, ...],
+        scope_node_ids: tuple[str, ...],
+        actor: str,
+        request_id: str,
+    ) -> FleetProfileChildOperation:
+        """Reconcile the complete desired assignment set as one child operation.
+
+        ``assignments`` is ordered by stable assignment identity and
+        ``scope_node_ids`` is the complete sorted profile boundary.  The
+        implementation must plan conflicts once and preserve healthy desired
+        assignments while preparing or stopping other members.
+        """
+
+    def get(self, operation_id: str) -> FleetProfileChildOperation:
+        """Return the durable child state for inspection or resumption."""
+
+
 class FleetProfilePreview(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     profile_id: UuidId
     profile_name: Name
     profile_digest: Digest
     generated_at: datetime
     allowed: bool
+    scope: FleetProfileScopePreview
     summary: FleetProfilePlanSummary
     assignments: list[FleetProfileAssignmentPreview] = Field(max_length=64)
+    preparations: list[FleetProfileAssignmentPreparation] = Field(
+        default_factory=list, max_length=64
+    )
     steps: list[FleetProfilePlanStep] = Field(max_length=1024)
     reasons: list[FleetProfileReason] = Field(max_length=128)
     plan_digest: Digest
@@ -219,7 +341,7 @@ class FleetProfilePreviewRequest(_StrictModel):
 
 
 class FleetProfileApplicationView(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     id: UuidId
     profile_id: UuidId
     profile_digest: Digest
@@ -237,12 +359,60 @@ class FleetProfileApplicationView(_StrictModel):
     updated_at: datetime
 
 
+class FleetProfileStatusView(_StrictModel):
+    schema_version: Literal[2] = 2
+    profile_id: UuidId
+    profile_digest: Digest
+    state: Literal[
+        "draft",
+        "needs-preparation",
+        "ready",
+        "matched",
+        "switching",
+        "partially-applied",
+        "blocked",
+        "drifted",
+    ]
+    matched: bool
+    drifted: bool
+    scope: FleetProfileScopePreview
+    reasons: list[FleetProfileReason] = Field(max_length=128)
+    generated_at: datetime
+
+
+class FleetProfileDuplicateInput(_StrictModel):
+    name: Name
+    description: Description | None = None
+
+
+class FleetProfilePrepareRequest(_StrictModel):
+    plan_digest: Digest
+    request_key: UuidId
+
+
+class FleetProfilePreparePreviewRequest(_StrictModel):
+    """Explicit empty body for the digest-bound preparation preview."""
+
+
+class FleetProfileCaptureInput(_StrictModel):
+    name: Name
+    description: Description = "Captured current Fleet setup"
+    installation_policy: Literal["keep-cached", "exact"] = "keep-cached"
+    labels: dict[LabelName, LabelValue] = Field(default_factory=dict, max_length=16)
+    favorite: bool = False
+
+
 __all__ = [
     "FleetProfileApplicationView",
     "FleetProfileApplyRequest",
     "FleetProfileAssignment",
     "FleetProfileAssignmentInput",
     "FleetProfileAssignmentPreview",
+    "FleetProfileAssignmentPreparation",
+    "FleetProfileChildOperation",
+    "FleetProfileChildProgress",
+    "FleetProfileCaptureInput",
+    "FleetProfileDuplicateInput",
     "FleetProfileInput",
     "FleetProfileList",
     "FleetProfileNode",
@@ -250,6 +420,12 @@ __all__ = [
     "FleetProfilePlanSummary",
     "FleetProfilePreview",
     "FleetProfilePreviewRequest",
+    "FleetProfilePrepareRequest",
+    "FleetProfilePreparePreviewRequest",
     "FleetProfileReason",
+    "FleetProfileScope",
+    "FleetProfileScopePreview",
+    "FleetProfileStatusView",
+    "FleetProfileSwitchAdapter",
     "FleetProfileView",
 ]

@@ -104,6 +104,8 @@ struct RuntimeContract<'a> {
     interface: &'static str,
     installation_id: &'a str,
     run_id: &'a str,
+    adapter: &'a str,
+    adapter_version: u32,
     artifacts: Vec<RuntimeArtifact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     endpoint: Option<RuntimeEndpoint<'a>>,
@@ -1480,6 +1482,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             interface: "vonk.runtime.v1",
             installation_id,
             run_id,
+            adapter: &spec.runtime.adapter,
+            adapter_version: spec.runtime.adapter_version,
             artifacts,
             endpoint: spec.endpoint.as_ref().map(|endpoint| RuntimeEndpoint {
                 listen_host: "0.0.0.0",

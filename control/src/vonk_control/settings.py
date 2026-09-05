@@ -153,6 +153,10 @@ class Settings:
     host_runtime_grant_private_key_path: Path | None = None
     global_catalog_url: str = "https://vonkforge.ai"
     recipe_library_api_url: str = "https://api.github.com"
+    # Optional immutable package channel.  An empty value keeps development
+    # and existing installations on the GitHub reader until publication is
+    # configured.
+    recipe_library_package_url: str | None = None
     recipe_library_sync_interval_seconds: int = 900
     agent_release_api_url: str = "https://install.vonkforge.ai"
     agent_controller_address: str | None = None
@@ -160,6 +164,8 @@ class Settings:
     install_channel: str = "stable"
     artifact_job_storage_max_bytes: int = 16 * 1024**3
     artifact_job_retention_seconds: int = 7 * 24 * 60 * 60
+    model_cache_root: Path = Path("/state/model-cache")
+    model_cache_reserve_bytes: int = 10 * 1024**3
 
     @property
     def database_host(self) -> str | None:
@@ -281,9 +287,12 @@ class Settings:
             recipe_library_sync_interval_seconds = int(
                 os.environ.get("VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS", "900")
             )
+            model_cache_reserve_bytes = int(
+                os.environ.get("VONK_MODEL_CACHE_RESERVE_BYTES", str(10 * 1024**3))
+            )
         except ValueError as error:
             raise SettingsError(
-                "artifact job storage settings must be integers"
+                "artifact and model cache storage settings must be integers"
             ) from error
         if not 1024**3 <= artifact_job_storage_max_bytes <= 1024**4:
             raise SettingsError(
@@ -296,6 +305,10 @@ class Settings:
         if not 60 <= recipe_library_sync_interval_seconds <= 24 * 60 * 60:
             raise SettingsError(
                 "recipe library sync interval must be between one minute and one day"
+            )
+        if not 0 <= model_cache_reserve_bytes <= 1024**4:
+            raise SettingsError(
+                "model cache reserve must be between zero and one TiB"
             )
         try:
             configured_jurisdiction = operator_jurisdiction(
@@ -472,6 +485,32 @@ class Settings:
             raise SettingsError(
                 "recipe library API URL must be GitHub or the fixed internal relay"
             )
+        recipe_library_package_url = os.environ.get(
+            "VONK_RECIPE_LIBRARY_PACKAGE_URL", ""
+        ).rstrip("/") or None
+        if recipe_library_package_url is not None:
+            parsed_package = urlsplit(recipe_library_package_url)
+            package_loopback = parsed_package.hostname in {
+                "localhost",
+                "127.0.0.1",
+                "::1",
+                "caddy",
+            }
+            if (
+                not parsed_package.hostname
+                or (
+                    parsed_package.scheme != "https"
+                    and not (parsed_package.scheme == "http" and package_loopback)
+                )
+                or parsed_package.username
+                or parsed_package.password
+                or parsed_package.query
+                or parsed_package.fragment
+                or parsed_package.path not in {"", "/"}
+            ):
+                raise SettingsError(
+                    "recipe library package URL must be a fixed HTTPS origin"
+                )
         agent_release_api_url = os.environ.get(
             "VONK_AGENT_RELEASE_API_URL", "https://install.vonkforge.ai"
         ).rstrip("/")
@@ -517,6 +556,7 @@ class Settings:
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
             global_catalog_url=global_catalog_url,
             recipe_library_api_url=recipe_library_api_url,
+            recipe_library_package_url=recipe_library_package_url,
             recipe_library_sync_interval_seconds=recipe_library_sync_interval_seconds,
             agent_release_api_url=agent_release_api_url,
             agent_controller_address=agent_controller_address,
@@ -524,6 +564,10 @@ class Settings:
             install_channel=install_channel,
             artifact_job_storage_max_bytes=artifact_job_storage_max_bytes,
             artifact_job_retention_seconds=artifact_job_retention_seconds,
+            model_cache_root=_absolute_root(
+                "VONK_MODEL_CACHE_ROOT", "/state/model-cache"
+            ),
+            model_cache_reserve_bytes=model_cache_reserve_bytes,
         )
 
 
@@ -544,6 +588,8 @@ class WorkerSettings:
     artifact_job_retention_seconds: int
     artifact_job_reconcile_interval_seconds: int
     artifact_job_reconcile_batch_limit: int
+    model_cache_root: Path = Path("/state/model-cache")
+    model_cache_reserve_bytes: int = 10 * 1024**3
 
     @classmethod
     def from_env_and_secrets(cls) -> WorkerSettings:
@@ -632,6 +678,9 @@ class WorkerSettings:
             artifact_job_reconcile_batch_limit = int(
                 os.environ.get("VONK_ARTIFACT_JOB_RECONCILE_BATCH_LIMIT", "1000")
             )
+            model_cache_reserve_bytes = int(
+                os.environ.get("VONK_MODEL_CACHE_RESERVE_BYTES", str(10 * 1024**3))
+            )
         except ValueError as error:
             raise SettingsError(
                 "artifact job worker settings must be integers"
@@ -652,6 +701,10 @@ class WorkerSettings:
             raise SettingsError(
                 "artifact job reconciliation batch limit must be between 1 and 10000"
             )
+        if not 0 <= model_cache_reserve_bytes <= 1024**4:
+            raise SettingsError(
+                "model cache reserve must be between zero and one TiB"
+            )
         return cls(
             database_url=database_url,
             deployment_mode=mode,
@@ -668,4 +721,8 @@ class WorkerSettings:
                 artifact_job_reconcile_interval_seconds
             ),
             artifact_job_reconcile_batch_limit=artifact_job_reconcile_batch_limit,
+            model_cache_root=_absolute_root(
+                "VONK_MODEL_CACHE_ROOT", "/state/model-cache"
+            ),
+            model_cache_reserve_bytes=model_cache_reserve_bytes,
         )

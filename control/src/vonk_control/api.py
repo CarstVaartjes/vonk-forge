@@ -74,13 +74,20 @@ from .fleet_profile_api import install_fleet_profile_routes
 from .fleet_projection import (
     FleetNodeIdentity,
     FleetSnapshot,
+    TelemetryCapabilitiesResponse,
+    TelemetryCurrentResponse,
     TelemetryHistoryResponse,
+    TelemetryWorkloadsResponse,
 )
 from .fleet_stream import parse_last_event_id
 from .global_catalog import GlobalCatalogClient
 from .library_api import install_library_routes
 from .library_placement_api import install_library_placement_routes
 from .metrics import MetricsRegistry
+from .model_cache_api import (
+    install_model_cache_routes,
+    register_model_cache_operation_provider,
+)
 from .operation_api import (
     AgentsResponse,
     EndpointResponse,
@@ -91,16 +98,25 @@ from .operation_api import (
     JobResumeResponse,
     JobsResponse,
     OperationApiServices,
+    OperationDetailResponse,
     OperationPage,
+    OperationsResponse,
+    _global_get_operation,
+    _global_list_operations,
     bounded_error_responses,
     decode_offset,
     fleet_response,
     job_response,
+    operation_detail_response,
 )
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
 from .recipe_library import RecipeLibraryClient, RecipeLibraryError
 from .recipe_operations import RecipeOperationService
+from .recipe_packages import RecipePackageClient
+from .distribution_executor import CompositeDistributionPhaseExecutor
+from .run_switch_api import install_run_switch_routes
+from .run_switch_operations import RunSwitchOperationService
 from .source_bundles import DatabaseSourceBundleStore
 from .telemetry import TelemetryResolution
 from .workload_run_api import install_workload_run_routes
@@ -168,6 +184,8 @@ def build_agent_services(
     *,
     revision_eligible: Callable[[str], bool] | None = None,
     current_revision: Callable[[], str] | None = None,
+    distribution: Any | None = None,
+    model_cache: Any | None = None,
 ) -> AgentApiServices:
     """Construct the fail-closed production agent runtime from one provider."""
     from .agent_jobs import AgentJobService
@@ -184,6 +202,20 @@ def build_agent_services(
         WorkloadHelperGrantIssuer,
         WorkloadObjectReceiptIssuer,
     )
+
+    if distribution is None and model_cache is not None:
+        from .distribution import build_distribution_service_from_components
+
+        distribution = build_distribution_service_from_components(
+            model_cache,
+            sessions,
+            settings.agent_artifact_root,
+            clock=clock,
+        )
+    if distribution is not None:
+        attach_sessions = getattr(distribution, "attach_sessions", None)
+        if callable(attach_sessions):
+            attach_sessions(sessions)
 
     if settings.agent_runtime != "enabled":
         # Local development still needs the durable operation queue and fleet
@@ -210,6 +242,7 @@ def build_agent_services(
             source_bundles=DatabaseSourceBundleStore(sessions),
             workload_tuf_metadata_root=settings.workload_tuf_metadata_root,
             workload_tuf_target_root=settings.workload_tuf_target_root,
+            distribution=distribution,
         )
 
     if settings.agent_intermediate_certificate_path is None:
@@ -322,6 +355,7 @@ def build_agent_services(
         source_bundles=DatabaseSourceBundleStore(sessions),
         workload_tuf_metadata_root=workload_tuf_metadata_root,
         workload_tuf_target_root=workload_tuf_target_root,
+        distribution=distribution,
         workload_helper_authority=helper_authority,
         host_runtime_authority=host_runtime_authority,
         fabric_policy=(
@@ -464,11 +498,13 @@ def create_app(
     managed_catalog_sync: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
     recipe_operations: RecipeOperationService | None = None,
+    run_switch_operations: RunSwitchOperationService | None = None,
     artifact_jobs: ArtifactJobService | None = None,
     fleet_profiles: Any | None = None,
     library_placements: Any | None = None,
     agent_upgrades: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
+    model_cache: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Vonk Forge Control", version="1.0", docs_url=None, redoc_url=None
@@ -736,10 +772,23 @@ def create_app(
         audits=audits,
         service=recipe_operations,
     )
+    install_run_switch_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        audits=audits,
+        service=run_switch_operations,
+    )
     install_artifact_job_routes(
         app,
         actor_dependency=authenticated_actor,
         service=artifact_jobs,
+    )
+    install_model_cache_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        service=model_cache,
+        audits=audits,
+        cursors=cursor_codec,
     )
 
     @app.get("/api/v1/healthz")
@@ -888,17 +937,32 @@ def create_app(
         end: Annotated[datetime, Query()],
         resolution: Annotated[TelemetryResolution, Query()],
         maximum_points: Annotated[int, Query(ge=1, le=3_000)] = 1_500,
+        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
+        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
         _actor: Actor = authenticated_actor,
     ) -> TelemetryHistoryResponse:
         if fleet_projection is None:
             raise HTTPException(status_code=503, detail="Fleet projection unavailable")
         try:
+            filters = {
+                name: value
+                for name, value in {
+                    "key": key,
+                    "device_id": device_id,
+                    "interface_name": interface_name,
+                    "run_id": run_id,
+                }.items()
+                if value is not None
+            }
             return fleet_projection.telemetry_history(
                 node_id,
                 start=start,
                 end=end,
                 maximum_points=maximum_points,
                 resolution=resolution,
+                **filters,
             )
         except KeyError:
             raise HTTPException(
@@ -910,6 +974,99 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="Telemetry history unavailable"
             ) from None
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/telemetry/current",
+        response_model=TelemetryCurrentResponse,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getNodeTelemetryCurrent",
+    )
+    def node_telemetry_current(
+        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
+        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
+        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        _actor: Actor = authenticated_actor,
+    ) -> TelemetryCurrentResponse:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            filters = {
+                name: value
+                for name, value in {
+                    "key": key,
+                    "device_id": device_id,
+                    "interface_name": interface_name,
+                    "run_id": run_id,
+                }.items()
+                if value is not None
+            }
+            return fleet_projection.telemetry_current(node_id, **filters)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Telemetry sample not found") from None
+        except (OSError, RuntimeError, TypeError):
+            raise HTTPException(status_code=503, detail="Telemetry unavailable") from None
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/telemetry/capabilities",
+        response_model=TelemetryCapabilitiesResponse,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getNodeTelemetryCapabilities",
+    )
+    def node_telemetry_capabilities(
+        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
+        key: Annotated[str | None, Query(min_length=1, max_length=96)] = None,
+        device_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        interface_name: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        _actor: Actor = authenticated_actor,
+    ) -> TelemetryCapabilitiesResponse:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            filters = {
+                name: value
+                for name, value in {
+                    "key": key,
+                    "device_id": device_id,
+                    "interface_name": interface_name,
+                    "run_id": run_id,
+                }.items()
+                if value is not None
+            }
+            return fleet_projection.telemetry_capabilities(node_id, **filters)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Telemetry sample not found") from None
+        except (OSError, RuntimeError, TypeError):
+            raise HTTPException(status_code=503, detail="Telemetry unavailable") from None
+
+    @app.get(
+        "/api/v1/nodes/{node_id}/telemetry/workloads",
+        response_model=TelemetryWorkloadsResponse,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="listNodeTelemetryWorkloads",
+    )
+    def node_telemetry_workloads(
+        node_id: Annotated[str, ApiPath(pattern=r"^spk_[0-9a-f]{32}$")],
+        run_id: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+        state: Annotated[str | None, Query(min_length=1, max_length=32)] = None,
+        _actor: Actor = authenticated_actor,
+    ) -> TelemetryWorkloadsResponse:
+        if fleet_projection is None:
+            raise HTTPException(status_code=503, detail="Fleet projection unavailable")
+        try:
+            return fleet_projection.telemetry_workloads(
+                node_id,
+                run_id=run_id,
+                state=state,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Telemetry sample not found") from None
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from None
+        except (OSError, RuntimeError, TypeError):
+            raise HTTPException(status_code=503, detail="Telemetry unavailable") from None
 
     @app.get(
         "/api/v1/endpoints/{alias}",
@@ -1089,6 +1246,69 @@ def create_app(
             "next_cursor": next_cursor,
             "total": total,
         }
+
+    @app.get(
+        "/api/v1/operations",
+        response_model=OperationsResponse,
+        responses=bounded_error_responses(401, 422, 503),
+        operation_id="listOperations",
+    )
+    def operations_view(
+        cursor: str | None = Query(default=None, max_length=512),
+        limit: int = Query(default=20, ge=1, le=100),
+        operation_state: str | None = Query(
+            default=None,
+            alias="state",
+            pattern=r"^[a-z][a-z0-9-]{0,31}$",
+        ),
+        node_id: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
+        _actor: Actor = authenticated_actor,
+    ) -> OperationsResponse:
+        if operations is None:
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            )
+        try:
+            page = _global_list_operations(
+                operations, cursor, limit, operation_state, node_id
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=422, detail="operation cursor is invalid"
+            ) from None
+        except RuntimeError:
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            ) from None
+        return OperationsResponse(
+            operations=[operation_detail_response(item) for item in page.items],
+            next_cursor=page.next_cursor,
+            total=page.total,
+        )
+
+    @app.get(
+        "/api/v1/operations/{operation_id}",
+        response_model=OperationDetailResponse,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getOperation",
+    )
+    def operation_view(
+        operation_id: str = ApiPath(min_length=1, max_length=128),
+        _actor: Actor = authenticated_actor,
+    ) -> OperationDetailResponse:
+        if operations is None:
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            )
+        try:
+            item = _global_get_operation(operations, operation_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="operation not found") from None
+        except RuntimeError:
+            raise HTTPException(
+                status_code=503, detail="operation projection unavailable"
+            ) from None
+        return operation_detail_response(item)
 
     @app.get("/api/v1/audit")
     def audit_view(_actor: Actor = authenticated_actor) -> dict[str, object]:
@@ -1270,6 +1490,7 @@ def production_app() -> FastAPI:
     from .library_projection import LibraryProjection
     from .logging import DatabaseJobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
+    from .model_cache import ModelCacheService
     from .models import Job
     from .operation_api import durable_operation_services
     from .presence import ManagementAddressPolicy
@@ -1326,6 +1547,13 @@ def production_app() -> FastAPI:
         sessions,
         clock=clock,
     )
+    model_cache = ModelCacheService(
+        sessions,
+        settings.model_cache_root,
+        reserve_bytes=settings.model_cache_reserve_bytes,
+        clock=clock,
+    )
+    model_cache.resume_operations()
     revision_eligible = lambda revision: revision == authority.head()
     current_revision = authority.head
     agent_services = build_agent_services(
@@ -1334,6 +1562,7 @@ def production_app() -> FastAPI:
         clock,
         revision_eligible=revision_eligible,
         current_revision=current_revision,
+        model_cache=model_cache,
     )
 
     def reconciliation_authority_input(
@@ -1415,6 +1644,20 @@ def production_app() -> FastAPI:
         ),
         mappings=ClusterMappingService(sessions),
     )
+    run_switch_operations = RunSwitchOperationService(
+        sessions,
+        lifecycle=recipe_operations,
+        clock=clock,
+        mappings=ClusterMappingService(sessions),
+        model_cache=model_cache,
+        artifact_phase_executor=CompositeDistributionPhaseExecutor(
+            sessions,
+            agent_services.operations,
+            agent_services.distribution,
+            model_cache=model_cache,
+            clock=clock,
+        ),
+    )
     artifact_jobs = ArtifactJobService(
         sessions,
         recipe_operations=recipe_operations,
@@ -1426,12 +1669,15 @@ def production_app() -> FastAPI:
         retention_seconds=settings.artifact_job_retention_seconds,
     )
     artifact_jobs.reconcile_storage()
-    from .fleet_profiles import FleetProfileService
+    from .fleet_profiles import FleetProfileService, RunSwitchFleetProfileAdapter
 
     fleet_profiles = FleetProfileService(
         sessions,
         clock=clock,
         recipe_operations=recipe_operations,
+        switch_adapter=RunSwitchFleetProfileAdapter(
+            sessions, run_switch_operations
+        ),
     )
     from .library_placements import LibraryPlacementService
 
@@ -1483,7 +1729,14 @@ def production_app() -> FastAPI:
                 pass
 
     global_catalog = GlobalCatalogClient(settings.global_catalog_url)
-    recipe_library = RecipeLibraryClient(base_url=settings.recipe_library_api_url)
+    recipe_library = (
+        RecipePackageClient(
+            settings.recipe_library_package_url,
+            cache_root=settings.state_path / "recipe-library-packages",
+        )
+        if settings.recipe_library_package_url is not None
+        else RecipeLibraryClient(base_url=settings.recipe_library_api_url)
+    )
     catalog_service = CatalogService(
         sessions,
         clock=clock,
@@ -1522,12 +1775,19 @@ def production_app() -> FastAPI:
         worker_api_token=(
             settings.worker_api_token if settings.agent_runtime == "enabled" else b""
         ),
-        operations=durable_operation_services(
-            sessions,
-            Path("/routes"),
-            clock=clock,
-            cursors=cursor_codec,
-            resume_agent_upgrade=agent_upgrades.resume,
+        operations=register_model_cache_operation_provider(
+            durable_operation_services(
+                sessions,
+                Path("/routes"),
+                clock=clock,
+                cursors=cursor_codec,
+                resume_agent_upgrade=agent_upgrades.resume,
+                operation_providers=(
+                    fleet_profiles.operation_provider(),
+                    run_switch_operations.activity_provider(),
+                ),
+            ),
+            model_cache,
         ),
         catalog=catalog_service,
         global_catalog=global_catalog,
@@ -1547,10 +1807,12 @@ def production_app() -> FastAPI:
             clock=clock,
         ),
         recipe_operations=recipe_operations,
+        run_switch_operations=run_switch_operations,
         artifact_jobs=artifact_jobs,
         fleet_profiles=fleet_profiles,
         library_placements=library_placements,
         agent_upgrades=agent_upgrades,
+        model_cache=model_cache,
     )
     web_root = Path(__file__).resolve().parent / "web"
     if web_root.is_dir():
@@ -1570,7 +1832,12 @@ def production_app() -> FastAPI:
         while not automatic_sync_stop.is_set():
             try:
                 await asyncio.to_thread(managed_catalog_sync.automatic)
-            except (CatalogError, CatalogSyncError, RecipeLibraryError, OSError) as error:
+            except (
+                CatalogError,
+                CatalogSyncError,
+                RecipeLibraryError,
+                OSError,
+            ) as error:
                 _LOGGER.warning(
                     "automatic managed recipe catalog sync failed: %s",
                     type(error).__name__,

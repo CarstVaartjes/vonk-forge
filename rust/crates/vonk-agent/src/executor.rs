@@ -14,7 +14,7 @@ use std::{
 use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     agent_upgrade::AgentUpgradeExecutor,
-    client::{AgentHttpClient, ClientError, ExactRecipeRunObservation},
+    client::{AgentHttpClient, ClientError, DistributionProgress, ExactRecipeRunObservation},
     health::{HealthEvidence, wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
     image_importer::ImageImporter,
@@ -25,9 +25,10 @@ use crate::{
     workloads::{Placement, image_digest},
 };
 use vonk_agent_protocol::{
-    AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, RecipeJobEvidence,
-    RecipeJobFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
-    RecipeJobRunResult, RecipeOperationRequest, RecipeStartPhase, canonical_json, hex_sha256,
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
+    HostRuntimeAction, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
+    RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
+    RecipeStartPhase, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -424,6 +425,110 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
         lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         mut cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> ExecutionResult {
+        if claim.operation == "artifact.distribution.v1" {
+            if claim.validate().is_err() {
+                return failed("artifact distribution claim is invalid");
+            }
+            let request: ArtifactDistributionRequest =
+                match serde_json::from_value(claim.payload.clone()) {
+                    Ok(request) => request,
+                    Err(_) => return failed("artifact distribution request is invalid"),
+                };
+            if request.validate().is_err() || request.plan_digest != claim.authority_revision {
+                return failed("artifact distribution plan identity is invalid");
+            }
+            let destination = self
+                .runtime
+                .data_root
+                .join("distribution")
+                .join(&request.plan_digest);
+            let (progress_sender, mut progress_receiver) =
+                tokio::sync::mpsc::unbounded_channel::<DistributionProgress>();
+            let progress_client = self.client.clone();
+            let progress_claim = claim.clone();
+            let progress_deadline = lease_deadline.clone();
+            let progress_task = tokio::spawn(async move {
+                while let Some(item) = progress_receiver.recv().await {
+                    let progress = AgentProgress {
+                        attempt: progress_claim.attempt,
+                        deadline: *progress_deadline.borrow(),
+                        fence: progress_claim.fence,
+                        job_id: progress_claim.job_id,
+                        node_id: progress_claim.node_id.clone(),
+                        operation_id: progress_claim.operation_id,
+                        progress: json!({
+                            "phase": "copying",
+                            "object_sha256": item.object_sha256,
+                            "kind": item.kind,
+                            "bytes": item.bytes,
+                            "total_bytes": item.total_bytes,
+                        }),
+                        schema_version: 1,
+                    };
+                    let _ = progress_client.heartbeat(&progress).await;
+                }
+            });
+            let download = self
+                .client
+                .download_distribution_with_progress(
+                    &request.plan_digest,
+                    &destination,
+                    move |item| {
+                        let _ = progress_sender.send(item);
+                    },
+                )
+                .await;
+            let _ = progress_task.await;
+            return match download {
+                Ok(evidence) => {
+                    let importer = ImageImporter {
+                        data_root: self.runtime.data_root,
+                    };
+                    let archive = match importer.retain_verified_distribution_archive(
+                        &evidence.oci_archive_sha256,
+                        &evidence.oci_image_digest,
+                        evidence.oci_archive_bytes,
+                        &evidence.oci_archive_path,
+                    ) {
+                        Ok(path) => path,
+                        Err(_) => return failed("distributed OCI archive could not be retained"),
+                    };
+                    if self
+                        .execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::ImageImport,
+                            importer.distribution_runtime_arguments(
+                                &request.plan_digest,
+                                &evidence.oci_image_digest,
+                                evidence.oci_archive_bytes,
+                                &archive,
+                            ),
+                        )
+                        .await
+                        .is_err()
+                    {
+                        return failed("distributed OCI image could not be imported");
+                    }
+                    ExecutionResult {
+                        state: "succeeded",
+                        body: json!({
+                            "assignment_id": evidence.assignment_id,
+                            "model_artifact_set_sha256": evidence.model_artifact_set_sha256,
+                            "verified": true,
+                            "verified_digests": evidence.model_digests,
+                            "verified_image_digest": evidence.oci_image_digest,
+                            "imported_image_digest": evidence.oci_image_digest,
+                            "verified_oci_layout_sha256": evidence.oci_archive_sha256,
+                            "model_files": evidence.model_paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+                            "oci_archive": archive.display().to_string(),
+                            "oci_image_digest": evidence.oci_image_digest,
+                            "downloaded_bytes": evidence.downloaded_bytes,
+                        }),
+                    }
+                }
+                Err(_) => failed("Controller distribution could not be verified and retained"),
+            };
+        }
         let request = match RecipeOperationRequest::parse(claim) {
             Ok(request) => request,
             Err(_) => return failed("recipe operation payload is invalid"),
@@ -486,18 +591,34 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let importer = ImageImporter {
                     data_root: self.runtime.data_root,
                 };
-                let archive = match importer.staging_path(claim.operation_id) {
-                    Ok(path) => path,
-                    Err(_) => return failed("image import staging is unavailable"),
+                let archive = match importer.verified_cached_archive(&request) {
+                    Ok(Some(path)) => path,
+                    Ok(None) => {
+                        let staging = match importer.staging_path(claim.operation_id) {
+                            Ok(path) => path,
+                            Err(_) => return failed("image import staging is unavailable"),
+                        };
+                        if self
+                            .client
+                            .download_artifact(
+                                &request.oci_layout_sha256,
+                                request.image_bytes,
+                                &staging,
+                            )
+                            .await
+                            .is_err()
+                        {
+                            return failed("exact OCI image archive is unavailable");
+                        }
+                        match importer.retain_verified_archive(&request, &staging) {
+                            Ok(path) => path,
+                            Err(_) => {
+                                return failed("verified OCI image archive could not be retained");
+                            }
+                        }
+                    }
+                    Err(_) => return failed("OCI image archive cache is invalid"),
                 };
-                if self
-                    .client
-                    .download_artifact(&request.oci_layout_sha256, request.image_bytes, &archive)
-                    .await
-                    .is_err()
-                {
-                    return failed("exact OCI image archive is unavailable");
-                }
                 match importer.verify(&request, &archive) {
                     Ok(evidence) => match self
                         .execute_host_runtime(

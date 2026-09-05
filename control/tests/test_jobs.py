@@ -46,6 +46,34 @@ def test_workers_cannot_claim_same_job(service) -> None:
     assert claimed[0].job_id == job.id
 
 
+def test_repeated_request_key_replays_one_durable_job(service) -> None:
+    jobs, _ = service
+    first = jobs.enqueue(
+        "install",
+        "operator",
+        "authority",
+        ["spk_1"],
+        {"plan_digest": "a" * 64},
+        request_id="request-key",
+    )
+    replay = jobs.enqueue(
+        "install",
+        "operator",
+        "authority",
+        ["spk_1"],
+        {"plan_digest": "a" * 64},
+        request_id="request-key",
+    )
+    assert replay.id == first.id
+    with pytest.raises(ValueError, match="already used differently"):
+        jobs.enqueue(
+            "install",
+            "different-actor",
+            "authority",
+            ["spk_1"],
+            {"plan_digest": "b" * 64},
+            request_id="request-key",
+        )
 
 
 def test_job_list_keyset_pages_reach_every_job_in_stable_order(service) -> None:

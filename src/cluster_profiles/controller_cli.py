@@ -9,6 +9,8 @@ import json
 import os
 import re
 import stat
+import sys
+import time
 import urllib.parse
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
@@ -199,8 +201,12 @@ def _add_json(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Emit stable JSON output")
 
 
-def _subcommands(parser: argparse.ArgumentParser, name: str):
-    return parser.add_subparsers(dest=name, required=True, parser_class=type(parser))
+def _subcommands(
+    parser: argparse.ArgumentParser, name: str, *, required: bool = True
+):
+    return parser.add_subparsers(
+        dest=name, required=required, parser_class=type(parser)
+    )
 
 
 def _apply(parser: argparse.ArgumentParser) -> None:
@@ -246,6 +252,32 @@ def _request_key(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _structured_input(
+    parser: argparse.ArgumentParser,
+    *,
+    required: bool = True,
+    prefix: str | None = None,
+) -> None:
+    """Add the bounded structured-input contract used by agent callers.
+
+    ``--input -`` is accepted as an explicit stdin form as well as the more
+    discoverable ``--stdin`` flag.  Keeping this on the parser means every
+    complex command advertises the same machine-facing contract.
+    """
+    group = parser.add_mutually_exclusive_group(required=required)
+    suffix = f"{prefix}_" if prefix else ""
+    group.add_argument("--input", dest=f"{suffix}input", metavar="JSON", help="Inline JSON object")
+    group.add_argument("--input-file", dest=f"{suffix}input_file", type=Path, help="Bounded JSON object file")
+    group.add_argument("--stdin", dest=f"{suffix}stdin", action="store_true", help="Read a JSON object from stdin")
+
+
+def _plan_flags(parser: argparse.ArgumentParser, *, require_digest: bool = False) -> None:
+    parser.add_argument("--plan-digest", required=require_digest)
+    _request_key(parser)
+    _apply(parser)
+    _add_json(parser)
+
+
 def _action_pair(
     commands: argparse._SubParsersAction[argparse.ArgumentParser],
     name: str,
@@ -288,24 +320,87 @@ def add_controller_commands(
     _add_json(fleet_node)
 
     telemetry = fleet_commands.add_parser(
-        "telemetry", help="Show node telemetry history"
+        "telemetry", help="Inspect node telemetry and metric support"
     )
-    telemetry.add_argument("node_id")
-    telemetry_time = telemetry.add_mutually_exclusive_group()
-    telemetry_time.add_argument(
+    telemetry_commands = telemetry.add_subparsers(dest="telemetry_command")
+    telemetry_current = telemetry_commands.add_parser("current")
+    telemetry_current.add_argument("node_id")
+    _add_json(telemetry_current)
+    telemetry_capabilities = telemetry_commands.add_parser("capabilities")
+    telemetry_capabilities.add_argument("node_id")
+    _add_json(telemetry_capabilities)
+    telemetry_workloads = telemetry_commands.add_parser("workloads")
+    telemetry_workloads.add_argument("node_id")
+    telemetry_workloads.add_argument("--run-id")
+    telemetry_workloads.add_argument("--state")
+    _add_json(telemetry_workloads)
+    telemetry_history = telemetry_commands.add_parser("history")
+    telemetry_history.add_argument("node_id")
+    telemetry_history_time = telemetry_history.add_mutually_exclusive_group()
+    telemetry_history_time.add_argument(
         "--range", choices=tuple(TELEMETRY_RANGES), default="1h"
     )
-    telemetry_time.add_argument("--start")
-    telemetry.add_argument("--end")
-    telemetry.add_argument("--resolution", choices=("raw", "minute", "fifteen-minute"))
-    telemetry.add_argument("--maximum-points", type=int, choices=range(1, 3001))
-    _add_json(telemetry)
+    telemetry_history_time.add_argument("--start")
+    telemetry_history.add_argument("--end")
+    telemetry_history.add_argument(
+        "--resolution", choices=("raw", "minute", "fifteen-minute")
+    )
+    telemetry_history.add_argument(
+        "--maximum-points", type=int, choices=range(1, 3001)
+    )
+    _add_json(telemetry_history)
 
-    profile = fleet_commands.add_parser("profile", help="Rename a Fleet node")
+    metrics = fleet_commands.add_parser(
+        "metrics", help="Inspect server-provided Spark metrics and history"
+    )
+    metric_commands = _subcommands(metrics, "metrics_command")
+    metrics_current = metric_commands.add_parser("current")
+    metrics_current.add_argument("node_id")
+    _add_json(metrics_current)
+    for metric_command in ("history", "export"):
+        metric_parser = metric_commands.add_parser(metric_command)
+        metric_parser.add_argument("node_id")
+        metric_time = metric_parser.add_mutually_exclusive_group()
+        metric_time.add_argument(
+            "--range", choices=tuple(TELEMETRY_RANGES), default="1h"
+        )
+        metric_time.add_argument("--start")
+        metric_parser.add_argument("--end")
+        metric_parser.add_argument(
+            "--resolution", choices=("raw", "minute", "fifteen-minute")
+        )
+        metric_parser.add_argument(
+            "--maximum-points", type=int, choices=range(1, 3001)
+        )
+        if metric_command == "export":
+            metric_parser.add_argument("--file", type=Path)
+        _add_json(metric_parser)
+    metrics_capabilities = metric_commands.add_parser("capabilities")
+    metrics_capabilities.add_argument("node_id")
+    _add_json(metrics_capabilities)
+    metrics_workloads = metric_commands.add_parser("workloads")
+    metrics_workloads.add_argument("node_id")
+    metrics_workloads.add_argument("--run-id")
+    metrics_workloads.add_argument("--state")
+    _add_json(metrics_workloads)
+
+    profile = fleet_commands.add_parser(
+        "node-profile", aliases=["profile"], help="Rename a Fleet node"
+    )
     profile.add_argument("node_id")
     profile.add_argument("--display-name", required=True)
     _apply(profile)
     _add_json(profile)
+    current = fleet_commands.add_parser(
+        "current", help="Show current workloads and placements"
+    )
+    current.add_argument("--search", default="")
+    current.add_argument("--all", action="store_true")
+    _add_json(current)
+    state = fleet_commands.add_parser("state", help="Show current Spark state and capacity")
+    state.add_argument("--search", default="")
+    state.add_argument("--all", action="store_true")
+    _add_json(state)
 
     agents = fleet_commands.add_parser("agents", help="List registered agents")
     _add_json(agents)
@@ -685,6 +780,211 @@ def add_controller_commands(
     _apply(resume)
     _add_json(resume)
 
+    # Stable, task-oriented aliases for the browser's primary workflows.  The
+    # lower-level ``library`` tree remains available for expert lifecycle work.
+    models = commands.add_parser("models", help="Discover and compare model versions")
+    model_commands = _subcommands(models, "models_command")
+    model_list = model_commands.add_parser("list", aliases=["discover"])
+    _paging(model_list, default=100)
+    model_list.add_argument("--search", default="")
+    model_list.add_argument("--capability", action="append", default=[])
+    model_list.add_argument(
+        "--recipe-capability",
+        action="append",
+        default=[],
+        help="Filter by capabilities exposed by at least one recipe",
+    )
+    _add_json(model_list)
+    model_show = model_commands.add_parser("show")
+    model_show.add_argument("model_id")
+    _add_json(model_show)
+    model_compare = model_commands.add_parser("compare")
+    model_compare.add_argument("model_id", nargs="+", metavar="MODEL_ID")
+    _add_json(model_compare)
+    model_download = model_commands.add_parser(
+        "download", help="Download an exact model to the Library"
+    )
+    model_download.add_argument("--model-version-sha256", required=True)
+    model_download.add_argument("--recipe-revision-id")
+    model_download.add_argument("--recipe-revision-sha256")
+    model_download.add_argument("--request-key")
+    model_download.add_argument("--dry-run", action="store_true")
+    model_download.add_argument("--detach", action="store_true")
+    model_download.add_argument("--timeout-seconds", type=int, default=30)
+    model_download.add_argument("--interval-seconds", type=float, default=1.0)
+    _add_json(model_download)
+    model_run = model_commands.add_parser("run", help="Preview or start a model run")
+    _structured_input(model_run, required=False, prefix="run")
+    model_run.add_argument("--request-key", dest="run_request_key")
+    model_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the automatic run without starting it",
+    )
+    model_run.add_argument("--detach", action="store_true", help="Return after submission")
+    model_run.add_argument("--timeout-seconds", type=int, default=30)
+    model_run.add_argument("--interval-seconds", type=float, default=1.0)
+    model_run_commands = _subcommands(
+        model_run, "model_run_command", required=False
+    )
+    model_run_preview = model_run_commands.add_parser("preview")
+    _structured_input(model_run_preview)
+    _add_json(model_run_preview)
+    model_run_apply = model_run_commands.add_parser("apply")
+    _structured_input(model_run_apply)
+    model_run_apply.add_argument("--plan-digest", required=True)
+    model_run_apply.add_argument("--request-key", required=True)
+    _apply(model_run_apply)
+    _add_json(model_run_apply)
+    model_run_stop = model_run_commands.add_parser("stop")
+    stop_variants = _subcommands(model_run_stop, "model_run_stop_command")
+    stop_preview = stop_variants.add_parser("preview")
+    stop_preview.add_argument("run_id")
+    _add_json(stop_preview)
+    stop_apply = stop_variants.add_parser("apply")
+    stop_apply.add_argument("run_id")
+    stop_apply.add_argument("--plan-digest", required=True)
+    stop_apply.add_argument("--request-key", required=True)
+    _apply(stop_apply)
+    _add_json(stop_apply)
+
+    cache = commands.add_parser("cache", help="Manage verified NAS model artifacts")
+    cache_commands = _subcommands(cache, "cache_command")
+    cache_list = cache_commands.add_parser("list")
+    _paging(cache_list, default=100)
+    cache_list.add_argument("--search", default="")
+    cache_list.add_argument("--state")
+    _add_json(cache_list)
+    cache_show = cache_commands.add_parser("show")
+    cache_show.add_argument("artifact_id", metavar="ARTIFACT_SET_SHA256")
+    _add_json(cache_show)
+    cache_download = cache_commands.add_parser("download")
+    cache_download.add_argument("download_mode", nargs="?", choices=("preview", "apply"))
+    _structured_input(cache_download, required=False)
+    cache_download.add_argument("--model-version-sha256")
+    cache_download.add_argument("--recipe-revision-sha256")
+    cache_download.add_argument("--recipe-revision-id")
+    cache_download.add_argument("--dry-run", action="store_true", help="Preview without downloading")
+    cache_download.add_argument("--detach", action="store_true", help="Return after submission")
+    cache_download.add_argument("--timeout-seconds", type=int, default=30)
+    cache_download.add_argument("--interval-seconds", type=float, default=1.0)
+    _plan_flags(cache_download)
+    cache_repair = cache_commands.add_parser("repair")
+    cache_repair.add_argument("artifact_id", metavar="ARTIFACT_SET_SHA256")
+    cache_repair.add_argument("repair_mode", nargs="?", choices=("preview", "apply"))
+    _plan_flags(cache_repair)
+    cache_update = cache_commands.add_parser("update")
+    cache_update.add_argument("artifact_id", nargs="?", metavar="ARTIFACT_SET_SHA256")
+    _add_json(cache_update)
+    cache_operations = cache_commands.add_parser("operations")
+    cache_operations_commands = _subcommands(cache_operations, "cache_operations_command")
+    cache_operations_list = cache_operations_commands.add_parser("list")
+    _paging(cache_operations_list, default=20)
+    _add_json(cache_operations_list)
+    cache_operations_show = cache_operations_commands.add_parser("show")
+    cache_operations_show.add_argument("operation_id")
+    _add_json(cache_operations_show)
+    eviction = cache_commands.add_parser("eviction", help="Review or apply cache eviction")
+    eviction_commands = _subcommands(eviction, "eviction_command")
+    eviction_preview = eviction_commands.add_parser("preview")
+    _structured_input(eviction_preview, required=False)
+    eviction_preview.add_argument("--target-bytes", type=int)
+    _add_json(eviction_preview)
+    eviction_apply = eviction_commands.add_parser("apply")
+    _structured_input(eviction_apply, required=False)
+    eviction_apply.add_argument("--target-bytes", type=int)
+    _plan_flags(eviction_apply, require_digest=True)
+
+    profiles = commands.add_parser("profiles", help="Saved whole-fleet running profiles")
+    profile_commands = _subcommands(profiles, "profiles_command")
+    profile_list = profile_commands.add_parser("list")
+    profile_list.add_argument("--search", default="")
+    _add_json(profile_list)
+    profile_show = profile_commands.add_parser("show")
+    profile_show.add_argument("profile_id")
+    _add_json(profile_show)
+    profile_create = profile_commands.add_parser("create")
+    _structured_input(profile_create)
+    _add_json(profile_create)
+    profile_update = profile_commands.add_parser("update")
+    profile_update.add_argument("profile_id")
+    _structured_input(profile_update)
+    _add_json(profile_update)
+    profile_duplicate = profile_commands.add_parser("duplicate")
+    profile_duplicate.add_argument("profile_id")
+    profile_duplicate.add_argument("--name", required=True)
+    profile_duplicate.add_argument("--description")
+    profile_duplicate.add_argument("--apply", action="store_true")
+    profile_duplicate.add_argument("--request-key")
+    _structured_input(profile_duplicate, required=False)
+    _add_json(profile_duplicate)
+    profile_capture = profile_commands.add_parser("capture-current")
+    profile_capture.add_argument("--name", required=True)
+    profile_capture.add_argument("--description", default="")
+    profile_capture.add_argument("--installation-policy", choices=("keep-cached", "exact"), default="keep-cached")
+    profile_capture.add_argument("--request-key")
+    _structured_input(profile_capture, required=False)
+    _apply(profile_capture)
+    _add_json(profile_capture)
+    profile_delete = profile_commands.add_parser("delete")
+    profile_delete.add_argument("profile_id")
+    _apply(profile_delete)
+    _add_json(profile_delete)
+    profile_preview = profile_commands.add_parser("preview")
+    profile_preview.add_argument("profile_id")
+    _add_json(profile_preview)
+    profile_status = profile_commands.add_parser("status")
+    profile_status.add_argument("profile_id")
+    _add_json(profile_status)
+    profile_prepare = profile_commands.add_parser("prepare")
+    profile_prepare_commands = _subcommands(profile_prepare, "profile_prepare_command")
+    profile_prepare_preview = profile_prepare_commands.add_parser("preview")
+    profile_prepare_preview.add_argument("profile_id")
+    _add_json(profile_prepare_preview)
+    profile_prepare_apply = profile_prepare_commands.add_parser("apply")
+    profile_prepare_apply.add_argument("profile_id")
+    profile_prepare_apply.add_argument("--plan-digest", required=True)
+    profile_prepare_apply.add_argument("--request-key", required=True)
+    _apply(profile_prepare_apply)
+    _add_json(profile_prepare_apply)
+    profile_switch = profile_commands.add_parser("switch")
+    profile_switch.add_argument("profile_id")
+    profile_switch.add_argument("--plan-digest")
+    profile_switch.add_argument("--request-key")
+    profile_switch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the automatic switch without applying it",
+    )
+    profile_switch.add_argument("--detach", action="store_true", help="Return after submission")
+    profile_switch.add_argument("--timeout-seconds", type=int, default=30)
+    profile_switch.add_argument("--interval-seconds", type=float, default=1.0)
+    _apply(profile_switch)
+    _add_json(profile_switch)
+    profile_application = profile_commands.add_parser("application")
+    profile_application.add_argument("application_id")
+    _add_json(profile_application)
+
+    operations = commands.add_parser("operations", help="Inspect durable operations and evidence")
+    operation_commands = _subcommands(operations, "operations_command")
+    operation_list = operation_commands.add_parser("list")
+    _paging(operation_list, default=20)
+    operation_list.add_argument("--status")
+    _add_json(operation_list)
+    operation_show = operation_commands.add_parser("show")
+    operation_show.add_argument("operation_id")
+    _add_json(operation_show)
+    for operation_action in ("watch", "wait"):
+        watch_parser = operation_commands.add_parser(operation_action)
+        watch_parser.add_argument("operation_id")
+        watch_parser.add_argument("--timeout-seconds", type=int, default=30)
+        watch_parser.add_argument("--interval-seconds", type=float, default=1.0)
+        _add_json(watch_parser)
+    evidence = operation_commands.add_parser("evidence")
+    evidence.add_argument("operation_id")
+    evidence.add_argument("--file", type=Path)
+    _add_json(evidence)
+
 
 def _quoted(value: str) -> str:
     return urllib.parse.quote(value, safe="")
@@ -706,6 +1006,113 @@ def _read_object(path: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("input JSON must be an object")
     return value
+
+
+def _read_structured(
+    args: argparse.Namespace,
+    *,
+    required: bool = True,
+    prefix: str | None = None,
+) -> dict[str, object]:
+    """Read one bounded JSON object from inline text, a file, or stdin."""
+    suffix = f"{prefix}_" if prefix else ""
+    source = getattr(args, f"{suffix}input", None)
+    input_file = getattr(args, f"{suffix}input_file", None)
+    use_stdin = bool(getattr(args, f"{suffix}stdin", False))
+    if source is None and input_file is None and not use_stdin:
+        if required:
+            raise ValueError("one of --input, --input-file, or --stdin is required")
+        return {}
+    if source is not None:
+        raw = source.encode()
+        if len(raw) > 1_048_576:
+            raise ValueError("inline JSON input exceeds the 1 MiB limit")
+        return _decode_structured(raw)
+    if input_file is not None:
+        return _read_object(input_file)
+    stream = getattr(sys.stdin, "buffer", sys.stdin)
+    raw = stream.read(1_048_577)
+    if isinstance(raw, str):
+        raw = raw.encode()
+    if len(raw) > 1_048_576:
+        raise ValueError("stdin JSON input exceeds the 1 MiB limit")
+    return _decode_structured(raw)
+
+
+def _decode_structured(raw: bytes) -> dict[str, object]:
+    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"input JSON contains duplicate key: {key}")
+            value[key] = item
+        return value
+
+    value = json.loads(raw, object_pairs_hook=reject_duplicates)
+    if not isinstance(value, dict):
+        raise TypeError("input JSON must be an object")
+    return value
+
+
+def _validated_request_key(args: argparse.Namespace, factory: Callable[[], str]) -> str:
+    value = args.request_key or factory()
+    if re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        value,
+    ) is None:
+        raise ValueError("--request-key must be a lowercase UUID")
+    return value
+
+
+def _explicit_request_key(value: str | None) -> str:
+    if value is None or re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        value,
+    ) is None:
+        raise ValueError("an explicit lowercase UUID --request-key is required")
+    return value
+
+
+def _load_pages(
+    client: ControllerClient,
+    path: str,
+    args: argparse.Namespace,
+    *,
+    query: Mapping[str, object] | None = None,
+    collection: str | None = None,
+) -> dict[str, object]:
+    """Follow server cursors with a hard bound and preserve stable JSON."""
+    cursor = getattr(args, "cursor", None)
+    pages: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for _ in range(_MAX_PAGES):
+        values = dict(query or {})
+        values.update(cursor=cursor, limit=getattr(args, "limit", 20))
+        page = client.request("GET", path, query=_query(**values))
+        pages.append(page)
+        next_cursor = page.get("next_cursor")
+        if not getattr(args, "all", False) or not isinstance(next_cursor, str) or not next_cursor:
+            break
+        if next_cursor in seen:
+            raise ValueError("continuation cursor repeated")
+        seen.add(next_cursor)
+        cursor = next_cursor
+    else:
+        raise ValueError("pagination exceeded the safety limit")
+    if not pages:
+        return {}
+    result = dict(pages[0])
+    if collection is None:
+        return result
+    merged: list[object] = []
+    for page in pages:
+        values = page.get(collection)
+        if isinstance(values, list):
+            merged.extend(values)
+    result[collection] = merged
+    result["loaded_pages"] = len(pages)
+    result["next_cursor"] = pages[-1].get("next_cursor")
+    return result
 
 
 def _inspect_artifact_input(
@@ -1553,18 +1960,18 @@ def _model_identity_key(model: Mapping[str, object]) -> tuple[object, object, ob
 def _load_library_snapshot(
     client: ControllerClient, args: argparse.Namespace
 ) -> dict[str, object]:
-    cursor = args.cursor
+    cursor = getattr(args, "cursor", None)
     seen: set[str] = set()
     pages: list[dict[str, object]] = []
     for _page_number in range(_MAX_PAGES):
         page = client.request(
             "GET",
             "/api/v1/library",
-            query=_query(cursor=cursor, limit=args.limit),
+            query=_query(cursor=cursor, limit=getattr(args, "limit", 100)),
         )
         pages.append(page)
         next_cursor = page.get("next_cursor")
-        if not args.all or not isinstance(next_cursor, str) or not next_cursor:
+        if not getattr(args, "all", False) or not isinstance(next_cursor, str) or not next_cursor:
             break
         if next_cursor in seen:
             raise ValueError("Library continuation cursor repeated")
@@ -1612,6 +2019,14 @@ def _load_library_snapshot(
 
 def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     command = args.fleet_command
+    if command == "current":
+        return client.request(
+            "GET", "/api/v1/fleet/workloads", query=_query(search=args.search or None, all=True if args.all else None)
+        )
+    if command == "state":
+        return client.request(
+            "GET", "/api/v1/fleet/state", query=_query(search=args.search or None, all=True if args.all else None)
+        )
     if command in {"list", "show"}:
         payload = client.request("GET", "/api/v1/fleet")
         if command == "list":
@@ -1623,12 +2038,12 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
                     return node
         raise ValueError(f"Fleet node not found: {args.node_id}")
     if command == "telemetry":
-        return client.request(
-            "GET",
-            f"/api/v1/nodes/{_quoted(args.node_id)}/telemetry",
-            query=_telemetry_query(args),
+        return _run_metric_command(
+            args, client, getattr(args, "telemetry_command", None) or "history"
         )
-    if command == "profile":
+    if command == "metrics":
+        return _run_metric_command(args, client, args.metrics_command)
+    if command in {"profile", "node-profile"}:
         display_name = args.display_name.strip()
         if (
             not display_name
@@ -1694,6 +2109,30 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
     return _plan_or_request(
         args, client, "POST", f"/api/v1/agents/nodes/{_quoted(args.node_id)}/revoke"
     )
+
+
+def _run_metric_command(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    metric_command: str,
+) -> dict[str, object]:
+    """Forward the Controller's schema-2 telemetry projection unchanged."""
+    node_path = f"/api/v1/nodes/{_quoted(args.node_id)}/telemetry"
+    if metric_command == "current":
+        return client.request("GET", f"{node_path}/current")
+    if metric_command == "capabilities":
+        return client.request("GET", f"{node_path}/capabilities")
+    if metric_command == "workloads":
+        return client.request(
+            "GET",
+            f"{node_path}/workloads",
+            query=_query(run_id=args.run_id, state=args.state) or None,
+        )
+    result = client.request("GET", node_path, query=_telemetry_query(args))
+    if metric_command == "export" and args.file is not None:
+        args.file.write_text(json.dumps(result, sort_keys=True) + "\n")
+        return {"node_id": args.node_id, "file": str(args.file)}
+    return result
 
 
 def _artifact_job_id(value: object) -> str:
@@ -2572,6 +3011,539 @@ def _run_activity(
     return _plan_or_request(args, client, "POST", f"{path}/resume")
 
 
+def _model_supports_capabilities(
+    model: Mapping[str, object], requested: list[str]
+) -> bool:
+    """Match only declared facts from the Controller model inventory."""
+    inventory = model.get("model_capabilities")
+    if not isinstance(inventory, Mapping) or inventory.get("state") != "declared":
+        return False
+    facts = inventory.get("facts")
+    if not isinstance(facts, list):
+        return False
+    supported = {
+        str(item.get("capability"))
+        for item in facts
+        if isinstance(item, Mapping)
+        and item.get("support") == "supported"
+        and isinstance(item.get("capability"), str)
+    }
+    return all(capability in supported for capability in requested)
+
+
+def _run_models(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.models_command
+    if command in {"list", "discover"}:
+        result = _load_library_snapshot(client, args)
+        result = _filter_library(result, args.search)
+        if args.capability:
+            models = result.get("models")
+            if isinstance(models, list):
+                result["models"] = [
+                    model
+                    for model in models
+                    if isinstance(model, Mapping)
+                    and _model_supports_capabilities(model, args.capability)
+                ]
+        if args.recipe_capability:
+            models = result.get("models")
+            if isinstance(models, list):
+                result["models"] = [
+                    model
+                    for model in models
+                    if isinstance(model, Mapping)
+                    and any(
+                        all(
+                            capability in recipe.get("capabilities", [])
+                            for capability in args.recipe_capability
+                        )
+                        for recipe in model.get("recipes", [])
+                        if isinstance(recipe, Mapping)
+                    )
+                ]
+        return result
+    if command == "download":
+        if _LOWER_SHA256.fullmatch(args.model_version_sha256) is None:
+            raise ValueError("model version identity must be a lowercase SHA-256 digest")
+        model_version_sha256 = args.model_version_sha256
+        payload: dict[str, object] = {
+            "model_version_sha256": model_version_sha256,
+        }
+        if args.recipe_revision_id is not None:
+            payload["recipe_revision_id"] = args.recipe_revision_id
+        if args.recipe_revision_sha256 is not None:
+            if _LOWER_SHA256.fullmatch(args.recipe_revision_sha256) is None:
+                raise ValueError("recipe revision identity must be a lowercase SHA-256 digest")
+            payload["recipe_revision_sha256"] = args.recipe_revision_sha256
+        return _run_cache_download_flow(args, client, request_id_factory, payload)
+    if command == "show":
+        snapshot = _load_library_snapshot(client, args)
+        return _find_model(snapshot, args.model_id)
+    values = _compare_values(args.model_id, "model")
+    return {
+        "models": [_find_model(_load_library_snapshot(client, args), value) for value in values],
+        "compared_count": len(values),
+    }
+
+
+def _run_model_run(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.model_run_command
+    if command is None:
+        payload = _read_structured(args, prefix="run")
+        preview = client.request(
+            "POST", "/api/v1/recipes/run-switch-plans/preview", payload
+        )
+        if args.dry_run:
+            return preview
+        plan_digest = preview.get("plan_digest")
+        if not isinstance(plan_digest, str) or not plan_digest:
+            raise ValueError("automatic model run preview did not return plan_digest")
+        request_key = args.run_request_key or request_id_factory()
+        args.request_key = _explicit_request_key(request_key)
+        apply_payload = dict(payload)
+        apply_payload.update(plan_digest=plan_digest, request_key=args.request_key)
+        result = client.request(
+            "POST", "/api/v1/recipes/run-switches", apply_payload
+        )
+        result = _follow_submitted_operation(args, client, result)
+        return {
+            "plan": preview,
+            "result": result,
+            "plan_digest": plan_digest,
+            "request_key": args.request_key,
+        }
+    if command in {"preview", "apply"}:
+        payload = _read_structured(args)
+        if command == "preview":
+            return client.request("POST", "/api/v1/recipes/run-switch-plans/preview", payload)
+        payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
+        if not args.apply:
+            return {
+                "mode": "plan",
+                "apply": False,
+                "method": "POST",
+                "path": "/api/v1/recipes/run-switches",
+                "body": payload,
+            }
+        return client.request("POST", "/api/v1/recipes/run-switches", payload)
+    variant = args.model_run_stop_command
+    payload: dict[str, object] = {"run_id": args.run_id}
+    if variant == "preview":
+        return client.request("POST", "/api/v1/recipes/run-switch-stops/preview", payload)
+    payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
+    if not args.apply:
+        return {
+            "mode": "plan",
+            "apply": False,
+            "method": "POST",
+            "path": "/api/v1/recipes/run-switch-stops",
+            "body": payload,
+        }
+    return client.request("POST", "/api/v1/recipes/run-switch-stops", payload)
+
+
+_TERMINAL_OPERATION_STATES = frozenset(
+    {"succeeded", "completed", "failed", "cancelled", "canceled", "blocked", "partial"}
+)
+
+
+def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
+    progress = observed.get("progress")
+    if not isinstance(progress, Mapping):
+        return None
+    phase = progress.get("phase")
+    pieces: list[str] = []
+    if isinstance(phase, str) and phase:
+        pieces.append(f"phase: {phase}")
+    subphase = progress.get("subphase")
+    if isinstance(subphase, str) and subphase:
+        pieces.append(f"subphase: {subphase}")
+    completed = progress.get("completed_bytes")
+    total = progress.get("total_bytes")
+    if isinstance(completed, int) and not isinstance(completed, bool):
+        if isinstance(total, int) and not isinstance(total, bool):
+            pieces.append(f"bytes: {completed}/{total}")
+        else:
+            pieces.append(f"bytes: {completed}")
+    members = progress.get("members")
+    if isinstance(members, list):
+        labels = []
+        for member in members:
+            if isinstance(member, Mapping):
+                label = (
+                    member.get("display_name")
+                    or member.get("node_name")
+                    or member.get("node_id")
+                    or member.get("member_id")
+                    or member.get("id")
+                )
+                if isinstance(label, str) and label:
+                    detail = member.get("phase") or member.get("state")
+                    labels.append(
+                        f"{label} ({detail})"
+                        if isinstance(detail, str) and detail
+                        else label
+                    )
+        if labels:
+            pieces.append("sparks: " + ", ".join(labels[:32]))
+    return " | ".join(pieces) if pieces else None
+
+
+def _follow_submitted_operation(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    submission: dict[str, object],
+) -> dict[str, object]:
+    operation_id = submission.get("operation_id")
+    if not isinstance(operation_id, str) or not operation_id or args.detach:
+        return submission
+    args.operation_id = operation_id
+    timeout = max(0, min(args.timeout_seconds, 300))
+    interval = max(0.1, min(args.interval_seconds, 30.0))
+    deadline = time.monotonic() + timeout
+    last_progress: str | None = None
+    human_output = not (args.global_json or getattr(args, "json", False))
+    while True:
+        observed = client.request("GET", f"/api/v1/operations/{_quoted(operation_id)}")
+        if human_output:
+            progress = _operation_progress_line(observed)
+            if progress is not None and progress != last_progress:
+                print(progress, file=sys.stderr)
+                last_progress = progress
+        state = str(observed.get("state", observed.get("status", ""))).casefold()
+        if state in _TERMINAL_OPERATION_STATES:
+            return observed
+        if time.monotonic() >= deadline:
+            return {**observed, "timed_out": True, "operation_id": operation_id}
+        time.sleep(interval)
+
+
+def _find_model(snapshot: Mapping[str, object], requested: str) -> dict[str, object]:
+    models = snapshot.get("models")
+    if not isinstance(models, list):
+        raise TypeError("Library response contains no model identities")
+    query = requested.casefold()
+    matches: list[dict[str, object]] = []
+    for model in models:
+        if not isinstance(model, Mapping) or not isinstance(model.get("model"), Mapping):
+            continue
+        identity = model["model"]
+        publisher = str(identity.get("publisher", ""))
+        slug = str(identity.get("slug", ""))
+        digest = str(identity.get("content_sha256", ""))
+        aliases = {publisher, slug, f"{publisher}/{slug}", digest, f"{publisher}/{slug}@sha256:{digest}"}
+        if query in {alias.casefold() for alias in aliases}:
+            matches.append(dict(model))
+    if len(matches) > 1:
+        raise ValueError(json.dumps({"error": "ambiguous model", "candidates": matches}, sort_keys=True))
+    if not matches:
+        raise ValueError(f"model not found: {requested}")
+    return matches[0]
+
+
+def _cache_payload(args: argparse.Namespace) -> dict[str, object]:
+    payload = _read_structured(args, required=False)
+    for key in ("plan_digest",):
+        value = getattr(args, key, None)
+        if value is not None:
+            payload.setdefault(key, value)
+    for key in ("model_version_sha256", "recipe_revision_sha256", "recipe_revision_id"):
+        value = getattr(args, key, None)
+        if value is not None:
+            payload.setdefault(key, value)
+    return payload
+
+
+def _artifact_set_sha256(value: str) -> str:
+    if _LOWER_SHA256.fullmatch(value) is None:
+        raise ValueError("artifact set identity must be a lowercase SHA-256 digest")
+    return value
+
+
+def _run_cache_download_flow(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+    payload: dict[str, object],
+) -> dict[str, object]:
+    preview = client.request(
+        "POST", "/api/v1/model-cache/download-preview", dict(payload)
+    )
+    if args.dry_run:
+        return preview
+    plan_digest = preview.get("plan_digest")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        raise ValueError("automatic cache download preview did not return plan_digest")
+    request_key = _explicit_request_key(args.request_key or request_id_factory())
+    args.request_key = request_key
+    apply_payload = dict(payload)
+    apply_payload.update(plan_digest=plan_digest, request_key=request_key)
+    result = _follow_submitted_operation(
+        args,
+        client,
+        client.request("POST", "/api/v1/model-cache/download", apply_payload),
+    )
+    return {
+        "plan": preview,
+        "result": result,
+        "plan_digest": plan_digest,
+        "request_key": request_key,
+    }
+
+
+def _run_cache(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.cache_command
+    if command == "list":
+        return _load_pages(
+            client,
+            "/api/v1/model-cache",
+            args,
+            query=_query(search=args.search, state=args.state),
+            collection="entries",
+        )
+    if command == "show":
+        artifact_set_sha256 = _artifact_set_sha256(args.artifact_id)
+        return client.request(
+            "GET", f"/api/v1/model-cache/entries/{_quoted(artifact_set_sha256)}"
+        )
+    if command == "update":
+        artifact_set_sha256 = (
+            _artifact_set_sha256(args.artifact_id) if args.artifact_id else None
+        )
+        return client.request(
+            "GET",
+            "/api/v1/model-cache/updates",
+            query=_query(artifact_set_sha256=artifact_set_sha256),
+        )
+    if command == "operations":
+        if args.cache_operations_command == "list":
+            return _load_pages(client, "/api/v1/model-cache/operations", args, collection="operations")
+        return client.request(
+            "GET", f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}"
+        )
+    if command == "eviction":
+        variant = args.eviction_command
+        path = "/api/v1/model-cache/eviction-preview" if variant == "preview" else "/api/v1/model-cache/evict"
+        payload = _cache_payload(args)
+        if args.target_bytes is not None:
+            if args.target_bytes < 0:
+                raise ValueError("--target-bytes must be non-negative")
+            payload.setdefault("target_bytes", args.target_bytes)
+        if not any(key != "plan_digest" for key in payload):
+            raise ValueError("cache eviction requires --target-bytes or structured input")
+        if variant == "apply":
+            if not args.request_key:
+                raise ValueError("cache eviction apply requires --request-key")
+            payload.update(
+                plan_digest=args.plan_digest,
+                request_key=_explicit_request_key(args.request_key),
+            )
+            return _plan_or_request(args, client, "POST", path, payload)
+        return client.request("POST", path, payload)
+    if command == "download":
+        payload = _cache_payload(args)
+        if not payload:
+            raise ValueError("cache download requires an exact artifact input")
+        if args.download_mode is None:
+            return _run_cache_download_flow(args, client, request_id_factory, payload)
+        variant = args.download_mode
+        if variant == "preview":
+            if args.apply:
+                raise ValueError("cache download preview cannot be combined with --apply")
+            return client.request("POST", "/api/v1/model-cache/download-preview", payload)
+        if not args.apply or not args.plan_digest or not args.request_key:
+            raise ValueError("cache download apply requires --apply, --plan-digest, and --request-key")
+        payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
+        return client.request("POST", "/api/v1/model-cache/download", payload)
+    payload = _cache_payload(args)
+    payload.setdefault("artifact_set_sha256", _artifact_set_sha256(args.artifact_id))
+    variant = args.repair_mode or ("apply" if args.apply else "preview")
+    if variant == "preview":
+        if args.apply:
+            raise ValueError("cache repair preview cannot be combined with --apply")
+        return client.request("POST", "/api/v1/model-cache/repair-preview", payload)
+    if not args.apply or not args.plan_digest or not args.request_key:
+        raise ValueError("cache repair apply requires --apply, --plan-digest, and --request-key")
+    payload.update(
+        plan_digest=args.plan_digest,
+        request_key=_explicit_request_key(args.request_key),
+    )
+    return client.request("POST", "/api/v1/model-cache/repair", payload)
+
+
+def _profile_body(args: argparse.Namespace) -> dict[str, object]:
+    body = _read_structured(args)
+    if "scope" not in body:
+        raise ValueError("profile input requires an explicit scope")
+    return body
+
+
+def _run_profiles(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.profiles_command
+    base = "/api/v1/fleet-profiles"
+    if command == "list":
+        result = client.request("GET", base)
+        search = args.search.strip().casefold()
+        if search and isinstance(result.get("profiles"), list):
+            result["profiles"] = [
+                profile
+                for profile in result["profiles"]
+                if isinstance(profile, Mapping)
+                and search in str(profile.get("name", "")).casefold()
+            ]
+        return result
+    if command == "show":
+        return client.request("GET", f"{base}/{_quoted(args.profile_id)}")
+    if command in {"create", "update"}:
+        path = base if command == "create" else f"{base}/{_quoted(args.profile_id)}"
+        return client.request("POST" if command == "create" else "PUT", path, _profile_body(args))
+    if command == "duplicate":
+        body = _read_structured(args, required=False)
+        if body and "scope" not in body:
+            raise ValueError("profile duplicate input requires an explicit scope")
+        body["name"] = args.name
+        if args.description is not None:
+            body["description"] = args.description
+        if args.apply:
+            if not args.request_key:
+                raise ValueError("profile duplicate apply requires --request-key")
+            body["request_key"] = _explicit_request_key(args.request_key)
+        return _plan_or_request(
+            args,
+            client,
+            "POST",
+            f"{base}/{_quoted(args.profile_id)}/duplicate",
+            body,
+        )
+    if command == "capture-current":
+        payload = _read_structured(args, required=False)
+        payload.setdefault("name", args.name)
+        payload.setdefault("description", args.description)
+        payload.setdefault("installation_policy", args.installation_policy)
+        if args.apply:
+            if not args.request_key:
+                raise ValueError("profile capture-current apply requires --request-key")
+            payload["request_key"] = _explicit_request_key(args.request_key)
+        return _plan_or_request(args, client, "POST", f"{base}/capture-current", payload)
+    if command == "delete":
+        return _plan_or_request(args, client, "DELETE", f"{base}/{_quoted(args.profile_id)}")
+    if command == "preview":
+        return client.request("POST", f"{base}/{_quoted(args.profile_id)}/preview", {})
+    if command == "status":
+        return client.request("GET", f"{base}/{_quoted(args.profile_id)}/status")
+    if command == "application":
+        return client.request("GET", f"{base}/applications/{_quoted(args.application_id)}")
+    profile_id = _quoted(args.profile_id)
+    if command == "prepare":
+        variant = args.profile_prepare_command
+        path = f"{base}/{profile_id}/prepare/preview" if variant == "preview" else f"{base}/{profile_id}/prepare"
+        payload = {} if variant == "preview" else {
+            "plan_digest": args.plan_digest,
+            "request_key": _explicit_request_key(args.request_key),
+        }
+        if variant == "apply" and not args.apply:
+            return {
+                "mode": "plan",
+                "apply": False,
+                "method": "POST",
+                "path": path,
+                "body": payload,
+            }
+        return client.request("POST", path, payload)
+    if command == "switch":
+        switch_path = f"{base}/{profile_id}/switch"
+        if args.plan_digest is None:
+            preview = client.request("POST", f"{base}/{profile_id}/preview", {})
+            if args.dry_run:
+                return preview
+            plan_digest = preview.get("plan_digest")
+            if not isinstance(plan_digest, str) or not plan_digest:
+                raise ValueError("automatic profile switch preview did not return plan_digest")
+        else:
+            preview = None
+            plan_digest = args.plan_digest
+        request_key = args.request_key or request_id_factory()
+        request_key = _explicit_request_key(request_key)
+        args.request_key = request_key
+        payload = {
+            "plan_digest": plan_digest,
+            "request_key": request_key,
+        }
+        if not args.apply and preview is None:
+            return {
+                "mode": "plan",
+                "apply": False,
+                "method": "POST",
+                "path": switch_path,
+                "body": payload,
+            }
+        result = _follow_submitted_operation(
+            args, client, client.request("POST", switch_path, payload)
+        )
+        if preview is None:
+            return result
+        return {
+            "plan": preview,
+            "result": result,
+            "plan_digest": plan_digest,
+            "request_key": request_key,
+        }
+    raise ValueError(f"unsupported profile command: {command}")
+
+
+def _run_operations(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.operations_command
+    base = "/api/v1/operations"
+    if command == "list":
+        return _load_pages(client, base, args, query=_query(state=args.status), collection="operations")
+    operation_id = _quoted(args.operation_id)
+    if command == "show":
+        return client.request("GET", f"{base}/{operation_id}")
+    if command == "evidence":
+        result = client.request("GET", f"{base}/{operation_id}")
+        if args.file is not None:
+            args.file.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
+            return {"operation_id": args.operation_id, "file": str(args.file)}
+        return result
+    if command in {"watch", "wait"}:
+        timeout = max(0, min(args.timeout_seconds, 300))
+        interval = max(0.1, min(args.interval_seconds, 30.0))
+        deadline = time.monotonic() + timeout
+        result: dict[str, object] = {}
+        while True:
+            result = client.request(
+                "GET",
+                f"{base}/{operation_id}",
+            )
+            state = str(result.get("state", result.get("status", ""))).casefold()
+            if state in {"succeeded", "completed", "failed", "cancelled", "canceled", "blocked", "partial"} or command == "watch" or time.monotonic() >= deadline:
+                if time.monotonic() >= deadline and state not in {"succeeded", "completed", "failed", "cancelled", "canceled"}:
+                    result = {**result, "timed_out": True, "operation_id": args.operation_id}
+                return result
+            time.sleep(interval)
+    raise ValueError(f"unsupported operation command: {command}")
+
+
 def run_controller(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -2583,4 +3555,14 @@ def run_controller(
         return _run_library(args, client, request_id_factory)
     if args.command == "activity":
         return _run_activity(args, client)
+    if args.command == "models":
+        if args.models_command == "run":
+            return _run_model_run(args, client, request_id_factory)
+        return _run_models(args, client, request_id_factory)
+    if args.command == "cache":
+        return _run_cache(args, client, request_id_factory)
+    if args.command == "profiles":
+        return _run_profiles(args, client, request_id_factory)
+    if args.command == "operations":
+        return _run_operations(args, client, request_id_factory)
     raise ValueError("unsupported controller command")

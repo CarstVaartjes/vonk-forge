@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -86,6 +86,40 @@ class _Client:
             "sha256": expected_sha256,
             "size_bytes": expected_size,
         }
+
+
+class _StrictTaskClient(_Client):
+    """Fixture transport that rejects route, query, and body drift."""
+
+    def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+        allowed = {
+            ("POST", "/api/v1/fleet-profiles"): {"name", "scope", "assignments"},
+            ("POST", "/api/v1/fleet-profiles/profile-1/duplicate"): {"name", "scope", "request_key"},
+            ("POST", "/api/v1/fleet-profiles/profile-1/preview"): set(),
+            ("POST", "/api/v1/fleet-profiles/profile-1/switch"): {"plan_digest", "request_key"},
+            ("POST", "/api/v1/model-cache/eviction-preview"): {"target_bytes"},
+            ("POST", "/api/v1/model-cache/evict"): {"target_bytes", "plan_digest", "request_key"},
+            ("POST", "/api/v1/model-cache/repair-preview"): {"artifact_set_sha256"},
+            ("POST", "/api/v1/model-cache/repair"): {"artifact_set_sha256", "plan_digest", "request_key"},
+            ("GET", "/api/v1/operations"): {"limit", "state"},
+        }
+        if (method, path) not in allowed:
+            raise AssertionError(f"unexpected Controller route: {method} {path}")
+        if query is not None and set(query) != allowed[(method, path)]:
+            raise AssertionError(f"unexpected query for {path}: {query}")
+        if method == "POST" and (
+            not isinstance(payload, dict) or set(payload) != allowed[(method, path)]
+        ):
+            raise AssertionError(f"unexpected body for {path}: {payload}")
+        self.calls.append((method, path, payload, query))
+        self.extra_headers.append(extra_headers)
+        if path == "/api/v1/model-cache/eviction-preview":
+            return {"schema_version": 2, "plan_digest": "d" * 64}
+        if path == "/api/v1/model-cache/evict":
+            return {"schema_version": 2, "operation_id": "op-1"}
+        if path in {"/api/v1/model-cache/repair-preview", "/api/v1/model-cache/repair"}:
+            return {"schema_version": 2, "plan_digest": "d" * 64}
+        return {"schema_version": 2, "id": "profile-1", "profiles": []}
 
 
 def _invoke(client: _Client, *argv: str) -> tuple[int, dict[str, Any]]:
@@ -515,6 +549,150 @@ def test_telemetry_range_uses_the_web_resolution_and_point_defaults() -> None:
     assert query["maximum_points"] == 672
     assert str(query["start"]).endswith("Z")
     assert str(query["end"]).endswith("Z")
+
+
+def test_metrics_current_forwards_server_metric_units_and_provenance() -> None:
+    metrics = {
+        "schema_version": 2,
+        "sample": {
+            "metrics": [
+                {
+                    "key": "gpu.power",
+                    "scope": "device",
+                    "device_id": "gpu0",
+                    "value": 185.5,
+                    "unit": "W",
+                    "source": "dcgm",
+                    "support_status": "supported",
+                    "freshness": "fresh",
+                }
+            ]
+        },
+    }
+    client = _Client({("GET", "/api/v1/nodes/spk_node/telemetry/current"): metrics})
+
+    result, payload = _invoke(
+        client, "--json", "fleet", "metrics", "current", "spk_node"
+    )
+
+    assert result == 0
+    assert payload == metrics
+    assert client.calls == [
+        ("GET", "/api/v1/nodes/spk_node/telemetry/current", None, None)
+    ]
+
+
+def test_telemetry_subcommands_match_metrics_routes() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/nodes/spk_node/telemetry/current"): {"sample": {}},
+            ("GET", "/api/v1/nodes/spk_node/telemetry/capabilities"): {},
+            ("GET", "/api/v1/nodes/spk_node/telemetry/workloads"): {},
+        }
+    )
+    assert _invoke(client, "--json", "fleet", "telemetry", "current", "spk_node")[0] == 0
+    assert _invoke(client, "--json", "fleet", "telemetry", "capabilities", "spk_node")[0] == 0
+    assert _invoke(
+        client,
+        "--json",
+        "fleet",
+        "telemetry",
+        "workloads",
+        "spk_node",
+        "--run-id",
+        "run-1",
+    )[0] == 0
+    assert [call[1] for call in client.calls] == [
+        "/api/v1/nodes/spk_node/telemetry/current",
+        "/api/v1/nodes/spk_node/telemetry/capabilities",
+        "/api/v1/nodes/spk_node/telemetry/workloads",
+    ]
+
+
+def test_metrics_history_capabilities_and_workloads_use_exact_routes() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/nodes/spk_node/telemetry"): {
+                "samples": [{"schema_version": 2, "metrics": []}],
+            },
+            ("GET", "/api/v1/nodes/spk_node/telemetry/capabilities"): {
+                "schema_version": 2,
+                "capabilities": [],
+            },
+            ("GET", "/api/v1/nodes/spk_node/telemetry/workloads"): {
+                "schema_version": 2,
+                "workloads": [],
+            },
+        }
+    )
+
+    assert _invoke(
+        client,
+        "--json",
+        "fleet",
+        "metrics",
+        "history",
+        "spk_node",
+        "--start",
+        "2026-09-05T00:00:00Z",
+        "--end",
+        "2026-09-05T01:00:00Z",
+        "--resolution",
+        "raw",
+        "--maximum-points",
+        "100",
+    )[0] == 0
+    assert _invoke(client, "--json", "fleet", "metrics", "capabilities", "spk_node")[0] == 0
+    assert _invoke(
+        client,
+        "--json",
+        "fleet",
+        "metrics",
+        "workloads",
+        "spk_node",
+        "--run-id",
+        "run-1",
+        "--state",
+        "running",
+    )[0] == 0
+
+    assert client.calls[0][3] == {
+        "start": "2026-09-05T00:00:00Z",
+        "end": "2026-09-05T01:00:00Z",
+        "resolution": "raw",
+        "maximum_points": 100,
+    }
+    assert client.calls[1] == (
+        "GET",
+        "/api/v1/nodes/spk_node/telemetry/capabilities",
+        None,
+        None,
+    )
+    assert client.calls[2][3] == {"run_id": "run-1", "state": "running"}
+
+
+def test_metrics_export_writes_the_unchanged_server_projection(tmp_path: Path) -> None:
+    response = {
+        "samples": [{"schema_version": 2, "metrics": []}],
+        "provenance": {"source": "agent"},
+    }
+    destination = tmp_path / "metrics.json"
+    client = _Client({("GET", "/api/v1/nodes/spk_node/telemetry"): response})
+
+    result, payload = _invoke(
+        client,
+        "--json",
+        "fleet",
+        "metrics",
+        "export",
+        "spk_node",
+        "--file",
+        str(destination),
+    )
+
+    assert result == 0
+    assert payload == {"node_id": "spk_node", "file": str(destination)}
+    assert json.loads(destination.read_text()) == response
 
 
 def test_fleet_search_and_attention_sort_match_friendly_web_names() -> None:
@@ -1328,6 +1506,8 @@ def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
     [
         ("library", "compare", "one", "two", "three", "four"),
         ("library", "public", "compare", "one"),
+        ("cache", "show", "artifact-set-1"),
+        ("cache", "repair", "artifact-set-1", "preview"),
         ("fleet", "enroll", "--ttl-seconds", "901"),
         ("fleet", "re-enroll", "spk_NOT_HEX"),
         ("fleet", "profile", "node", "--display-name", "   "),
@@ -1339,6 +1519,502 @@ def test_controller_rejects_out_of_contract_values(argv: tuple[str, ...]) -> Non
 
     assert result == 2
     assert payload["error_type"] == "control_api"
+
+
+def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/model-cache"): {"schema_version": 2, "entries": []},
+            ("POST", "/api/v1/model-cache/download"): {"id": "download-1"},
+            ("POST", "/api/v1/model-cache/repair"): {"id": "repair-1"},
+            ("GET", "/api/v1/fleet-profiles"): {"profiles": []},
+            ("POST", "/api/v1/fleet-profiles"): {"id": "profile-1"},
+            ("POST", "/api/v1/fleet-profiles/profile-1/preview"): {"plan_digest": "d" * 64},
+            ("POST", "/api/v1/fleet-profiles/profile-1/switch"): {"id": "application-1"},
+        }
+    )
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        assert cli.main(("--json", "cache", "list"), control_client=client) == 0
+        assert cli.main(
+                ("--json", "cache", "download", "apply", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}',
+                 "--plan-digest", "d" * 64,
+             "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+            control_client=client,
+        ) == 0
+        assert cli.main(
+            ("--json", "cache", "repair", "a" * 64, "--plan-digest", "d" * 64,
+             "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+            control_client=client,
+        ) == 0
+        assert cli.main(("--json", "profiles", "list"), control_client=client) == 0
+        assert cli.main(
+            ("--json", "profiles", "create", "--input", '{"name":"Demo","scope":{"node_ids":[]},"assignments":[]}'),
+            control_client=client,
+        ) == 0
+        assert cli.main(("--json", "profiles", "preview", "profile-1"), control_client=client) == 0
+        assert cli.main(
+            ("--json", "profiles", "switch", "profile-1", "--plan-digest", "d" * 64,
+             "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+            control_client=client,
+        ) == 0
+    assert client.calls[0][0:2] == ("GET", "/api/v1/model-cache")
+    assert ("POST", "/api/v1/model-cache/download") in [call[0:2] for call in client.calls]
+    assert ("POST", "/api/v1/model-cache/repair") in [call[0:2] for call in client.calls]
+    assert ("POST", "/api/v1/fleet-profiles/profile-1/switch") in [call[0:2] for call in client.calls]
+
+
+def test_operations_wait_reobserves_until_terminal_without_cancelling() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/operations/op-1"): [
+                {"id": "op-1", "state": "running"},
+                {"id": "op-1", "state": "succeeded"},
+            ]
+        }
+    )
+    stdout = StringIO()
+    with redirect_stdout(stdout):
+        result = cli.main(
+            ("--json", "operations", "wait", "op-1", "--timeout-seconds", "1", "--interval-seconds", ".01",
+            ),
+            control_client=client,
+        )
+    assert result == 0
+    assert json.loads(stdout.getvalue())["state"] == "succeeded"
+    assert len(client.calls) == 2
+    assert client.calls[0][3] is None
+
+
+def test_models_show_uses_library_identity_projection() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/library"): {
+                "models": [
+                    {"model": {"publisher": "acme", "slug": "demo", "content_sha256": "a" * 64}, "recipes": []}
+                ],
+                "unlinked_recipes": [],
+            }
+        }
+    )
+    result, payload = _invoke(client, "--json", "models", "show", "acme/demo")
+    assert result == 0
+    assert payload["model"]["slug"] == "demo"
+
+
+def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/library"): {
+                "models": [
+                    {
+                        "model": {
+                            "publisher": "acme",
+                            "slug": "vision",
+                            "content_sha256": "a" * 64,
+                        },
+                        "model_capabilities": {
+                            "schema_version": 2,
+                            "state": "declared",
+                            "facts": [{"capability": "vision", "support": "supported"}],
+                            "reasons": [],
+                            "provenance": {"source": "catalog"},
+                        },
+                        "recipes": [{"capabilities": ["chat"]}],
+                    },
+                    {
+                        "model": {
+                            "publisher": "acme",
+                            "slug": "text",
+                            "content_sha256": "b" * 64,
+                            "capabilities": ["chat"],
+                        },
+                        "recipes": [{"capabilities": ["vision"]}],
+                    },
+                ],
+                "unlinked_recipes": [],
+            }
+        }
+    )
+
+    result, payload = _invoke(
+        client, "--json", "models", "list", "--capability", "vision"
+    )
+    assert result == 0
+    assert [item["model"]["slug"] for item in payload["models"]] == ["vision"]
+
+    result, payload = _invoke(
+        client, "--json", "models", "list", "--recipe-capability", "vision"
+    )
+    assert result == 0
+    assert [item["model"]["slug"] for item in payload["models"]] == ["text"]
+
+    result, payload = _invoke(
+        client, "--json", "models", "list", "--capability", "chat"
+    )
+    assert result == 0
+    assert payload["models"] == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("fleet", "current"),
+        ("fleet", "state"),
+        ("models", "discover"),
+        ("models", "compare", "a", "b"),
+        ("cache", "show", "a" * 64),
+        ("cache", "update", "a" * 64),
+        ("cache", "eviction", "preview", "--target-bytes", "100"),
+        ("cache", "eviction", "apply", "--target-bytes", "100", "--plan-digest", "d" * 64,
+         "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+        ("profiles", "show", "p"),
+        ("profiles", "update", "p", "--input", '{"name":"Demo","scope":{"node_ids":[]},"assignments":[]}'),
+        ("profiles", "duplicate", "p", "--name", "Copy"),
+        ("profiles", "capture-current", "--name", "Current"),
+        ("profiles", "delete", "p"),
+        ("profiles", "prepare", "preview", "p"),
+        ("profiles", "status", "p"),
+        ("operations", "show", "o"),
+        ("operations", "watch", "o"),
+        ("operations", "evidence", "o"),
+    ],
+)
+def test_task_oriented_command_parser_and_dispatch_contract(argv: tuple[str, ...]) -> None:
+    response: dict[str, object] = {"models": [], "unlinked_recipes": []}
+    if argv[:2] == ("models", "compare"):
+        response["models"] = [
+            {"model": {"publisher": "a", "slug": "model", "content_sha256": "a" * 64}, "recipes": []},
+            {"model": {"publisher": "b", "slug": "model", "content_sha256": "b" * 64}, "recipes": []},
+        ]
+    client = _Client({("GET", "/api/v1/library"): response})
+    result, _payload = _invoke(client, "--json", *argv)
+    assert result == 0
+
+
+@pytest.mark.parametrize(
+    ("argv", "method", "path"),
+    [
+        (("models", "run", "preview", "--input", '{"model_version_sha256":"' + "a" * 64 + '"}'), "POST", "/api/v1/recipes/run-switch-plans/preview"),
+        (("models", "run", "apply", "--input", '{}', "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switches"),
+        (("models", "run", "stop", "preview", "run-1"), "POST", "/api/v1/recipes/run-switch-stops/preview"),
+        (("models", "run", "stop", "apply", "run-1", "--plan-digest", "d" * 64, "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"), "POST", "/api/v1/recipes/run-switch-stops"),
+    ],
+)
+def test_high_level_run_routes_are_plan_bound(
+    argv: tuple[str, ...], method: str, path: str
+) -> None:
+    client = _Client()
+    result, _payload = _invoke(client, "--json", *argv)
+    assert result == 0
+    assert client.calls[-1][0:2] == (method, path)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("models", "run", "apply", "--input", '{}', "--plan-digest", "d" * 64,
+         "--request-key", "11111111-1111-4111-8111-111111111111"),
+        ("models", "run", "stop", "apply", "run-1", "--plan-digest", "d" * 64,
+         "--request-key", "11111111-1111-4111-8111-111111111111"),
+    ],
+)
+def test_high_level_apply_without_apply_flag_only_emits_plan(argv: tuple[str, ...]) -> None:
+    client = _Client()
+    result, payload = _invoke(client, "--json", *argv)
+    assert result == 0
+    assert payload["mode"] == "plan"
+    assert client.calls == []
+
+
+def test_simple_model_run_previews_then_applies_with_one_request_key() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/recipes/run-switch-plans/preview"): {
+                "schema_version": 2,
+                "plan_digest": "d" * 64,
+            },
+            ("POST", "/api/v1/recipes/run-switches"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+            },
+            ("GET", "/api/v1/operations/op-1"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+                "state": "succeeded",
+            },
+        }
+    )
+    request_key = "11111111-1111-4111-8111-111111111111"
+    run_input = {
+        "model_version_sha256": "a" * 64,
+        "recipe_revision_id": "recipe-1",
+        "spark_group": {
+            "nodes": [
+                {
+                    "node_id": "spk_11111111111111111111111111111111",
+                    "rank": 0,
+                    "role": "coordinator",
+                    "endpoint_owner": True,
+                }
+            ]
+        },
+        "alias": "demo",
+        "action": "run",
+        "retention": "retain-cached",
+        "invocation": {"prompt": "hello"},
+    }
+
+    result, payload = _invoke(
+        client,
+        "--json",
+        "models",
+        "run",
+        "--input",
+        json.dumps(run_input),
+        "--request-key",
+        request_key,
+    )
+
+    assert result == 0
+    assert payload["request_key"] == request_key
+    assert [call[1] for call in client.calls] == [
+        "/api/v1/recipes/run-switch-plans/preview",
+        "/api/v1/recipes/run-switches",
+        "/api/v1/operations/op-1",
+    ]
+    assert client.calls[1][2] == {**run_input, "plan_digest": "d" * 64, "request_key": request_key}
+
+
+def test_simple_cache_download_previews_then_applies_exact_artifacts() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/model-cache/download-preview"): {
+                "schema_version": 2,
+                "plan_digest": "d" * 64,
+            },
+            ("POST", "/api/v1/model-cache/download"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+            },
+            ("GET", "/api/v1/operations/op-1"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+                "state": "succeeded",
+            },
+        }
+    )
+    request_key = "11111111-1111-4111-8111-111111111111"
+    artifact_input = {
+        "model_version_sha256": "a" * 64,
+        "recipe_revision_id": "recipe-1",
+    }
+
+    result, payload = _invoke(
+        client,
+        "--json",
+        "cache",
+        "download",
+        "--input",
+        json.dumps(artifact_input),
+        "--request-key",
+        request_key,
+    )
+
+    assert result == 0
+    assert payload["request_key"] == request_key
+    assert client.calls[0][2] == artifact_input
+    assert client.calls[1][2] == {
+        **artifact_input,
+        "plan_digest": "d" * 64,
+        "request_key": request_key,
+    }
+
+
+def test_models_download_uses_the_same_exact_cache_routes() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/model-cache/download-preview"): {
+                "plan_digest": "d" * 64
+            },
+            ("POST", "/api/v1/model-cache/download"): {"operation_id": "op-1"},
+            ("GET", "/api/v1/operations/op-1"): {"state": "succeeded"},
+        }
+    )
+    result, _payload = _invoke(
+        client,
+        "--json",
+        "models",
+        "download",
+        "--model-version-sha256",
+        "a" * 64,
+        "--recipe-revision-id",
+        "recipe-1",
+        "--request-key",
+        "11111111-1111-4111-8111-111111111111",
+    )
+
+    assert result == 0
+    assert [call[1] for call in client.calls] == [
+        "/api/v1/model-cache/download-preview",
+        "/api/v1/model-cache/download",
+        "/api/v1/operations/op-1",
+    ]
+    assert client.calls[0][2] == {
+        "model_version_sha256": "a" * 64,
+        "recipe_revision_id": "recipe-1",
+    }
+
+
+def test_simple_profile_switch_previews_then_applies_without_manual_digest() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/fleet-profiles/p/preview"): {
+                "schema_version": 2,
+                "plan_digest": "d" * 64,
+            },
+            ("POST", "/api/v1/fleet-profiles/p/switch"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+            },
+            ("GET", "/api/v1/operations/op-1"): {
+                "schema_version": 2,
+                "operation_id": "op-1",
+                "state": "succeeded",
+            },
+        }
+    )
+    request_key = "11111111-1111-4111-8111-111111111111"
+
+    result, payload = _invoke(
+        client,
+        "--json",
+        "profiles",
+        "switch",
+        "p",
+        "--request-key",
+        request_key,
+    )
+
+    assert result == 0
+    assert payload["request_key"] == request_key
+    assert client.calls[1][2] == {
+        "plan_digest": "d" * 64,
+        "request_key": request_key,
+    }
+
+
+def test_simple_run_human_mode_reports_changed_operation_progress_to_stderr() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/recipes/run-switch-plans/preview"): {
+                "plan_digest": "d" * 64
+            },
+            ("POST", "/api/v1/recipes/run-switches"): {"operation_id": "op-1"},
+            ("GET", "/api/v1/operations/op-1"): [
+                {
+                    "state": "running",
+                    "progress": {
+                        "phase": "copying",
+                        "completed_bytes": 10,
+                        "total_bytes": 100,
+                        "total_bytes_known": True,
+                        "members": [
+                            {
+                                "member_id": "spk_1",
+                                "phase": "copying",
+                                "completed_bytes": 10,
+                                "total_bytes": 100,
+                                "state": "running",
+                            }
+                        ],
+                    },
+                },
+                {"state": "succeeded", "progress": {"phase": "running"}},
+            ],
+        }
+    )
+    stderr = StringIO()
+    with redirect_stderr(stderr):
+        result = cli.main(
+            (
+                "models",
+                "run",
+                "--input",
+                '{"model_version_sha256":"' + "a" * 64 + '"}',
+                "--request-key",
+                "11111111-1111-4111-8111-111111111111",
+            ),
+            control_client=client,
+        )
+
+    assert result == 0
+    assert "phase: copying | bytes: 10/100 | sparks: spk_1" in stderr.getvalue()
+
+
+def test_operation_progress_projects_run_switch_subphase_and_node_identity() -> None:
+    from cluster_profiles.controller_cli import _operation_progress_line
+
+    line = _operation_progress_line(
+        {
+            "progress": {
+                "phase": "transfer",
+                "subphase": "target-copy",
+                "completed_bytes": 16,
+                "total_bytes": 32,
+                "members": [
+                    {
+                        "node_id": "spk_0123456789abcdef0123456789abcdef",
+                        "state": "running",
+                    }
+                ],
+            }
+        }
+    )
+    assert line == (
+        "phase: transfer | subphase: target-copy | bytes: 16/32 | "
+        "sparks: spk_0123456789abcdef0123456789abcdef (running)"
+    )
+
+
+def test_uncertain_run_apply_error_preserves_request_key_for_reconciliation() -> None:
+    from cluster_profiles.control_client import ControlTransportError
+
+    class _UncertainClient(_Client):
+        def request(self, *args: object, **kwargs: object) -> dict[str, object]:
+            raise ControlTransportError("connection lost")
+
+    request_key = "11111111-1111-4111-8111-111111111111"
+    client = _UncertainClient()
+    result, payload = _invoke(
+        client,
+        "--json",
+        "models", "run", "apply", "--input", '{}',
+        "--plan-digest", "d" * 64, "--request-key", request_key, "--apply",
+    )
+    assert result == 2
+    assert payload["request_key"] == request_key
+    assert payload["reconcile"]["request_key"] == request_key
+
+
+def test_strict_fixture_rejects_route_query_and_body_drift() -> None:
+    client = _StrictTaskClient()
+    profile = '{"name":"Demo","scope":{"node_ids":["spk_' + "1" * 32 + '"]},"assignments":[]}'
+    request_key = "11111111-1111-4111-8111-111111111111"
+    commands = (
+        ("profiles", "create", "--input", profile),
+        ("profiles", "duplicate", "profile-1", "--name", "Copy", "--input", '{"scope":{"node_ids":[]}}', "--request-key", "11111111-1111-4111-8111-111111111111", "--apply"),
+        ("profiles", "preview", "profile-1"),
+        ("profiles", "switch", "profile-1", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
+        ("cache", "eviction", "preview", "--target-bytes", "100"),
+        ("cache", "eviction", "apply", "--target-bytes", "100", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
+        ("cache", "repair", "a" * 64, "preview"),
+        ("cache", "repair", "a" * 64, "apply", "--plan-digest", "d" * 64, "--request-key", request_key, "--apply"),
+        ("operations", "list", "--status", "running"),
+    )
+    for command in commands:
+        result, _payload = _invoke(client, "--json", *command)
+        assert result == 0
 
 
 def test_artifact_job_create_declares_hashed_bounded_local_inputs(

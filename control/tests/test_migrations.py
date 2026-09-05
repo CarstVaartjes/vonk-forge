@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 EXPECTED_BASELINE_TABLES = {
+    "artifact_distribution_assignments",
     "artifact_job_blobs",
     "artifact_job_files",
     "artifact_jobs",
@@ -44,6 +45,10 @@ EXPECTED_BASELINE_TABLES = {
     "local_recipe_revisions",
     "local_recipes",
     "managed_recipe_library_links",
+    "model_cache_artifacts",
+    "model_cache_operations",
+    "model_cache_set_artifacts",
+    "model_cache_sets",
     "node_artifacts",
     "node_inventory_snapshots",
     "node_mutation_leases",
@@ -169,6 +174,10 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0011_recipe_model_identity.py",
         "0012_recipe_run_generation.py",
         "0013_repeatable_install_plans.py",
+        "0014_fleet_profile_scope.py",
+        "0015_model_cache.py",
+        "0016_rich_telemetry_metrics.py",
+        "0017_artifact_distribution_assignments.py",
     ]
 
 
@@ -305,7 +314,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            == "0013_repeatable_install_plans"
+            == "0017_artifact_distribution_assignments"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -435,7 +444,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0013_repeatable_install_plans"
+            == "0017_artifact_distribution_assignments"
         )
 
 
@@ -517,7 +526,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0013_repeatable_install_plans"
+            == "0017_artifact_distribution_assignments"
         )
 
 

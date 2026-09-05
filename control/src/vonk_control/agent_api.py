@@ -88,11 +88,13 @@ from .recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from .source_bundles import SourceBundleError, SourceBundleStore
+from .distribution import DistributionError, DistributionService
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
     TelemetrySampleInput,
 )
+from .telemetry_contract import TelemetryMetrics, empty_telemetry_metrics
 from .workload_helper_authority import (
     WorkloadHelperAuthorityError,
     WorkloadHelperAuthorityService,
@@ -145,6 +147,10 @@ class AgentApiServices:
     host_runtime_authority: HostRuntimeAuthorityService | None = None
     fabric_policy: ManagementAddressPolicy | None = None
     bootstrap: EnrollmentBootstrapConfig | None = None
+    # Optional production adapter. The run/profile worker registers exact
+    # assignments; the source itself remains owned by the NAS cache worker and
+    # recipe image store.
+    distribution: DistributionService | None = None
 
 
 class EnrollmentRateLimiter:
@@ -607,6 +613,10 @@ class TelemetrySampleRequest(BaseModel):
     )
     gap_samples: int = Field(ge=0, le=2**63 - 1, strict=True)
     details: TelemetryDetailsRequest = Field(default_factory=TelemetryDetailsRequest)
+    # ``metrics`` is additive to the active telemetry wire contract.  A
+    # scalar-only sample remains valid for an already enrolled agent while
+    # native agents progressively publish the richer contract.
+    metrics: TelemetryMetrics = Field(default_factory=empty_telemetry_metrics)
 
     @field_validator("boot_id")
     @classmethod
@@ -1781,6 +1791,7 @@ def install_agent_routes(
                                 sample.details.accelerator_performance_state
                             ),
                         ),
+                        metrics=sample.metrics,
                     )
                     for sample in body.samples
                 ),
@@ -2399,7 +2410,11 @@ def install_agent_routes(
                 status.HTTP_206_PARTIAL_CONTENT,
             )
         length = end - start + 1
-        headers = {"Accept-Ranges": "bytes", "Content-Length": str(length)}
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+            "ETag": f'"sha256:{sha256}"',
+        }
         if code == status.HTTP_206_PARTIAL_CONTENT:
             headers["Content-Range"] = f"bytes {start}-{end}/{size}"
         if recipe_image:
@@ -2420,6 +2435,110 @@ def install_agent_routes(
             snapshot,
             start,
             length,
+            status_code=code,
+            headers=headers,
+            media_type="application/octet-stream",
+        )
+
+    def _distribution_error(error: DistributionError) -> HTTPException:
+        if error.code in {
+            "distribution.unassigned",
+            "distribution.wrong_node",
+            "distribution.expired",
+        }:
+            return HTTPException(status_code=403, detail=error.detail)
+        if error.code == "distribution.object_invalid":
+            return HTTPException(status_code=404, detail=error.detail)
+        return HTTPException(status_code=503, detail=error.detail)
+
+    @agent.get(
+        "/distribution/manifests/{plan_digest}",
+        operation_id="getAgentDistributionManifest",
+    )
+    def distribution_manifest(plan_digest: str, request: Request) -> Response:
+        """Return the exact model plus OCI object set authorized for this node."""
+        _scope_identity(request)
+        required = _require_services(services)
+        identity = _authenticated_identity(request, required)
+        if required.distribution is None:
+            raise HTTPException(status_code=503, detail="agent distribution is unavailable")
+        try:
+            body = required.distribution.manifest(
+                node_id=identity.node_id,
+                plan_digest=plan_digest,
+            )
+        except DistributionError as error:
+            raise _distribution_error(error) from None
+        return Response(
+            content=canonical_message(body),
+            media_type="application/json",
+            headers={"Cache-Control": "no-store", "ETag": f'"plan:{plan_digest}"'},
+        )
+
+    @agent.get(
+        "/distribution/objects/{sha256}",
+        operation_id="downloadAgentDistributionObject",
+    )
+    def distribution_object(sha256: str, request: Request) -> Response:
+        """Stream one assigned immutable object with safe single-range resume."""
+        _scope_identity(request)
+        required = _require_services(services)
+        identity = _authenticated_identity(request, required)
+        if required.distribution is None:
+            raise HTTPException(status_code=503, detail="agent distribution is unavailable")
+        plan_digest = request.query_params.get("plan_digest")
+        if plan_digest is None:
+            raise HTTPException(status_code=403, detail="assignment is required")
+        try:
+            _assignment, object_spec, opened = required.distribution.open_object(
+                node_id=identity.node_id,
+                plan_digest=plan_digest,
+                digest=sha256,
+            )
+        except DistributionError as error:
+            raise _distribution_error(error) from None
+        etag = f'"sha256:{object_spec.sha256}"'
+        if_range = request.headers.get("if-range")
+        requested_range = request.headers.get("range")
+        # A mismatched If-Range deliberately degrades to a complete response,
+        # allowing a client with an old checkpoint to safely restart.
+        if requested_range is not None and if_range not in {None, etag, f"sha256:{object_spec.sha256}"}:
+            requested_range = None
+        try:
+            selected = _range(requested_range, opened.size, required.max_range_bytes)
+        except HTTPException:
+            opened.stream.close()
+            raise
+        if selected is None:
+            start, length, code = 0, opened.size, status.HTTP_200_OK
+        else:
+            start, end = selected
+            start, length, code = start, end - start + 1, status.HTTP_206_PARTIAL_CONTENT
+        if start:
+            opened.stream.seek(start)
+
+        def chunks():
+            remaining = length
+            try:
+                while remaining:
+                    chunk = opened.stream.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        raise RuntimeError("verified object was truncated during transfer")
+                    remaining -= len(chunk)
+                    yield chunk
+            finally:
+                opened.stream.close()
+
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-store",
+            "Content-Length": str(length),
+            "ETag": etag,
+        }
+        if code == status.HTTP_206_PARTIAL_CONTENT:
+            headers["Content-Range"] = f"bytes {start}-{start + length - 1}/{opened.size}"
+        return StreamingResponse(
+            chunks(),
             status_code=code,
             headers=headers,
             media_type="application/octet-stream",

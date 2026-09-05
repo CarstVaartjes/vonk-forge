@@ -32,6 +32,7 @@ from vonk_control.models import (
     ResourceReservation,
     RunNode,
 )
+from vonk_control.catalog_contract import catalog_content_sha256, validate_catalog_document
 from vonk_control.recipe_contract import recipe_content_sha256, validate_recipe
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
@@ -739,7 +740,8 @@ def test_root_operational_summaries_are_exact_bounded_and_fair_per_recipe() -> N
     summaries = {item.slug: item for model in snapshot.models for item in model.recipes}
     alpha = summaries["alpha-history-heavy"]
     bravo_summary = summaries["bravo-current"]
-    assert len(statements) == 6
+    # One bounded catalog-authority read supplies exact model-version facts.
+    assert len(statements) == 7
     installation_window = next(
         statement
         for statement in statements
@@ -1271,7 +1273,8 @@ def test_detail_uses_a_fixed_set_query_count_instead_of_candidate_services() -> 
     second = list(statements)
     event.remove(engine, "before_cursor_execute", record)
 
-    assert len(first) == len(second) == 22
+    # The fixed set includes one exact catalog-authority read for model facts.
+    assert len(first) == len(second) == 23
     for table in (
         "local_recipes",
         "cluster_mappings",
@@ -1326,6 +1329,197 @@ def test_valid_long_v1_visual_fields_are_bounded_without_profile_projection() ->
     assert detail.topology.name == "solo"
     assert detail.placement[0].topology_name == "solo"
     assert "recipe.visual_text_truncated" in {item.code for item in detail.reasons}
+
+
+def test_a06_model_capabilities_stay_separate_from_recipe_exposure() -> None:
+    """Recipe interfaces stay separate while model capability authority is absent."""
+
+    _engine, sessions = _database()
+    # openai is the recipe's chat surface; image-job is its image/vision surface.
+    text_recipe = _document(family="a06-v1", title="A06 text recipe")
+    text_recipe["interfaces"][0]["adapter"] = "openai"
+    vision_recipe = _document(family="a06-v1", title="A06 vision recipe")
+    vision_recipe["interfaces"][0]["adapter"] = "image-job"
+    vision_recipe["interfaces"] = [
+        {
+            "adapter": "image-job",
+            "path": "/outputs",
+            "output": {
+                "path": "/outputs",
+                "max_total_bytes": 512 * 1024**2,
+                "slots": [
+                    {
+                        "id": "image",
+                        "label": "Generated image",
+                        "description": "The generated PNG image.",
+                        "media_types": ["image/png"],
+                        "extensions": [".png"],
+                        "min_files": 1,
+                        "max_files": 1,
+                        "max_file_bytes": 512 * 1024**2,
+                        "max_total_bytes": 512 * 1024**2,
+                    }
+                ],
+            },
+        }
+    ]
+    vision_recipe["runtime"]["lifecycle"]["readiness"] = {
+        "strategy": "endpoint-owner",
+        "path": "/outputs",
+        "timeout_seconds": 3_600,
+    }
+    vision_recipe["validation"]["validators"] = [
+        {"interface": "image-job", "checks": ["job.completed"]}
+    ]
+    second_variant = _document(family="a06-v2", title="A06 second variant")
+    second_variant["interfaces"] = deepcopy(vision_recipe["interfaces"])
+    second_variant["runtime"]["lifecycle"]["readiness"] = deepcopy(
+        vision_recipe["runtime"]["lifecycle"]["readiness"]
+    )
+    second_variant["validation"]["validators"] = deepcopy(
+        vision_recipe["validation"]["validators"]
+    )
+    unknown_variant = _document(family="a06-unknown", title="A06 unknown variant")
+    unknown_variant["interfaces"] = deepcopy(vision_recipe["interfaces"])
+    unknown_variant["runtime"]["lifecycle"]["readiness"] = deepcopy(
+        vision_recipe["runtime"]["lifecycle"]["readiness"]
+    )
+    unknown_variant["validation"]["validators"] = deepcopy(
+        vision_recipe["validation"]["validators"]
+    )
+
+    def model_document(document: dict) -> dict:
+        catalog = json.loads(
+            (Path(__file__).parent / "fixtures/catalog/model-version-v1-minimal.json")
+            .read_text()
+        )
+        catalog["identity"]["slug"] = document["model"]["slug"]
+        catalog["version"] = document["model"]["slug"]
+        if document["model"]["slug"] == "a06-v2":
+            catalog["metadata"]["title"] = "A06 GGUF variant"
+            catalog["metadata"]["tags"] = ["synthetic", "vision", "gguf"]
+            catalog["format"] = {
+                "container": "gguf",
+                "precision": "q4_k_m",
+                "quantization": "q4_k_m",
+            }
+            catalog["artifacts"][0].update(
+                {
+                    "id": "weights-gguf",
+                    "path": "model-q4_k_m.gguf",
+                    "kind": "http.file",
+                    "repository": "https://models.example.test/a06-v2.gguf",
+                    "download_bytes": 2_048,
+                    "installed_bytes": 3_072,
+                }
+            )
+            catalog["sizes"] = {"download_bytes": 2_048, "installed_bytes": 3_072}
+        validate_catalog_document(catalog)
+        digest = catalog_content_sha256(catalog)
+        document["model"]["content_sha256"] = digest
+        catalog["identity"]["slug"] = document["model"]["slug"]
+        catalog["identity"]["publisher"] = document["model"]["publisher"]
+        catalog["model"]["content_sha256"] = "b" * 64
+        validate_catalog_document(catalog)
+        assert catalog_content_sha256(catalog) == digest
+        return catalog
+
+    with sessions.begin() as session:
+        _recipe(
+            session,
+            701,
+            slug="a06-text",
+            title="A06 text",
+            document=text_recipe,
+            model_version_document=model_document(text_recipe),
+        )
+        _recipe(
+            session,
+            702,
+            slug="a06-vision",
+            title="A06 vision",
+            document=vision_recipe,
+            model_version_document=model_document(vision_recipe),
+        )
+        _recipe(
+            session,
+            703,
+            slug="a06-second-variant",
+            title="A06 second variant",
+            document=second_variant,
+            model_version_document=model_document(second_variant),
+        )
+        _recipe(
+            session,
+            704,
+            slug="a06-unknown",
+            title="A06 unknown",
+            document=unknown_variant,
+            model_version_document=model_document(unknown_variant),
+        )
+
+    snapshot = _projection(sessions).list()
+    models = {model.model.slug: model for model in snapshot.models}
+    first = models["a06-v1"]
+    assert first.model_capabilities.schema_version == 2
+    assert first.model_capabilities.state == "unknown"
+    assert first.model_capabilities.facts == []
+    assert "model.capabilities_unknown" in {
+        reason.code for reason in first.model_capabilities.reasons
+    }
+    recipes = {recipe.slug: recipe for recipe in first.recipes}
+    assert [
+        fact.capability for fact in recipes["a06-text"].recipe_capabilities.facts
+    ] == ["openai"]
+    assert [
+        fact.capability for fact in recipes["a06-vision"].recipe_capabilities.facts
+    ] == ["image-job"]
+    assert first.model_capabilities.provenance is not None
+    assert first.model_capabilities.provenance.content_sha256 == first.model.content_sha256
+    assert first.model_version is not None
+    assert first.model_version.schema_version == 2
+    assert first.model_version.state == "resolved"
+    assert first.model_version.identity.slug == "a06-v1"
+    assert first.model_version.metadata is not None
+    assert first.model_version.metadata.title == "Synthetic Tiny FP16"
+    assert first.model_version.format is not None
+    assert first.model_version.format.container == "safetensors"
+    assert first.model_version.sizes is not None
+    assert first.model_version.sizes.download_bytes == 1_024
+    assert first.model_version.artifacts[0].path == "model.safetensors"
+    assert first.model_version.model is not None
+    assert first.model_version.model.slug == "synthetic-tiny"
+    assert first.model_version.family is None
+    assert "model.definition_metadata_unknown" in {
+        reason.code for reason in first.model_version.reasons
+    }
+    second_model = models["a06-v2"]
+    assert second_model.model_version is not None
+    assert second_model.model_version.format is not None
+    assert second_model.model_version.format.container == "gguf"
+    assert second_model.model_version.sizes is not None
+    assert second_model.model_version.sizes.installed_bytes == 3_072
+    assert second_model.model_version.artifacts[0].id == "weights-gguf"
+    assert models["a06-v2"].model_capabilities.state == "unknown"
+    second_recipe = models["a06-v2"].recipes[0]
+    assert [
+        fact.capability for fact in second_recipe.recipe_capabilities.facts
+    ] == ["image-job"]
+    assert models["a06-unknown"].model_capabilities.state == "unknown"
+
+    text_detail = _projection(sessions).detail(_uuid(701))
+    assert text_detail.model_capabilities.state == "unknown"
+    assert [
+        fact.capability for fact in text_detail.recipe_capabilities.facts
+    ] == ["openai"]
+    assert text_detail.model_capabilities.facts == []
+    assert text_detail.model_version is not None
+    assert text_detail.model_version.identity == first.model_version.identity
+    # Recipe exposure does not turn the model support status green.
+    assert text_detail.recipe_capabilities.state == "declared"
+    assert json.dumps(snapshot.model_dump(mode="json"), sort_keys=True) == json.dumps(
+        _projection(sessions).list().model_dump(mode="json"), sort_keys=True
+    )
 
 
 def test_visual_projection_exposes_sorted_signed_artifact_include_paths() -> None:
@@ -1901,7 +2095,7 @@ def test_active_run_lineage_precedes_512_newer_operational_rows_without_more_que
     detail = _projection(sessions).detail(_uuid(64))
     event.remove(engine, "before_cursor_execute", record)
 
-    assert len(statements) == 22
+    assert len(statements) == 23
     assert active["run_id"] in {item.run_id for item in detail.operational_state.runs}
     assert active["installation_id"] in {
         item.installation_id for item in detail.operational_state.installations
