@@ -24,6 +24,7 @@ on:
       - install/**
       - packaging/**
       - pyproject.toml
+      - uv.lock
       - rust/crates/vonk-agent-helper/**
       - rust/crates/vonk-agent-protocol/**
       - rust/crates/vonk-agent/**
@@ -39,8 +40,12 @@ on:
       - scripts/dev-image-acceptance-receipt
       - scripts/dev-image-metadata
       - scripts/install-release-publication
+      - scripts/resolve-publication-producer
       - scripts/materialize-agent-tools
       - scripts/promote-image-aliases
+      - scripts/promote-accepted-channel
+      - scripts/render-accepted-compose-overlay
+      - scripts/verify-production-alias-postconditions
       - scripts/publish-immutable-image
       - scripts/render-dev-compose
       - scripts/render-production-compose

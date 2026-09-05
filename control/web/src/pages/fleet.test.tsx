@@ -324,7 +324,7 @@ test("keeps selected detail and focus while a keyed node card updates", async ()
 
   act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: sample("node-a", "2026-08-15T11:59:59Z", 73)}, "6"));
 
-  expect(screen.getByRole("img", {name: "GPU 24h trend"})).toHaveAccessibleDescription(/Latest 73%/);
+  expect(screen.getByRole("img", {name: "GPU 24h trend has only one reported sample"})).toHaveTextContent("Current sample only");
   expect(screen.getByRole("complementary", {name: "Alpha details"})).toBeVisible();
   expect(close).toHaveFocus();
 });

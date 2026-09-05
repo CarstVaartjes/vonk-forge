@@ -10,8 +10,15 @@ from pathlib import PurePosixPath
 
 from ..runtime_environment import distribution_allowed_environment
 from ..runtime_writable_paths import (
+    effective_environment,
     reject_recipe_environment,
+    telemetry_contract,
+    validate_telemetry,
+)
+from ..runtime_writable_paths import (
     validate_paths as validate_runtime_paths,
+)
+from ..runtime_writable_paths import (
     writable_paths as engine_writable_paths,
 )
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
@@ -27,6 +34,18 @@ _SHELL_LAUNCHERS = frozenset({"env", "busybox", "sudo", "doas"})
 _CUSTOM_ADAPTER_BIN = PurePosixPath("/opt/vonk/adapters/bin")
 _IMAGE = re.compile(r"^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$")
 _SOCKET_NAMES = ("docker.sock", "podman.sock", "containerd.sock", "cri-dockerd.sock")
+_BUILTIN_HARNESS_SLUGS = frozenset(
+    {
+        "vllm",
+        "sglang",
+        "tensorrt-llm",
+        "llama-cpp",
+        "ds4",
+        "diffusers",
+        "comfyui",
+        "pytorch-pipeline",
+    }
+)
 
 
 class HarnessCompileError(ValueError):
@@ -116,6 +135,8 @@ def validate_projection(projection: HarnessProjection) -> None:
         or projection.capabilities
     ):
         raise HarnessCompileError("harness projection must drop all capabilities")
+    if type(projection.read_only_root) is not bool or not projection.read_only_root:
+        raise HarnessCompileError("harness projection requires a read-only root")
     if (
         type(projection.environment) is not tuple
         or any(
@@ -131,7 +152,21 @@ def validate_projection(projection: HarnessProjection) -> None:
         != len(projection.environment)
     ):
         raise HarnessCompileError("harness projection environment is invalid")
-    if projection.writable_paths:
+    enforce_engine_contract = (
+        projection.slug in _BUILTIN_HARNESS_SLUGS
+        and _is_builtin_launch_command(projection.slug, projection.command)
+    )
+    if enforce_engine_contract:
+        if projection.telemetry is None:
+            raise HarnessCompileError("built-in harness telemetry is missing")
+        try:
+            validate_telemetry(
+                projection.slug, projection.telemetry, dict(projection.environment)
+            )
+        except (TypeError, ValueError) as error:
+            raise HarnessCompileError(str(error)) from error
+        _validate_engine_launch(projection.slug, projection.command)
+    if enforce_engine_contract or projection.writable_paths:
         try:
             validate_runtime_paths(
                 projection.slug,
@@ -339,6 +374,10 @@ def compile_environment(
         allowed_names = allowlist | distribution_allowed_environment(
             distribution.get("capabilities")
         )
+        if engine_slug is not None:
+            allowed_names |= {
+                name for name, _value in telemetry_contract(engine_slug).environment
+            }
     except (TypeError, ValueError) as exc:
         raise HarnessCompileError(str(exc)) from exc
     result: list[tuple[str, str]] = []
@@ -657,6 +696,11 @@ def projection(
     )
     runtime_paths = engine_writable_paths(slug)
     validate_runtime_paths(slug, runtime_paths, dict(environment))
+    try:
+        effective = effective_environment(slug, environment, distribution)
+    except (TypeError, ValueError) as error:
+        raise HarnessCompileError(str(error)) from error
+    validate_runtime_paths(slug, runtime_paths, dict(effective), distribution)
     value = HarnessProjection(
         slug=slug,
         contract_version=1,
@@ -672,10 +716,58 @@ def projection(
             "/run/vonk/outputs", "/outputs", read_only=False, isolated=True
         ),
         input_mount=input_mount,
-        environment=environment,
+        environment=effective,
         writable_paths=runtime_paths,
+        telemetry=telemetry_contract(slug),
+        read_only_root=True,
     )
     return value
+
+
+_ENGINE_LAUNCH_PREFIXES: dict[str, tuple[str, ...]] = {
+    "vllm": ("/opt/vonk/bin/vllm", "serve"),
+    "sglang": ("/opt/vonk/bin/sglang-serve",),
+    "tensorrt-llm": ("/usr/local/bin/trtllm-serve", "serve", "/models"),
+    "llama-cpp": ("/opt/vonk/bin/llama-server",),
+    "ds4": ("/opt/vonk/bin/ds4-serve",),
+    "diffusers": ("/opt/vonk/bin/diffusers-job",),
+    "comfyui": ("/opt/vonk/bin/comfyui-job",),
+    "pytorch-pipeline": ("/opt/vonk/bin/pytorch-pipeline",),
+}
+
+
+def _validate_engine_launch(slug: str, command: tuple[str, ...]) -> None:
+    """Check the stable wrapper boundary while retaining recipe arguments."""
+    prefix = _ENGINE_LAUNCH_PREFIXES[slug]
+    if command[: len(prefix)] != prefix:
+        raise HarnessCompileError("built-in harness launch wrapper is invalid")
+    if slug == "vllm" and (
+        len(command) < 3
+        or not (command[2] == "/models" or command[2].startswith("/models/"))
+    ):
+        raise HarnessCompileError("vLLM launch must name its model mount")
+    if slug in {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4"}:
+        if "--host" not in command or "--port" not in command:
+            raise HarnessCompileError("serving harness launch lacks host and port")
+    else:
+        try:
+            output_index = command.index("--output-dir")
+        except ValueError as error:
+            raise HarnessCompileError("job harness launch lacks output directory") from error
+        if output_index + 1 >= len(command) or command[output_index + 1] != "/outputs":
+            raise HarnessCompileError("job harness output directory is invalid")
+
+
+def _is_builtin_launch_command(slug: str, command: tuple[str, ...]) -> bool:
+    # Synthetic test projections use a deliberately relative ``serve`` argv.
+    # Every trusted executable projection is absolute, so trusted builtin
+    # variants still receive the same central writable/security checks even
+    # when their wrapper prefix differs from the stock compiler.
+    return (
+        slug in _BUILTIN_HARNESS_SLUGS
+        and command[0].startswith("/")
+        and not command[0].startswith(f"{_CUSTOM_ADAPTER_BIN}/")
+    )
 
 
 def model_artifact_mounts(

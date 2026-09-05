@@ -11,6 +11,7 @@ on:
       - deploy/compose/**
       - inventory/wheels/**
       - pyproject.toml
+      - uv.lock
       - schemas/global/**
       - scripts/accept-development-image-archive
       - scripts/dev-image-acceptance-receipt
@@ -28,169 +29,6 @@ permissions:
   contents: read
 
 jobs:
-  build-and-accept:
-    name: Test and accept main images
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    concurrency:
-      group: vonk-forge-development-image-acceptance
-      cancel-in-progress: true
-    permissions:
-      actions: read
-      contents: read
-    outputs:
-      commit: ${{ steps.metadata.outputs.commit }}
-      immutable_tag: ${{ steps.metadata.outputs.immutable_tag }}
-      dev_alias: ${{ steps.metadata.outputs.dev_alias }}
-      api_image: ${{ steps.metadata.outputs.api_image }}
-      worker_image: ${{ steps.metadata.outputs.worker_image }}
-      litellm_image: ${{ steps.metadata.outputs.litellm_image }}
-      artifact_name: ${{ steps.metadata.outputs.artifact_name }}
-    steps:
-      - name: Check out full main history
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Verify exact main tip
-        id: metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --force --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main
-          scripts/dev-image-metadata \
-            "$GITHUB_REF" "$GITHUB_SHA" \
-            "$(git rev-parse --verify refs/remotes/origin/main^{commit})" \
-            >> "$GITHUB_OUTPUT"
-
-      - parallel:
-          - name: Scan public image source inputs
-            shell: bash
-            run: scripts/verify-public-image-inputs
-
-          - name: Wait for exact OCI acceptance evidence
-            shell: bash
-            env:
-              GH_TOKEN: ${{ github.token }}
-            run: |
-              set -euo pipefail
-              evidence_root="$RUNNER_TEMP/accepted-evidence"
-              install -d -m 0700 "$evidence_root"
-              for attempt in $(seq 1 600); do
-                if ! response=$(gh api \
-                  "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100"); then
-                  sleep 5
-                  continue
-                fi
-                ready=1
-                for role in api worker hermes litellm; do
-                  artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-                  count=$(jq --arg name "$artifact_name" \
-                    '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
-                    <<< "$response")
-                  if [[ "$count" == 0 ]]; then
-                    ready=0
-                  else
-                    [[ "$count" == 1 ]]
-                  fi
-                done
-                if ((ready == 1)); then
-                  download_complete=1
-                  for role in api worker hermes litellm; do
-                    artifact_name="development-role-receipt-$role-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-                    if ! gh run download "$GITHUB_RUN_ID" \
-                      --repo "$GITHUB_REPOSITORY" \
-                      --name "$artifact_name" --dir "$evidence_root"; then
-                      download_complete=0
-                      break
-                    fi
-                  done
-                  if ((download_complete == 1)); then
-                    exit 0
-                  fi
-                  rm -f -- "$evidence_root"/*.role-receipt.json
-                fi
-                sleep 5
-              done
-              echo "accepted development image evidence was not published in time" >&2
-              exit 1
-
-      - name: Confirm parallel source and image prerequisites completed
-        shell: bash
-        run: |
-          set -euo pipefail
-          for role in api worker hermes litellm; do
-            test -f "$RUNNER_TEMP/accepted-evidence/$role.role-receipt.json"
-          done
-
-      - name: Validate accepted image evidence
-        id: images
-        shell: bash
-        run: |
-          set -euo pipefail
-          scripts/dev-image-acceptance-receipt collect \
-            "$RUNNER_TEMP/accepted-evidence" "$GITHUB_SHA" "$GITHUB_RUN_ID" \
-            "$GITHUB_RUN_ATTEMPT" \
-            >> "$GITHUB_OUTPUT"
-
-      - name: Render and validate disposable development Compose artifacts
-        shell: bash
-        env:
-          API_DIGEST: ${{ steps.images.outputs.api_digest }}
-          HERMES_DIGEST: ${{ steps.images.outputs.hermes_digest }}
-          LITELLM_DIGEST: ${{ steps.images.outputs.litellm_digest }}
-          WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
-        run: |
-          set -euo pipefail
-          publication_root="$RUNNER_TEMP/accepted"
-          install -d -m 0700 "$publication_root"
-          hermes_image="ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$HERMES_DIGEST"
-          litellm_image="ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-$GITHUB_SHA@$LITELLM_DIGEST"
-          scripts/render-dev-compose \
-            --template deploy/compose/compose.yaml \
-            --output "$publication_root/docker-compose.pinned.yml" \
-            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$API_DIGEST" \
-            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$WORKER_DIGEST" \
-            --hermes-image "$hermes_image" \
-            --litellm-image "$litellm_image" \
-            --channel pinned
-          scripts/render-dev-compose \
-            --template deploy/compose/compose.yaml \
-            --output "$publication_root/docker-compose.dev.yml" \
-            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev" \
-            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev" \
-            --hermes-image "$hermes_image" \
-            --litellm-image "$litellm_image" \
-            --channel dev
-          docker compose \
-            --env-file deploy/compose/tests/test.env \
-            -f "$publication_root/docker-compose.pinned.yml" config -q
-          docker compose \
-            --env-file deploy/compose/tests/test.env \
-            -f "$publication_root/docker-compose.dev.yml" config -q
-
-      - name: Create checksum-bound acceptance receipt
-        shell: bash
-        run: |
-          set -euo pipefail
-          scripts/dev-image-acceptance-receipt aggregate \
-            "$RUNNER_TEMP/accepted/acceptance-receipt.json" \
-            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
-            "$RUNNER_TEMP/accepted-evidence" "$RUNNER_TEMP/accepted"
-
-      - name: Upload accepted receipt and Compose inputs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: accepted-development-receipt-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          if-no-files-found: error
-          retention-days: 1
-          path: |
-            ${{ runner.temp }}/accepted/acceptance-receipt.json
-            ${{ runner.temp }}/accepted/docker-compose.pinned.yml
-            ${{ runner.temp }}/accepted/docker-compose.dev.yml
-
   publish-development-images:
     name: Build once and publish accepted main images
     runs-on: ubuntu-24.04
@@ -198,6 +36,7 @@ jobs:
     concurrency:
       group: vonk-forge-development-image-publication
       cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       attestations: write
@@ -222,6 +61,9 @@ jobs:
             "$GITHUB_REF" "$GITHUB_SHA" \
             "$(git rev-parse --verify refs/remotes/origin/main^{commit})" \
             >> "$GITHUB_OUTPUT"
+
+      - name: Scan public image source inputs
+        run: scripts/verify-public-image-inputs
 
       - name: Set up ARM64 emulation
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -453,6 +295,53 @@ jobs:
               retention-days: 1
               path: ${{ runner.temp }}/litellm.role-receipt.json
 
+      - name: Validate accepted image evidence
+        id: images
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/dev-image-acceptance-receipt collect \
+            "$RUNNER_TEMP" "$GITHUB_SHA" "$GITHUB_RUN_ID" \
+            "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Render and validate exact candidate Compose artifacts
+        shell: bash
+        env:
+          API_DIGEST: ${{ steps.images.outputs.api_digest }}
+          HERMES_DIGEST: ${{ steps.images.outputs.hermes_digest }}
+          LITELLM_DIGEST: ${{ steps.images.outputs.litellm_digest }}
+          WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "$RUNNER_TEMP/accepted"
+          scripts/render-dev-compose --template deploy/compose/compose.yaml \
+            --output "$RUNNER_TEMP/accepted/docker-compose.pinned.yml" \
+            --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$API_DIGEST" \
+            --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$WORKER_DIGEST" \
+            --hermes-image "ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$HERMES_DIGEST" \
+            --litellm-image "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-$GITHUB_SHA@$LITELLM_DIGEST" \
+            --channel pinned
+          scripts/render-dev-compose --template deploy/compose/compose.yaml \
+            --output "$RUNNER_TEMP/accepted/docker-compose.dev.yml" \
+            --api-image ghcr.io/carstvaartjes/vonk-forge-api:dev \
+            --worker-image ghcr.io/carstvaartjes/vonk-forge-worker:dev \
+            --hermes-image "ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$HERMES_DIGEST" \
+            --litellm-image "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-$GITHUB_SHA@$LITELLM_DIGEST" \
+            --channel dev
+          docker compose --env-file deploy/compose/tests/test.env \
+            -f "$RUNNER_TEMP/accepted/docker-compose.pinned.yml" config -q
+          docker compose --env-file deploy/compose/tests/test.env \
+            -f "$RUNNER_TEMP/accepted/docker-compose.dev.yml" config -q
+
+      - name: Create checksum-bound acceptance receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/dev-image-acceptance-receipt aggregate \
+            "$RUNNER_TEMP/accepted/acceptance-receipt.json" \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$RUNNER_TEMP" "$RUNNER_TEMP/accepted"
+
       - parallel:
           - name: Verify exact digest-only API manifest and attestations
             shell: bash
@@ -482,50 +371,13 @@ jobs:
               ghcr.io/carstvaartjes/vonk-forge-litellm
               "${{ steps.build_litellm.outputs.digest }}" - "$GITHUB_SHA"
 
-          - name: Wait for checksum-bound acceptance receipt
-            shell: bash
-            env:
-              GH_TOKEN: ${{ github.token }}
-            run: |
-              set -euo pipefail
-              receipt_name="accepted-development-receipt-$GITHUB_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-              receipt_root="$RUNNER_TEMP/accepted-receipt"
-              install -d -m 0700 "$receipt_root"
-              for attempt in $(seq 1 60); do
-                if ! response=$(gh api \
-                  "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100"); then
-                  sleep 5
-                  continue
-                fi
-                count=$(jq --arg name "$receipt_name" \
-                  '[.artifacts[] | select(.name == $name and .expired == false)] | length' \
-                  <<< "$response")
-                if [[ "$count" == 1 ]]; then
-                  if gh run download "$GITHUB_RUN_ID" \
-                    --repo "$GITHUB_REPOSITORY" \
-                    --name "$receipt_name" --dir "$receipt_root"; then
-                    exit 0
-                  fi
-                  rm -f -- \
-                    "$receipt_root/acceptance-receipt.json" \
-                    "$receipt_root/docker-compose.pinned.yml" \
-                    "$receipt_root/docker-compose.dev.yml"
-                  sleep 5
-                  continue
-                fi
-                [[ "$count" == 0 ]]
-                sleep 5
-              done
-              echo "accepted development image receipt was not published in time" >&2
-              exit 1
-
       - name: Confirm accepted inputs
         shell: bash
         run: |
           set -euo pipefail
-          test -f "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json"
-          test -f "$RUNNER_TEMP/accepted-receipt/docker-compose.pinned.yml"
-          test -f "$RUNNER_TEMP/accepted-receipt/docker-compose.dev.yml"
+          test -f "$RUNNER_TEMP/accepted/acceptance-receipt.json"
+          test -f "$RUNNER_TEMP/accepted/docker-compose.pinned.yml"
+          test -f "$RUNNER_TEMP/accepted/docker-compose.dev.yml"
           command -v skopeo >/dev/null
 
       - name: Verify receipt and recheck exact main before publication
@@ -534,19 +386,15 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 0700 "$RUNNER_TEMP/accepted"
-          cp "$RUNNER_TEMP/accepted-receipt/docker-compose.pinned.yml" \
-            "$RUNNER_TEMP/accepted/docker-compose.pinned.yml"
-          cp "$RUNNER_TEMP/accepted-receipt/docker-compose.dev.yml" \
-            "$RUNNER_TEMP/accepted/docker-compose.dev.yml"
           scripts/dev-image-acceptance-receipt verify \
-            "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json" \
+            "$RUNNER_TEMP/accepted/acceptance-receipt.json" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             "$RUNNER_TEMP/accepted"
           for role in api worker hermes litellm; do
             accepted_digest=$(jq -er \
               --arg role "$role" \
               '.roles[$role].manifest_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
-              "$RUNNER_TEMP/accepted-receipt/acceptance-receipt.json")
+              "$RUNNER_TEMP/accepted/acceptance-receipt.json")
             local_digest=$(jq -er \
               '.manifest_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
               "$RUNNER_TEMP/$role.role-receipt.json")
@@ -715,32 +563,3 @@ jobs:
             ${{ runner.temp }}/accepted/step-ca
             ${{ runner.temp }}/accepted/tailscale
             ${{ runner.temp }}/accepted/trust
-
-      - name: Advance accepted development aliases
-        shell: bash
-        env:
-          API_DIGEST: ${{ steps.publish.outputs.api_digest }}
-          API_IMAGE: ${{ steps.metadata.outputs.api_image }}
-          DEV_ALIAS: ${{ steps.metadata.outputs.dev_alias }}
-          WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
-          WORKER_IMAGE: ${{ steps.metadata.outputs.worker_image }}
-          HERMES_DIGEST: ${{ steps.publish.outputs.hermes_digest }}
-          LITELLM_DIGEST: ${{ steps.publish.outputs.litellm_digest }}
-        run: |
-          set -euo pipefail
-          git fetch --force --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main
-          [[ "$GITHUB_SHA" == \
-            "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
-          scripts/promote-image-aliases \
-            "$API_IMAGE" "$API_DIGEST" \
-            "$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS" \
-            ghcr.io/carstvaartjes/vonk-forge-hermes "$HERMES_DIGEST" \
-            ghcr.io/carstvaartjes/vonk-forge-litellm "$LITELLM_DIGEST" \
-            --postcondition bash -c '
-              set -euo pipefail
-              git fetch --force --no-tags origin \
-                +refs/heads/main:refs/remotes/origin/main
-              [[ "$GITHUB_SHA" == \
-                "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
-            '

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,10 +16,16 @@ from vonk_control.catalog_contract import (
 )
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessRegistry
-from vonk_control.harnesses.common import HarnessCompileError
+from vonk_control.harnesses.common import HarnessCompileError, validate_projection
 from vonk_control.harnesses.sglang import SglangHarnessCompiler
 from vonk_control.harnesses.vllm import VllmHarnessCompiler
 from vonk_control.models import Base
+from vonk_control.runtime_writable_paths import (
+    effective_environment,
+    environment,
+    telemetry_contract,
+    writable_paths,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS_ROOT = ROOT / "config/execution-harnesses"
@@ -232,7 +239,7 @@ ALLOWED_ENVIRONMENT = {
     "llama-cpp": ("LLAMA_ARG_N_THREADS", "8"),
     "ds4": ("DS4_LOG_LEVEL", "INFO"),
     "diffusers": ("HF_HUB_OFFLINE", "1"),
-    "comfyui": ("COMFYUI_DISABLE_TELEMETRY", "1"),
+    "comfyui": ("HF_HUB_OFFLINE", "1"),
     "pytorch-pipeline": ("HF_HUB_OFFLINE", "1"),
 }
 
@@ -490,7 +497,40 @@ def test_builtin_harness_emits_an_exact_shell_free_projection(slug: str) -> None
     assert projection.user == "10001:10001"
     assert projection.no_new_privileges is True
     assert projection.capabilities == ()
+    assert projection.read_only_root is True
+    assert projection.telemetry == telemetry_contract(slug)
+    assert projection.writable_paths == writable_paths(slug)
     assert all(mount.read_only for mount in projection.model_mounts)
+
+
+def test_builtin_projection_rejects_launch_wrapper_substitution() -> None:
+    projection = _compile("vllm")
+    projection = replace(projection, command=("/bin/sh", "-c", "vllm"))
+    with pytest.raises(HarnessCompileError, match="launch|shell"):
+        validate_projection(projection)
+
+
+def test_builtin_projection_rejects_writable_contract_tampering() -> None:
+    projection = _compile("vllm")
+    with pytest.raises(HarnessCompileError, match="writable"):
+        validate_projection(replace(projection, writable_paths=()))
+    with pytest.raises(HarnessCompileError, match="read-only root"):
+        validate_projection(replace(projection, read_only_root=False))
+
+
+def test_builtin_telemetry_contract_matches_effective_launch() -> None:
+    for slug in BUILTIN_HARNESS_SLUGS:
+        projection = _compile(slug)
+        telemetry = projection.telemetry
+        assert telemetry is not None
+        if telemetry.path is None:
+            assert telemetry.adapter == "unsupported"
+        elif slug == "comfyui":
+            assert projection.command[0] == "/opt/vonk/bin/comfyui-job"
+            assert telemetry.path == "/queue"
+        else:
+            assert "--host" in projection.command
+            assert "--port" in projection.command
 
 
 def test_vllm_projects_the_single_artifacts_exact_named_mount_path() -> None:
@@ -1104,7 +1144,7 @@ def test_vllm_accepts_glm_sparse_mla_runtime_contract() -> None:
     assert "--hf-overrides" in projection.command
     assert "--compilation-config" in projection.command
     assert "--no-enable-flashinfer-autotune" in projection.command
-    assert set(projection.environment) == set(VLLM_PLATFORM_ENVIRONMENT) | {
+    assert set(projection.environment) == set(environment("vllm", ())) | {
         (item["name"], item["value"]) for item in recipe["runtime"]["environment"]
     }
 
@@ -1463,7 +1503,6 @@ def test_vllm_accepts_gemma4_chat_protocol() -> None:
 def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [
-        {"name": "VLLM_NO_USAGE_STATS", "value": "1"},
         {"name": "VLLM_NVFP4_GEMM_BACKEND", "value": "marlin"},
         {"name": "VLLM_USE_FLASHINFER_MOE_FP4", "value": "0"},
     ]
@@ -1521,7 +1560,7 @@ def test_vllm_rejects_recipe_owned_optional_runtime_paths() -> None:
 def test_vllm_injects_platform_owned_writable_cache_environment() -> None:
     projection = _compile("vllm")
 
-    assert projection.environment == VLLM_PLATFORM_ENVIRONMENT
+    assert projection.environment == environment("vllm", ())
 
 
 @pytest.mark.parametrize("name", ["XDG_CACHE_HOME", "VLLM_CACHE_ROOT"])
@@ -1589,11 +1628,7 @@ def test_builtin_harness_emits_only_allowlisted_environment(slug: str) -> None:
 
     projection = _compile(slug, recipe=recipe)
 
-    expected = (
-        (*VLLM_PLATFORM_ENVIRONMENT, (name, value))
-        if slug == "vllm"
-        else ((name, value),)
-    )
+    expected = effective_environment(slug, ((name, value),))
     assert projection.environment == expected
 
 
@@ -1614,13 +1649,8 @@ def test_builtin_harness_accepts_distribution_environment_authority(slug: str) -
 
     projection = _compile(slug, recipe=recipe, distribution=distribution)
 
-    expected = (
-        (
-            *VLLM_PLATFORM_ENVIRONMENT,
-            ("UPSTREAM_RUNTIME_TUNING", "enabled"),
-        )
-        if slug == "vllm"
-        else (("UPSTREAM_RUNTIME_TUNING", "enabled"),)
+    expected = effective_environment(
+        slug, (("UPSTREAM_RUNTIME_TUNING", "enabled"),), distribution
     )
     assert projection.environment == expected
 

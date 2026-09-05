@@ -146,6 +146,32 @@ function libraryOperation(state: string) {
   return {id: "operation-load", kind: "run", owner_id: "installation-chat", state, plan_digest: "load-plan-digest", nodes: ["node-alpha", "node-beta"], result: {job_id: "job-load"}};
 }
 
+function switchableProfilePreview(): components["schemas"]["FleetProfilePreview"] {
+  return {
+    schema_version: 2,
+    profile_id: "00000000-0000-4000-8000-000000000101",
+    profile_name: "Studio service",
+    profile_digest: "d".repeat(64),
+    plan_digest: "e".repeat(64),
+    generated_at: "2026-09-05T00:00:00Z",
+    allowed: true,
+    scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
+    assignments: [{
+      assignment_id: "00000000-0000-4000-8000-000000000102",
+      recipe_revision_id: "revision-chat",
+      recipe_title: "Qwen pair",
+      desired_state: "running",
+      current_state: "degraded",
+      node_ids: [nodeId, borealisId],
+      actions: ["stop", "switch", "start"],
+      reasons: [],
+    }],
+    reasons: [],
+    steps: [{index: 0, kind: "switch", label: "Switch the Qwen pair on the selected Sparks.", node_ids: [nodeId, borealisId], assignment_id: "00000000-0000-4000-8000-000000000102", owner_id: null, recipe_revision_id: "revision-chat"}],
+    summary: {already_correct: 0, blockers: 0, builds: 0, distributions: 0, installs: 0, placements: 0, starts: 1, stops: 1, uninstalls: 0},
+  };
+}
+
 function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId): components["schemas"]["TelemetryPoint"] {
   return {
     id: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
@@ -164,7 +190,7 @@ function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId): 
     gpu_memory_total_bytes: 128 * GIB,
     gpu_memory_free_bytes: 84 * GIB,
     temperature_c: 43.5,
-    power_watts: 22.25,
+    power_watts: 156.6,
     network_receive_bytes_per_second: 2 * 1024 ** 2,
     network_transmit_bytes_per_second: 512 * 1024,
     gap_samples: 0,
@@ -177,59 +203,69 @@ function richTelemetryMetrics(observedAt: string, telemetryNodeId = nodeId): com
     key, scope, value, unit, source: "spark.telemetry.fixture", measurement_kind: "measured", observed_at: observedAt, received_at: observedAt,
     freshness: "fresh", freshness_threshold_seconds: 6, support_status: "available", aggregation: "latest", node_id: telemetryNodeId, ...context,
   });
-  const capability = (key: string, scope: components["schemas"]["TelemetryCapability"]["scope"], unit: string, supported = true, reason: string | null = null): components["schemas"]["TelemetryCapability"] => ({
-    key, scope, unit, source: "spark.telemetry.fixture", measurement_kind: "measured", freshness_threshold_seconds: 6, supported, reason, node_id: telemetryNodeId,
+  const capability = (key: string, scope: components["schemas"]["TelemetryCapability"]["scope"], unit: string, supported = true, reason: string | null = null, context: Partial<components["schemas"]["TelemetryCapability"]> = {}): components["schemas"]["TelemetryCapability"] => ({
+    key, scope, unit, source: "spark.telemetry.fixture", measurement_kind: "measured", freshness_threshold_seconds: 6, supported, reason, node_id: telemetryNodeId, ...context,
   });
   return {
     schema_version: 2,
     series: [
-      series("gpu.clock.sm", "accelerator", 1680, "MHz", {device_id: "gpu0"}),
-      series("gpu.throttle", "accelerator", "none", "state", {device_id: "gpu0"}),
-      series("gpu.power", "accelerator", 68.4, "W", {device_id: "gpu0"}),
-      series("gpu.process_memory", "accelerator", 18.5, "GiB", {device_id: "gpu0", process_id: 4021, process_name: "vllm"}),
-      series("cpu.temperature", "node", 51.2, "°C"),
-      series("cpu.load.1m", "node", 2.1, "load"),
-      series("cpu.power", "node", 88.2, "W"),
-      series("memory.bandwidth", "memory", 312.5, "GB/s"),
-      series("disk.read", "storage", 74.1, "MB/s", {device_id: "nvme0n1"}),
-      series("disk.write", "storage", 12.7, "MB/s", {device_id: "nvme0n1"}),
-      series("network.receive", "network", 2.4, "MB/s", {interface_name: "eth0"}),
-      series("network.transmit", "network", 0.8, "MB/s", {interface_name: "eth0"}),
-      series("runtime.decode", "runtime", 112.4, "tok/s", {run_id: "run-chat"}),
-      series("runtime.prefill", "runtime", 841.7, "tok/s", {run_id: "run-chat"}),
-      series("runtime.kv_cache", "runtime", 42.8, "%", {run_id: "run-chat"}),
-      series("runtime.queue", "runtime", 2, "requests", {run_id: "run-chat"}),
-      series("runtime.ttft.p95", "runtime", 184, "ms", {run_id: "run-chat"}),
-      series("runtime.e2e.p95", "runtime", 921, "ms", {run_id: "run-chat"}),
-      series("runtime.itl.p95", "runtime", 24.2, "ms", {run_id: "run-chat"}),
-      series("runtime.cache_hits", "runtime", 91, "%", {run_id: "run-chat"}),
-      series("runtime.mtp_acceptance", "runtime", 78, "%", {run_id: "run-chat"}),
-      series("runtime.preemptions", "runtime", 0, "events", {run_id: "run-chat"}),
+      series("gpu.utilization_percent", "accelerator", 61, "%", {device_id: "0"}),
+      series("gpu.clock_sm_mhz", "accelerator", 1680, "MHz", {device_id: "0"}),
+      series("gpu.throttle_active", "accelerator", false, "boolean", {device_id: "0"}),
+      series("gpu.power_watts", "accelerator", 68.4, "W", {device_id: "0"}),
+      series("gpu.temperature_c", "accelerator", 43.5, "degC", {device_id: "0"}),
+      series("gpu.process_memory_bytes", "accelerator", 18.5 * GIB, "bytes", {device_id: "0", process_id: 4021, process_name: "vllm"}),
+      series("cpu.temperature_c", "node", 51.2, "degC"),
+      series("cpu.utilization_percent", "node", 24.5, "%"),
+      series("cpu.load_average_1m", "node", 2.1, "load"),
+      series("cpu.power_watts", "node", 88.2, "W"),
+      series("memory.available_bytes", "memory", 92 * GIB, "bytes"),
+      series("memory.total_bytes", "memory", 128 * GIB, "bytes"),
+      series("memory.bandwidth_bytes_per_second", "memory", 312.5 * GIB, "bytes/s"),
+      series("storage.read_bytes_per_second", "storage", 74.1 * 1024 ** 2, "bytes/s", {device_id: "nvme0n1"}),
+      series("storage.write_bytes_per_second", "storage", 12.7 * 1024 ** 2, "bytes/s", {device_id: "nvme0n1"}),
+      series("network.receive_bytes_per_second", "network", 2 * 1024 ** 2, "bytes/s", {interface_name: "eth0"}),
+      series("network.transmit_bytes_per_second", "network", 512 * 1024, "bytes/s", {interface_name: "eth0"}),
+      series("runtime.decode_tokens_per_second", "runtime", 112.4, "tokens/s", {run_id: "run-chat"}),
+      series("runtime.prefill_tokens_per_second", "runtime", 841.7, "tokens/s", {run_id: "run-chat"}),
+      series("runtime.kv_cache_usage_percent", "runtime", 42.8, "%", {run_id: "run-chat"}),
+      series("runtime.requests_waiting", "runtime", 2, "requests", {run_id: "run-chat"}),
+      series("runtime.ttft_p95_ms", "runtime", 184, "ms", {run_id: "run-chat"}),
+      series("runtime.e2e_p95_ms", "runtime", 921, "ms", {run_id: "run-chat"}),
+      series("runtime.itl_p95_ms", "runtime", 24.2, "ms", {run_id: "run-chat"}),
+      series("runtime.prefix_cache_hit_percent", "runtime", 91, "%", {run_id: "run-chat"}),
+      series("runtime.mtp_acceptance_percent", "runtime", 78, "%", {run_id: "run-chat"}),
+      series("runtime.preemptions_total", "runtime", 0, "count", {run_id: "run-chat"}),
     ],
     capabilities: [
-      capability("gpu.clock.sm", "accelerator", "MHz"),
-      capability("gpu.throttle", "accelerator", "state"),
-      capability("gpu.power", "accelerator", "W"),
-      capability("gpu.process_memory", "accelerator", "GiB"),
-      capability("cpu.temperature", "node", "°C"),
-      capability("cpu.load.1m", "node", "load"),
-      capability("cpu.power", "node", "W"),
-      capability("memory.bandwidth", "memory", "GB/s"),
-      capability("disk.read", "storage", "MB/s"),
-      capability("disk.write", "storage", "MB/s"),
-      capability("network.receive", "network", "MB/s"),
-      capability("network.transmit", "network", "MB/s"),
-      capability("runtime.decode", "runtime", "tok/s"),
-      capability("runtime.prefill", "runtime", "tok/s"),
-      capability("runtime.kv_cache", "runtime", "%"),
-      capability("runtime.queue", "runtime", "requests"),
-      capability("runtime.ttft.p95", "runtime", "ms"),
-      capability("runtime.e2e.p95", "runtime", "ms"),
-      capability("runtime.itl.p95", "runtime", "ms"),
-      capability("runtime.cache_hits", "runtime", "%"),
-      capability("runtime.mtp_acceptance", "runtime", "%"),
-      capability("runtime.preemptions", "runtime", "events"),
-      capability("gpu.encoder", "accelerator", "utilization", false, "This Spark does not expose encoder counters."),
+      capability("gpu.utilization_percent", "accelerator", "%", true, null, {device_id: "0"}),
+      capability("gpu.clock_sm_mhz", "accelerator", "MHz", true, null, {device_id: "0"}),
+      capability("gpu.throttle_active", "accelerator", "boolean", true, null, {device_id: "0"}),
+      capability("gpu.power_watts", "accelerator", "W", true, null, {device_id: "0"}),
+      capability("gpu.temperature_c", "accelerator", "degC", true, null, {device_id: "0"}),
+      capability("gpu.process_memory_bytes", "accelerator", "bytes", true, null, {device_id: "0", process_id: 4021, process_name: "vllm"}),
+      capability("cpu.temperature_c", "node", "degC"),
+      capability("cpu.utilization_percent", "node", "%"),
+      capability("cpu.load_average_1m", "node", "load"),
+      capability("cpu.power_watts", "node", "W"),
+      capability("memory.available_bytes", "memory", "bytes"),
+      capability("memory.total_bytes", "memory", "bytes"),
+      capability("memory.bandwidth_bytes_per_second", "memory", "bytes/s"),
+      capability("storage.read_bytes_per_second", "storage", "bytes/s", true, null, {device_id: "nvme0n1"}),
+      capability("storage.write_bytes_per_second", "storage", "bytes/s", true, null, {device_id: "nvme0n1"}),
+      capability("network.receive_bytes_per_second", "network", "bytes/s", true, null, {interface_name: "eth0"}),
+      capability("network.transmit_bytes_per_second", "network", "bytes/s", true, null, {interface_name: "eth0"}),
+      capability("runtime.decode_tokens_per_second", "runtime", "tokens/s", true, null, {run_id: "run-chat"}),
+      capability("runtime.prefill_tokens_per_second", "runtime", "tokens/s", true, null, {run_id: "run-chat"}),
+      capability("runtime.kv_cache_usage_percent", "runtime", "%", true, null, {run_id: "run-chat"}),
+      capability("runtime.requests_waiting", "runtime", "requests", true, null, {run_id: "run-chat"}),
+      capability("runtime.ttft_p95_ms", "runtime", "ms", true, null, {run_id: "run-chat"}),
+      capability("runtime.e2e_p95_ms", "runtime", "ms", true, null, {run_id: "run-chat"}),
+      capability("runtime.itl_p95_ms", "runtime", "ms", true, null, {run_id: "run-chat"}),
+      capability("runtime.prefix_cache_hit_percent", "runtime", "%", true, null, {run_id: "run-chat"}),
+      capability("runtime.mtp_acceptance_percent", "runtime", "%", true, null, {run_id: "run-chat"}),
+      capability("runtime.preemptions_total", "runtime", "count", true, null, {run_id: "run-chat"}),
+      capability("gpu.power_limit_watts", "accelerator", "W", false, "This Spark does not expose configured power limits.", {device_id: "0"}),
     ],
     runtimes: [{run_id: "run-chat", engine_id: "engine-qwen", backend: "vllm", version: "0.8.5", endpoint: "http://aurora.fixture.invalid:8000", model: "Qwen 3", model_version: "qwen/3", recipe_revision: "revision-chat", context_limit_tokens: 32768, serving_node_ids: [nodeId, borealisId], ranks: [0, 1], readiness: "running", error: null, adapter: "openai-chat", adapter_version: "2", adapter_supported: true, adapter_reason: null}],
     workloads: [{run_id: "run-chat", request_id: "req-42", job_id: null, model: "Qwen 3", recipe_revision: "revision-chat", engine_id: "engine-qwen", state: "running", origin_node_id: nodeId, executor_node_ids: [nodeId, borealisId], created_at: observedAt, started_at: observedAt, ended_at: null, elapsed_seconds: 4.2, failure: null, title: "Interactive request", progress_value: null, progress_max: null, eta_seconds: null, eta_source: null}],
@@ -239,6 +275,79 @@ function richTelemetryMetrics(observedAt: string, telemetryNodeId = nodeId): com
 
 function richTelemetry(observedAt: string, sequence = 5, telemetryNodeId = nodeId): components["schemas"]["TelemetryPoint"] {
   return {...telemetry(observedAt, sequence, telemetryNodeId), metrics: richTelemetryMetrics(observedAt, telemetryNodeId)};
+}
+
+type HistoryMetricValues = {
+  gpu: number;
+  gpuTemperature: number;
+  gpuPower: number;
+  cpuTemperature: number;
+  cpuUtilization: number;
+  cpuPower: number;
+  memoryAvailable: number;
+  memoryBandwidth: number;
+  storageRead: number;
+  storageWrite: number;
+  networkReceive: number;
+  networkTransmit: number;
+  decode: number;
+  prefill: number;
+  queue: number;
+  ttft: number;
+  e2e: number;
+  itl: number;
+};
+
+function setRichHistoryValue(point: components["schemas"]["TelemetryPoint"], key: string, value: number, context: Partial<components["schemas"]["TelemetrySeries"]> = {}) {
+  const series = point.metrics?.series.find(item => item.key === key && item.device_id === (context.device_id ?? item.device_id) && item.interface_name === (context.interface_name ?? item.interface_name) && item.run_id === (context.run_id ?? item.run_id));
+  if (!series) throw new Error(`Fixture metric ${key} is missing`);
+  series.value = value;
+}
+
+function richHistoryPoint(observedAt: string, sequence: number, values: HistoryMetricValues, telemetryNodeId = nodeId): components["schemas"]["TelemetryPoint"] {
+  const point = richTelemetry(observedAt, sequence, telemetryNodeId);
+  setRichHistoryValue(point, "gpu.utilization_percent", values.gpu, {device_id: "0"});
+  setRichHistoryValue(point, "gpu.temperature_c", values.gpuTemperature, {device_id: "0"});
+  setRichHistoryValue(point, "gpu.power_watts", values.gpuPower, {device_id: "0"});
+  setRichHistoryValue(point, "cpu.temperature_c", values.cpuTemperature);
+  setRichHistoryValue(point, "cpu.utilization_percent", values.cpuUtilization);
+  setRichHistoryValue(point, "cpu.power_watts", values.cpuPower);
+  setRichHistoryValue(point, "memory.available_bytes", values.memoryAvailable);
+  setRichHistoryValue(point, "memory.bandwidth_bytes_per_second", values.memoryBandwidth * GIB);
+  setRichHistoryValue(point, "storage.read_bytes_per_second", values.storageRead * 1024 ** 2, {device_id: "nvme0n1"});
+  setRichHistoryValue(point, "storage.write_bytes_per_second", values.storageWrite * 1024 ** 2, {device_id: "nvme0n1"});
+  setRichHistoryValue(point, "network.receive_bytes_per_second", values.networkReceive, {interface_name: "eth0"});
+  setRichHistoryValue(point, "network.transmit_bytes_per_second", values.networkTransmit, {interface_name: "eth0"});
+  setRichHistoryValue(point, "runtime.decode_tokens_per_second", values.decode, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.prefill_tokens_per_second", values.prefill, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.requests_waiting", values.queue, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.ttft_p95_ms", values.ttft, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.e2e_p95_ms", values.e2e, {run_id: "run-chat"});
+  setRichHistoryValue(point, "runtime.itl_p95_ms", values.itl, {run_id: "run-chat"});
+  point.gpu_utilization_percent = values.gpu;
+  point.temperature_c = values.gpuTemperature;
+  point.power_watts = values.gpuPower + values.cpuPower;
+  point.cpu_utilization_percent = values.cpuUtilization;
+  point.memory_available_bytes = values.memoryAvailable;
+  point.network_receive_bytes_per_second = values.networkReceive;
+  point.network_transmit_bytes_per_second = values.networkTransmit;
+  return point;
+}
+
+function richHistoryRollup(first: components["schemas"]["TelemetryPoint"], last: components["schemas"]["TelemetryPoint"], start: string, end: string, resolution: string): components["schemas"]["TelemetryRollupPoint"] {
+  const metrics = Object.fromEntries((first.metrics?.series ?? []).flatMap(series => {
+    const counterpart = last.metrics?.series.find(item => item.key === series.key && item.scope === series.scope && item.unit === series.unit && item.device_id === series.device_id && item.process_id === series.process_id && item.interface_name === series.interface_name && item.run_id === series.run_id);
+    const values = [series.value, counterpart?.value].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    if (values.length === 0) return [];
+    const minimum = Math.min(...values);
+    const maximum = Math.max(...values);
+    return [[`${series.key}:${series.device_id ?? series.interface_name ?? series.run_id ?? "node"}`, {
+      count: values.length, minimum, mean: values.reduce((total, value) => total + value, 0) / values.length, maximum,
+      key: series.key, scope: series.scope, device_id: series.device_id, process_id: series.process_id, process_name: series.process_name,
+      interface_name: series.interface_name, run_id: series.run_id, unit: series.unit, source: series.source, measurement_kind: series.measurement_kind, aggregation: "mean",
+    } satisfies components["schemas"]["TelemetryMetricSummary"]]];
+  }));
+  return {node_id: first.node_id, resolution: resolution === "fifteen-minute" ? "fifteen-minute" : "minute", bucket_start: start, bucket_end: end, source_sample_count: first === last ? 1 : 2, gap_samples: 0, metrics};
 }
 
 function localSnapshot(): components["schemas"]["FleetSnapshot"] {
@@ -257,7 +366,7 @@ function localSnapshot(): components["schemas"]["FleetSnapshot"] {
       labels: {role: "inference"},
       connection: {agent_state: "active", certificate_state: "valid", online_state: "online", offline_reason: null, last_seen_at: observedAt, last_seen_age_seconds: 0},
       inventory: null,
-      telemetry: {age_seconds: 0, freshness: "live", sample: telemetry(observedAt)},
+      telemetry: {age_seconds: 0, freshness: "live", sample: richTelemetry(observedAt, 5)},
       installed: [{
         installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 0, role: "leader", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
       }],
@@ -332,7 +441,7 @@ async function installLocalFleetFixture(page: Page) {
       schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
       plan_digest: body.plan_digest ?? "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
       state: "running", current_operation_id: null, current_step: 1, total_steps: 4,
-      progress: {phase: "transfer", subphase: "model-download", message: "Downloading model", completed_bytes: 0, total_bytes: null, total_bytes_known: false, request_key: body.request_key ?? null, members: [{node_id: nodeId, state: "running", completed_bytes: 0, total_bytes: null}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: null}]},
+      progress: {phase: "transfer", subphase: "model-copy", message: `Copying model to ${nodeId}`, completed_bytes: 32 * GIB, total_bytes: 80 * GIB, total_bytes_known: true, request_key: body.request_key ?? null, members: [{node_id: nodeId, state: "running", completed_bytes: 32 * GIB, total_bytes: 80 * GIB}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: 80 * GIB}]},
       status_reason: null, result: null,
     }});
   });
@@ -340,7 +449,7 @@ async function installLocalFleetFixture(page: Page) {
     schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
     plan_digest: "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at, state: "running",
     current_operation_id: null, current_step: 1, total_steps: 4,
-    progress: {phase: "transfer", subphase: "model-download", message: "Downloading model", completed_bytes: 0, total_bytes: null, total_bytes_known: false, members: [{node_id: nodeId, state: "running", completed_bytes: 0, total_bytes: null}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: null}]},
+    progress: {phase: "transfer", subphase: "model-copy", message: `Copying model to ${nodeId}`, completed_bytes: 32 * GIB, total_bytes: 80 * GIB, total_bytes_known: true, members: [{node_id: nodeId, state: "running", completed_bytes: 32 * GIB, total_bytes: 80 * GIB}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: 80 * GIB}]},
     status_reason: null, result: null,
   }}));
   await page.route("**/api/v1/nodes/*/profile", async route => {
@@ -440,21 +549,24 @@ async function installLocalFleetFixture(page: Page) {
     const end = url.searchParams.get("end") ?? snapshot.generated_at;
     const resolution = url.searchParams.get("resolution") ?? "raw";
     const maximumPoints = Number(url.searchParams.get("maximum_points") ?? 360);
-    const first = telemetry(start, 1);
-    const last = {...telemetry(end, 2), gpu_utilization_percent: 72, temperature_c: 45};
-    const points = resolution === "raw" ? [first, last] : [{
-      node_id: nodeId,
-      resolution,
-      bucket_start: start,
-      bucket_end: end,
-      source_sample_count: 2,
-      gap_samples: 0,
-      metrics: {
-        gpu_utilization_percent: {count: 2, minimum: 61, mean: 66.5, maximum: 72, key: "gpu_utilization_percent", scope: "accelerator", unit: "%", source: "spark.telemetry.fixture", measurement_kind: "measured", aggregation: "mean"},
-        memory_available_bytes: {count: 2, minimum: 90 * GIB, mean: 91 * GIB, maximum: 92 * GIB, key: "memory_available_bytes", scope: "memory", unit: "bytes", source: "spark.telemetry.fixture", measurement_kind: "measured", aggregation: "mean"},
-        temperature_c: {count: 2, minimum: 43.5, mean: 44.25, maximum: 45, key: "temperature_c", scope: "node", unit: "°C", source: "spark.telemetry.fixture", measurement_kind: "measured", aggregation: "mean"},
-      },
-    }];
+    const first = richHistoryPoint(start, 1, {
+      gpu: 42, gpuTemperature: 48, gpuPower: 60, cpuTemperature: 50, cpuUtilization: 18, cpuPower: 80,
+      memoryAvailable: 100 * GIB, memoryBandwidth: 290, storageRead: 64, storageWrite: 10,
+      networkReceive: 1.5 * 1024 ** 2, networkTransmit: 400 * 1024, decode: 96, prefill: 700,
+      queue: 1, ttft: 220, e2e: 950, itl: 22,
+    });
+    const last = richHistoryPoint(end, 2, {
+      gpu: 72, gpuTemperature: 55, gpuPower: 68.4, cpuTemperature: 51.2, cpuUtilization: 32, cpuPower: 88.2,
+      memoryAvailable: 92 * GIB, memoryBandwidth: 312.5, storageRead: 74.1, storageWrite: 12.7,
+      networkReceive: 2 * 1024 ** 2, networkTransmit: 512 * 1024, decode: 112.4, prefill: 841.7,
+      queue: 2, ttft: 184, e2e: 921, itl: 24.2,
+    });
+    const bucketSeconds = resolution === "fifteen-minute" ? 15 * 60 : 60;
+    const firstBucketEnd = new Date(new Date(start).getTime() + bucketSeconds * 1_000).toISOString();
+    const lastBucketStart = new Date(new Date(end).getTime() - bucketSeconds * 1_000).toISOString();
+    const points = resolution === "raw"
+      ? [first, last]
+      : [richHistoryRollup(first, first, start, firstBucketEnd, resolution), richHistoryRollup(last, last, lastBucketStart, end, resolution)];
     return route.fulfill({json: {schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points, metadata: {requested_start: start, requested_end: end, actual_start: start, actual_end: end, requested_resolution: resolution, actual_resolution: resolution, timezone: "UTC", point_count: points.length, coverage_seconds: 3600, gap_samples: 0, downsampled: resolution !== "raw"}}});
   });
 }
@@ -499,7 +611,7 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await page.keyboard.press("Enter");
   await expect(page.getByRole("complementary", {name: "Aurora details"})).toBeVisible();
   await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
-  await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/1 reported buckets/);
+  await expect(page.getByRole("img", {name: "Aurora GPU utilization history"})).toHaveAccessibleDescription(/2 reported buckets/);
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
@@ -574,6 +686,30 @@ test("Node history and lifecycle controls work on desktop and mobile", async ({p
       document: document.documentElement.scrollWidth,
       viewport: window.innerWidth,
     }))).toEqual({body: width, document: width, viewport: width});
+  }
+});
+
+test("Spark metrics use typed history identities and keep the focused detail usable", async ({page}, testInfo) => {
+  for (const [width, height] of [[1280, 900], [360, 800]] as const) {
+    await page.setViewportSize({width, height});
+    await page.goto("/fleet");
+    await page.screenshot({path: testInfo.outputPath(`fleet-first-${width}.png`)});
+    await page.getByRole("button", {name: "View Aurora details"}).click();
+    const detail = page.getByRole("complementary", {name: "Aurora details"});
+    await expect(detail.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
+    await detail.getByRole("tab", {name: "Metrics"}).click();
+    const metrics = detail.getByRole("tabpanel", {name: "Metrics"});
+    await metrics.scrollIntoViewIfNeeded();
+    await expect(metrics.getByRole("heading", {name: "Metrics"})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Gpu · Utilization Percent GPU 0 history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Cpu · Temperature C Node aggregate history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Runtime · Requests Waiting Run run-chat history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Runtime · Ttft P95 Ms Run run-chat history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Runtime · Decode Tokens Per Second Run run-chat history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByRole("img", {name: /Runtime · Itl P95 Ms Run run-chat history for 1 hour/})).toBeVisible();
+    await expect(metrics.getByText("Last observed").first()).toBeVisible();
+    await expect.poll(() => page.evaluate(() => ({body: document.body.scrollWidth, document: document.documentElement.scrollWidth, viewport: innerWidth}))).toEqual({body: width, document: width, viewport: width});
+    await page.screenshot({path: testInfo.outputPath(`spark-metrics-${width}.png`)});
   }
 });
 
@@ -834,6 +970,31 @@ test("Library keeps partial Run progress visible for each Spark", async ({page})
   await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("node-beta");
   await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("Waiting");
   await expect(progress.getByRole("progressbar", {name: "Run progress"})).not.toHaveAttribute("aria-valuenow");
+});
+
+test("Profiles keep the saved view primary and show durable per-Spark switch progress", async ({page}, testInfo) => {
+  await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
+
+  for (const [width, height] of [[1280, 900], [360, 800]] as const) {
+    await page.setViewportSize({width, height});
+    await page.goto("/library/profiles");
+
+    const saved = page.getByRole("region", {name: "Studio service saved profile"});
+    await expect(saved).toBeVisible();
+    await expect(saved.getByRole("button", {name: "Edit profile"})).toBeVisible();
+    await expect(saved.getByRole("button", {name: "Switch profile"})).toBeEnabled();
+    await page.screenshot({path: testInfo.outputPath(`profiles-saved-${width}.png`)});
+
+    await saved.getByRole("button", {name: "Switch profile"}).click();
+    const progress = page.getByRole("region", {name: "Profile switch progress"});
+    await expect(progress).toContainText("Copying model to Aurora");
+    await expect(progress).toContainText("32 GiB of 80 GiB");
+    await expect(progress.getByRole("list", {name: "Profile switch targets"})).toContainText("Aurora");
+    await expect(progress.getByRole("list", {name: "Profile switch targets"})).toContainText("Borealis");
+    await expect(progress.getByRole("progressbar", {name: "Profile switch progress"})).toHaveAttribute("aria-valuenow", "40");
+    await progress.scrollIntoViewIfNeeded();
+    await page.screenshot({path: testInfo.outputPath(`profiles-switch-progress-${width}.png`)});
+  }
 });
 
 test("Library retries a failed snapshot and recipe detail request", async ({page}) => {

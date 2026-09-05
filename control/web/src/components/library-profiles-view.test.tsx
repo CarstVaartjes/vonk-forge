@@ -1,4 +1,4 @@
-import {render, screen} from "@testing-library/react";
+import {render, screen, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {ControlApi, FleetProfile, FleetProfileApplication, FleetProfilePreview, VisualFleetSnapshot} from "../api/types";
 import {LibraryProfilesView} from "./library-profiles-view";
@@ -73,7 +73,17 @@ const application = {
   total_steps: 3,
   current_operation_id: null,
   status_reason: null,
-  progress: {phase: "switch"},
+  progress: {
+    phase: "transfer",
+    subphase: "model-copy",
+    completed_bytes: 4 * 1024 ** 3,
+    total_bytes: 8 * 1024 ** 3,
+    total_bytes_known: true,
+    members: [
+      {node_id: nodeA, state: "running", completed_bytes: 4 * 1024 ** 3, total_bytes: 8 * 1024 ** 3},
+      {node_id: nodeB, state: "pending", completed_bytes: 1 * 1024 ** 3, total_bytes: 8 * 1024 ** 3},
+    ],
+  },
   result: null,
   created_at: "2026-09-05T00:00:00Z",
   updated_at: "2026-09-05T00:00:00Z",
@@ -106,5 +116,10 @@ test("switches an in-scope dual-to-solo replacement on the first click and keeps
   expect(applyFleetProfile).toHaveBeenCalledTimes(1);
   expect(applyFleetProfile).toHaveBeenCalledWith(profileId, {plan_digest: preview.plan_digest, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(screen.queryByRole("button", {name: "Review switch effects"})).not.toBeInTheDocument();
-  expect(screen.getByText("Switching profile")).toBeVisible();
+  expect(screen.getByText("Copying model to Spark A")).toBeVisible();
+  const progress = screen.getByRole("region", {name: "Profile switch progress"});
+  expect(progress).toHaveTextContent("4.0 GiB of 8.0 GiB");
+  expect(within(progress).getByRole("progressbar", {name: "Profile switch progress"})).toHaveAttribute("aria-valuenow", "50");
+  expect(within(progress).getByRole("list", {name: "Profile switch targets"})).toHaveTextContent("Spark A");
+  expect(within(progress).getByRole("list", {name: "Profile switch targets"})).toHaveTextContent("Spark B");
 });

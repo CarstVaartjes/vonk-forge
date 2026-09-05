@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useId, useRef, useState} from "react";
 import type {MouseEvent as ReactMouseEvent} from "react";
-import type {ControlApi, LibraryOperation, TelemetryCapabilitiesResponse, TelemetryCurrentResponse, TelemetryHistory, TelemetryHistoryPoint, TelemetryResolution, TelemetryRuntime, TelemetrySeries, TelemetryWorkload, TelemetryWorkloadsResponse, VisualFleetNode} from "../api/types";
+import type {ControlApi, LibraryOperation, TelemetryCapabilitiesResponse, TelemetryCurrentResponse, TelemetryHistory, TelemetryResolution, TelemetryRuntime, TelemetrySeries, TelemetryWorkload, TelemetryWorkloadsResponse, VisualFleetNode} from "../api/types";
 import {formatBytes, installationGroupLabel, nodeDisplayName, nodeSecondaryName, nodeUnifiedMemory, nodeWarningsAt, runGroupLabel, timestampPresentation} from "../lib/fleet";
 import {CopyButton} from "./copy-button";
 import {LibraryActionDialog} from "./library-action-dialog";
@@ -8,8 +8,9 @@ import type {LibraryActionName, LibraryActionTarget} from "./library-action-type
 import {LibraryNodeNamesProvider} from "./library-node-names";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
 import {Meter} from "./meter";
-import {Sparkline, sparklinePath, type SparklineDomain, type SparklineSeriesPoint} from "./sparkline";
+import {Sparkline, sparklinePath, type SparklineDomain} from "./sparkline";
 import {StatusPill} from "./status-pill";
+import {hasContiguousHistory, historyIdentities, historyLastObservedAt, historySeries, historyValues, metricIdentity, metricIdentityKey, sameMetricIdentity, type TelemetryMetricIdentity} from "../lib/telemetry-history";
 
 type HistoryRange = "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y";
 
@@ -29,42 +30,6 @@ const LIFECYCLE_PREVIEW_POLICY = {
   telemetry_live_seconds: 6,
 };
 
-type RawMetricName = "gpu_utilization_percent" | "memory_available_bytes" | "temperature_c" | "power_watts" | "disk_free_bytes" | "network_receive_bytes_per_second";
-
-function isRollupPoint(point: TelemetryHistoryPoint): point is Extract<TelemetryHistoryPoint, {resolution: string}> {
-  return "resolution" in point;
-}
-
-function metricSeries(points: readonly TelemetryHistoryPoint[], name: RawMetricName): (SparklineSeriesPoint | null)[] {
-  return points.map(point => {
-    if (isRollupPoint(point)) {
-      const metric = point.metrics[name];
-      return metric ? {count: metric.count, minimum: metric.minimum, mean: metric.mean, maximum: metric.maximum} : null;
-    }
-    const value = point[name];
-    return typeof value === "number" && Number.isFinite(value)
-      ? {count: 1, minimum: value, mean: value, maximum: value}
-      : null;
-  });
-}
-
-function availableMemoryDomain(points: readonly TelemetryHistoryPoint[], node: VisualFleetNode): SparklineDomain | undefined {
-  const totals = points.flatMap(point => {
-    if (isRollupPoint(point)) {
-      const metric = point.metrics.memory_total_bytes;
-      return metric && Number.isFinite(metric.maximum) && metric.maximum > 0 ? [metric.maximum] : [];
-    }
-    return typeof point.memory_total_bytes === "number"
-      && Number.isFinite(point.memory_total_bytes)
-      && point.memory_total_bytes > 0
-      ? [point.memory_total_bytes]
-      : [];
-  });
-  const currentTotal = node.telemetry?.sample.memory_total_bytes ?? node.inventory?.host_memory_total_bytes;
-  if (typeof currentTotal === "number" && Number.isFinite(currentTotal) && currentTotal > 0) totals.push(currentTotal);
-  return totals.length > 0 ? [0, Math.max(...totals)] : undefined;
-}
-
 function boundedError(value: unknown): string {
   const message = value instanceof Error ? value.message : "Telemetry history is unavailable";
   return message.length > 512 ? `${message.slice(0, 512)}…` : message;
@@ -74,8 +39,13 @@ function humanMetricKey(key: string): string {
   return key.replaceAll("_", " ").replaceAll(".", " · ").replace(/\b\w/g, value => value.toUpperCase());
 }
 
-function metricContext(series: TelemetrySeries): string {
-  return [series.device_id, series.interface_name, series.process_name, series.run_id].filter(Boolean).join(" · ") || "Node aggregate";
+function metricContext(series: TelemetryMetricIdentity): string {
+  const dimensions: string[] = [];
+  if (series.device_id) dimensions.push(series.key.toLocaleLowerCase().startsWith("gpu.") ? `GPU ${series.device_id}` : `Device ${series.device_id}`);
+  if (series.interface_name) dimensions.push(`Interface ${series.interface_name}`);
+  if (series.process_name || series.process_id !== null) dimensions.push(`Process ${series.process_name ?? series.process_id}${series.process_name && series.process_id !== null ? ` · ${series.process_id}` : ""}`);
+  if (series.run_id) dimensions.push(`Run ${series.run_id}`);
+  return dimensions.join(" · ") || "Node aggregate";
 }
 
 function metricValue(series: TelemetrySeries): string {
@@ -86,18 +56,8 @@ function metricValue(series: TelemetrySeries): string {
 
 type MetricGroupName = "GPU" | "CPU" | "Memory" | "Power" | "Storage" | "Network" | "Runtime" | "Other";
 const METRIC_GROUPS: MetricGroupName[] = ["GPU", "CPU", "Memory", "Power", "Storage", "Network", "Runtime", "Other"];
-const HISTORY_KEYS: Record<MetricGroupName, RawMetricName | undefined> = {
-  GPU: "gpu_utilization_percent",
-  CPU: "temperature_c",
-  Memory: "memory_available_bytes",
-  Power: "power_watts",
-  Storage: "disk_free_bytes",
-  Network: "network_receive_bytes_per_second",
-  Runtime: undefined,
-  Other: undefined,
-};
 
-function metricGroup(series: TelemetrySeries): MetricGroupName {
+function metricGroup(series: Pick<TelemetryMetricIdentity, "key" | "scope">): MetricGroupName {
   const key = series.key.toLocaleLowerCase();
   if (series.scope === "accelerator" || key.includes("gpu") || key.includes("accelerator")) return "GPU";
   if (key.includes("cpu") || key.includes("temperature") || key.includes("load")) return "CPU";
@@ -109,30 +69,68 @@ function metricGroup(series: TelemetrySeries): MetricGroupName {
   return "Other";
 }
 
-function historyMetricValue(point: TelemetryHistoryPoint, key: RawMetricName): number | null {
-  if (isRollupPoint(point)) return point.metrics[key]?.mean ?? null;
-  const value = point[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+function metricDomain(series: TelemetryMetricIdentity): SparklineDomain | undefined {
+  const unit = series.unit.toLocaleLowerCase();
+  return unit === "%" || unit.includes("percent") || unit.includes("degc") || unit.includes("°c")
+    ? [0, 100]
+    : undefined;
 }
 
-function metricGroupPath(history: TelemetryHistory | undefined, key: RawMetricName | undefined, domain?: SparklineDomain): string {
-  if (!history || !key) return "";
-  const values = history.points.map(point => historyMetricValue(point, key));
-  const finite = values.filter((value): value is number => value !== null);
-  if (finite.length < 2) return "";
-  return sparklinePath(values, 100, 32, domain);
+function historyMetricPath(history: TelemetryHistory | undefined, series: TelemetryMetricIdentity): string {
+  const values = historyValues(history, series);
+  if (!hasContiguousHistory(values)) return "";
+  return sparklinePath(values, 100, 32, metricDomain(series));
 }
 
-function TelemetryChartGroup({group, rows, history, rangeLabel}: {group: MetricGroupName; rows: TelemetrySeries[]; history?: TelemetryHistory; rangeLabel: string}) {
-  const key = HISTORY_KEYS[group];
-  const domain = group === "GPU" || group === "CPU" ? [0, 100] as const : undefined;
-  const path = metricGroupPath(history, key, domain);
+function performanceDomain(history: TelemetryHistory | undefined, identity: TelemetryMetricIdentity, spec: PerformanceMetricSpec): SparklineDomain | undefined {
+  if (spec.domain) return spec.domain;
+  const maximum = Math.max(...historyValues(history, identity).filter((value): value is number => typeof value === "number" && Number.isFinite(value)), 0);
+  return maximum > 0 ? [0, maximum] : undefined;
+}
+
+function TelemetryChartGroup({group, rows, historyIdentities: historicalIdentities, history, rangeLabel}: {group: MetricGroupName; rows: TelemetrySeries[]; historyIdentities: TelemetryMetricIdentity[]; history?: TelemetryHistory; rangeLabel: string}) {
+  const chartIdentities = [...rows.map(metricIdentity), ...historicalIdentities.filter(identity => metricGroup(identity) === group)].filter((identity, index, identities) => identities.findIndex(candidate => sameMetricIdentity(candidate, identity)) === index);
+  const chartEntries = chartIdentities.flatMap(identity => {
+    const path = historyMetricPath(history, identity);
+    return [{path, identity}];
+  });
+  const charts = chartEntries.filter(entry => entry.path);
+  const historicalOnlyCount = chartIdentities.filter(identity => !rows.some(row => sameMetricIdentity(row, identity))).length;
+  const reportedLabel = rows.length > 0
+    ? `${rows.length} reported${historicalOnlyCount > 0 ? ` · ${historicalOnlyCount} history-only` : ""}`
+    : historicalOnlyCount > 0 ? `${historicalOnlyCount} history-only` : "No data reported";
   return <article className={`telemetry-chart-group telemetry-chart-group-${group.toLocaleLowerCase()}`} aria-labelledby={`telemetry-group-${group.toLocaleLowerCase()}`}>
-    <header><div><h5 id={`telemetry-group-${group.toLocaleLowerCase()}`}>{group}</h5><span>{rangeLabel} · {rows.length > 0 ? `${rows.length} reported` : "No data reported"}</span></div>{path ? <span className="telemetry-chart-range">Trend</span> : <span className="telemetry-chart-range is-unavailable">No trend</span>}</header>
-    {path ? <svg className="telemetry-chart" role="img" aria-label={`${group} telemetry trend for ${rangeLabel}`} viewBox="0 0 100 32" preserveAspectRatio="none"><path d={path}/></svg> : <div className="telemetry-chart-unavailable" role="img" aria-label={`${group} trend unavailable`}>{rows.length > 0 ? "Current sample only" : "Unavailable"}</div>}
-    {rows.length > 0 ? <ul>{rows.slice(0, 8).map(row => <li key={`${row.key}:${row.scope}:${row.device_id ?? ""}:${row.interface_name ?? ""}:${row.run_id ?? ""}`}><div><strong>{humanMetricKey(row.key)}</strong><small>{metricContext(row)}</small></div><div><strong className={`telemetry-value status-${row.support_status}`}>{row.support_status === "available" ? metricValue(row) : row.support_status === "unsupported" ? "Unsupported" : "Unavailable"}</strong><small>{row.unit} · {row.scope}</small></div></li>)}</ul> : <p>No reported metrics in this group.</p>}
+    <header><div><h5 id={`telemetry-group-${group.toLocaleLowerCase()}`}>{group}</h5><span>{rangeLabel} · {reportedLabel}</span></div>{charts.length > 0 ? <span className="telemetry-chart-range">{charts.length} trend{charts.length === 1 ? "" : "s"}</span> : <span className="telemetry-chart-range is-unavailable">No trend</span>}</header>
+    {chartEntries.length > 0
+      ? <div className="telemetry-chart-series">{chartEntries.map(({path, identity}) => { const lastObservedAt = historyLastObservedAt(history, identity); const chartLabel = `${humanMetricKey(identity.key)} ${metricContext(identity)} history for ${rangeLabel}`; return <figure key={metricIdentityKey(identity)}><figcaption><strong>{humanMetricKey(identity.key)}</strong><span>{metricContext(identity)} · {identity.unit}{lastObservedAt ? ` · Last observed ${new Date(lastObservedAt).toLocaleString()}` : ""}</span></figcaption>{path ? <svg className="telemetry-chart" role="img" aria-label={chartLabel} viewBox="0 0 100 32" preserveAspectRatio="none"><path d={path}/></svg> : <div className="telemetry-chart-unavailable" role="img" aria-label={`${chartLabel} unavailable`}>No adjacent historical samples</div>}</figure>; })}</div>
+      : <div className="telemetry-chart-unavailable" role="img" aria-label={`${group} trend unavailable`}>Unavailable</div>}
+    {rows.length > 0 ? <ul>{rows.slice(0, 8).map(row => <li key={`${row.key}:${row.scope}:${row.device_id ?? ""}:${row.interface_name ?? ""}:${row.run_id ?? ""}`}><div><strong>{humanMetricKey(row.key)}</strong><small>{metricContext(row)}</small></div><div><strong className={`telemetry-value status-${row.support_status}`}>{row.support_status === "available" ? metricValue(row) : row.support_status === "unsupported" ? "Unsupported" : "Unavailable"}</strong><small>{row.unit} · {row.scope}</small></div></li>)}</ul> : chartIdentities.length === 0 ? <p>No reported metrics in this group.</p> : <p>Current reading unavailable; historical series are shown when adjacent samples exist.</p>}
     {rows.length > 8 && <small className="telemetry-chart-overflow">+{rows.length - 8} more in raw details</small>}
   </article>;
+}
+
+type PerformanceMetricSpec = {
+  label: string;
+  keys: readonly string[];
+  scope: TelemetrySeries["scope"];
+  units: readonly string[];
+  domain?: SparklineDomain;
+  format(value: number): string;
+};
+
+const PERFORMANCE_METRIC_SPECS: readonly PerformanceMetricSpec[] = [
+  {label: "GPU utilization", keys: ["gpu.utilization_percent"], scope: "accelerator", units: ["%"], domain: [0, 100], format: value => `${Math.round(value)}%`},
+  {label: "Available memory", keys: ["memory.available_bytes"], scope: "memory", units: ["bytes"], format: formatBytes},
+  {label: "CPU temperature", keys: ["cpu.temperature_c"], scope: "node", units: ["degC"], domain: [0, 100], format: value => `${Number(value.toFixed(1))} °C`},
+  {label: "CPU utilization", keys: ["cpu.utilization_percent"], scope: "node", units: ["%"], domain: [0, 100], format: value => `${Math.round(value)}%`},
+];
+
+function performanceIdentity(history: TelemetryHistory | undefined, node: VisualFleetNode, spec: PerformanceMetricSpec): TelemetryMetricIdentity | undefined {
+  const candidates: TelemetryMetricIdentity[] = [
+    ...(node.telemetry?.sample.metrics?.series ?? []).map(metricIdentity),
+    ...historyIdentities(history),
+  ];
+  return candidates.find(candidate => spec.keys.includes(candidate.key) && candidate.scope === spec.scope && spec.units.includes(candidate.unit));
 }
 
 function freshnessLabel(value: TelemetrySeries["freshness"] | TelemetryCurrentResponse["freshness"]): string {
@@ -177,8 +175,9 @@ type RichTelemetryPanelProps = {
 function RichTelemetryPanel({tab, current, capabilities, history, rangeLabel, workloads, loading, error, paused, onRetry, onPause, onExport}: RichTelemetryPanelProps) {
   const metrics = current?.sample.metrics;
   const series = metrics?.series ?? [];
+  const historicalIdentities = historyIdentities(history);
   const capabilityRows = (capabilities?.capabilities ?? metrics?.capabilities ?? [])
-    .filter(capability => !series.some(item => item.key === capability.key && item.scope === capability.scope && item.device_id === capability.device_id && item.interface_name === capability.interface_name && item.run_id === capability.run_id));
+    .filter(capability => !series.some(item => sameMetricIdentity(item, capability)));
   const metricRows = [...series, ...capabilityRows.map(capability => ({
     key: capability.key,
     scope: capability.scope,
@@ -198,7 +197,7 @@ function RichTelemetryPanel({tab, current, capabilities, history, rangeLabel, wo
     support_status: capability.supported ? "unavailable" as const : "unsupported" as const,
     reason: capability.reason ?? (capability.supported ? "No sample was reported." : "This metric is not supported by the collector."),
     aggregation: "current",
-  } satisfies TelemetrySeries))];
+  } satisfies TelemetrySeries))].filter((item, index, rows) => rows.findIndex(candidate => sameMetricIdentity(candidate, item)) === index);
 
   if (loading) return <section className="node-detail-deep-surface" aria-live="polite"><p role="status">Loading Spark telemetry…</p></section>;
   if (error) return <section className="node-detail-deep-surface node-detail-deep-error" aria-live="polite"><p role="alert">{error}</p><button type="button" className="button secondary" onClick={onRetry}>Retry telemetry</button></section>;
@@ -210,8 +209,8 @@ function RichTelemetryPanel({tab, current, capabilities, history, rangeLabel, wo
     return <section className="node-detail-deep-surface" aria-labelledby="rich-metrics-heading">
       <header className="node-detail-deep-heading"><div><h4 id="rich-metrics-heading">Metrics</h4><p>Live readings are grouped by system area. Every value keeps its unit, scope and source; missing readings stay unavailable.</p></div><div className="node-detail-deep-actions"><button type="button" className="button secondary" onClick={onPause}>{paused ? "Resume refresh" : "Pause refresh"}</button><button type="button" className="button secondary" disabled={!current && !capabilities} onClick={onExport}>Export JSON</button></div></header>
       <div className="node-detail-telemetry-meta"><span>Sample: {current ? freshnessLabel(current.freshness) : "Unavailable"}</span>{current && <time dateTime={current.observed_at}>Observed {new Date(current.observed_at).toLocaleString()}</time>}<span>History range: {rangeLabel}</span>{metrics?.provenance && <span>Source: {metrics.provenance.collector} {metrics.provenance.collector_version}</span>}{metrics?.provenance?.host_uptime_seconds !== null && metrics?.provenance?.host_uptime_seconds !== undefined && <span>Host uptime: {Math.round(metrics.provenance.host_uptime_seconds / 3600)} h</span>}</div>
-      {metricRows.length === 0 ? <p role="status">No metric readings or capability declarations are available for this Spark.</p> : <>
-        <div className="telemetry-chart-grid">{METRIC_GROUPS.filter(group => group !== "Other" || grouped.get(group)?.length).map(group => <TelemetryChartGroup key={group} group={group} rows={grouped.get(group) ?? []} history={history} rangeLabel={rangeLabel}/>)}</div>
+      {metricRows.length === 0 && historicalIdentities.length === 0 ? <p role="status">No metric readings or capability declarations are available for this Spark.</p> : <>
+        <div className="telemetry-chart-grid">{METRIC_GROUPS.filter(group => group !== "Other" || grouped.get(group)?.length || historicalIdentities.some(identity => metricGroup(identity) === group)).map(group => <TelemetryChartGroup key={group} group={group} rows={grouped.get(group) ?? []} historyIdentities={historicalIdentities} history={history} rangeLabel={rangeLabel}/>)}</div>
         <details className="node-detail-raw-metrics"><summary>Raw readings and provenance</summary><div className="node-detail-metric-table-wrap"><table className="node-detail-metric-table"><caption className="visually-hidden">Raw Spark metrics with source and freshness evidence</caption><thead><tr><th scope="col">Metric</th><th scope="col">Scope</th><th scope="col">Value</th><th scope="col">Evidence</th></tr></thead><tbody>{metricRows.map((item, index) => <tr key={`${item.key}:${item.scope}:${item.device_id ?? ""}:${item.interface_name ?? ""}:${item.run_id ?? ""}:${index}`}><th scope="row"><span>{humanMetricKey(item.key)}</span><small>{metricContext(item)}</small></th><td>{item.scope}</td><td><strong className={`telemetry-value status-${item.support_status}`}>{item.support_status === "available" ? metricValue(item) : item.support_status === "unsupported" ? "Unsupported" : "Unavailable"}</strong><small>{item.unit}</small></td><td><span className={`telemetry-freshness freshness-${item.freshness}`}>{freshnessLabel(item.freshness)}</span><small>{item.source} · {item.measurement_kind} · {item.aggregation}</small>{item.reason && <small>{item.reason}</small>}</td></tr>)}</tbody></table></div></details>
       </>}
     </section>;
@@ -347,7 +346,10 @@ export function NodeDetail({
   const name = nodeDisplayName(node);
   const secondaryName = nodeSecondaryName(node);
   const memory = nodeUnifiedMemory(node);
-  const memoryHistoryDomain = availableMemoryDomain(points, node);
+  const performanceMetrics = PERFORMANCE_METRIC_SPECS.flatMap(spec => {
+    const identity = performanceIdentity(history, node, spec);
+    return identity ? [{identity, spec}] : [];
+  });
   const lifecycleBlocked = operation !== undefined && (!operationSettled(operation.state) || ["partial", "failed", "cancelled", "canceled", "lost"].includes(operation.state));
   const refreshLifecycle = useCallback(async (signal: AbortSignal) => {
     try {
@@ -372,7 +374,7 @@ export function NodeDetail({
   const blockingRuns = (installationId: string) => node.loaded.filter(run => run.installation_id === installationId && run.run_state !== "stopped");
 
   function exportTelemetry() {
-    const payload = {node_id: node.id, current: richCurrent ?? null, capabilities: richCapabilities?.capabilities ?? [], workloads: richWorkloads ?? null};
+    const payload = {node_id: node.id, current: richCurrent ?? null, capabilities: richCapabilities?.capabilities ?? [], workloads: richWorkloads ?? null, history: history ?? null};
     const blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
     const urlFactory = URL as typeof URL & {createObjectURL?: (value: Blob) => string; revokeObjectURL?: (value: string) => void};
     if (!urlFactory.createObjectURL) {
@@ -450,11 +452,10 @@ export function NodeDetail({
       {historyLoading && <p role="status">Loading bounded telemetry history…</p>}
       {historyError && <div className="history-error"><p role="alert">{historyError}</p><button type="button" onClick={() => setRetryRevision(value => value + 1)}>Retry history</button></div>}
       {history && points.length === 0 && <p role="status">No telemetry samples are available in this window.</p>}
-      {history && points.length > 0 && <div className="history-grid">
-        <Sparkline metricName="GPU utilization" label={`${name} GPU utilization history`} domain={[0, 100]} values={[]} series={metricSeries(points, "gpu_utilization_percent")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Math.round(value)}%`}/>
-        <Sparkline metricName="Available memory" label={`${name} available memory history`} domain={memoryHistoryDomain} values={[]} series={metricSeries(points, "memory_available_bytes")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={formatBytes}/>
-        <Sparkline metricName="Temperature" label={`${name} temperature history`} domain={[0, 100]} values={[]} series={metricSeries(points, "temperature_c")} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={value => `${Number(value.toFixed(1))} °C`}/>
+      {history && points.length > 0 && performanceMetrics.length > 0 && <div className="history-grid">
+        {performanceMetrics.map(({identity, spec}) => <Sparkline key={metricIdentityKey(identity)} metricName={spec.label} label={`${name} ${spec.label} history`} domain={performanceDomain(history, identity, spec)} values={historyValues(history, identity)} series={historySeries(history, identity)} sampleLabel={history.resolution === "raw" ? "samples" : "buckets"} formatValue={spec.format}/>)}
       </div>}
+      {history && points.length > 0 && performanceMetrics.length === 0 && <p role="status">No typed telemetry history is available in this window.</p>}
     </section>
 
     <section aria-labelledby={`${headingId}-events`}>

@@ -23,6 +23,15 @@ class RuntimeWritablePath:
     source: str = "outputs"
 
 
+@dataclass(frozen=True, slots=True)
+class EngineTelemetryContract:
+    """Telemetry endpoint and privacy settings owned by an engine harness."""
+
+    adapter: str
+    path: str | None
+    environment: tuple[tuple[str, str], ...] = ()
+
+
 _COMMON_PATHS = (
     RuntimeWritablePath("home", "/outputs/cache/home", True),
     RuntimeWritablePath("xdg-cache", "/outputs/cache", True),
@@ -56,6 +65,40 @@ _ENGINE_PATHS: dict[str, tuple[RuntimeWritablePath, ...]] = {
     "diffusers": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "comfyui": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "pytorch-pipeline": (*_COMMON_PATHS, *_PYTHON_PATHS),
+}
+
+# These endpoints mirror the agent's managed-runtime telemetry producer. An
+# endpoint is advertised only where that producer has an allowlisted parser.
+# The privacy flags are source-backed by the reviewed recipe Dockerfiles and
+# wrappers: vLLM's image defaults, SGLang's ``small-dual`` image, ComfyUI's
+# recipe contract, and the Hugging Face based media/runtime images.
+_ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
+    "vllm": EngineTelemetryContract(
+        "vllm",
+        "/metrics",
+        (("HF_HUB_DISABLE_TELEMETRY", "1"), ("VLLM_NO_USAGE_STATS", "1")),
+    ),
+    "sglang": EngineTelemetryContract(
+        "sglang",
+        "/metrics",
+        (("HF_HUB_DISABLE_TELEMETRY", "1"), ("SGLANG_DISABLE_USAGE_REPORT", "1")),
+    ),
+    "tensorrt-llm": EngineTelemetryContract("unsupported", None),
+    "llama-cpp": EngineTelemetryContract("llama-cpp", "/metrics"),
+    "ds4": EngineTelemetryContract(
+        "ds4", "/metrics", (("HF_HUB_DISABLE_TELEMETRY", "1"),)
+    ),
+    "diffusers": EngineTelemetryContract(
+        "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
+    ),
+    "comfyui": EngineTelemetryContract(
+        "comfyui",
+        "/queue",
+        (("COMFYUI_DISABLE_TELEMETRY", "1"), ("HF_HUB_DISABLE_TELEMETRY", "1")),
+    ),
+    "pytorch-pipeline": EngineTelemetryContract(
+        "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
+    ),
 }
 
 # These names are paths rather than recipe tuning knobs. They are injected by
@@ -122,6 +165,11 @@ _PATH_NAMES = frozenset(
     name for environment in _ENGINE_ENVIRONMENT.values() for name in environment
 ) | _OPTIONAL_PATH_NAMES
 _RESERVED_PATH_NAMES = _PATH_NAMES | _OPTIONAL_PATH_NAMES
+_TELEMETRY_ENV_NAMES = frozenset(
+    name
+    for contract in _ENGINE_TELEMETRY.values()
+    for name, _value in contract.environment
+)
 
 
 def writable_paths(slug: str) -> tuple[RuntimeWritablePath, ...]:
@@ -140,6 +188,13 @@ def writable_paths_for_distribution(
     return paths
 
 
+def telemetry_contract(slug: str) -> EngineTelemetryContract:
+    try:
+        return _ENGINE_TELEMETRY[slug]
+    except KeyError as exc:
+        raise _compile_error(f"runtime telemetry contract is unavailable: {slug}") from exc
+
+
 def reject_recipe_environment(
     slug: str, supplied: Iterable[tuple[str, str]]
 ) -> None:
@@ -149,6 +204,10 @@ def reject_recipe_environment(
             f"runtime writable-path contract is unavailable: {slug}"
         )
     for name, _value in supplied:
+        if name in _TELEMETRY_ENV_NAMES:
+            raise _compile_error(
+                f"runtime telemetry variable is platform-owned: {name}"
+            )
         if name in _RESERVED_PATH_NAMES:
             raise _compile_error(
                 f"runtime writable path variable is platform-owned: {name}"
@@ -159,7 +218,21 @@ def environment(
     slug: str, supplied: Iterable[tuple[str, str]]
 ) -> tuple[tuple[str, str], ...]:
     """Return defaults and reject recipe ownership of reserved path names."""
+    supplied = tuple(supplied)
+    reject_recipe_environment(slug, supplied)
     return _merge_environment(slug, supplied, allow_reserved=False)
+
+
+def effective_environment(
+    slug: str,
+    supplied: Iterable[tuple[str, str]],
+    distribution: Mapping[str, object] | None = None,
+) -> tuple[tuple[str, str], ...]:
+    supplied = tuple(supplied)
+    reject_recipe_environment(slug, supplied)
+    return _merge_environment(
+        slug, supplied, allow_reserved=True, distribution=distribution
+    )
 
 
 def compile_environment(
@@ -167,7 +240,20 @@ def compile_environment(
     supplied: Iterable[tuple[str, str]],
     distribution: Mapping[str, object] | None = None,
 ) -> tuple[tuple[str, str], ...]:
-    """Merge defaults with values already injected by the central compiler."""
+    """Compile recipe declarations while rejecting platform-owned telemetry."""
+    supplied = tuple(supplied)
+    reject_recipe_environment(slug, supplied)
+    return _merge_environment(
+        slug, supplied, allow_reserved=True, distribution=distribution
+    )
+
+
+def materialize_environment(
+    slug: str,
+    supplied: Iterable[tuple[str, str]],
+    distribution: Mapping[str, object] | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """Materialize an already-centralized projection for runtime serialization."""
     return _merge_environment(
         slug, supplied, allow_reserved=True, distribution=distribution
     )
@@ -180,7 +266,10 @@ def _merge_environment(
     allow_reserved: bool,
     distribution: Mapping[str, object] | None = None,
 ) -> tuple[tuple[str, str], ...]:
-    defaults = _environment_defaults(slug, distribution)
+    defaults = {
+        **_environment_defaults(slug, distribution),
+        **dict(telemetry_contract(slug).environment),
+    }
     if defaults is None:
         raise _compile_error(
             f"runtime writable-path contract is unavailable: {slug}"
@@ -198,7 +287,7 @@ def _merge_environment(
                 )
     for name, expected in defaults.items():
         actual = supplied_map.get(name)
-        if actual is not None and not allow_reserved:
+        if actual is not None and not allow_reserved and name not in _TELEMETRY_ENV_NAMES:
             raise _compile_error(
                 f"runtime writable path variable is platform-owned: {name}"
             )
@@ -241,6 +330,17 @@ def validate_paths(
             raise _compile_error(
                 f"runtime path environment escapes writable mounts: {name}"
             )
+
+
+def validate_telemetry(
+    slug: str, telemetry: EngineTelemetryContract, env: Mapping[str, str]
+) -> None:
+    expected = telemetry_contract(slug)
+    if telemetry != expected:
+        raise _compile_error("runtime telemetry is not the central engine contract")
+    for name, value in expected.environment:
+        if env.get(name) != value:
+            raise _compile_error(f"runtime telemetry environment is incomplete: {name}")
 
 
 def document(

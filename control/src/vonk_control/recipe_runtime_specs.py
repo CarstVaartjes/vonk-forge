@@ -17,8 +17,6 @@ from .catalog_contract import (
 )
 from .harnesses import HarnessRegistry
 from .harnesses.common import HarnessCompileError
-from .runtime_writable_paths import document as runtime_writable_path_document
-from .runtime_writable_paths import compile_environment as compile_runtime_environment
 from .models import CatalogEntity, CatalogEntityRevision
 from .recipe_contract import (
     recipe_content_sha256,
@@ -27,6 +25,10 @@ from .recipe_contract import (
     recipe_references,
     recipe_topology,
     validate_recipe,
+)
+from .runtime_writable_paths import document as runtime_writable_path_document
+from .runtime_writable_paths import (
+    materialize_environment as compile_runtime_environment,
 )
 
 _OCI_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")

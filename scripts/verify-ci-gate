@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Verify that CI's selected jobs have the expected terminal results."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+AREAS = ("rust", "repository", "control", "web", "generated", "compose")
+AREA_JOBS = {
+    "rust": ("rust-tests", "rust-platform"),
+    "repository": ("repository",),
+    "control": ("control",),
+    "web": ("web",),
+    "generated": ("generated",),
+    "compose": ("compose",),
+}
+
+
+def _pairs(values: list[str], label: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for value in values:
+        key, separator, item = value.partition("=")
+        if not separator or not key or not item or key in result:
+            raise ValueError(f"invalid {label}: {value!r}")
+        result[key] = item
+    return result
+
+
+def verify(
+    selector_result: str, selected: dict[str, str], results: dict[str, str]
+) -> list[str]:
+    errors: list[str] = []
+    if selector_result != "success":
+        errors.append(f"selector result is {selector_result!r}, expected 'success'")
+
+    required_success = {"lint", "rust-umbrella", "rust-quality-gate", "catalog-runtime"}
+    for job in required_success:
+        if results.get(job) != "success":
+            errors.append(f"{job} result is {results.get(job)!r}, expected 'success'")
+
+    for area in AREAS:
+        selection = selected.get(area)
+        if selection not in {"true", "false"}:
+            errors.append(
+                f"{area} selection is {selection!r}, expected 'true' or 'false'"
+            )
+        else:
+            expected = "success" if selection == "true" else "skipped"
+            for job in AREA_JOBS[area]:
+                result = results.get(job)
+                if result != expected:
+                    errors.append(f"{job} result is {result!r}, expected {expected!r}")
+    return errors
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--selector-result", required=True)
+    parser.add_argument("--selected", action="append", default=[])
+    parser.add_argument("--result", action="append", default=[])
+    args = parser.parse_args()
+    try:
+        selected = _pairs(args.selected, "selection")
+        results = _pairs(args.result, "result")
+    except ValueError as error:
+        parser.error(str(error))
+    errors = verify(args.selector_result, selected, results)
+    if errors:
+        print("CI gate failed:", file=sys.stderr)
+        for error in errors:
+            print(f"- {error}", file=sys.stderr)
+        return 1
+    print("CI gate passed: selector and selected CI jobs are healthy")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

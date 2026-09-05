@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Advance one fully accepted image set, then its signed installer pointer.
+set -euo pipefail
+umask 077
+
+[[ $# == 9 && ( $1 == run || $1 == commit ) ]] || exit 64
+mode=$1
+shift
+bundle=$1 evidence=$2 fingerprint=$3 remote=$4
+channel=$5 authority_ref=$6 source_sha=$7 tag_oid=$8
+[[ $channel == dev || $channel == stable ]] || exit 64
+[[ $source_sha =~ ^[0-9a-f]{40}$ && $fingerprint =~ ^[0-9a-f]{64}$ ]] || exit 64
+publication=(scripts/install-release-publication promote
+  --bundle "$bundle"
+  --accepted-evidence "$evidence/receipt.json"
+  --accepted-evidence-signature "$evidence/receipt.sig"
+  --acceptance-public-key "$evidence/installer-acceptance-public.pem"
+  --acceptance-public-key-sha256 "$fingerprint"
+  --rclone-remote "$remote")
+
+verify_authority() {
+  git fetch --force --no-tags origin +refs/heads/main:refs/remotes/origin/main
+  if [[ $channel == dev ]]; then
+    [[ $authority_ref == refs/heads/main ]]
+    [[ $source_sha == "$(git rev-parse --verify refs/remotes/origin/main^{commit})" ]]
+  else
+    [[ $authority_ref == refs/tags/* ]]
+    git fetch --force --tags origin
+    scripts/verify-production-alias-postconditions \
+      "${authority_ref#refs/tags/}" "$tag_oid" "$source_sha"
+  fi
+}
+
+if [[ $mode == commit ]]; then
+  # Invoked after all aliases converge, with rollback still armed. Promotion
+  # repeats candidate, signature and anti-rollback validation before writing.
+  verify_authority
+  "${publication[@]}"
+  exit 0
+fi
+
+# Validate signed acceptance, remote immutable objects and monotonic pointer
+# before any mutable image tag is touched.
+"${publication[@]}" --preflight-only
+plan="$bundle/publication-plan.json"
+jq -e --arg channel "$channel" --arg source "$source_sha" \
+  '.channel == $channel and .source_sha == $source' "$plan" >/dev/null
+generation=$(jq -er '.generation' "$plan")
+[[ $generation =~ ^[a-zA-Z0-9.+-]+$ ]] || exit 64
+release="$bundle/objects/artifacts/$channel/releases/$generation/release.json"
+verify_authority
+alias=latest
+[[ $channel != dev ]] || alias=dev
+roles=(api worker hermes litellm)
+images=() digests=()
+for role in "${roles[@]}"; do
+  repository="ghcr.io/carstvaartjes/vonk-forge-$role"
+  reference=$(jq -er --arg role "$role" '.images[$role]' "$release")
+  [[ ${reference%%:*} == ghcr.io/carstvaartjes/vonk-forge-* ]]
+  [[ $reference == "$repository:"*"@sha256:"* ]]
+  digest=${reference##*@}
+  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || exit 64
+  images+=("$repository") digests+=("$digest")
+done
+scripts/promote-image-aliases \
+  "${images[0]}" "${digests[0]}" "${images[1]}" "${digests[1]}" "$alias" \
+  "${images[2]}" "${digests[2]}" "${images[3]}" "${digests[3]}" \
+  --commit "$0" commit "$@"
+
+# Keep a durable, human-readable record beside the pointer publication receipt.
+if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+  {
+    printf 'Promoted **:%s** from source `%s`, generation `%s`.\n\n' "$alias" "$source_sha" "$generation"
+    printf '| Image | Accepted digest |\n| --- | --- |\n'
+    for index in "${!roles[@]}"; do
+      printf '| %s | `%s` |\n' "${roles[$index]}" "${digests[$index]}"
+    done
+  } >> "$GITHUB_STEP_SUMMARY"
+fi
