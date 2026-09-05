@@ -85,7 +85,10 @@ fn model_materialization_keeps_nested_paths_selection_scoped() {
     let draft =
         materialized_model_path(Path::new("/run/vonk/models"), &parsed.artifacts[1]).unwrap();
     assert_eq!(primary, Path::new("/run/vonk/models/primary/config.json"));
-    assert_eq!(draft, Path::new("/run/vonk/models/draft/config.json"));
+    assert_eq!(
+        draft,
+        Path::new("/run/vonk/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json")
+    );
     assert_ne!(primary, draft);
 }
 

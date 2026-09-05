@@ -3,7 +3,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     net::IpAddr,
-    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -52,7 +52,6 @@ pub struct OciRuntime<'a, R> {
 
 pub const MAX_MANAGED_RECIPE_RUNS: usize = 64;
 const MAX_RUN_DIRECTORY_ENTRIES: usize = 4096;
-const MAX_HTTP_FILE_NAME_BYTES: usize = 255;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]

@@ -211,7 +211,16 @@ pub fn project(
             ));
         }
         match mount.source.as_str() {
-            "model" if mount.target == "/models" && mount.read_only => saw_model = true,
+            "model"
+                if mount.read_only
+                    && (mount.target == "/models" || mount.target.starts_with("/models/"))
+                    && plan
+                        .artifacts
+                        .iter()
+                        .any(|artifact| artifact.mount.target == mount.target) =>
+            {
+                saw_model = true
+            }
             "inputs" if has_job && mount.target == "/inputs" && mount.read_only => {
                 saw_inputs = true;
                 let source = paths
@@ -511,7 +520,9 @@ mod tests {
         assert_eq!(invocation.mounts[0].target, "/models/config.json");
         assert_eq!(
             invocation.mounts[1].source,
-            std::path::Path::new("/run/vonk/models/draft/config.json")
+            std::path::Path::new(
+                "/run/vonk/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json"
+            )
         );
         assert_eq!(invocation.mounts[1].target, "/models/draft/config.json");
         assert!(invocation.mounts[0].read_only && invocation.mounts[1].read_only);
@@ -566,7 +577,7 @@ mod tests {
     #[test]
     fn duplicate_materialized_target_is_rejected() {
         let mut value = fixture();
-        value["artifacts"][1]["mount"]["target"] = json!("/models");
+        value["artifacts"][1]["mount"]["target"] = json!("/models/target");
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         assert!(matches!(
             project(&plan, &paths()),
@@ -579,9 +590,11 @@ mod tests {
         let mut value = fixture();
         let receipt = value["artifacts"][0]["distribution_object"].clone();
         let digest = value["artifacts"][0]["sha256"].clone();
-        value["identity"]["model_artifact_bytes"] = json!(7);
+        let bytes = value["artifacts"][0]["size_bytes"].clone();
+        value["identity"]["model_artifact_bytes"] = bytes.clone();
         value["artifacts"][1]["sha256"] = digest;
-        value["artifacts"][1]["size_bytes"] = json!(7);
+        value["artifacts"][1]["size_bytes"] = bytes.clone();
+        value["artifacts"][1]["distribution_object"]["bytes"] = bytes;
         value["artifacts"][1]["distribution_object"] = receipt;
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let invocation = project(&plan, &paths()).unwrap();
@@ -591,7 +604,9 @@ mod tests {
         );
         assert_eq!(
             invocation.mounts[1].source,
-            std::path::Path::new("/run/vonk/models/draft/config.json")
+            std::path::Path::new(
+                "/run/vonk/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json"
+            )
         );
     }
 
@@ -631,7 +646,7 @@ mod tests {
             "timeout_seconds": 90
         });
         value["security"]["mounts"] = json!([
-            {"source":"model","target":"/models","read_only":true},
+            {"source":"model","target":"/models/target","read_only":true},
             {"source":"inputs","target":"/inputs","read_only":true},
             {"source":"outputs","target":"/outputs","read_only":false}
         ]);

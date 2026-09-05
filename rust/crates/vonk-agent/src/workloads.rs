@@ -32,9 +32,7 @@ pub struct CompiledExecutionPlan {
     pub security: CompiledSecurity,
     pub topology: CompiledTopology,
     pub lifecycle: CompiledLifecycle,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<CompiledEndpoint>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job: Option<CompiledJob>,
 }
 
@@ -354,7 +352,10 @@ impl CompiledSecurity {
             || self.mounts.len() > 4
             || self.mounts.iter().any(|mount| {
                 !mount.read_only && mount.target != "/outputs"
-                    || mount.read_only && !matches!(mount.target.as_str(), "/models" | "/inputs")
+                    || mount.read_only
+                        && !(mount.target == "/inputs"
+                            || mount.target == "/models"
+                            || mount.target.starts_with("/models/"))
                     || !matches!(mount.source.as_str(), "model" | "inputs" | "outputs")
             })
         {

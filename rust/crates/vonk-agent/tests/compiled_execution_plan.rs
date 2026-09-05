@@ -21,11 +21,33 @@ fn generated_python_workload_fixture_round_trips_through_rust() {
     assert_eq!(plan.artifacts[0].path, "config.json");
     assert_eq!(plan.artifacts[1].path, "config.json");
     assert_ne!(plan.artifacts[0].model, plan.artifacts[1].model);
-    assert_eq!(
-        plan.runtime.argv[2],
-        "value with spaces; {\"mode\": [\"$\", \"μ\"]}"
+    assert!(
+        plan.runtime
+            .argv
+            .contains(&"--served-model-name".to_owned())
     );
     assert_eq!(serde_json::to_value(plan).unwrap(), value);
+}
+
+#[test]
+fn endpoint_and_job_are_required_one_of_wire_keys() {
+    let mut value = fixture();
+    value.as_object_mut().unwrap().remove("endpoint");
+    assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_err());
+
+    let mut value = fixture();
+    value.as_object_mut().unwrap().remove("job");
+    assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_err());
+
+    let mut value = fixture();
+    value["job"] = json!({
+        "interface": "batch",
+        "input": null,
+        "output_path": "/outputs/result.json",
+        "timeout_seconds": 30
+    });
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    assert!(plan.validate().is_err());
 }
 
 #[test]
@@ -35,7 +57,10 @@ fn materialized_paths_remain_selection_scoped() {
         materialized_model_path(Path::new("/run/vonk/models"), &plan.artifacts[0]).unwrap();
     let draft = materialized_model_path(Path::new("/run/vonk/models"), &plan.artifacts[1]).unwrap();
     assert_eq!(primary, Path::new("/run/vonk/models/primary/config.json"));
-    assert_eq!(draft, Path::new("/run/vonk/models/draft/config.json"));
+    assert_eq!(
+        draft,
+        Path::new("/run/vonk/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json")
+    );
     assert_ne!(primary, draft);
 }
 
