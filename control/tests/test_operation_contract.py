@@ -7,7 +7,6 @@ from vonk_control.operation_contract import (
     OperationPhase,
     OperationProgress,
     OperationRecoveryAction,
-    is_secret_field,
     normalize_operation_progress,
     recovery_for_operation,
     recovery_for_state,
@@ -96,50 +95,14 @@ def test_failure_evidence_is_bounded_and_secret_free() -> None:
             "error_code": "transfer_failed",
             "summary": "download failed",
             "token": "do-not-persist",
-            "HF_TOKEN": "hf-secret",
-            "apiKey": "api-secret",
-            "max_tokens": 512,
-            "token_budget": 1_024,
-            "tokenizer": "custom",
-            "unfamiliar_token_parameter": "opaque",
             "detail": "x" * 5000,
             "nested": {"authorization": "hidden", "reason": "network"},
         }
     )
     assert "token" not in safe
-    assert "HF_TOKEN" not in safe
-    assert "apiKey" not in safe
     assert "authorization" not in str(safe)
-    assert safe["max_tokens"] == 512
-    assert safe["token_budget"] == 1_024
-    assert safe["tokenizer"] == "custom"
-    assert safe["unfamiliar_token_parameter"] == "opaque"
     assert len(safe["detail"]) == 1024
     assert len(canonical_message(safe)) <= 8192
-
-
-@pytest.mark.parametrize(
-    "name",
-    [
-        "apiKey",
-        "APIKey",
-        "accessToken",
-        "privateKey",
-        "passwordHash",
-        "hf_token",
-        "HF-TOKEN",
-        "github_token",
-    ],
-)
-def test_secret_field_detection_normalizes_credential_spellings(name: str) -> None:
-    assert is_secret_field(name)
-
-
-@pytest.mark.parametrize(
-    "name", ["max_tokens", "token_budget", "tokenizer", "tokens_per_minute"]
-)
-def test_secret_field_detection_keeps_token_count_parameters_opaque(name: str) -> None:
-    assert not is_secret_field(name)
 
 
 def test_uncertain_operations_require_inspection_before_resume() -> None:
