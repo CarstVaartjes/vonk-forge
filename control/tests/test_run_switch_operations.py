@@ -9,16 +9,26 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 from vonk_control.auth import CursorCodec
+from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
 from vonk_control.models import (
+    AgentNode,
     ClusterMapping,
     ClusterMappingNode,
     Job,
     LocalRecipeRevision,
+    NodeInventorySnapshot,
+    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
+    RecipeSourceBundle,
     ResourceReservation,
     RunNode,
 )
+from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
     RunSwitchApplyRequest,
@@ -29,11 +39,13 @@ from vonk_control.run_switch_contract import (
 from vonk_control.run_switch_operations import (
     ArtifactInspection,
     PhaseExecution,
+    RecipeLifecyclePhaseExecutor,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
+    effective_build_receipt,
 )
 
-from .test_recipe_operations import installed_recipe, setup_services
+from .test_recipe_operations import NOW, installed_recipe, setup_services
 
 MODEL_ARTIFACT = "c" * 64
 MODEL_ARTIFACT_SET = "f" * 64
@@ -176,6 +188,105 @@ class StopOnlyLifecycle:
         return SimpleNamespace(plan_digest="e" * 64)
 
 
+class PendingBuilds:
+    """Small build planner double that preserves the real build contract."""
+
+    def __init__(self, sessions, *, build_id: str, builder_node_id: str, revision_id: str, source_digest: str):
+        self.sessions = sessions
+        self.build_id = build_id
+        self.builder_node_id = builder_node_id
+        self.revision_id = revision_id
+        self.source_digest = source_digest
+        self.calls: list[str] = []
+
+    def plan(self, recipe_revision_id: str, builder_node_id: str, *, now):
+        self.calls.append(builder_node_id)
+        assert recipe_revision_id == self.revision_id
+        with self.sessions.begin() as session:
+            row = session.get(RecipeBuild, self.build_id)
+            if row is None:
+                row = RecipeBuild(
+                    id=self.build_id,
+                    recipe_revision_id=self.revision_id,
+                    builder_node_id=builder_node_id,
+                    source_bundle_sha256=self.source_digest,
+                    build_input_sha256="d" * 64,
+                    state="planned",
+                    policy_report={"passed": True},
+                    plan={
+                        "build_id": self.build_id,
+                        "recipe_revision_id": self.revision_id,
+                        "source_bundle_sha256": self.source_digest,
+                        "build_input_sha256": "d" * 64,
+                        "platform": "linux/arm64",
+                    },
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+                session.add(row)
+        return RecipeBuildPlan(
+            build_id=self.build_id,
+            recipe_revision_id=self.revision_id,
+            recipe_content_sha256="e" * 64,
+            builder_node_id=builder_node_id,
+            source_bundle_sha256=self.source_digest,
+            build_input_sha256="d" * 64,
+            agent_payload={"platform": "linux/arm64"},
+        )
+
+
+class BuildThenCopyExecutor:
+    """Drive the real build phase and retain a durable child for the test."""
+
+    def __init__(self, lifecycle, sessions) -> None:
+        self.children: dict[str, SimpleNamespace] = {}
+        self.build_preview_calls = 0
+        self.build_start_calls = 0
+        self.receipts: list[object] = []
+        self._lifecycle = lifecycle
+        self._sessions = sessions
+        self._delegate = RecipeLifecyclePhaseExecutor(
+            lifecycle,
+            sessions,
+            ClusterMappingService(sessions),
+            lambda: NOW,
+        )
+
+    def execute(
+        self,
+        plan,
+        phase,
+        *,
+        item_index,
+        actor,
+        request_key,
+        progress,
+    ) -> PhaseExecution:
+        if phase.subphase == "container-build":
+            self.build_preview_calls += 1
+            execution = self._delegate.execute(
+                plan,
+                phase,
+                item_index=item_index,
+                actor=actor,
+                request_key=request_key,
+                progress=progress,
+            )
+            if execution.operation_id is not None:
+                self.children[execution.operation_id] = SimpleNamespace(
+                    state="running",
+                    result=None,
+                )
+            return execution
+        if phase.subphase == "target-copy":
+            self.receipts.append(effective_build_receipt(plan, progress))
+            return PhaseExecution(result={"copied_bytes": 0})
+        return PhaseExecution(result={"phase": phase.kind})
+
+    def get(self, operation_id: str):
+        return self.children.get(operation_id)
+
+
 def _request(sessions, node_id: str, *, action: str = "run", retention: str = "retain-cached"):
     with sessions() as session:
         revision = session.scalar(
@@ -310,6 +421,11 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     )
     plan = service.preview(_request(sessions, nodes[0]), actor="admin")
     assert plan.storage.nas_coverage == "partial"
+    assert [(phase.kind, phase.subphase) for phase in plan.phases[:3]] == [
+        ("transfer", "model-download"),
+        ("transfer", "target-copy"),
+        ("verify", "target-copy"),
+    ]
     assert plan.storage.missing_nas_bytes == 1024
     assert plan.preparation is not None
     assert plan.preparation.model.artifact_set_sha256 == MODEL_ARTIFACT_SET
@@ -319,6 +435,143 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     assert "run-switch.nas-download-required" in {
         reason.code for reason in plan.warnings
     }
+
+
+def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        build.state = "planned"
+        build.image_digest = None
+        build.oci_layout_sha256 = None
+        build.image_bytes = None
+        build.plan = {"platform": "linux/arm64"}
+        session.add(
+            RecipeSourceBundle(
+                sha256=build.source_bundle_sha256,
+                media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
+                archive_bytes=1,
+                total_bytes=1,
+                file_count=1,
+                storage_key="source-bundle-uncached-build",
+                manifest={"schema_version": 1},
+                verified_at=NOW,
+            )
+        )
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.binary_digest = "a" * 64
+        node.capabilities = ["recipe.build.v1"]
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.capabilities = ["recipe.build.v1"]
+        revision = session.get(LocalRecipeRevision, build.recipe_revision_id)
+        assert revision is not None
+        build_plan = RecipeBuildPlan(
+            build_id=build.id,
+            recipe_revision_id=revision.id,
+            recipe_content_sha256=revision.content_sha256,
+            builder_node_id=nodes[0],
+            source_bundle_sha256=build.source_bundle_sha256,
+            build_input_sha256=build.build_input_sha256,
+            agent_payload={"platform": "linux/arm64"},
+        )
+
+    child_id = str(uuid.uuid4())
+    build_preview_calls: list[str] = []
+    build_start_calls: list[str] = []
+
+    def preview_build(_revision_id, _builder_id):
+        build_preview_calls.append(_builder_id)
+        return build_plan
+
+    def start_build(*_args, **_kwargs):
+        build_start_calls.append("start")
+        return SimpleNamespace(id=child_id, state="running", owner_id=build_id)
+
+    lifecycle.preview_build = preview_build
+    lifecycle.build = start_build
+    executor = BuildThenCopyExecutor(lifecycle, sessions)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=CompleteArtifactInspector(),
+        phase_executor=executor,
+        artifact_phase_executor=executor,
+        memory_floor_bytes=50,
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    assert plan.build.state == "planned"
+    assert plan.build.image_digest is None
+    assert [(phase.kind, phase.subphase) for phase in plan.phases[:2]] == [
+        ("prepare", "container-build"),
+        ("transfer", "target-copy"),
+    ]
+    second_plan = service.preview(request, actor="admin")
+    assert second_plan.allowed, [reason.code for reason in second_plan.blockers]
+    assert second_plan.plan_digest == plan.plan_digest
+
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert service.tick() is True
+    waiting = service.get(operation.operation_id)
+    assert waiting.current_phase == "prepare"
+    assert waiting.progress.subphase == "container-build"
+    assert waiting.result["child_operation_id"] == child_id
+    assert build_preview_calls == [nodes[0]]
+    assert build_start_calls == ["start"]
+
+    restarted = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=CompleteArtifactInspector(),
+        phase_executor=executor,
+        artifact_phase_executor=executor,
+        memory_floor_bytes=50,
+    )
+    assert restarted.tick() is True
+    assert build_preview_calls == [nodes[0]]
+    assert build_start_calls == ["start"]
+
+    executor.children[child_id].state = "succeeded"
+    with sessions.begin() as session:
+        completed = session.get(RecipeBuild, build_id)
+        assert completed is not None
+        completed.state = "succeeded"
+        completed.image_digest = "sha256:" + "1" * 64
+        completed.oci_layout_sha256 = "3" * 64
+        completed.image_bytes = 30
+    assert restarted.tick() is True
+    resumed = restarted.get(operation.operation_id)
+    assert resumed.current_phase == "transfer"
+    assert resumed.progress.subphase == "target-copy"
+    receipt = effective_build_receipt(plan, resumed.result)
+    assert receipt == {
+        "build_id": build_id,
+        "build_input_sha256": build_plan.build_input_sha256,
+        "image_digest": "sha256:" + "1" * 64,
+        "oci_layout_sha256": "3" * 64,
+        "image_bytes": 30,
+    }
+    assert restarted.tick() is True
+    assert executor.receipts == [receipt]
 
 
 def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None:
@@ -335,6 +588,188 @@ def test_model_cache_manifest_failure_is_a_typed_blocker(tmp_path: Path) -> None
     assert plan.allowed is False
     assert "run-switch.artifact-inspection-unavailable" in {
         reason.code for reason in plan.blockers
+    }
+
+
+def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
+    source_digest = "c" * 64
+    builder_id = "spk_" + "9" * 32
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        session.delete(build)
+        session.add(
+            RecipeSourceBundle(
+                sha256=source_digest,
+                media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
+                archive_bytes=1,
+                total_bytes=1,
+                file_count=1,
+                storage_key="source-bundle-c",
+                manifest={"schema_version": 1},
+                verified_at=NOW,
+            )
+        )
+        session.add(
+            AgentNode(
+                node_id=builder_id,
+                state="active",
+                architecture="linux-arm64",
+                binary_digest="a" * 64,
+                capabilities=["recipe.build.v1"],
+            )
+        )
+    InventoryRepository(sessions, clock=lambda: NOW).record(
+        InventorySnapshotInput(
+            builder_id,
+            NOW,
+            10_000,
+            8_000,
+            10_000,
+            8_000,
+            10_000,
+            8_000,
+            1,
+            False,
+            ("recipe.build.v1",),
+        )
+    )
+    with sessions.begin() as session:
+        revision = session.scalar(
+            select(LocalRecipeRevision).where(LocalRecipeRevision.lifecycle == "resolved")
+        )
+        assert revision is not None
+        fake_builds = PendingBuilds(
+            sessions,
+            build_id=str(uuid.uuid4()),
+            builder_node_id=builder_id,
+            revision_id=revision.id,
+            source_digest=source_digest,
+        )
+    lifecycle._builds = fake_builds
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+
+    assert plan.allowed is True
+    assert plan.build.state == "planned"
+    assert plan.build.builder_node_id == builder_id
+    assert plan.build.build_input_sha256 == "d" * 64
+    assert fake_builds.calls == [builder_id]
+    assert [(phase.kind, phase.subphase) for phase in plan.phases[:3]] == [
+        ("prepare", "container-build"),
+        ("transfer", "target-copy"),
+        ("verify", "target-copy"),
+    ]
+    assert "run-switch.container-build-required" in {
+        reason.code for reason in plan.warnings
+    }
+
+
+def test_container_phase_delegates_to_existing_recipe_build_child(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
+    source_digest = "c" * 64
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        build.state = "planned"
+        build.image_digest = None
+        build.oci_layout_sha256 = None
+        build.image_bytes = None
+        build.plan = {
+            "build_id": build.id,
+            "recipe_revision_id": build.recipe_revision_id,
+            "source_bundle_sha256": source_digest,
+            "build_input_sha256": build.build_input_sha256,
+            "platform": "linux/arm64",
+        }
+        session.add(
+            RecipeSourceBundle(
+                sha256=source_digest,
+                media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
+                archive_bytes=1,
+                total_bytes=1,
+                file_count=1,
+                storage_key="source-bundle-build",
+                manifest={"schema_version": 1},
+                verified_at=NOW,
+            )
+        )
+        revision = session.get(LocalRecipeRevision, build.recipe_revision_id)
+        assert revision is not None
+        node = session.get(AgentNode, nodes[0])
+        assert node is not None
+        node.binary_digest = "a" * 64
+        node.capabilities = ["recipe.build.v1"]
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot).where(
+                NodeInventorySnapshot.node_id == nodes[0]
+            )
+        )
+        assert snapshot is not None
+        snapshot.capabilities = ["recipe.build.v1"]
+    lifecycle_stub = SimpleNamespace()
+    child_id = str(uuid.uuid4())
+    build_plan = RecipeBuildPlan(
+        build_id=build_id,
+        recipe_revision_id=revision.id,
+        recipe_content_sha256=revision.content_sha256,
+        builder_node_id=nodes[0],
+        source_bundle_sha256=source_digest,
+        build_input_sha256="e" * 64,
+        agent_payload={"platform": "linux/arm64"},
+    )
+    with sessions.begin() as session:
+        row = session.get(RecipeBuild, build_id)
+        assert row is not None
+        row.build_input_sha256 = build_plan.build_input_sha256
+
+    def preview_build(_revision_id, _builder_id):
+        return build_plan
+
+    def start_build(*_args, **_kwargs):
+        return SimpleNamespace(id=child_id, state="running", owner_id=build_id)
+
+    lifecycle_stub.preview_build = preview_build
+    lifecycle_stub.build = start_build
+    executor = RecipeLifecyclePhaseExecutor(
+        lifecycle_stub,
+        sessions,
+        # Mapping is not touched by the container subphase.
+        ClusterMappingService(sessions),
+        lambda: NOW,
+    )
+    request_key = str(uuid.uuid4())
+    service = _service(
+        sessions,
+        NOW,
+        lifecycle,
+        RecordingArtifactExecutor(),
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+    phase = next(phase for phase in plan.phases if phase.subphase == "container-build")
+    execution = executor.execute(
+        plan,
+        phase,
+        item_index=0,
+        actor="admin",
+        request_key=request_key,
+        progress={},
+    )
+    assert execution.operation_id == child_id
+    assert execution.result == {
+        "build_id": build_id,
+        "build_input_sha256": "e" * 64,
+        "state": "running",
     }
 
 

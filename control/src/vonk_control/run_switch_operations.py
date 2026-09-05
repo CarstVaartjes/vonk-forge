@@ -184,6 +184,16 @@ class _ConflictRun:
     stop_plan_digest: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class _BuildSelection:
+    """The exact build receipt or pending Controller build selected for a plan."""
+
+    build: RecipeBuild | None
+    candidate: RecipeBuild | None
+    builder_freshness: FreshnessEvidence | None = None
+    blockers: tuple[RunSwitchReason, ...] = ()
+
+
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _OPERATION_KINDS = frozenset({"recipe.run-switch.v2", "recipe.stop.v2"})
@@ -611,7 +621,7 @@ class DatabaseRunSwitchArtifactInspector:
         resolve = getattr(model_cache, "resolve_artifact_set", None)
         preview = getattr(model_cache, "download_preview", None)
         if not callable(resolve) or not callable(preview):
-            raise RuntimeError("model-cache manifest provider is unavailable")
+            raise TypeError("model-cache manifest provider is unavailable")
         try:
             manifest = resolve(
                 model_version_sha256=model_version_sha256,
@@ -709,10 +719,16 @@ class DatabaseRunSwitchArtifactInspector:
                 )
             )
         dependency_versions = _manifest_value(manifest, "model_versions")
+        raw_dependencies = (
+            dependency_versions
+            if isinstance(dependency_versions, Sequence)
+            and not isinstance(dependency_versions, (str, bytes, bytearray))
+            else ()
+        )
         dependencies = tuple(
             sorted(
                 value
-                for value in (dependency_versions or ())
+                for value in raw_dependencies
                 if isinstance(value, str)
                 and value != model_version_sha256
                 and _is_hex_digest(value)
@@ -754,6 +770,129 @@ class RecipeLifecyclePhaseExecutor:
         self._mappings = mappings
         self._clock = clock
         self._artifact_executor = artifact_executor
+
+    def _execute_container_build(
+        self,
+        plan: RunSwitchPlan,
+        *,
+        actor: str,
+        request_key: str,
+    ) -> PhaseExecution:
+        """Start or replay the existing durable ``recipe.build.v1`` child."""
+
+        build_id = plan.recipe_build_id or plan.build.build_id
+        revision_id = plan.recipe_revision_id
+        if build_id is None or revision_id is None:
+            raise RunSwitchOperationConflict(
+                "run-switch.container-build-identity-unavailable"
+            )
+        with self._sessions() as session:
+            build = session.get(RecipeBuild, build_id)
+            if build is None or build.recipe_revision_id != revision_id:
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-receipt-unavailable"
+                )
+            if build.state == "succeeded":
+                if (
+                    not isinstance(build.image_digest, str)
+                    or not _is_oci_digest(build.image_digest)
+                    or not _is_hex_digest(build.oci_layout_sha256)
+                    or type(build.image_bytes) is not int
+                    or build.image_bytes < 1
+                ):
+                    raise RunSwitchOperationConflict(
+                        "run-switch.container-build-evidence-invalid"
+                    )
+                return PhaseExecution(
+                    result={
+                        "build_id": build.id,
+                        "build_input_sha256": build.build_input_sha256,
+                        "image_digest": build.image_digest,
+                        "oci_layout_sha256": build.oci_layout_sha256,
+                        "image_bytes": build.image_bytes,
+                        "state": "succeeded",
+                    }
+                )
+            if build.state not in {"planned", "building", "failed"}:
+                raise RunSwitchOperationConflict(
+                    "run-switch.container-build-state-invalid"
+                )
+            active = session.scalar(
+                select(Job)
+                .where(
+                    Job.kind == "recipe.build.v1",
+                    Job.state.in_(("queued", "running")),
+                    Job.payload["owner_id"].as_string() == build.id,
+                    Job.payload["plan_digest"].as_string()
+                    == build.build_input_sha256,
+                )
+                .order_by(Job.updated_at.desc(), Job.id)
+                .limit(1)
+            )
+            if active is not None:
+                return PhaseExecution(
+                    active.id,
+                    {
+                        "build_id": build.id,
+                        "build_input_sha256": build.build_input_sha256,
+                        "state": build.state,
+                    },
+                )
+            builder_node_id = build.builder_node_id
+            build_input_sha256 = build.build_input_sha256
+        preview_build = getattr(self._lifecycle, "preview_build", None)
+        start_build = getattr(self._lifecycle, "build", None)
+        if not callable(preview_build) or not callable(start_build):
+            raise RunSwitchOperationConflict(
+                "run-switch.container-build-executor-unavailable"
+            )
+        try:
+            build_plan = preview_build(revision_id, builder_node_id)
+        except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
+            raise RunSwitchOperationConflict(
+                f"run-switch.container-build-plan-unavailable: {error}"
+            ) from error
+        if (
+            getattr(build_plan, "build_id", None) != build_id
+            or getattr(build_plan, "build_input_sha256", None) != build_input_sha256
+        ):
+            raise RunSwitchOperationConflict(
+                "run-switch.container-build-plan-changed"
+            )
+        child_key = str(uuid.uuid5(uuid.UUID(request_key), "container-build"))
+        try:
+            value = start_build(
+                build_plan,
+                build_input_sha256=build_input_sha256,
+                actor=actor,
+                request_id=child_key,
+            )
+        except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
+            raise RunSwitchOperationConflict(
+                f"run-switch.container-build-start-unavailable: {error}"
+            ) from error
+        result = {
+            "build_id": build_id,
+            "build_input_sha256": build_input_sha256,
+            "state": getattr(value, "state", "unknown"),
+        }
+        if getattr(value, "state", None) == "succeeded":
+            with self._sessions() as session:
+                completed = session.get(RecipeBuild, build_id)
+                if completed is None:
+                    raise RunSwitchOperationConflict(
+                        "run-switch.container-build-receipt-unavailable"
+                    )
+                result.update(
+                    {
+                        "image_digest": completed.image_digest,
+                        "oci_layout_sha256": completed.oci_layout_sha256,
+                        "image_bytes": completed.image_bytes,
+                        "state": completed.state,
+                    }
+                )
+            return PhaseExecution(result=result)
+        return PhaseExecution(value.id, result)
 
     def execute(
         self,
@@ -805,6 +944,12 @@ class RecipeLifecyclePhaseExecutor:
                 request_id=child_key,
             )
             return PhaseExecution(value.id, {"run_id": target.run_id})
+        if phase.kind == "prepare" and phase.subphase == "container-build":
+            return self._execute_container_build(
+                plan,
+                actor=actor,
+                request_key=request_key,
+            )
         if phase.kind == "prepare":
             # A new mapping and installation are created through the existing
             # lifecycle primitives.  The resulting installation identity is
@@ -1422,6 +1567,19 @@ class RunSwitchOperationService:
             )
             build = self._matching_build(session, revision.id, installation)
             build_candidate = build or self._latest_build(session, revision.id)
+            build_selection = self._select_build(
+                session,
+                revision,
+                build,
+                build_candidate,
+                group,
+                now=now,
+            )
+            build = build_selection.build
+            build_candidate = build_selection.candidate
+            if build_selection.builder_freshness is not None:
+                freshness.append(build_selection.builder_freshness)
+            blockers.extend(build_selection.blockers)
             build_evidence, runtime_storage, build_blockers, build_warnings = (
                 self._build_evidence(
                     session,
@@ -1434,7 +1592,14 @@ class RunSwitchOperationService:
             blockers.extend(build_blockers)
             warnings.extend(build_warnings)
             start_plan_digest: str | None = None
-            recipe_build_id = build.id if build is not None else None
+            recipe_build_id = (
+                build.id
+                if build is not None
+                else build_candidate.id
+                if build_candidate is not None
+                and build_candidate.state in {"planned", "building"}
+                else None
+            )
             image_digest = build.image_digest if build is not None else None
             if installation is None:
                 if self._phase_executor is None:
@@ -1542,6 +1707,17 @@ class RunSwitchOperationService:
                 blockers=blockers,
                 stop_before_transfer=stop_before_transfer,
                 stop_before_prepare=stop_before_prepare,
+                build_required=(
+                    build is None
+                    and build_candidate is not None
+                    and build_candidate.state in {"planned", "building"}
+                ),
+                build_on_target=(
+                    build is None
+                    and build_candidate is not None
+                    and build_candidate.state in {"planned", "building"}
+                    and build_candidate.builder_node_id in node_ids
+                ),
             )
             if (
                 not self._custom_phase_executor
@@ -1572,6 +1748,17 @@ class RunSwitchOperationService:
                     blockers=blockers,
                     stop_before_transfer=stop_before_transfer,
                     stop_before_prepare=stop_before_prepare,
+                    build_required=(
+                        build is None
+                        and build_candidate is not None
+                        and build_candidate.state in {"planned", "building"}
+                    ),
+                    build_on_target=(
+                        build is None
+                        and build_candidate is not None
+                        and build_candidate.state in {"planned", "building"}
+                        and build_candidate.builder_node_id in node_ids
+                    ),
                 )
             preparation = self._preparation(
                 revision=revision,
@@ -1850,6 +2037,162 @@ class RunSwitchOperationService:
             .limit(1)
         )
 
+    def _select_build(
+        self,
+        session: Session,
+        revision: LocalRecipeRevision,
+        build: RecipeBuild | None,
+        candidate: RecipeBuild | None,
+        group: SparkGroup,
+        *,
+        now: datetime,
+    ) -> _BuildSelection:
+        """Resolve an immutable build or create a pending Controller build.
+
+        A successful receipt is reusable without re-admitting its builder.  A
+        pending receipt is reusable only while its builder still has fresh
+        typed build evidence.  Otherwise the Controller chooses the first
+        compatible builder in deterministic order, preferring a node outside
+        the inference group, and delegates planning to the existing recipe
+        build primitive.  This method only creates the durable *planned*
+        receipt; bytes are produced by ``recipe.build.v1`` during apply.
+        """
+
+        if build is not None:
+            return _BuildSelection(build=build, candidate=build)
+
+        group_ids = {node.node_id for node in group.nodes}
+        if candidate is not None and candidate.state in {"planned", "building"}:
+            builder = session.get(AgentNode, candidate.builder_node_id)
+            freshness, admissible = self._builder_admission(
+                session, builder, now=now
+            )
+            if admissible:
+                return _BuildSelection(
+                    build=None,
+                    candidate=candidate,
+                    builder_freshness=freshness,
+                )
+
+        preview_build = getattr(self._lifecycle, "preview_build", None)
+        if not callable(preview_build):
+            return _BuildSelection(
+                build=None,
+                candidate=None,
+                blockers=(
+                    _as_reason(
+                        "run-switch.container-build-unavailable",
+                        "The existing recipe build primitive is unavailable; the Controller cannot prepare the exact OCI runtime image.",
+                        scope="operation",
+                        node_ids=[node.node_id for node in group.nodes],
+                    ),
+                ),
+            )
+
+        nodes = tuple(
+            session.scalars(
+                select(AgentNode)
+                .where(
+                    AgentNode.state == "active",
+                    AgentNode.revoked_at.is_(None),
+                    AgentNode.architecture == "linux-arm64",
+                )
+                .order_by(AgentNode.node_id)
+            )
+        )
+        # A builder may be a member of the selected group, but a separate
+        # active worker is preferred so build memory cannot contend with the
+        # inference admission.  Both choices remain deterministic.
+        ordered_nodes = tuple(
+            sorted(nodes, key=lambda node: (node.node_id in group_ids, node.node_id))
+        )
+        errors: list[str] = []
+        saw_builder = False
+        for node in ordered_nodes:
+            freshness, admissible = self._builder_admission(
+                session, node, now=now
+            )
+            if not admissible:
+                continue
+            saw_builder = True
+            try:
+                proposed = preview_build(revision.id, node.node_id)
+            except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
+                errors.append(f"{node.node_id}: {error}")
+                continue
+            proposed_id = getattr(proposed, "build_id", None)
+            if not isinstance(proposed_id, str):
+                errors.append(f"{node.node_id}: build preview returned no build identity")
+                continue
+            selected = session.get(RecipeBuild, proposed_id)
+            if selected is None or selected.recipe_revision_id != revision.id:
+                errors.append(f"{node.node_id}: build preview receipt is unavailable")
+                continue
+            return _BuildSelection(
+                build=None,
+                candidate=selected,
+                builder_freshness=freshness,
+            )
+
+        if saw_builder:
+            detail = (
+                "No compatible Controller builder could prepare the exact recipe source and runtime image."
+            )
+            if errors:
+                detail += " " + errors[-1]
+        else:
+            detail = (
+                "No active linux-arm64 worker has fresh recipe.build.v1 admission evidence."
+            )
+        return _BuildSelection(
+            build=None,
+            candidate=None,
+            blockers=(
+                _as_reason(
+                    "run-switch.container-build-unavailable",
+                    detail,
+                    scope="operation",
+                    node_ids=[node.node_id for node in group.nodes],
+                ),
+            ),
+        )
+
+    def _builder_admission(
+        self,
+        session: Session,
+        node: AgentNode | None,
+        *,
+        now: datetime,
+    ) -> tuple[FreshnessEvidence | None, bool]:
+        """Return fresh builder evidence and whether it can run recipe.build.v1."""
+
+        if node is None:
+            return None, False
+        freshness = _latest_inventory(
+            session,
+            node.node_id,
+            now=now,
+            maximum_age_seconds=self._inventory_max_age,
+        )[1]
+        if (
+            node.state != "active"
+            or node.revoked_at is not None
+            or node.architecture != "linux-arm64"
+            or not _is_hex_digest(node.binary_digest)
+            or "recipe.build.v1" not in node.capabilities
+            or freshness.state != "fresh"
+        ):
+            return freshness, False
+        snapshot = session.scalar(
+            select(NodeInventorySnapshot)
+            .where(NodeInventorySnapshot.node_id == node.node_id)
+            .order_by(NodeInventorySnapshot.observed_at.desc())
+            .limit(1)
+        )
+        if snapshot is None or "recipe.build.v1" not in snapshot.capabilities:
+            return freshness, False
+        return freshness, True
+
     @staticmethod
     def _build_evidence(
         session: Session,
@@ -1995,7 +2338,13 @@ class RunSwitchOperationService:
             else "unknown"
         )
         runtime = RuntimeImageStorageImpact(
-            build_id=build.id if build is not None else None,
+            build_id=(
+                build.id
+                if build is not None
+                else candidate.id
+                if candidate is not None
+                else None
+            ),
             image_digest=image_digest,
             image_bytes=image_bytes,
             required_bytes=(
@@ -2028,18 +2377,33 @@ class RunSwitchOperationService:
             state = "incompatible"
         if require_available:
             if build is None:
-                blockers.append(
-                    _as_reason(
-                        "run-switch.recipe-build-unavailable",
-                        (
-                            "No successful immutable runtime image build is available."
-                            if candidate is None
-                            else f"Runtime image preparation is {candidate.state}: {candidate.error or 'no completed image receipt is available.'}"
-                        ),
-                        scope="operation",
-                        node_ids=[node.node_id for node in group.nodes],
+                pending = candidate is not None and candidate.state in {
+                    "planned",
+                    "building",
+                }
+                if pending and source_state == "available":
+                    warnings.append(
+                        _as_reason(
+                            "run-switch.container-build-required",
+                            "The exact OCI runtime image is pinned to a durable Controller build and will be prepared before target transfer.",
+                            scope="operation",
+                            severity="warning",
+                            node_ids=[node.node_id for node in group.nodes],
+                        )
                     )
-                )
+                else:
+                    blockers.append(
+                        _as_reason(
+                            "run-switch.recipe-build-unavailable",
+                            (
+                                "No successful immutable runtime image build is available."
+                                if candidate is None
+                                else f"Runtime image preparation is {candidate.state}: {candidate.error or 'no completed image receipt is available.'}"
+                            ),
+                            scope="operation",
+                            node_ids=[node.node_id for node in group.nodes],
+                        )
+                    )
             if compatibility_state == "incompatible":
                 blockers.append(
                     _as_reason(
@@ -2063,6 +2427,20 @@ class RunSwitchOperationService:
             RecipeBuildEvidence(
                 state=state,
                 build_id=build.id if build is not None else candidate.id if candidate is not None else None,
+                build_input_sha256=(
+                    build.build_input_sha256
+                    if build is not None
+                    else candidate.build_input_sha256
+                    if candidate is not None
+                    else None
+                ),
+                builder_node_id=(
+                    build.builder_node_id
+                    if build is not None
+                    else candidate.builder_node_id
+                    if candidate is not None
+                    else None
+                ),
                 image_digest=image_digest,
                 image_bytes=image_bytes,
                 oci_layout_sha256=oci_layout,
@@ -2732,6 +3110,8 @@ class RunSwitchOperationService:
         blockers: Sequence[RunSwitchReason],
         stop_before_transfer: bool,
         stop_before_prepare: bool,
+        build_required: bool = False,
+        build_on_target: bool = False,
     ) -> list[RunSwitchPhase]:
         node_ids = [node.node_id for node in group.nodes]
         phases: list[RunSwitchPhase] = []
@@ -2757,16 +3137,20 @@ class RunSwitchOperationService:
             )
             return phases
 
-        needs_transfer = (
+        needs_model_download = inspection.missing_nas_bytes not in (None, 0)
+        needs_target_copy = (
             installation_id is None
             or inspection.missing_spark_bytes not in (None, 0)
-            or inspection.missing_nas_bytes not in (None, 0)
             or (
                 runtime_storage is not None
                 and runtime_storage.missing_image_distribution_bytes not in (None, 0)
             )
         )
-        needs_prepare = installation_id is None or installation_state != "installed"
+        needs_prepare = (
+            build_required
+            or installation_id is None
+            or installation_state != "installed"
+        )
         needs_cleanup = retention == "reclaim-unreferenced" and (
             inspection.reclaimable_bytes > 0
             or (
@@ -2775,31 +3159,76 @@ class RunSwitchOperationService:
         )
         stop_added = False
 
-        def add(kind: RunSwitchPhaseKind, detail: str) -> None:
+        def add(
+            kind: RunSwitchPhaseKind,
+            detail: str,
+            *,
+            subphase: str | None = None,
+        ) -> None:
             phases.append(
                 RunSwitchPhase(
                     index=len(phases),
                     kind=kind,
+                    subphase=subphase,
                     state="blocked" if blockers and kind in {"prepare", "start", "final_verify"} else "planned",
                     node_ids=node_ids,
                     detail=detail,
                 )
             )
 
+        if build_required and not build_on_target:
+            # Controller build output is an input to transfer.  Keep it ahead
+            # of target disk cleanup/stop because this builder is outside the
+            # selected inference group.
+            add(
+                "prepare",
+                "Build the exact linux-arm64 runtime container in Controller storage before target transfer.",
+                subphase="container-build",
+            )
         if stops and stop_before_transfer:
             add("stop", "Stop conflicting workloads before disk capacity is consumed.")
             stop_added = True
-        if needs_transfer:
+        if build_required and build_on_target and not stop_before_prepare:
+            add(
+                "prepare",
+                "Build the exact linux-arm64 runtime container in Controller storage before target transfer.",
+                subphase="container-build",
+            )
+        if needs_model_download:
+            add(
+                "transfer",
+                "Download the exact model artifact set into Controller/NAS cache before Spark distribution.",
+                subphase="model-download",
+            )
+        if needs_target_copy:
             add(
                 "transfer",
                 "Copy missing model artifacts and runtime images while retaining reusable verified content.",
+                subphase="target-copy",
             )
-            add("verify", "Verify every transferred artifact against its immutable identity.")
+            add(
+                "verify",
+                "Verify every transferred artifact against its immutable model set and OCI identity.",
+                subphase="target-copy",
+            )
         if stops and stop_before_prepare and not stop_added:
             add("stop", "Stop conflicting workloads before memory-consuming runtime preparation.")
             stop_added = True
+        if build_required and stop_before_prepare:
+            # This remains a ``prepare`` phase for the shared lifecycle
+            # vocabulary; the subphase makes Controller OCI preparation
+            # explicit and gives clients a stable progress label.
+            add(
+                "prepare",
+                "Build the exact linux-arm64 runtime container in Controller storage before target transfer.",
+                subphase="container-build",
+            )
         if needs_prepare:
-            add("prepare", "Prepare the exact runtime and installation for this recipe revision.")
+            add(
+                "prepare",
+                "Prepare the exact runtime and installation for this recipe revision.",
+                subphase="runtime-install",
+            )
         if needs_cleanup:
             add("cleanup", "Reclaim only unreferenced Spark-local artifacts under the selected retention policy.")
         if stops and not stop_added:
@@ -2882,6 +3311,9 @@ class RunSwitchOperationService:
                 "item_index": 0,
                 "phase": (
                     plan.phases[0].kind if plan.phases else "final_verify"
+                ),
+                "subphase": (
+                    plan.phases[0].subphase if plan.phases else None
                 ),
                 "completed_phases": [],
                 "child_operation_id": None,
@@ -3025,6 +3457,7 @@ class RunSwitchOperationService:
                         child_progress,
                     )
                     progress["phase"] = persisted_phase.kind
+                    progress["subphase"] = persisted_phase.subphase
                     job.state = "running"
                     job.result = progress
                     job.updated_at = now
@@ -3066,6 +3499,28 @@ class RunSwitchOperationService:
                         if isinstance(receipt, Mapping)
                     )
                     progress["phase_results"] = results
+                if phase.subphase == "container-build":
+                    try:
+                        receipt = _build_receipt_in_session(
+                            session,
+                            persisted_plan,
+                        )
+                    except RunSwitchOperationConflict as error:
+                        job.state = "failed"
+                        job.status_reason = str(error)[:512]
+                        progress["failed_phase"] = phase.kind
+                        job.result = progress
+                        job.updated_at = now
+                        return True
+                    results = list(progress.get("phase_results", []))
+                    if not any(
+                        isinstance(item, Mapping)
+                        and item.get("build_id") == receipt["build_id"]
+                        and item.get("image_digest") == receipt["image_digest"]
+                        for item in results
+                    ):
+                        results.append(receipt)
+                        progress["phase_results"] = results
                 if phase.kind in {"transfer", "verify", "cleanup"}:
                     try:
                         _validate_artifact_execution(
@@ -3089,6 +3544,11 @@ class RunSwitchOperationService:
                         persisted_plan.phases[phase_index + 1].kind
                         if phase_index + 1 < len(persisted_plan.phases)
                         else "final_verify"
+                    )
+                    progress["subphase"] = (
+                        persisted_plan.phases[phase_index + 1].subphase
+                        if phase_index + 1 < len(persisted_plan.phases)
+                        else None
                     )
                 else:
                     progress["item_index"] = item_index
@@ -3149,6 +3609,7 @@ class RunSwitchOperationService:
             )
             if execution.waiting:
                 progress["phase"] = phase.kind
+                progress["subphase"] = phase.subphase
                 if execution.result is not None:
                     results = list(progress.get("phase_results", []))
                     results.append(dict(execution.result))
@@ -3156,11 +3617,31 @@ class RunSwitchOperationService:
             elif execution.operation_id is not None:
                 progress["child_operation_id"] = execution.operation_id
                 progress["phase"] = phase.kind
+                progress["subphase"] = phase.subphase
                 if execution.result is not None:
                     results = list(progress.get("phase_results", []))
                     results.append(dict(execution.result))
                     progress["phase_results"] = results
             else:
+                if phase.subphase == "container-build":
+                    try:
+                        receipt = _build_receipt_in_session(session, plan)
+                    except RunSwitchOperationConflict as error:
+                        job.state = "failed"
+                        job.status_reason = str(error)[:512]
+                        progress["failed_phase"] = phase.kind
+                        job.result = progress
+                        job.updated_at = now
+                        return True
+                    results = list(progress.get("phase_results", []))
+                    if not any(
+                        isinstance(item, Mapping)
+                        and item.get("build_id") == receipt["build_id"]
+                        and item.get("image_digest") == receipt["image_digest"]
+                        for item in results
+                    ):
+                        results.append(receipt)
+                        progress["phase_results"] = results
                 completed = list(progress.get("completed_phases", []))
                 completed.append(phase.kind)
                 progress["completed_phases"] = completed
@@ -3170,6 +3651,11 @@ class RunSwitchOperationService:
                 next_index = int(progress["phase_index"])
                 progress["phase"] = (
                     plan.phases[next_index].kind if next_index < len(plan.phases) else "final_verify"
+                )
+                progress["subphase"] = (
+                    plan.phases[next_index].subphase
+                    if next_index < len(plan.phases)
+                    else None
                 )
             job.state = "running"
             job.result = progress
@@ -3421,11 +3907,17 @@ def _planned_transfer_bytes(
     node_ids = [node.node_id for node in plan.spark_group.nodes]
     if plan.action == "stop":
         return 0, {node_id: 0 for node_id in node_ids}
+    model_download_bytes = plan.storage.missing_nas_bytes
     model_bytes = plan.storage.missing_spark_bytes
     image_bytes = plan.runtime_storage.missing_image_distribution_bytes
-    total = (
+    target_bytes = (
         model_bytes + image_bytes
         if model_bytes is not None and image_bytes is not None
+        else None
+    )
+    total = (
+        model_download_bytes + target_bytes
+        if model_download_bytes is not None and target_bytes is not None
         else None
     )
     model_each = _per_target_bytes(model_bytes, len(node_ids))
@@ -3436,6 +3928,124 @@ def _planned_transfer_bytes(
         else None
     )
     return total, {node_id: each for node_id in node_ids}
+
+
+def _planned_transfer_parts(
+    plan: RunSwitchPlan,
+) -> tuple[int | None, int | None, int | None]:
+    """Return Controller model download, target copy, and aggregate bytes."""
+
+    model_download = plan.storage.missing_nas_bytes
+    model_copy = plan.storage.missing_spark_bytes
+    image_copy = plan.runtime_storage.missing_image_distribution_bytes
+    target_copy = (
+        model_copy + image_copy
+        if model_copy is not None and image_copy is not None
+        else None
+    )
+    aggregate = (
+        model_download + target_copy
+        if model_download is not None and target_copy is not None
+        else None
+    )
+    return model_download, target_copy, aggregate
+
+
+def effective_build_receipt(
+    plan: RunSwitchPlan,
+    progress: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Resolve the exact OCI receipt available to later transfer phases.
+
+    A pending container build cannot put its output digest in the immutable
+    preview digest.  Once the durable build child succeeds, ``_advance``
+    records the receipt in ``phase_results``.  Distribution executors should
+    use this helper so they bind the target assignment to that receipt while
+    preserving the original plan digest.
+    """
+
+    expected_build_id = plan.recipe_build_id
+    expected_input = plan.build.build_input_sha256
+    candidates: list[Mapping[str, object]] = []
+    if plan.image_digest is not None:
+        candidates.append(
+            {
+                "build_id": expected_build_id,
+                "build_input_sha256": expected_input,
+                "image_digest": plan.image_digest,
+                "oci_layout_sha256": plan.build.oci_layout_sha256,
+                "image_bytes": plan.build.image_bytes,
+            }
+        )
+    raw_results = progress.get("phase_results")
+    if isinstance(raw_results, Sequence) and not isinstance(
+        raw_results, (str, bytes, bytearray)
+    ):
+        candidates.extend(
+            result
+            for result in reversed(raw_results)
+            if isinstance(result, Mapping)
+        )
+    for result in candidates:
+        if expected_build_id is not None and result.get("build_id") != expected_build_id:
+            continue
+        if expected_input is not None and result.get("build_input_sha256") not in {
+            None,
+            expected_input,
+        }:
+            continue
+        image_digest = result.get("image_digest")
+        layout_digest = result.get("oci_layout_sha256")
+        image_bytes = result.get("image_bytes")
+        if (
+            _is_oci_digest(image_digest)
+            and _is_hex_digest(layout_digest)
+            and type(image_bytes) is int
+            and image_bytes > 0
+        ):
+            return {
+                "build_id": expected_build_id,
+                "build_input_sha256": expected_input,
+                "image_digest": image_digest,
+                "oci_layout_sha256": layout_digest,
+                "image_bytes": image_bytes,
+            }
+    return None
+
+
+def _build_receipt_in_session(
+    session: Session,
+    plan: RunSwitchPlan,
+) -> dict[str, object]:
+    """Read and validate the successful build receipt for a pending plan."""
+
+    build_id = plan.recipe_build_id or plan.build.build_id
+    if build_id is None:
+        raise RunSwitchOperationConflict(
+            "run-switch.container-build-receipt-unavailable"
+        )
+    build = session.get(RecipeBuild, build_id)
+    if (
+        build is None
+        or build.recipe_revision_id != plan.recipe_revision_id
+        or build.state != "succeeded"
+        or build.build_input_sha256 != plan.build.build_input_sha256
+        or not _is_oci_digest(build.image_digest)
+        or not _is_hex_digest(build.oci_layout_sha256)
+        or type(build.image_bytes) is not int
+        or build.image_bytes < 1
+    ):
+        raise RunSwitchOperationConflict(
+            "run-switch.container-build-receipt-unavailable"
+        )
+    return {
+        "build_id": build.id,
+        "build_input_sha256": build.build_input_sha256,
+        "image_digest": build.image_digest,
+        "oci_layout_sha256": build.oci_layout_sha256,
+        "image_bytes": build.image_bytes,
+        "state": "succeeded",
+    }
 
 
 def _progress_int(value: object) -> int | None:
@@ -3517,13 +4127,24 @@ def _merge_progress_evidence(
     reported_completed = next(
         (
             _progress_int(payload.get(key))
-            for key in ("completed_bytes", "bytes_done", "copied_bytes")
+            for key in (
+                "completed_bytes",
+                "bytes_done",
+                "copied_bytes",
+                "downloaded_bytes",
+            )
             if _progress_int(payload.get(key)) is not None
         ),
         None,
     )
     if reported_completed is not None:
-        progress["completed_bytes"] = max(current_completed, reported_completed)
+        model_download, _target_copy, _aggregate = _planned_transfer_parts(plan)
+        offset = (
+            model_download
+            if phase.subphase == "target-copy" and model_download is not None
+            else 0
+        )
+        progress["completed_bytes"] = max(current_completed, offset + reported_completed)
     reported_total = next(
         (
             _progress_int(payload.get(key))
@@ -3533,8 +4154,10 @@ def _merge_progress_evidence(
         None,
     )
     if reported_total is not None and progress.get("total_bytes") is None:
-        progress["total_bytes"] = reported_total
-        progress["total_bytes_known"] = True
+        model_download, _target_copy, _aggregate = _planned_transfer_parts(plan)
+        if phase.subphase == "target-copy" and model_download is not None:
+            progress["total_bytes"] = model_download + reported_total
+            progress["total_bytes_known"] = True
 
     member_values = payload.get("members", payload.get("member_progress"))
     entries = _progress_member_entries(member_values)
@@ -3584,11 +4207,26 @@ def _complete_phase_progress(
 ) -> None:
     if phase.kind != "transfer":
         return
-    total, member_totals = _planned_transfer_bytes(plan)
-    if total is not None:
-        progress["completed_bytes"] = total
-        progress["total_bytes"] = total
+    model_download, target_copy, aggregate = _planned_transfer_parts(plan)
+    if phase.subphase == "model-download":
+        if model_download is not None:
+            progress["completed_bytes"] = max(
+                _progress_int(progress.get("completed_bytes")) or 0,
+                model_download,
+            )
+        return
+    if phase.subphase != "target-copy":
+        return
+    _total, member_totals = _planned_transfer_bytes(plan)
+    if aggregate is not None:
+        progress["completed_bytes"] = aggregate
+        progress["total_bytes"] = aggregate
         progress["total_bytes_known"] = True
+    elif target_copy is not None:
+        progress["completed_bytes"] = max(
+            _progress_int(progress.get("completed_bytes")) or 0,
+            target_copy + (model_download or 0),
+        )
     entries = {
         str(item.get("node_id")): dict(item)
         for item in _progress_member_entries(progress.get("members"))
@@ -3629,6 +4267,7 @@ def _complete_operation_progress(
         item["error"] = None
     progress["members"] = list(entries.values())
     progress["phase"] = "final_verify"
+    progress["subphase"] = None
     return progress
 
 
@@ -3645,6 +4284,7 @@ def _progress_view(
         phase_count = 1
         phase_index = 0
         phase = None
+        subphase = None
         total = _progress_int(raw.get("total_bytes"))
         member_totals = {node_id: None for node_id in node_ids}
     else:
@@ -3656,6 +4296,18 @@ def _progress_view(
         phase = _progress_phase(raw.get("phase"))
         if phase is None and phase_index < len(plan.phases):
             phase = plan.phases[phase_index].kind
+        subphase = raw.get("subphase")
+        if subphase not in {
+            "container-build",
+            "model-download",
+            "target-copy",
+            "runtime-install",
+        }:
+            subphase = (
+                plan.phases[phase_index].subphase
+                if phase_index < len(plan.phases)
+                else None
+            )
         total, member_totals = _planned_transfer_bytes(plan)
         if total is None:
             candidate_total = _progress_int(raw.get("total_bytes"))
@@ -3664,6 +4316,7 @@ def _progress_view(
     state = operation_state if operation_state in {"queued", "running", "succeeded", "failed"} else "unknown"
     if state == "succeeded":
         phase = "final_verify"
+        subphase = None
         phase_index = min(max(phase_index, phase_count - 1), 31)
     completed = _progress_int(raw.get("completed_bytes")) or 0
     if state == "succeeded" and total is not None:
@@ -3736,6 +4389,7 @@ def _progress_view(
         completed_bytes=completed,
         total_bytes=total,
         total_bytes_known=total is not None,
+        subphase=subphase,
         members=members,
     )
 
@@ -3776,6 +4430,14 @@ def _validate_artifact_execution(
             if expected_layout is not None and result.get("verified_oci_layout_sha256") != expected_layout:
                 raise RunSwitchOperationConflict(
                     "run-switch.runtime-layout-verification-mismatch"
+                )
+        elif plan.recipe_build_id is not None:
+            # A build performed by the same high-level operation has no OCI
+            # output digest at preview time.  The distribution adapter must
+            # bind its verification receipt to the exact durable build row.
+            if result.get("verified_build_id") != plan.recipe_build_id:
+                raise RunSwitchOperationConflict(
+                    "run-switch.runtime-build-verification-mismatch"
                 )
     elif phase.kind == "cleanup":
         if result.get("scope") != "spark-local":
@@ -3919,4 +4581,5 @@ __all__ = [
     "RunSwitchOperationProvider",
     "RunSwitchOperationService",
     "RunSwitchPhaseExecutor",
+    "effective_build_receipt",
 ]

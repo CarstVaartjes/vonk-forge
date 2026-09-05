@@ -228,6 +228,11 @@ class RuntimeImageStorageImpact(_StrictModel):
 class RecipeBuildEvidence(_StrictModel):
     state: Literal["available", "planned", "building", "failed", "missing", "incompatible", "unknown"]
     build_id: UuidId | None
+    # A pending build is still bound to an immutable source/build input and a
+    # deterministically selected Controller builder.  The OCI output digest
+    # is filled only after the durable build child records its receipt.
+    build_input_sha256: Digest | None = None
+    builder_node_id: NodeId | None = None
     image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
     image_bytes: int | None = Field(default=None, ge=0)
     oci_layout_sha256: Digest | None = None
@@ -270,6 +275,15 @@ RunSwitchPhaseKind = Literal[
 class RunSwitchPhase(_StrictModel):
     index: int = Field(ge=0, le=31)
     kind: RunSwitchPhaseKind
+    # ``kind`` stays in the shared lifecycle vocabulary.  This typed purpose
+    # distinguishes Controller-side OCI preparation from target installation
+    # while keeping Activity's generic phase enum stable.
+    subphase: Literal[
+        "container-build",
+        "model-download",
+        "target-copy",
+        "runtime-install",
+    ] | None = None
     state: Literal["planned", "retained", "skipped", "blocked"]
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     operation_digest: Digest | None = None
@@ -335,6 +349,12 @@ class RunSwitchProgress(_StrictModel):
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     total_bytes_known: bool
+    subphase: Literal[
+        "container-build",
+        "model-download",
+        "target-copy",
+        "runtime-install",
+    ] | None = None
     members: list[RunSwitchMemberProgress] = Field(min_length=1, max_length=32)
 
     @model_validator(mode="after")
