@@ -35,6 +35,8 @@ PACKAGE_SCHEMA_VERSION = 2
 PACKAGE_INDEX_PATH = "/v1/recipe-library/index.json"
 PACKAGE_MEDIA_TYPE = "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
 PACKAGE_REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
+PACKAGE_RAW_ORIGIN = "https://raw.githubusercontent.com"
+PACKAGE_API_ORIGIN = "https://api.github.com"
 MAX_INDEX_BYTES = 12 * 1024 * 1024
 MAX_PACKAGE_BYTES = 256 * 1024 * 1024
 MAX_PACKAGE_FILES = 2048
@@ -153,19 +155,27 @@ class RecipePackageClient:
 
     def __init__(
         self,
-        base_url: str,
+        base_url: str | None = None,
         *,
         cache_root: Path,
         transport: httpx.BaseTransport | None = None,
         timeout_seconds: float = 8.0,
         publication_commit: str | None = None,
+        api_url: str = PACKAGE_API_ORIGIN,
     ) -> None:
-        parsed = urlsplit(base_url.rstrip("/"))
+        production = base_url is None
+        origin = PACKAGE_RAW_ORIGIN if production else base_url.rstrip("/")
+        parsed = urlsplit(origin)
         if not parsed.hostname or (parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1", "caddy"}):
             raise RecipePackageError("recipe_package.url_insecure", "recipe package URL must use HTTPS")
         if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
             raise RecipePackageError("recipe_package.url_invalid", "recipe package URL contains forbidden components")
-        self._base_url = base_url.rstrip("/")
+        api = urlsplit(api_url.rstrip("/"))
+        if not api.hostname or (api.scheme != "https" and api.hostname not in {"localhost", "127.0.0.1", "::1", "caddy"}) or api.username or api.password or api.query or api.fragment or api.path not in {"", "/"}:
+            raise RecipePackageError("recipe_package.url_invalid", "recipe package API URL is invalid")
+        self._production = production
+        self._api_url = api_url.rstrip("/")
+        self._base_url = origin
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
         if publication_commit is not None and not _SHA1.fullmatch(publication_commit):
@@ -187,13 +197,16 @@ class RecipePackageClient:
         self._prepared: dict[str, RecipeLibraryItem] = {}
         self._snapshot_path = self._cache_root / "snapshot.json"
         self._candidate_path = self._cache_root / "snapshot.candidate.json"
+        self._candidate_active = False
 
     def close(self) -> None:
         self._client.close()
 
     def list(self) -> RecipeLibrarySnapshot:
         try:
-            response = self._client.get(PACKAGE_INDEX_PATH)
+            publication = self._resolve_publication_commit() if self._production else None
+            index_path = self._raw_path(publication, "catalog-index.json") if publication else PACKAGE_INDEX_PATH
+            response = self._client.get(index_path)
         except (httpx.HTTPError, OSError) as error:
             persisted = self._read_persisted_snapshot()
             if persisted is not None:
@@ -207,18 +220,43 @@ class RecipePackageClient:
             raise RecipePackageError("recipe_package.unavailable", "recipe package index is unavailable")
         if media_type not in _INDEX_MEDIA_TYPES or len(response.content) > MAX_INDEX_BYTES:
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index response is invalid")
-        publication = response.headers.get("x-vonk-publication-commit") or response.headers.get(
+        publication = publication or response.headers.get("x-vonk-publication-commit") or response.headers.get(
             "x-recipe-library-publication-commit"
         )
         if publication is not None and not _SHA1.fullmatch(publication):
             raise RecipePackageError("recipe_package.response_invalid", "recipe publication identity is invalid")
         snapshot, packages = self._parse_index(response.content, publication_commit=publication)
         self._persist_index(response.content, publication_commit=publication)
+        self._candidate_active = True
         self._previous_snapshot = self._snapshot
         self._packages = packages
         self._snapshot = snapshot
         self._prepared = {}
         return snapshot
+
+    def _raw_path(self, publication_commit: str, path: str) -> str:
+        if not _SHA1.fullmatch(publication_commit) or not _safe_path(path):
+            raise RecipePackageError("recipe_package.url_invalid", "recipe publication path is invalid")
+        return f"/{PACKAGE_REPOSITORY}/{publication_commit}/{path}"
+
+    def _resolve_publication_commit(self) -> str:
+        try:
+            response = self._client.get(
+                f"{self._api_url}/repos/{PACKAGE_REPOSITORY}/commits/main",
+                headers={"Accept": "application/vnd.github+json"},
+            )
+        except (httpx.HTTPError, OSError) as error:
+            raise RecipePackageError("recipe_package.unavailable", "recipe publication is unavailable") from error
+        if response.status_code != 200 or response.is_redirect or len(response.content) > 128 * 1024:
+            raise RecipePackageError("recipe_package.unavailable", "recipe publication is unavailable")
+        try:
+            payload = _json(response.content)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise RecipePackageError("recipe_package.response_invalid", "recipe publication response is invalid") from error
+        commit = payload.get("sha") if isinstance(payload, Mapping) else None
+        if not isinstance(commit, str) or not _SHA1.fullmatch(commit):
+            raise RecipePackageError("recipe_package.response_invalid", "recipe publication identity is invalid")
+        return commit
 
     def _parse_index(
         self, raw: bytes, *, publication_commit: str | None = None
@@ -298,6 +336,8 @@ class RecipePackageClient:
                 pass
 
     def _promote_candidate(self) -> None:
+        if not self._candidate_active:
+            return
         try:
             os.replace(self._candidate_path, self._snapshot_path)
         except OSError as error:
@@ -307,6 +347,13 @@ class RecipePackageClient:
             ) from error
 
     def _read_persisted_snapshot(self) -> RecipeLibrarySnapshot | None:
+        self._candidate_active = False
+        try:
+            # A candidate left by an interrupted process is never eligible for
+            # promotion by an offline prepare.
+            self._candidate_path.unlink()
+        except OSError:
+            pass
         try:
             payload = _json(self._snapshot_path.read_bytes())
             if not isinstance(payload, Mapping) or not isinstance(payload.get("index"), str):
@@ -369,7 +416,12 @@ class RecipePackageClient:
         except OSError:
             pass
         try:
-            response = self._client.get(urljoin(self._base_url + "/", location))
+            download_url = (
+                self._raw_path(expected_publication, location)
+                if self._production and expected_publication is not None
+                else urljoin(self._base_url + "/", location)
+            )
+            response = self._client.get(download_url)
         except (httpx.HTTPError, OSError) as error:
             raise RecipePackageError("recipe_package.unavailable", "recipe package is unavailable") from error
         media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()

@@ -1730,11 +1730,10 @@ def production_app() -> FastAPI:
                 pass
 
     global_catalog = GlobalCatalogClient(settings.global_catalog_url)
-    if settings.recipe_library_package_url is None:
-        raise RuntimeError("recipe library package URL is required")
     recipe_library = RecipePackageClient(
         settings.recipe_library_package_url,
         cache_root=settings.state_path / "recipe-library-packages",
+        api_url=settings.recipe_library_api_url,
     )
     catalog_service = CatalogService(
         sessions,
