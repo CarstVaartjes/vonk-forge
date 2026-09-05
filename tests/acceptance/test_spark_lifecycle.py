@@ -52,7 +52,7 @@ from tests.acceptance.test_fresh_nas_install import (
     command_environment,
     generate_bundle,
     host_command_environment,
-    is_immutable_image,
+    is_channel_image,
     nas_responses,
     tailscale_service_hostname,
 )
@@ -913,6 +913,7 @@ class SparkLifecycle:
             raise LifecycleError(
                 "candidate controller services are not healthy"
             ) from error
+        self._assert_running_publication_images()
         # Both package lanes need deterministic NVIDIA discovery so the agent
         # can start on a GPU-less CI runner. Only ARM64 consumes it in a recipe.
         self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
@@ -1000,12 +1001,47 @@ class SparkLifecycle:
             configured_service = services.get(service)
             if not isinstance(configured_service, dict) or configured_service.get(
                 "image"
-            ) != images.get(role):
+            ) != str(images.get(role)).split("@", 1)[0].rsplit(":", 1)[0] + (
+                ":dev" if self.arguments.channel == "dev" else ":latest"
+            ):
                 raise LifecycleError("Compose image graph differs from publication")
         for service in services.values():
             image = service.get("image") if isinstance(service, dict) else None
-            if not isinstance(image, str) or not is_immutable_image(image):
-                raise LifecycleError("Compose contains a mutable image")
+            if not isinstance(image, str) or not is_channel_image(
+                image, self.arguments.channel
+            ):
+                raise LifecycleError("Compose image does not follow its channel")
+
+    def _assert_running_publication_images(self) -> None:
+        """A moving alias must still resolve to the candidate being qualified."""
+        assert self.bundle is not None
+        candidate = _read_canonical_document(
+            self.arguments.candidate_release, "candidate release object"
+        )
+        images = _object(candidate.get("images"), "candidate image graph")
+        for role, service in COMPOSE_IMAGE_ROLES.items():
+            if service not in LOCAL_CONTROLLER_SERVICES:
+                continue
+            container = self._run_command(
+                self._compose("ps", "-q", service), cwd=self.bundle
+            ).stdout.strip()
+            observed = self._run_command(
+                ["docker", "inspect", "--format", "{{.Image}}", container],
+                cwd=self.bundle,
+            ).stdout.strip()
+            expected = self._run_command(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{.Id}}",
+                    str(images[role]),
+                ],
+                cwd=self.bundle,
+            ).stdout.strip()
+            if not observed or observed != expected:
+                raise LifecycleError("running channel image differs from publication")
 
     def _read_secret(self, relative: str) -> str:
         assert self.bundle is not None
@@ -1897,10 +1933,7 @@ class SparkLifecycle:
                 agent = matching[0]
                 node_id = agent.get("node_id")
                 agent_mismatches = []
-                if (
-                    not isinstance(node_id, str)
-                    or NODE_ID.fullmatch(node_id) is None
-                ):
+                if not isinstance(node_id, str) or NODE_ID.fullmatch(node_id) is None:
                     agent_mismatches.append("node_id")
                 if agent.get("state") != "active":
                     agent_mismatches.append("state")

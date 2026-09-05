@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Reconcile public convenience aliases from an authoritative immutable digest
-# set. Deployments consume immutable references, never these moving aliases.
+# set. Deployment Compose files follow these accepted channel aliases.
 set -euo pipefail
 umask 077
 
@@ -36,7 +36,6 @@ images=("$api_image" "$worker_image")
 digests=("$api_digest" "$worker_digest")
 if [[ "$#" -eq 7 ]]; then
   readonly hermes_image=$6 hermes_digest=$7
-  [[ "$alias" == latest ]] || usage
   [[ "$hermes_image" == ghcr.io/carstvaartjes/vonk-forge-hermes ]] || usage
   [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
   roles+=(hermes)
@@ -45,7 +44,6 @@ if [[ "$#" -eq 7 ]]; then
 fi
 if [[ "$#" -eq 9 ]]; then
   readonly hermes_image=$6 hermes_digest=$7 litellm_image=$8 litellm_digest=$9
-  [[ "$alias" == latest ]] || usage
   [[ "$hermes_image" == ghcr.io/carstvaartjes/vonk-forge-hermes ]] || usage
   [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
   [[ "$litellm_image" == ghcr.io/carstvaartjes/vonk-forge-litellm ]] || usage

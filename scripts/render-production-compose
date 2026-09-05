@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render the canonical production graph with versioned digest-locked images."""
+"""Render the canonical production graph with production latest images."""
 
 from __future__ import annotations
 
@@ -35,7 +35,9 @@ def _validate_image(image: str, role: str) -> None:
 
 def _canonical_renderer():
     script = Path(__file__).with_name("render-dev-compose")
-    loader = importlib.machinery.SourceFileLoader("canonical_compose_renderer", str(script))
+    loader = importlib.machinery.SourceFileLoader(
+        "canonical_compose_renderer", str(script)
+    )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     if spec is None:
         raise ValueError("canonical Compose renderer is unavailable")
@@ -51,6 +53,8 @@ def render(
     worker_image: str,
     hermes_image: str,
     litellm_image: str,
+    *,
+    channel: str = "stable",
 ) -> None:
     """Render one self-contained production Compose file."""
     if not template.is_file() or template.is_symlink():
@@ -94,7 +98,11 @@ def render(
             LITELLM_TOKEN: litellm_image,
         },
     )
-    canonical_renderer._resolve_runtime_images(document)
+    if channel not in {"stable", "pinned"}:
+        raise ValueError("channel must be stable or pinned")
+    canonical_renderer._resolve_runtime_images(document, channel)
+    if channel != "pinned":
+        canonical_renderer._resolve_extension_images(document, channel)
     canonical_renderer._embed_runtime_assets(document, template.parent)
     rendered = yaml.safe_dump(document, sort_keys=False, default_flow_style=False)
     if "VONK_DEPLOYMENT_MODE: production" not in rendered:
@@ -127,6 +135,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--worker-image", required=True)
     parser.add_argument("--hermes-image", required=True)
     parser.add_argument("--litellm-image", required=True)
+    parser.add_argument("--channel", choices=("stable", "pinned"), default="stable")
     return parser.parse_args()
 
 
@@ -139,6 +148,7 @@ def main() -> None:
         arguments.worker_image,
         arguments.hermes_image,
         arguments.litellm_image,
+        channel=arguments.channel,
     )
 
 

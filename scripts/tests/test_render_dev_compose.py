@@ -207,7 +207,7 @@ def test_render_rejects_the_mutable_development_image_alias(tmp_path: Path) -> N
     assert "immutable published development image" in result.stderr
 
 
-def test_render_dev_accepts_workflow_mutable_aliases_and_pins_the_rest(
+def test_render_dev_floats_every_service_and_always_pulls(
     tmp_path: Path,
 ) -> None:
     output = tmp_path / "docker-compose.yaml"
@@ -226,12 +226,22 @@ def test_render_dev_accepts_workflow_mutable_aliases_and_pins_the_rest(
     assert services["control-api"]["pull_policy"] == "always"
     assert services["control-worker"]["image"] == DEV_WORKER_IMAGE
     assert services["control-worker"]["pull_policy"] == "always"
-    assert services["hermes-agent"]["image"] == HERMES_IMAGE
-    assert all(
-        "@sha256:" in service["image"]
-        for name, service in services.items()
-        if name not in {"control-api", "control-worker"}
+    assert (
+        services["hermes-agent"]["image"]
+        == "ghcr.io/carstvaartjes/vonk-forge-hermes:dev"
     )
+    assert (
+        services["litellm"]["image"] == "ghcr.io/carstvaartjes/vonk-forge-litellm:dev"
+    )
+    for service in services.values():
+        expected_tag = (
+            "dev"
+            if service["image"].startswith("ghcr.io/carstvaartjes/vonk-forge-")
+            else "latest"
+        )
+        assert service["image"].endswith(f":{expected_tag}")
+        assert "@" not in service["image"]
+        assert service["pull_policy"] == "always"
 
 
 def test_render_dev_rejects_role_swapped_mutable_aliases(tmp_path: Path) -> None:
