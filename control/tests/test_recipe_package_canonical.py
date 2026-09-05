@@ -166,3 +166,39 @@ def test_candidate_package_imports_into_canonical_controller_documents(tmp_path:
     assert queried.content_sha256 == item.content_sha256
     assert queried.document["identity"] == item.document["identity"]
     client.close()
+
+
+def test_published_index_imports_all_models_including_unreferenced_versions(
+    tmp_path: Path,
+) -> None:
+    index_path = ROOT / "catalog-index.json"
+    if not index_path.is_file():
+        pytest.skip("published recipe corpus checkout is not available")
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    model_documents = [entry["document"] for entry in index["catalog_entities"]]
+    recipe_models = {
+        reference["model"]["slug"]
+        for row in index["recipes"]
+        for reference in row["document"].get("models", [])
+        if isinstance(reference, dict)
+        and isinstance(reference.get("model"), dict)
+        and isinstance(reference["model"].get("slug"), str)
+    }
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog-models.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    catalog = CatalogService(
+        sessions,
+        clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
+        cursors=TokenCodec(b"m" * 32).cursor_codec(),
+    )
+    assert catalog.import_catalog_models("index-test", model_documents) == 92
+    with sessions() as session:
+        revisions = session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model"
+            )
+        ).all()
+        assert len(revisions) == 92
+        assert all(revision.state == "active" for revision in revisions)
+        assert any(revision.slug not in recipe_models for revision in revisions)

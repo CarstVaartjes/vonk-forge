@@ -30,8 +30,6 @@ from .catalog_service import (
     _document_summary,
 )
 from .catalog_sync import CatalogSyncError, CatalogSyncView
-from .global_catalog import GlobalCatalogError, GlobalRecipeRevision
-from .models import CatalogDocumentRevision
 from .recipe_library import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -91,17 +89,6 @@ PublicRecipeQualificationBasis = Literal[
 ]
 
 CATALOG_OPERATION_IDS = {
-    ("get", "/api/v1/catalog/entities"): "listCatalogEntities",
-    ("post", "/api/v1/catalog/entities"): "createCatalogEntityDraft",
-    ("get", "/api/v1/catalog/entities/{entity_id}"): "getCatalogEntity",
-    (
-        "put",
-        "/api/v1/catalog/entities/{entity_id}/draft",
-    ): "reviseCatalogEntity",
-    (
-        "post",
-        "/api/v1/catalog/entities/{entity_id}/resolve",
-    ): "resolveCatalogEntity",
     ("get", "/api/v1/catalog/recipes"): "listLocalRecipes",
     ("post", "/api/v1/catalog/recipes"): "createLocalRecipe",
     ("get", "/api/v1/catalog/recipes/{recipe_id}"): "getLocalRecipe",
@@ -116,8 +103,6 @@ CATALOG_OPERATION_IDS = {
         "put",
         "/api/v1/catalog/source-bundles/{sha256}",
     ): "uploadLocalRecipeSourceBundle",
-    ("post", "/api/v1/catalog/imports/global/preview"): "previewGlobalRecipeImport",
-    ("post", "/api/v1/catalog/imports/global"): "importGlobalRecipe",
     ("post", "/api/v1/catalog/imports/recipe-library"): "importRecipeLibrary",
     (
         "post",
@@ -143,11 +128,6 @@ CATALOG_OPERATION_IDS = {
 
 class AuditSink(Protocol):
     def append(self, record: AuditRecord) -> None: ...
-
-
-class GlobalCatalogReader(Protocol):
-    def fetch(self, uri: str) -> GlobalRecipeRevision: ...
-    def fetch_source_bundle(self, sha256: str) -> bytes: ...
 
 
 class RecipeLibraryReader(Protocol):
@@ -192,32 +172,13 @@ class ResolveRecipeRequest(StrictModel):
     expected_revision: int = Field(ge=1, strict=True)
 
 
-class CreateCatalogEntityRequest(StrictModel):
-    document: dict[str, object]
-
-
-class ReviseCatalogEntityRequest(CreateCatalogEntityRequest):
-    expected_revision: int = Field(ge=1, strict=True)
-
-
-class ResolveCatalogEntityRequest(StrictModel):
-    expected_revision: int = Field(ge=1, strict=True)
-
-
 class ForkRecipeRequest(StrictModel):
     revision: int = Field(ge=1, strict=True)
     slug: str = Field(pattern=_SLUG)
 
 
-class GlobalImportPreviewRequest(StrictModel):
+class PublicImportRequest(StrictModel):
     uri: str = Field(min_length=100, max_length=256)
-
-
-class GlobalImportRequest(GlobalImportPreviewRequest):
-    expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class PublicImportRequest(GlobalImportPreviewRequest):
     expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -466,27 +427,6 @@ class SourceBundleResponse(StrictModel):
     files: list[str] = Field(min_length=1, max_length=4096)
 
 
-class CatalogEntityRevisionResponse(StrictModel):
-    entity_id: str = Field(pattern=_UUID)
-    kind: Literal["model", "recipe"]
-    publisher: str = Field(pattern=_SLUG)
-    slug: str = Field(pattern=_SLUG)
-    title: str = Field(min_length=1, max_length=120)
-    revision_id: str = Field(pattern=_UUID)
-    revision_number: int = Field(ge=1)
-    lifecycle: Literal["candidate", "active", "failed"]
-    schema_version: Literal[2]
-    document: dict[str, object]
-    content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    created_by: str = Field(min_length=1, max_length=200)
-    created_at: str
-
-
-class CatalogEntityListResponse(StrictModel):
-    entities: list[CatalogEntityRevisionResponse] = Field(max_length=100)
-    next_cursor: str | None = Field(default=None, max_length=512)
-
-
 def _catalog_problem(
     request: Request, *, status_code: int, code: str, detail: str
 ) -> JSONResponse:
@@ -578,29 +518,6 @@ def _managed_sync(value: CatalogSyncView) -> dict[str, object]:
         "completed_at": (
             value.completed_at.isoformat() if value.completed_at is not None else None
         ),
-    }
-
-
-def _entity_revision(value: CatalogDocumentRevision) -> dict[str, object]:
-    metadata = value.document.get("metadata", {})
-    title = metadata.get("title") if isinstance(metadata, Mapping) else None
-    if not isinstance(title, str):
-        identity = value.document.get("identity", {})
-        title = identity.get("slug", value.slug) if isinstance(identity, Mapping) else value.slug
-    return {
-        "entity_id": value.entity_id,
-        "kind": value.kind,
-        "publisher": value.publisher,
-        "slug": value.slug,
-        "title": title,
-        "revision_id": value.id,
-        "revision_number": value.revision_number,
-        "lifecycle": value.state,
-        "schema_version": value.schema_version,
-        "document": value.document,
-        "content_sha256": value.content_digest,
-        "created_by": value.created_by,
-        "created_at": value.created_at.isoformat(),
     }
 
 
@@ -1107,7 +1024,6 @@ def install_catalog_routes(
     actor_dependency: Any,
     audits: AuditSink,
     service: CatalogService | None,
-    global_catalog: GlobalCatalogReader | None = None,
     recipe_library: RecipeLibraryReader | None = None,
     managed_sync: ManagedRecipeCatalogSync | None = None,
 ) -> None:
@@ -1124,31 +1040,6 @@ def install_catalog_routes(
     def administrator(actor: Actor) -> None:
         if actor.role != "administrator":
             raise HTTPException(status_code=403, detail="insufficient role")
-
-    def entity_administrator(request: Request, actor: Actor) -> JSONResponse | None:
-        if actor.role == "administrator":
-            return None
-        return _catalog_problem(
-            request,
-            status_code=403,
-            code="catalog.entity_forbidden",
-            detail="administrator role is required for catalog entity authoring",
-        )
-
-    def entity_not_found(request: Request) -> JSONResponse:
-        return _catalog_problem(
-            request,
-            status_code=404,
-            code="catalog.entity_not_found",
-            detail="catalog entity or revision was not found",
-        )
-
-    def remote(uri: str) -> GlobalRecipeRevision:
-        if global_catalog is None:
-            raise GlobalCatalogError(
-                "global.unavailable", "global catalog is not configured"
-            )
-        return global_catalog.fetch(uri)
 
     def public_remote(uri: str) -> RecipeLibraryItem:
         if recipe_library is None:
@@ -1188,174 +1079,6 @@ def install_catalog_routes(
             **release_state,
             "changes_since_local": changes,
         }
-
-    @app.get(
-        "/api/v1/catalog/entities",
-        response_model=CatalogEntityListResponse,
-        responses={401: {"model": CatalogProblem}, 422: {"model": CatalogProblem}},
-        operation_id="listCatalogEntities",
-    )
-    def list_entities(
-        request: Request,
-        kind: str | None = Query(default=None, max_length=32),
-        publisher: str | None = Query(default=None, pattern=_SLUG),
-        limit: int = Query(default=20, ge=1, le=100),
-        cursor: str | None = Query(default=None, max_length=512),
-        _actor: Actor = authenticated,
-    ):
-        try:
-            values, next_cursor = catalog().entities.list_entities(
-                kind=kind,
-                publisher=publisher,
-                limit=limit,
-                cursor=cursor,
-            )
-        except (CatalogError, ValueError) as error:
-            problem = (
-                error
-                if isinstance(error, CatalogError)
-                else CatalogValidationError("catalog.kind", "catalog kind is invalid")
-            )
-            return _problem(request, problem)
-        return {
-            "entities": [_entity_revision(value) for value in values],
-            "next_cursor": next_cursor,
-        }
-
-    @app.post(
-        "/api/v1/catalog/entities",
-        response_model=CatalogEntityRevisionResponse,
-        responses={
-            401: {"model": CatalogProblem},
-            403: {"model": CatalogProblem},
-            409: {"model": CatalogProblem},
-            422: {"model": CatalogProblem},
-        },
-        status_code=status.HTTP_201_CREATED,
-        operation_id="createCatalogEntityDraft",
-    )
-    def create_entity(
-        body: CreateCatalogEntityRequest,
-        request: Request,
-        actor: Actor = authenticated,
-    ):
-        if denial := entity_administrator(request, actor):
-            return denial
-        try:
-            _bounded(body.document, subject="catalog entity document")
-            result = catalog().entities.create_draft(body.document, actor=actor.subject)
-        except CatalogError as error:
-            return _problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.entity.create",
-                None,
-                (result.entity_id, result.id),
-            )
-        )
-        return _entity_revision(result)
-
-    @app.get(
-        "/api/v1/catalog/entities/{entity_id}",
-        response_model=CatalogEntityRevisionResponse,
-        responses={401: {"model": CatalogProblem}, 404: {"model": CatalogProblem}},
-        operation_id="getCatalogEntity",
-    )
-    def get_entity(
-        request: Request,
-        entity_id: str = Path(pattern=_UUID),
-        _actor: Actor = authenticated,
-    ):
-        try:
-            return _entity_revision(catalog().entities.get_entity(entity_id))
-        except KeyError:
-            return entity_not_found(request)
-
-    @app.put(
-        "/api/v1/catalog/entities/{entity_id}/draft",
-        response_model=CatalogEntityRevisionResponse,
-        responses={
-            401: {"model": CatalogProblem},
-            403: {"model": CatalogProblem},
-            404: {"model": CatalogProblem},
-            409: {"model": CatalogProblem},
-            422: {"model": CatalogProblem},
-        },
-        operation_id="reviseCatalogEntity",
-    )
-    def revise_entity(
-        body: ReviseCatalogEntityRequest,
-        request: Request,
-        entity_id: str = Path(pattern=_UUID),
-        actor: Actor = authenticated,
-    ):
-        if denial := entity_administrator(request, actor):
-            return denial
-        try:
-            _bounded(body.document, subject="catalog entity document")
-            result = catalog().entities.revise(
-                entity_id,
-                body.document,
-                actor=actor.subject,
-                expected_revision=body.expected_revision,
-            )
-        except KeyError:
-            return entity_not_found(request)
-        except CatalogError as error:
-            return _problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.entity.revise",
-                None,
-                (entity_id, result.id),
-            )
-        )
-        return _entity_revision(result)
-
-    @app.post(
-        "/api/v1/catalog/entities/{entity_id}/resolve",
-        response_model=CatalogEntityRevisionResponse,
-        responses={
-            401: {"model": CatalogProblem},
-            403: {"model": CatalogProblem},
-            404: {"model": CatalogProblem},
-            409: {"model": CatalogProblem},
-            422: {"model": CatalogProblem},
-        },
-        operation_id="resolveCatalogEntity",
-    )
-    def resolve_entity(
-        body: ResolveCatalogEntityRequest,
-        request: Request,
-        entity_id: str = Path(pattern=_UUID),
-        actor: Actor = authenticated,
-    ):
-        if denial := entity_administrator(request, actor):
-            return denial
-        try:
-            result = catalog().entities.resolve(
-                entity_id,
-                actor=actor.subject,
-                expected_revision=body.expected_revision,
-            )
-        except KeyError:
-            return entity_not_found(request)
-        except CatalogError as error:
-            return _problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.entity.resolve",
-                None,
-                (entity_id, result.id, result.content_sha256 or ""),
-            )
-        )
-        return _entity_revision(result)
 
     @app.get(
         "/api/v1/catalog/source-bundles/{sha256}",
@@ -1450,32 +1173,6 @@ def install_catalog_routes(
             "files": list(result.files),
         }
 
-    def global_problem(request: Request, error: GlobalCatalogError) -> JSONResponse:
-        status_code = (
-            404
-            if error.code == "global.not_found"
-            else 409
-            if error.code == "global.revision_changed"
-            else 422
-            if error.code
-            in {
-                "global.uri_invalid",
-                "global.identity_mismatch",
-                "global.schema_incompatible",
-            }
-            else 503
-            if error.code in {"global.unavailable", "global.url_insecure"}
-            else 502
-        )
-        return JSONResponse(
-            status_code=status_code,
-            content={
-                "code": error.code[:128],
-                "detail": error.detail[:256],
-                "request_id": request.state.request_id,
-            },
-        )
-
     def recipe_library_problem(
         request: Request, error: RecipeLibraryError
     ) -> JSONResponse:
@@ -1497,18 +1194,6 @@ def install_catalog_routes(
                 "request_id": request.state.request_id,
             },
         )
-
-    def global_revision(value: GlobalRecipeRevision) -> dict[str, object]:
-        return {
-            "publisher": value.publisher,
-            "slug": value.slug,
-            "recipe_id": value.recipe_id,
-            "revision_number": value.revision_number,
-            "revision_id": value.revision_id,
-            "content_sha256": value.content_sha256,
-            "published_at": value.published_at,
-            "document": value.document,
-        }
 
     def read(call, request: Request):
         try:
@@ -1701,20 +1386,6 @@ def install_catalog_routes(
         )
         return _revision(result)
 
-    @app.post(
-        "/api/v1/catalog/imports/global/preview",
-        response_model=GlobalRevisionResponse,
-        operation_id="previewGlobalRecipeImport",
-    )
-    def preview_global_import(
-        body: GlobalImportPreviewRequest, request: Request, actor: Actor = authenticated
-    ):
-        administrator(actor)
-        try:
-            return global_revision(remote(body.uri))
-        except GlobalCatalogError as error:
-            return global_problem(request, error)
-
     @app.get(
         "/api/v1/catalog/public-recipes",
         response_model=PublicRecipeListResponse,
@@ -1847,7 +1518,7 @@ def install_catalog_routes(
         operation_id="previewPublicRecipeImport",
     )
     def preview_public_import(
-        body: GlobalImportPreviewRequest,
+        body: PublicImportRequest,
         request: Request,
         actor: Actor = authenticated,
     ):
@@ -1936,60 +1607,6 @@ def install_catalog_routes(
                 action,
                 None,
                 (result.recipe_id, result.content_sha256 or ""),
-            )
-        )
-        return _revision(result)
-
-    @app.post(
-        "/api/v1/catalog/imports/global",
-        response_model=RecipeRevisionResponse,
-        status_code=status.HTTP_201_CREATED,
-        operation_id="importGlobalRecipe",
-    )
-    def import_global_recipe(
-        body: GlobalImportRequest, request: Request, actor: Actor = authenticated
-    ):
-        administrator(actor)
-        try:
-            fetched = remote(body.uri)
-        except GlobalCatalogError as error:
-            return global_problem(request, error)
-        if fetched.content_sha256 != body.expected_content_sha256:
-            return _problem(
-                request,
-                CatalogConflict(
-                    "global.preview_changed",
-                    "global recipe changed since preview; review it again",
-                ),
-            )
-        try:
-            build = fetched.document.get("build")
-            context = build.get("context") if isinstance(build, dict) else None
-            source_sha256 = context.get("sha256") if isinstance(context, dict) else None
-            if not isinstance(source_sha256, str):
-                raise CatalogValidationError(
-                    "global.source_invalid", "global recipe source identity is invalid"
-                )
-            source = (
-                global_catalog.fetch_source_bundle(source_sha256)
-                if global_catalog is not None
-                else b""
-            )
-            catalog().store_source_bundle(
-                source_sha256, io.BytesIO(source), actor.subject
-            )
-            result = catalog().import_global(actor.subject, fetched)
-        except CatalogError as error:
-            return _problem(request, error)
-        except GlobalCatalogError as error:
-            return global_problem(request, error)
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                actor.subject,
-                "catalog.global.import",
-                None,
-                (result.recipe_id, fetched.revision_id, fetched.content_sha256),
             )
         )
         return _revision(result)

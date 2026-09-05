@@ -768,68 +768,109 @@ class CatalogService:
         actor: str,
     ) -> CatalogDocumentRevision:
         """Persist a package's exact model closure before activating its recipe."""
-        entities = CatalogEntityService(session, clock=self._clock, cursors=self._cursors)
-
-        def upsert(document: Mapping[str, object], kind: str, publisher: str, slug: str, digest: str) -> CatalogDocumentRevision:
-            active = session.scalar(
-                select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == kind,
-                    CatalogDocumentRevision.publisher == publisher,
-                    CatalogDocumentRevision.slug == slug,
-                    CatalogDocumentRevision.content_digest == digest,
-                    CatalogDocumentRevision.state == "active",
-                ).limit(1)
-            )
-            if active is not None:
-                return active
-            root = session.scalar(
-                select(CatalogDocument).where(
-                    CatalogDocument.kind == kind,
-                    CatalogDocument.publisher == publisher,
-                    CatalogDocument.slug == slug,
-                ).with_for_update()
-            )
-            if root is None:
-                candidate = entities.create_draft(document, actor=actor)
-            else:
-                head = session.scalar(
-                    select(CatalogDocumentHead).where(
-                        CatalogDocumentHead.kind == kind,
-                        CatalogDocumentHead.publisher == publisher,
-                        CatalogDocumentHead.slug == slug,
-                    ).with_for_update()
-                )
-                if head is not None and head.candidate_revision_id is not None:
-                    entities.fail_candidate(root.id)
-                latest = session.scalar(
-                    select(CatalogDocumentRevision)
-                    .where(CatalogDocumentRevision.document_id == root.id)
-                    .order_by(CatalogDocumentRevision.revision_number.desc())
-                    .limit(1)
-                )
-                candidate = entities.revise(
-                    root.id,
-                    document,
-                    actor=actor,
-                    expected_revision=latest.revision_number if latest is not None else None,
-                )
-            return entities.resolve(candidate.id, actor=actor)
-
         for model in models:
-            upsert(
+            self._upsert_canonical_document(
+                session,
                 model.model_dump(mode="json"),
                 "model",
                 model.identity.publisher,
                 model.identity.slug,
                 content_sha256(model),
+                actor=actor,
             )
-        return upsert(
+        return self._upsert_canonical_document(
+            session,
             recipe.model_dump(mode="json"),
             "recipe",
             recipe.identity.publisher,
             recipe.identity.slug,
             content_sha256(recipe),
+            actor=actor,
         )
+
+    def import_catalog_models(
+        self,
+        actor: str,
+        documents: Sequence[Mapping[str, object]],
+    ) -> int:
+        """Activate every canonical Model document advertised by the index."""
+
+        actor = _actor(actor)
+        try:
+            models = [ModelDefinition.model_validate(value) for value in documents]
+        except (TypeError, ValueError) as error:
+            raise CatalogValidationError(
+                "recipe_library.model_document_invalid",
+                "catalog index model documents are invalid",
+            ) from error
+        with self._sessions.begin() as session:
+            for model in models:
+                self._upsert_canonical_document(
+                    session,
+                    model.model_dump(mode="json"),
+                    "model",
+                    model.identity.publisher,
+                    model.identity.slug,
+                    content_sha256(model),
+                    actor=actor,
+                )
+        return len(models)
+
+    def _upsert_canonical_document(
+        self,
+        session: Session,
+        document: Mapping[str, object],
+        kind: str,
+        publisher: str,
+        slug: str,
+        digest: str,
+        *,
+        actor: str,
+    ) -> CatalogDocumentRevision:
+        entities = CatalogEntityService(session, clock=self._clock, cursors=self._cursors)
+        active = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == kind,
+                CatalogDocumentRevision.publisher == publisher,
+                CatalogDocumentRevision.slug == slug,
+                CatalogDocumentRevision.content_digest == digest,
+                CatalogDocumentRevision.state == "active",
+            ).limit(1)
+        )
+        if active is not None:
+            return active
+        root = session.scalar(
+            select(CatalogDocument).where(
+                CatalogDocument.kind == kind,
+                CatalogDocument.publisher == publisher,
+                CatalogDocument.slug == slug,
+            ).with_for_update()
+        )
+        if root is None:
+            candidate = entities.create_draft(document, actor=actor)
+        else:
+            head = session.scalar(
+                select(CatalogDocumentHead).where(
+                    CatalogDocumentHead.kind == kind,
+                    CatalogDocumentHead.publisher == publisher,
+                    CatalogDocumentHead.slug == slug,
+                ).with_for_update()
+            )
+            if head is not None and head.candidate_revision_id is not None:
+                entities.fail_candidate(root.id)
+            latest = session.scalar(
+                select(CatalogDocumentRevision)
+                .where(CatalogDocumentRevision.document_id == root.id)
+                .order_by(CatalogDocumentRevision.revision_number.desc())
+                .limit(1)
+            )
+            candidate = entities.revise(
+                root.id,
+                document,
+                actor=actor,
+                expected_revision=latest.revision_number if latest is not None else None,
+            )
+        return entities.resolve(candidate.id, actor=actor)
 
     def import_recipe_library(
         self,
