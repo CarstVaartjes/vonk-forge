@@ -322,11 +322,17 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
         progress={},
     )
     assert first.operation_id
-    service.run_pending(limit=2)
+    # Finish the durable seed first.  The composite child then observes the
+    # same exact set as an already verified shared object and should report no
+    # transfer bytes for its own operation.
+    service.run_pending(limit=1)
+    service.run_pending(limit=1)
     completed = executor.get(first.operation_id)
     assert completed.state == "succeeded"
     assert completed.result["artifact_set_sha256"] == manifest.digest == artifact_set
     assert completed.result["coverage"] == "complete"
     assert completed.result["evidence"]["coverage"] == "complete"
-    assert completed.result["progress"]["completed_bytes"] == len(payload)
-    assert completed.result["progress"]["total_bytes"] == len(payload)
+    assert completed.result["progress"]["completed_bytes"] == 0
+    assert completed.result["progress"]["total_bytes"] == (
+        len(payload) - seeded.progress["downloaded_bytes"]
+    )

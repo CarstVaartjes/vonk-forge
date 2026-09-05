@@ -613,8 +613,12 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
                 "skipped": True,
                 "coverage": "complete",
                 "artifact_set_sha256": model.artifact_set_sha256,
-                "downloaded_bytes": expected_bytes,
-                "total_bytes": expected_bytes,
+                # The immutable set is already complete, but this operation
+                # received no bytes.  Keep transfer progress separate from
+                # artifact-set coverage so cached reuse cannot fabricate a
+                # network transfer.
+                "downloaded_bytes": 0,
+                "total_bytes": 0,
             })
         cache_request_key = str(uuid.uuid5(uuid.UUID(request_key), f"model-download:{phase.index}:{model.artifact_set_sha256}"))
         view = start_method(

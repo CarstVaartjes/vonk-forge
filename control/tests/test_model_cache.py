@@ -16,6 +16,7 @@ from vonk_control.model_cache import (
     ModelCacheService,
 )
 from vonk_control.model_cache_api import (
+    ModelCacheOperationProvider,
     install_model_cache_routes,
     model_cache_operation_provider,
 )
@@ -118,6 +119,10 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         request_key="00000000-0000-4000-8000-000000000001",
     )
     assert first.state == "succeeded"
+    assert first.progress["downloaded_bytes"] == first.progress["expected_bytes"]
+    assert first.progress["expected_bytes"] == len(
+        b"primary model bytestokenizer auxiliary bytes"
+    )
     entry = service.get_entry(first.artifact_set_sha256 or "")
     assert entry["coverage"] == "complete"
     assert entry["expected_bytes"] == len(b"primary model bytestokenizer auxiliary bytes")
@@ -156,6 +161,8 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         request_key="00000000-0000-4000-8000-000000000002",
     )
     assert second.state == "succeeded"
+    assert second.progress["downloaded_bytes"] == 0
+    assert second.progress["expected_bytes"] == 0
     with sessions() as session:
         assert session.scalar(select(func.count()).select_from(ModelCacheArtifact)) == 2
     assert service.storage_summary().unique_used_bytes == len(
@@ -189,6 +196,39 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
     assert entry["expected_bytes"] == len(b"shared payload")
     assert entry["unique_bytes"] == len(b"shared payload")
     assert service.storage_summary().unique_used_bytes == len(b"shared payload")
+
+
+def test_cached_download_skip_reports_zero_transfer_but_complete_coverage(
+    cache, tmp_path: Path
+) -> None:
+    service, _sessions = cache
+    model = "8" * 64
+    data = b"already cached model"
+    artifact = _artifact(tmp_path, data, model_version_sha256=model)
+    first = _download(
+        service,
+        [artifact],
+        model_version_sha256=model,
+        request_key="00000000-0000-4000-8000-000000000016",
+    )
+    preview = service.download_preview(
+        model_version_sha256=model,
+        artifacts=[artifact],
+    )
+    assert preview["new_bytes"] == 0
+    replay = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000017",
+        plan_digest=str(preview["plan_digest"]),
+        model_version_sha256=model,
+        artifacts=[artifact],
+    )
+    service.run_pending()
+    replay = service.get_operation(replay.id)
+    assert replay.state == "succeeded"
+    assert replay.progress["downloaded_bytes"] == 0
+    assert replay.progress["expected_bytes"] == 0
+    assert service.get_entry(first.artifact_set_sha256 or "")["coverage"] == "complete"
 
 
 def test_download_mutation_is_queued_until_the_controller_worker_runs(
@@ -347,6 +387,8 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     set_digest = partial.artifact_set_sha256 or ""
     part = service.root / "partials" / set_digest / f"{artifact['sha256']}.part"
     assert 0 < part.stat().st_size < len(data)
+    assert partial.progress["downloaded_bytes"] == part.stat().st_size
+    assert partial.progress["expected_bytes"] == len(data)
 
     restarted = ModelCacheService(
         sessions,
@@ -359,6 +401,8 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     resumed = restarted.get_operation(partial.id)
     assert resumed.state == "succeeded"
     assert resumed.attempt == 2
+    assert resumed.progress["downloaded_bytes"] == len(data)
+    assert resumed.progress["expected_bytes"] == len(data)
     assert (service.root / "objects" / str(artifact["sha256"])[0:2] / str(artifact["sha256"]).strip()).read_bytes() == data
     assert restarted.get_entry(set_digest)["coverage"] == "complete"
 
@@ -630,3 +674,16 @@ def test_controller_worker_drains_queued_cache_operations_without_inline_api_tra
     worker = Worker(Jobs(), "worker", {}, model_cache=CacheWorker())
     assert worker.run_once() is True
     assert calls == [1]
+
+
+def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
+    progress = ModelCacheOperationProvider._progress(
+        {"phase": "downloading", "downloaded_bytes": 12}
+    )
+    assert progress == {
+        "phase": "download",
+        "completed_bytes": 12,
+        "total_bytes_known": False,
+    }
+    assert "percent" not in progress
+    assert "eta_seconds" not in progress
