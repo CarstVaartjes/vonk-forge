@@ -16,14 +16,32 @@ from .apply_request import ApplyRequest
 from .artifact_file_declaration import ArtifactFileDeclaration
 from .artifact_job_create import ArtifactJobCreate
 from .artifact_job_create_parameters import ArtifactJobCreateParameters
+from .artifact_storage_impact import ArtifactStorageImpact
+from .artifact_storage_impact_nas_coverage import ArtifactStorageImpactNasCoverage
+from .artifact_storage_impact_retention import ArtifactStorageImpactRetention
+from .artifact_storage_impact_running_coverage import ArtifactStorageImpactRunningCoverage
+from .artifact_storage_impact_spark_coverage import ArtifactStorageImpactSparkCoverage
 from .bounded_error_response import BoundedErrorResponse
+from .build_compatibility_evidence import BuildCompatibilityEvidence
+from .build_compatibility_evidence_state import BuildCompatibilityEvidenceState
 from .build_plan_response import BuildPlanResponse
 from .build_preview_input import BuildPreviewInput
 from .build_preview_request import BuildPreviewRequest
 from .build_preview_target import BuildPreviewTarget
 from .build_request import BuildRequest
+from .build_source_evidence import BuildSourceEvidence
+from .build_source_evidence_state import BuildSourceEvidenceState
+from .cache_artifact_response import CacheArtifactResponse
+from .cache_artifact_response_state import CacheArtifactResponseState
+from .cache_entry_response import CacheEntryResponse
+from .cache_entry_response_coverage import CacheEntryResponseCoverage
+from .cache_entry_response_state import CacheEntryResponseState
+from .cache_storage_response import CacheStorageResponse
 from .cancel_artifact_job_response_cancelartifactjob import CancelArtifactJobResponseCancelartifactjob
 from .cancel_request import CancelRequest
+from .capability_evidence import CapabilityEvidence
+from .capability_evidence_evidence import CapabilityEvidenceEvidence
+from .capability_evidence_support import CapabilityEvidenceSupport
 from .capacity_reservations import CapacityReservations
 from .catalog_entity_list_response import CatalogEntityListResponse
 from .catalog_entity_revision_response import CatalogEntityRevisionResponse
@@ -32,6 +50,14 @@ from .catalog_entity_revision_response_kind import CatalogEntityRevisionResponse
 from .catalog_entity_revision_response_lifecycle import CatalogEntityRevisionResponseLifecycle
 from .catalog_problem import CatalogProblem
 from .change_request import ChangeRequest
+from .compatibility_identity import CompatibilityIdentity
+from .compatibility_preparation import CompatibilityPreparation
+from .compatibility_preparation_kind import CompatibilityPreparationKind
+from .compatibility_preparation_stage import CompatibilityPreparationStage
+from .compatibility_preparation_state import CompatibilityPreparationState
+from .controller_asset_state import ControllerAssetState
+from .controller_asset_state_source import ControllerAssetStateSource
+from .controller_asset_state_state import ControllerAssetStateState
 from .create_artifact_job_response_createartifactjob import CreateArtifactJobResponseCreateartifactjob
 from .create_catalog_entity_request import CreateCatalogEntityRequest
 from .create_catalog_entity_request_document import CreateCatalogEntityRequestDocument
@@ -56,6 +82,7 @@ from .fleet_profile_assignment import FleetProfileAssignment
 from .fleet_profile_assignment_desired_state import FleetProfileAssignmentDesiredState
 from .fleet_profile_assignment_input import FleetProfileAssignmentInput
 from .fleet_profile_assignment_input_desired_state import FleetProfileAssignmentInputDesiredState
+from .fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
 from .fleet_profile_assignment_preview import FleetProfileAssignmentPreview
 from .fleet_profile_assignment_preview_actions_item import FleetProfileAssignmentPreviewActionsItem
 from .fleet_profile_assignment_preview_current_state import FleetProfileAssignmentPreviewCurrentState
@@ -88,6 +115,8 @@ from .fleet_profile_view_labels import FleetProfileViewLabels
 from .fleet_snapshot import FleetSnapshot
 from .fleet_status_response import FleetStatusResponse
 from .fork_recipe_request import ForkRecipeRequest
+from .freshness_evidence import FreshnessEvidence
+from .freshness_evidence_state import FreshnessEvidenceState
 from .freshness_policy import FreshnessPolicy
 from .get_agent_upgrade_candidate_response_current_agent_upgrade_api_v1_agents_upgrades_candidate_get import GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet
 from .get_artifact_job_capabilities_response_getartifactjobcapabilities import GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities
@@ -115,17 +144,45 @@ from .install_preview_target import InstallPreviewTarget
 from .install_request import InstallRequest
 from .inventory_state import InventoryState
 from .inventory_state_freshness import InventoryStateFreshness
+from .invocation_metadata import InvocationMetadata
+from .invocation_metadata_context import InvocationMetadataContext
 from .job_detail_response import JobDetailResponse
 from .job_logs_response import JobLogsResponse
 from .job_operation_progress import JobOperationProgress
+from .job_operation_progress_checkpoint_type_0 import JobOperationProgressCheckpointType0
 from .job_operation_response import JobOperationResponse
 from .job_progress import JobProgress
 from .job_resume_response import JobResumeResponse
 from .job_summary import JobSummary
 from .jobs_response import JobsResponse
+from .library_capability_fact import LibraryCapabilityFact
+from .library_capability_fact_evidence_status import LibraryCapabilityFactEvidenceStatus
+from .library_capability_fact_support import LibraryCapabilityFactSupport
+from .library_capability_inventory import LibraryCapabilityInventory
+from .library_capability_inventory_state import LibraryCapabilityInventoryState
+from .library_capability_provenance import LibraryCapabilityProvenance
+from .library_capability_provenance_source_kind import LibraryCapabilityProvenanceSourceKind
+from .library_catalog_reference import LibraryCatalogReference
+from .library_catalog_reference_kind import LibraryCatalogReferenceKind
 from .library_installation_summary import LibraryInstallationSummary
 from .library_installation_summary_state import LibraryInstallationSummaryState
 from .library_model import LibraryModel
+from .library_model_artifact import LibraryModelArtifact
+from .library_model_artifact_kind import LibraryModelArtifactKind
+from .library_model_definition import LibraryModelDefinition
+from .library_model_family import LibraryModelFamily
+from .library_model_format import LibraryModelFormat
+from .library_model_format_container import LibraryModelFormatContainer
+from .library_model_limits import LibraryModelLimits
+from .library_model_lineage import LibraryModelLineage
+from .library_model_lineage_relation import LibraryModelLineageRelation
+from .library_model_metadata import LibraryModelMetadata
+from .library_model_parameters import LibraryModelParameters
+from .library_model_sizes import LibraryModelSizes
+from .library_model_source import LibraryModelSource
+from .library_model_version_facts import LibraryModelVersionFacts
+from .library_model_version_facts_availability_type_0 import LibraryModelVersionFactsAvailabilityType0
+from .library_model_version_facts_state import LibraryModelVersionFactsState
 from .library_placement_application import LibraryPlacementApplication
 from .library_placement_application_desired_state import LibraryPlacementApplicationDesiredState
 from .library_placement_application_progress import LibraryPlacementApplicationProgress
@@ -177,6 +234,32 @@ from .mapping_preview_target import MappingPreviewTarget
 from .mapping_request import MappingRequest
 from .mapping_request_parameters import MappingRequestParameters
 from .mapping_response import MappingResponse
+from .mapping_selection import MappingSelection
+from .mapping_selection_action import MappingSelectionAction
+from .mapping_selection_parameters import MappingSelectionParameters
+from .model_artifact_preparation import ModelArtifactPreparation
+from .model_artifact_preparation_completeness import ModelArtifactPreparationCompleteness
+from .model_cache_download_preview_request import ModelCacheDownloadPreviewRequest
+from .model_cache_download_preview_response import ModelCacheDownloadPreviewResponse
+from .model_cache_download_request import ModelCacheDownloadRequest
+from .model_cache_evict_request import ModelCacheEvictRequest
+from .model_cache_eviction_entry import ModelCacheEvictionEntry
+from .model_cache_eviction_preview_request import ModelCacheEvictionPreviewRequest
+from .model_cache_eviction_preview_response import ModelCacheEvictionPreviewResponse
+from .model_cache_inventory_response import ModelCacheInventoryResponse
+from .model_cache_operation_progress import ModelCacheOperationProgress
+from .model_cache_operation_progress_phase import ModelCacheOperationProgressPhase
+from .model_cache_operation_response import ModelCacheOperationResponse
+from .model_cache_operation_response_kind import ModelCacheOperationResponseKind
+from .model_cache_operation_response_result_type_0 import ModelCacheOperationResponseResultType0
+from .model_cache_operation_response_state import ModelCacheOperationResponseState
+from .model_cache_operations_response import ModelCacheOperationsResponse
+from .model_cache_repair_preview_request import ModelCacheRepairPreviewRequest
+from .model_cache_repair_preview_response import ModelCacheRepairPreviewResponse
+from .model_cache_repair_preview_response_current_state import ModelCacheRepairPreviewResponseCurrentState
+from .model_cache_repair_request import ModelCacheRepairRequest
+from .model_cache_update_response import ModelCacheUpdateResponse
+from .model_cache_updates_response import ModelCacheUpdatesResponse
 from .model_deletion_installation_impact_response import ModelDeletionInstallationImpactResponse
 from .model_deletion_node_impact_response import ModelDeletionNodeImpactResponse
 from .model_deletion_plan_response import ModelDeletionPlanResponse
@@ -190,6 +273,13 @@ from .node_connection_online_state import NodeConnectionOnlineState
 from .node_profile_update_request import NodeProfileUpdateRequest
 from .node_status import NodeStatus
 from .node_status_labels import NodeStatusLabels
+from .operation_detail_response import OperationDetailResponse
+from .operation_evidence_download import OperationEvidenceDownload
+from .operation_evidence_provenance import OperationEvidenceProvenance
+from .operation_failure_evidence import OperationFailureEvidence
+from .operation_member_progress import OperationMemberProgress
+from .operation_recovery import OperationRecovery
+from .operation_recovery_action import OperationRecoveryAction
 from .operation_response import OperationResponse
 from .operation_response_result_type_0 import OperationResponseResultType0
 from .operational_build import OperationalBuild
@@ -203,6 +293,7 @@ from .operational_run import OperationalRun
 from .operational_run_route_state import OperationalRunRouteState
 from .operational_run_state import OperationalRunState
 from .operational_state import OperationalState
+from .operations_response import OperationsResponse
 from .output_limits import OutputLimits
 from .placement_evidence_counts import PlacementEvidenceCounts
 from .placement_evidence_counts_truncated_collections_item import PlacementEvidenceCountsTruncatedCollectionsItem
@@ -214,6 +305,8 @@ from .placement_recommendation_install_state import PlacementRecommendationInsta
 from .placement_recommendation_load_state import PlacementRecommendationLoadState
 from .placement_score import PlacementScore
 from .plan_reason import PlanReason
+from .preparation_reason import PreparationReason
+from .preparation_reason_severity import PreparationReasonSeverity
 from .preview_agent_upgrade_response_preview_agent_upgrade_api_v1_agents_upgrades_preview_post import PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost
 from .preview_proposal_response_proposal_preview_api_v1_proposals_post import PreviewProposalResponseProposalPreviewApiV1ProposalsPost
 from .preview_request import PreviewRequest
@@ -252,6 +345,8 @@ from .public_recipe_release import PublicRecipeRelease
 from .public_recipe_release_upgrade_effect import PublicRecipeReleaseUpgradeEffect
 from .public_recipe_topology_role import PublicRecipeTopologyRole
 from .publication_export_request import PublicationExportRequest
+from .recipe_build_evidence import RecipeBuildEvidence
+from .recipe_build_evidence_state import RecipeBuildEvidenceState
 from .recipe_disk_requirements import RecipeDiskRequirements
 from .recipe_fabric import RecipeFabric
 from .recipe_fabric_connectivity import RecipeFabricConnectivity
@@ -284,6 +379,7 @@ from .resolve_import_request_overlays import ResolveImportRequestOverlays
 from .resolve_recipe_request import ResolveRecipeRequest
 from .revise_catalog_entity_request import ReviseCatalogEntityRequest
 from .revise_catalog_entity_request_document import ReviseCatalogEntityRequestDocument
+from .rollout_preparation import RolloutPreparation
 from .run_node_plan_response import RunNodePlanResponse
 from .run_plan_response import RunPlanResponse
 from .run_presence import RunPresence
@@ -298,26 +394,75 @@ from .run_preview_target import RunPreviewTarget
 from .run_rank_status_response import RunRankStatusResponse
 from .run_request import RunRequest
 from .run_status_response import RunStatusResponse
+from .run_switch_apply_request import RunSwitchApplyRequest
+from .run_switch_apply_request_action import RunSwitchApplyRequestAction
+from .run_switch_apply_request_retention import RunSwitchApplyRequestRetention
+from .run_switch_member_progress import RunSwitchMemberProgress
+from .run_switch_member_progress_phase_type_0 import RunSwitchMemberProgressPhaseType0
+from .run_switch_member_progress_state import RunSwitchMemberProgressState
+from .run_switch_operation import RunSwitchOperation
+from .run_switch_operation_action import RunSwitchOperationAction
+from .run_switch_operation_completed_phases_item import RunSwitchOperationCompletedPhasesItem
+from .run_switch_operation_current_phase_type_0 import RunSwitchOperationCurrentPhaseType0
+from .run_switch_operation_kind import RunSwitchOperationKind
+from .run_switch_operation_result_type_0 import RunSwitchOperationResultType0
+from .run_switch_phase import RunSwitchPhase
+from .run_switch_phase_kind import RunSwitchPhaseKind
+from .run_switch_phase_state import RunSwitchPhaseState
+from .run_switch_phase_subphase_type_0 import RunSwitchPhaseSubphaseType0
+from .run_switch_plan import RunSwitchPlan
+from .run_switch_plan_action import RunSwitchPlanAction
+from .run_switch_preview_request import RunSwitchPreviewRequest
+from .run_switch_preview_request_action import RunSwitchPreviewRequestAction
+from .run_switch_preview_request_retention import RunSwitchPreviewRequestRetention
+from .run_switch_progress import RunSwitchProgress
+from .run_switch_progress_phase_type_0 import RunSwitchProgressPhaseType0
+from .run_switch_progress_state import RunSwitchProgressState
+from .run_switch_progress_subphase_type_0 import RunSwitchProgressSubphaseType0
+from .run_switch_reason import RunSwitchReason
+from .run_switch_reason_scope import RunSwitchReasonScope
+from .run_switch_reason_severity import RunSwitchReasonSeverity
+from .run_switch_stop_apply_request import RunSwitchStopApplyRequest
+from .run_switch_stop_preview_request import RunSwitchStopPreviewRequest
+from .runtime_image_preparation import RuntimeImagePreparation
+from .runtime_image_storage_impact import RuntimeImageStorageImpact
+from .runtime_image_storage_impact_nas_coverage import RuntimeImageStorageImpactNasCoverage
+from .runtime_image_storage_impact_running_coverage import RuntimeImageStorageImpactRunningCoverage
+from .runtime_image_storage_impact_spark_coverage import RuntimeImageStorageImpactSparkCoverage
 from .source_bundle_response import SourceBundleResponse
 from .source_check_request import SourceCheckRequest
 from .source_policy_finding_response import SourcePolicyFindingResponse
 from .source_policy_response import SourcePolicyResponse
+from .spark_fit import SparkFit
+from .spark_fit_node import SparkFitNode
+from .spark_group import SparkGroup
+from .spark_group_node import SparkGroupNode
+from .stop_impact import StopImpact
 from .stop_node_impact_response import StopNodeImpactResponse
 from .stop_plan_response import StopPlanResponse
 from .stop_preview_request import StopPreviewRequest
 from .stop_request import StopRequest
 from .submit_artifact_job_response_submitartifactjob import SubmitArtifactJobResponseSubmitartifactjob
 from .submit_change_response_submit_change_api_v1_changes_post import SubmitChangeResponseSubmitChangeApiV1ChangesPost
-from .telemetry_details import TelemetryDetails
+from .target_asset_state import TargetAssetState
+from .target_asset_state_state import TargetAssetStateState
+from .telemetry_capabilities_response import TelemetryCapabilitiesResponse
+from .telemetry_capabilities_response_freshness import TelemetryCapabilitiesResponseFreshness
+from .telemetry_capability import TelemetryCapability
+from .telemetry_capability_measurement_kind import TelemetryCapabilityMeasurementKind
+from .telemetry_capability_scope import TelemetryCapabilityScope
+from .telemetry_current_response import TelemetryCurrentResponse
+from .telemetry_current_response_freshness import TelemetryCurrentResponseFreshness
 from .telemetry_history_response import TelemetryHistoryResponse
-from .telemetry_history_response_resolution import TelemetryHistoryResponseResolution
-from .telemetry_metric_summary import TelemetryMetricSummary
 from .telemetry_point import TelemetryPoint
-from .telemetry_rollup_point import TelemetryRollupPoint
-from .telemetry_rollup_point_metrics import TelemetryRollupPointMetrics
-from .telemetry_rollup_point_resolution import TelemetryRollupPointResolution
+from .telemetry_runtime import TelemetryRuntime
+from .telemetry_runtime_readiness import TelemetryRuntimeReadiness
 from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
+from .telemetry_workload import TelemetryWorkload
+from .telemetry_workload_state import TelemetryWorkloadState
+from .telemetry_workloads_response import TelemetryWorkloadsResponse
+from .telemetry_workloads_response_freshness import TelemetryWorkloadsResponseFreshness
 from .test_report_request import TestReportRequest
 from .test_report_request_report import TestReportRequestReport
 from .topology_placement import TopologyPlacement
@@ -379,14 +524,32 @@ __all__ = (
     "ArtifactFileDeclaration",
     "ArtifactJobCreate",
     "ArtifactJobCreateParameters",
+    "ArtifactStorageImpact",
+    "ArtifactStorageImpactNasCoverage",
+    "ArtifactStorageImpactRetention",
+    "ArtifactStorageImpactRunningCoverage",
+    "ArtifactStorageImpactSparkCoverage",
     "BoundedErrorResponse",
+    "BuildCompatibilityEvidence",
+    "BuildCompatibilityEvidenceState",
     "BuildPlanResponse",
     "BuildPreviewInput",
     "BuildPreviewRequest",
     "BuildPreviewTarget",
     "BuildRequest",
+    "BuildSourceEvidence",
+    "BuildSourceEvidenceState",
+    "CacheArtifactResponse",
+    "CacheArtifactResponseState",
+    "CacheEntryResponse",
+    "CacheEntryResponseCoverage",
+    "CacheEntryResponseState",
+    "CacheStorageResponse",
     "CancelArtifactJobResponseCancelartifactjob",
     "CancelRequest",
+    "CapabilityEvidence",
+    "CapabilityEvidenceEvidence",
+    "CapabilityEvidenceSupport",
     "CapacityReservations",
     "CatalogEntityListResponse",
     "CatalogEntityRevisionResponse",
@@ -395,6 +558,14 @@ __all__ = (
     "CatalogEntityRevisionResponseLifecycle",
     "CatalogProblem",
     "ChangeRequest",
+    "CompatibilityIdentity",
+    "CompatibilityPreparation",
+    "CompatibilityPreparationKind",
+    "CompatibilityPreparationStage",
+    "CompatibilityPreparationState",
+    "ControllerAssetState",
+    "ControllerAssetStateSource",
+    "ControllerAssetStateState",
     "CreateArtifactJobResponseCreateartifactjob",
     "CreateCatalogEntityRequest",
     "CreateCatalogEntityRequestDocument",
@@ -419,6 +590,7 @@ __all__ = (
     "FleetProfileAssignmentDesiredState",
     "FleetProfileAssignmentInput",
     "FleetProfileAssignmentInputDesiredState",
+    "FleetProfileAssignmentPreparation",
     "FleetProfileAssignmentPreview",
     "FleetProfileAssignmentPreviewActionsItem",
     "FleetProfileAssignmentPreviewCurrentState",
@@ -451,6 +623,8 @@ __all__ = (
     "FleetSnapshot",
     "FleetStatusResponse",
     "ForkRecipeRequest",
+    "FreshnessEvidence",
+    "FreshnessEvidenceState",
     "FreshnessPolicy",
     "GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet",
     "GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities",
@@ -478,17 +652,45 @@ __all__ = (
     "InstallRequest",
     "InventoryState",
     "InventoryStateFreshness",
+    "InvocationMetadata",
+    "InvocationMetadataContext",
     "JobDetailResponse",
     "JobLogsResponse",
     "JobOperationProgress",
+    "JobOperationProgressCheckpointType0",
     "JobOperationResponse",
     "JobProgress",
     "JobResumeResponse",
     "JobsResponse",
     "JobSummary",
+    "LibraryCapabilityFact",
+    "LibraryCapabilityFactEvidenceStatus",
+    "LibraryCapabilityFactSupport",
+    "LibraryCapabilityInventory",
+    "LibraryCapabilityInventoryState",
+    "LibraryCapabilityProvenance",
+    "LibraryCapabilityProvenanceSourceKind",
+    "LibraryCatalogReference",
+    "LibraryCatalogReferenceKind",
     "LibraryInstallationSummary",
     "LibraryInstallationSummaryState",
     "LibraryModel",
+    "LibraryModelArtifact",
+    "LibraryModelArtifactKind",
+    "LibraryModelDefinition",
+    "LibraryModelFamily",
+    "LibraryModelFormat",
+    "LibraryModelFormatContainer",
+    "LibraryModelLimits",
+    "LibraryModelLineage",
+    "LibraryModelLineageRelation",
+    "LibraryModelMetadata",
+    "LibraryModelParameters",
+    "LibraryModelSizes",
+    "LibraryModelSource",
+    "LibraryModelVersionFacts",
+    "LibraryModelVersionFactsAvailabilityType0",
+    "LibraryModelVersionFactsState",
     "LibraryPlacementApplication",
     "LibraryPlacementApplicationDesiredState",
     "LibraryPlacementApplicationProgress",
@@ -540,6 +742,32 @@ __all__ = (
     "MappingRequest",
     "MappingRequestParameters",
     "MappingResponse",
+    "MappingSelection",
+    "MappingSelectionAction",
+    "MappingSelectionParameters",
+    "ModelArtifactPreparation",
+    "ModelArtifactPreparationCompleteness",
+    "ModelCacheDownloadPreviewRequest",
+    "ModelCacheDownloadPreviewResponse",
+    "ModelCacheDownloadRequest",
+    "ModelCacheEvictionEntry",
+    "ModelCacheEvictionPreviewRequest",
+    "ModelCacheEvictionPreviewResponse",
+    "ModelCacheEvictRequest",
+    "ModelCacheInventoryResponse",
+    "ModelCacheOperationProgress",
+    "ModelCacheOperationProgressPhase",
+    "ModelCacheOperationResponse",
+    "ModelCacheOperationResponseKind",
+    "ModelCacheOperationResponseResultType0",
+    "ModelCacheOperationResponseState",
+    "ModelCacheOperationsResponse",
+    "ModelCacheRepairPreviewRequest",
+    "ModelCacheRepairPreviewResponse",
+    "ModelCacheRepairPreviewResponseCurrentState",
+    "ModelCacheRepairRequest",
+    "ModelCacheUpdateResponse",
+    "ModelCacheUpdatesResponse",
     "ModelDeletionInstallationImpactResponse",
     "ModelDeletionNodeImpactResponse",
     "ModelDeletionPlanResponse",
@@ -564,8 +792,16 @@ __all__ = (
     "OperationalRunRouteState",
     "OperationalRunState",
     "OperationalState",
+    "OperationDetailResponse",
+    "OperationEvidenceDownload",
+    "OperationEvidenceProvenance",
+    "OperationFailureEvidence",
+    "OperationMemberProgress",
+    "OperationRecovery",
+    "OperationRecoveryAction",
     "OperationResponse",
     "OperationResponseResultType0",
+    "OperationsResponse",
     "OutputLimits",
     "PlacementEvidenceCounts",
     "PlacementEvidenceCountsTruncatedCollectionsItem",
@@ -577,6 +813,8 @@ __all__ = (
     "PlacementRecommendationLoadState",
     "PlacementScore",
     "PlanReason",
+    "PreparationReason",
+    "PreparationReasonSeverity",
     "PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost",
     "PreviewProposalResponseProposalPreviewApiV1ProposalsPost",
     "PreviewRequest",
@@ -615,6 +853,8 @@ __all__ = (
     "PublicRecipeRelease",
     "PublicRecipeReleaseUpgradeEffect",
     "PublicRecipeTopologyRole",
+    "RecipeBuildEvidence",
+    "RecipeBuildEvidenceState",
     "RecipeDiskRequirements",
     "RecipeFabric",
     "RecipeFabricConnectivity",
@@ -647,6 +887,7 @@ __all__ = (
     "ResolveRecipeRequest",
     "ReviseCatalogEntityRequest",
     "ReviseCatalogEntityRequestDocument",
+    "RolloutPreparation",
     "RunNodePlanResponse",
     "RunPlanResponse",
     "RunPresence",
@@ -661,26 +902,75 @@ __all__ = (
     "RunRankStatusResponse",
     "RunRequest",
     "RunStatusResponse",
+    "RunSwitchApplyRequest",
+    "RunSwitchApplyRequestAction",
+    "RunSwitchApplyRequestRetention",
+    "RunSwitchMemberProgress",
+    "RunSwitchMemberProgressPhaseType0",
+    "RunSwitchMemberProgressState",
+    "RunSwitchOperation",
+    "RunSwitchOperationAction",
+    "RunSwitchOperationCompletedPhasesItem",
+    "RunSwitchOperationCurrentPhaseType0",
+    "RunSwitchOperationKind",
+    "RunSwitchOperationResultType0",
+    "RunSwitchPhase",
+    "RunSwitchPhaseKind",
+    "RunSwitchPhaseState",
+    "RunSwitchPhaseSubphaseType0",
+    "RunSwitchPlan",
+    "RunSwitchPlanAction",
+    "RunSwitchPreviewRequest",
+    "RunSwitchPreviewRequestAction",
+    "RunSwitchPreviewRequestRetention",
+    "RunSwitchProgress",
+    "RunSwitchProgressPhaseType0",
+    "RunSwitchProgressState",
+    "RunSwitchProgressSubphaseType0",
+    "RunSwitchReason",
+    "RunSwitchReasonScope",
+    "RunSwitchReasonSeverity",
+    "RunSwitchStopApplyRequest",
+    "RunSwitchStopPreviewRequest",
+    "RuntimeImagePreparation",
+    "RuntimeImageStorageImpact",
+    "RuntimeImageStorageImpactNasCoverage",
+    "RuntimeImageStorageImpactRunningCoverage",
+    "RuntimeImageStorageImpactSparkCoverage",
     "SourceBundleResponse",
     "SourceCheckRequest",
     "SourcePolicyFindingResponse",
     "SourcePolicyResponse",
+    "SparkFit",
+    "SparkFitNode",
+    "SparkGroup",
+    "SparkGroupNode",
+    "StopImpact",
     "StopNodeImpactResponse",
     "StopPlanResponse",
     "StopPreviewRequest",
     "StopRequest",
     "SubmitArtifactJobResponseSubmitartifactjob",
     "SubmitChangeResponseSubmitChangeApiV1ChangesPost",
-    "TelemetryDetails",
+    "TargetAssetState",
+    "TargetAssetStateState",
+    "TelemetryCapabilitiesResponse",
+    "TelemetryCapabilitiesResponseFreshness",
+    "TelemetryCapability",
+    "TelemetryCapabilityMeasurementKind",
+    "TelemetryCapabilityScope",
+    "TelemetryCurrentResponse",
+    "TelemetryCurrentResponseFreshness",
     "TelemetryHistoryResponse",
-    "TelemetryHistoryResponseResolution",
-    "TelemetryMetricSummary",
     "TelemetryPoint",
-    "TelemetryRollupPoint",
-    "TelemetryRollupPointMetrics",
-    "TelemetryRollupPointResolution",
+    "TelemetryRuntime",
+    "TelemetryRuntimeReadiness",
     "TelemetryState",
     "TelemetryStateFreshness",
+    "TelemetryWorkload",
+    "TelemetryWorkloadsResponse",
+    "TelemetryWorkloadsResponseFreshness",
+    "TelemetryWorkloadState",
     "TestReportRequest",
     "TestReportRequestReport",
     "TopologyPlacement",
