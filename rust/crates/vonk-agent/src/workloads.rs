@@ -21,7 +21,7 @@ const MAX_ARGV_ITEMS: usize = 512;
 const MAX_ARGV_ITEM_BYTES: usize = 65_536;
 const MAX_ARGV_BYTES: usize = 1024 * 1024;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CompiledExecutionPlan {
     pub schema_version: u8,
@@ -34,6 +34,68 @@ pub struct CompiledExecutionPlan {
     pub lifecycle: CompiledLifecycle,
     pub endpoint: Option<CompiledEndpoint>,
     pub job: Option<CompiledJob>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompiledExecutionPlanWire {
+    schema_version: u8,
+    identity: CompiledWorkloadIdentity,
+    runtime: CompiledRuntime,
+    artifacts: Vec<CompiledModelArtifact>,
+    runtime_image: CompiledRuntimeImage,
+    security: CompiledSecurity,
+    topology: CompiledTopology,
+    lifecycle: CompiledLifecycle,
+    endpoint: RequiredOption<CompiledEndpoint>,
+    job: RequiredOption<CompiledJob>,
+}
+
+#[derive(Debug)]
+struct RequiredOption<T>(Option<T>);
+
+impl<'de, T> Deserialize<'de> for RequiredOption<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self(Option::<T>::deserialize(deserializer)?))
+    }
+}
+
+impl<'de> Deserialize<'de> for CompiledExecutionPlan {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let object = value.as_object().ok_or_else(|| {
+            <D::Error as serde::de::Error>::custom("compiled plan is not an object")
+        })?;
+        if !object.contains_key("endpoint") {
+            return Err(<D::Error as serde::de::Error>::missing_field("endpoint"));
+        }
+        if !object.contains_key("job") {
+            return Err(<D::Error as serde::de::Error>::missing_field("job"));
+        }
+        let wire: CompiledExecutionPlanWire =
+            serde_json::from_value(value).map_err(<D::Error as serde::de::Error>::custom)?;
+        Ok(Self {
+            schema_version: wire.schema_version,
+            identity: wire.identity,
+            runtime: wire.runtime,
+            artifacts: wire.artifacts,
+            runtime_image: wire.runtime_image,
+            security: wire.security,
+            topology: wire.topology,
+            lifecycle: wire.lifecycle,
+            endpoint: wire.endpoint.0,
+            job: wire.job.0,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

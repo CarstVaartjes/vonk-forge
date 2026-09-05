@@ -17,10 +17,11 @@ fn generated_python_workload_fixture_round_trips_through_rust() {
     plan.validate().unwrap();
     assert_eq!(plan.schema_version, 2);
     assert_eq!(plan.runtime.executable, "/opt/vonk/bin/vllm");
-    assert_eq!(plan.artifacts.len(), 2);
+    assert_eq!(plan.artifacts.len(), 3);
     assert_eq!(plan.artifacts[0].path, "config.json");
     assert_eq!(plan.artifacts[1].path, "config.json");
     assert_ne!(plan.artifacts[0].model, plan.artifacts[1].model);
+    assert_eq!(plan.artifacts[2].roles, ["entrypoint"]);
     assert!(
         plan.runtime
             .argv
