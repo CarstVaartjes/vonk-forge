@@ -27,9 +27,9 @@ from vonk_control.model_cache import (
 from vonk_control.models import (
     AgentNode,
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     FleetProfile,
-    LocalRecipe,
-    LocalRecipeRevision,
     RecipeBuild,
 )
 
@@ -130,28 +130,54 @@ def _seed_recipe_reference(
 ) -> str:
     recipe_id = str(uuid4())
     revision_id = str(uuid4())
+    publisher = "vonk-forge"
+    slug = f"acceptance-{recipe_id[:8]}"
+    document = {
+        "schema_version": 2,
+        "kind": "recipe",
+        "identity": {"publisher": publisher, "slug": slug},
+        "models": [
+            {
+                "id": "primary",
+                "model": {
+                    "kind": "model",
+                    "publisher": publisher,
+                    "slug": "acceptance-model",
+                    "content_sha256": model_version_sha256,
+                },
+                "files": [],
+            }
+        ],
+    }
+    recipe_digest = hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     with sessions.begin() as session:
         session.add(
-            LocalRecipe(
+            CatalogDocument(
                 id=recipe_id,
-                slug=f"acceptance-{recipe_id[:8]}",
+                kind="recipe",
+                publisher=publisher,
+                slug=slug,
                 title="Acceptance recipe",
-                description="",
-                source_kind="local",
                 created_by="acceptance",
                 created_at=NOW,
                 updated_at=NOW,
             )
         )
         session.add(
-            LocalRecipeRevision(
+            CatalogDocumentRevision(
                 id=revision_id,
-                recipe_id=recipe_id,
+                document_id=recipe_id,
+                kind="recipe",
+                publisher=publisher,
+                slug=slug,
                 revision_number=1,
-                lifecycle="resolved",
+                state="active",
                 schema_version=2,
-                document={"model": {"content_sha256": model_version_sha256}, "dependencies": []},
-                content_sha256=recipe_revision_sha256,
+                document=document,
+                content_digest=recipe_digest,
+                projected={},
                 created_by="acceptance",
                 created_at=NOW,
             )
