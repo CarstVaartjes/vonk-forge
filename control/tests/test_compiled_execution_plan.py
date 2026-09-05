@@ -406,6 +406,16 @@ def _collision_objects() -> list[dict[str, object]]:
     ]
 
 
+def test_plan_rejects_two_files_materializing_to_one_selection_path() -> None:
+    document = _compile().model_dump(mode="json")
+    duplicate = copy.deepcopy(document["artifacts"][0])
+    duplicate["id"] = "duplicate"
+    duplicate["file_id"] = "duplicate"
+    document["artifacts"].append(duplicate)
+    with pytest.raises(ValidationError, match="materialized path"):
+        CompiledExecutionPlan.model_validate(document)
+
+
 def test_qwen_config_collision_binds_model_identity_and_preserves_file_path(
     tmp_path,
 ) -> None:

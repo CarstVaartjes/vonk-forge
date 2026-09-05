@@ -290,6 +290,9 @@ class CompiledExecutionPlan(_StrictModel):
         keys = [(item.selection_id, item.file_id) for item in self.artifacts]
         if len(keys) != len(set(keys)):
             raise ValueError("compiled model artifacts repeat a selected file")
+        paths = [(item.selection_id, item.path) for item in self.artifacts]
+        if len(paths) != len(set(paths)):
+            raise ValueError("compiled model artifacts repeat a materialized path")
         return self
 
     def reusable_identity_document(self) -> dict[str, object]:
