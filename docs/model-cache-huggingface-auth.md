@@ -21,6 +21,12 @@ gated artifact is requested without a token, the cache operation reports the
 typed `model_cache.credentials_missing` blocker. A rejected token reports
 `model_cache.credentials_denied`; neither error includes the token value.
 
+The signed NAS installer declares `hf-token` as an optional secret. A fresh
+install creates an empty regular `secrets/hf-token` file with owner-only
+permissions and does not prompt for it, so public model downloads work by
+default. Replace that file with the protected token and recreate the
+Controller services when gated access is needed.
+
 After the Controller verifies the artifact bytes and digest, Spark nodes
 receive the cache payload through the existing tokenless distribution path.
 
