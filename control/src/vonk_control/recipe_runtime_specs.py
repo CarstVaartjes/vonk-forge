@@ -11,11 +11,14 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.resolver import ContractResolutionError, validate_recipe_package_paths
 
 from .harnesses.canonical import compile_canonical_harness
 from .harnesses.common import HarnessCompileError
+from .models import CatalogDocumentRevision
 from .runtime_writable_paths import document as writable_path_document
 
 
@@ -324,4 +327,39 @@ def _compiled_arguments(
     return result
 
 
-__all__ = ["RecipeRuntimeSpecError", "compile_runtime_spec"]
+def resolve_recipe_entities(
+    session: Session, document: Mapping[str, object]
+) -> dict[str, object]:
+    """Resolve a canonical recipe and its exact active Model revisions."""
+    try:
+        recipe = RecipeDefinition.model_validate(document)
+    except (TypeError, ValueError) as error:
+        raise RecipeRuntimeSpecError(
+            "recipe does not satisfy the canonical contract"
+        ) from error
+
+    models: list[CatalogDocumentRevision] = []
+    for selection in recipe.models:
+        reference = selection.model
+        revision = session.scalar(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.publisher == reference.publisher,
+                CatalogDocumentRevision.slug == reference.slug,
+                CatalogDocumentRevision.content_digest == reference.content_sha256,
+                CatalogDocumentRevision.state == "active",
+            )
+            .limit(1)
+        )
+        if revision is None:
+            raise RecipeRuntimeSpecError("exact recipe model is not active")
+        models.append(revision)
+    return {"recipe": recipe, "models": tuple(models)}
+
+
+__all__ = [
+    "RecipeRuntimeSpecError",
+    "compile_runtime_spec",
+    "resolve_recipe_entities",
+]

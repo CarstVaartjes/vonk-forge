@@ -1240,7 +1240,7 @@ dependencies = [
     { name = "jsonschema" },
 ]
 wheels = [
-    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:1eaba528efc74564b6dc00a6dada42a59e12e50fb52d37e6c966da263a670448" },
+    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:17b2778f29b1c0f38ec91115477fb7b7dfdb85a77ce7098c477b3886d1f7130f" },
 ]
 
 [package.metadata]
@@ -1299,6 +1299,7 @@ dependencies = [
     { name = "uvicorn" },
     { name = "vonk-agent-protocol" },
     { name = "vonk-cluster-profiles" },
+    { name = "vonk-forge-public-contracts" },
 ]
 
 [package.dev-dependencies]
@@ -1323,10 +1324,19 @@ requires-dist = [
     { name = "uvicorn", specifier = "==0.35.0" },
     { name = "vonk-agent-protocol", path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" },
     { name = "vonk-cluster-profiles", directory = "../" },
+    { name = "vonk-forge-public-contracts", git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&rev=2001c6502bfdc66141dd7224bfde5d77734e9959" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "openapi-python-client", specifier = "==0.26.2" },
     { name = "pytest", specifier = "==9.1.1" },
+]
+
+[[package]]
+name = "vonk-forge-public-contracts"
+version = "0.1.0"
+source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&rev=2001c6502bfdc66141dd7224bfde5d77734e9959#2001c6502bfdc66141dd7224bfde5d77734e9959" }
+dependencies = [
+    { name = "pydantic" },
 ]

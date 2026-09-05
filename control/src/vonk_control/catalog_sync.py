@@ -12,6 +12,7 @@ from typing import Protocol
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition
 
 from .catalog_service import CatalogError, CatalogService
 from .models import (
@@ -164,10 +165,8 @@ class ManagedRecipeCatalogSyncService:
                     "catalog.sync_preview_changed",
                     "recipe library changed since it was reviewed",
                 )
-            # Package readers validate every object in the candidate generation
-            # before the first catalog link/revision is written.  The legacy
-            # GitHub reader has no prepare hook and retains its established
-            # per-item behavior.
+            # The package reader validates every object in the candidate
+            # generation before the first catalog link/revision is written.
             prepare = getattr(self._reader, "prepare", None)
             if callable(prepare):
                 prepare(snapshot)
@@ -229,6 +228,9 @@ class ManagedRecipeCatalogSyncService:
     ) -> dict[str, object]:
         result = _empty_result()
         package_mode = callable(getattr(self._reader, "prepare", None))
+        # The immutable index is authoritative for the complete Model catalog,
+        # including valid revisions that no package happens to reference.
+        self._catalog.import_catalog_models(actor, snapshot.catalog_entities)
         local = self._catalog.recipe_catalog_local_revisions(
             [item.slug for item in snapshot.items]
         )
@@ -271,6 +273,12 @@ class ManagedRecipeCatalogSyncService:
                             "catalog.sync_recipe_not_executable",
                             "managed recipe does not explicitly declare an executable contract",
                         )
+                    package_handle = getattr(hydrated, "package_handle", None)
+                    if package_mode and package_handle is None:
+                        raise CatalogSyncError(
+                            "catalog.sync_package_handle_missing",
+                            "managed package has no durable verified closure handle",
+                        )
                     self._store_source_bundle(hydrated, actor)
                     revision = self._catalog.import_recipe_library(
                         actor,
@@ -288,6 +296,11 @@ class ManagedRecipeCatalogSyncService:
                             hydrated.release_history[0].released_at
                             if hydrated.release_history
                             else None
+                        ),
+                        package_handle=package_handle,
+                        package_sha256=getattr(hydrated, "package_sha256", None),
+                        source_bundle_sha256=getattr(
+                            hydrated, "source_bundle_sha256", None
                         ),
                     )
                     if package_mode:
@@ -334,16 +347,13 @@ class ManagedRecipeCatalogSyncService:
         return result
 
     def _store_source_bundle(self, item: RecipeLibraryItem, actor: str) -> None:
-        if item.source_bundle is None:
+        source_bundle = getattr(item, "source_bundle", None)
+        source_digest = getattr(item, "source_bundle_sha256", None)
+        if source_bundle is None or not isinstance(source_digest, str):
             return
-        build = item.document.get("build")
-        context = build.get("context") if isinstance(build, Mapping) else None
-        digest = context.get("sha256") if isinstance(context, Mapping) else None
-        if not isinstance(digest, str):
-            raise CatalogSyncError(
-                "catalog.sync_source_invalid", "managed recipe source identity is invalid"
-            )
-        self._catalog.store_source_bundle(digest, io.BytesIO(item.source_bundle), actor)
+        self._catalog.store_source_bundle(
+            source_digest, io.BytesIO(source_bundle), actor
+        )
 
     def _initialize(self, run_id: str, snapshot: RecipeLibrarySnapshot) -> None:
         with self._sessions.begin() as session:
@@ -733,17 +743,14 @@ def _model_version_key(session: Session, revision_id: str) -> str | None:
     revision = session.get(LocalRecipeRevision, revision_id)
     if revision is None:
         return None
-    model = revision.document.get("model")
-    if not isinstance(model, Mapping):
+    try:
+        recipe = RecipeDefinition.model_validate(revision.document)
+    except (TypeError, ValueError):
         return None
-    publisher, slug, digest = (
-        model.get("publisher"),
-        model.get("slug"),
-        model.get("content_sha256"),
-    )
-    if not all(isinstance(value, str) and value for value in (publisher, slug, digest)):
+    if not recipe.models:
         return None
-    return f"{publisher}/{slug}@{digest}"
+    reference = recipe.models[0].model
+    return f"{reference.publisher}/{reference.slug}@{reference.content_sha256}"
 
 
 def _release_version(

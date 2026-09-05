@@ -1728,7 +1728,11 @@ class RecipeBuild(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     recipe_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipe_revisions.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "catalog_document_revisions.id",
+            name="fk_recipe_builds_canonical_recipe_revision",
+            ondelete="RESTRICT",
+        ),
         nullable=False,
         index=True,
     )

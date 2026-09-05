@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -11,11 +13,16 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.distribution import (
+    CompositeVerifiedObjectSource,
+    ModelCacheVerifiedObjectSource,
+)
 from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheService,
 )
 from vonk_control.model_cache_api import (
+    ModelCacheOperationProvider,
     install_model_cache_routes,
     model_cache_operation_provider,
 )
@@ -26,9 +33,9 @@ from vonk_control.model_cache_contract import (
 )
 from vonk_control.models import (
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     FleetProfile,
-    LocalRecipe,
-    LocalRecipeRevision,
     ModelCacheArtifact,
 )
 from vonk_control.worker import Worker
@@ -97,6 +104,74 @@ def _download(
     return operation
 
 
+def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> None:
+    service, sessions = cache
+    document = {
+        "schema_version": 2,
+        "kind": "model",
+        "identity": {"publisher": "vonk-forge", "slug": "canonical-model"},
+        "source": {
+            "repository": "https://huggingface.co/vonk-forge/canonical-model",
+            "revision": "0" * 40,
+        },
+        "files": [
+            {
+                "id": "weights",
+                "path": "weights.bin",
+                "sha256": "1" * 64,
+                "size_bytes": 3,
+                "roles": ["weights"],
+            }
+        ],
+    }
+    digest = hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    with sessions.begin() as session:
+        root = CatalogDocument(
+            id="00000000-0000-0000-0000-000000000031",
+            kind="model",
+            publisher="vonk-forge",
+            slug="canonical-model",
+            title="Canonical model",
+            created_by="test",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(root)
+        session.flush()
+        session.add(
+            CatalogDocumentRevision(
+                id="00000000-0000-0000-0000-000000000032",
+                document_id=root.id,
+                kind="model",
+                publisher=root.publisher,
+                slug=root.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=document,
+                content_digest=digest,
+                projected={},
+                created_by="test",
+                created_at=NOW,
+            )
+        )
+
+    manifest = service.resolve_artifact_set(model_version_sha256=digest)
+    assert manifest.model_version_sha256 == digest
+    assert manifest.model_version_ref == {
+        "kind": "model",
+        "publisher": "vonk-forge",
+        "slug": "canonical-model",
+        "content_sha256": digest,
+        "artifact_key": None,
+    }
+    assert [(item.path, item.expected_bytes, item.roles) for item in manifest.artifacts] == [
+        ("weights.bin", 3, ("weights",))
+    ]
+
+
 def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     cache, tmp_path: Path
 ) -> None:
@@ -138,6 +213,34 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         primary["sha256"],
         auxiliary["sha256"],
     }
+    assert {item["file_id"] for item in descriptors} == {"weights", "tokenizer"}
+    assert {item["model_content_sha256"] for item in descriptors} == {model_a}
+    model_source = ModelCacheVerifiedObjectSource.from_service(service)
+    receipts = model_source.verified_model_objects_for_set(
+        first.artifact_set_sha256 or ""
+    )
+    composed_source = CompositeVerifiedObjectSource(model_source, object())
+    assert composed_source.verified_model_objects_for_set(
+        first.artifact_set_sha256 or ""
+    ) == receipts
+    assert {
+        (
+            item["model_content_sha256"],
+            item["file_id"],
+            item["path"],
+            tuple(item["roles"]),
+        )
+        for item in receipts
+    } == {
+        (model_a, "weights", "weights.bin", ("model",)),
+        (model_a, "tokenizer", "tokenizer.json", ("auxiliary",)),
+    }
+    assert all(
+        item["distribution_object"]["sha256"] == item["sha256"]
+        and item["distribution_object"]["bytes"] == item["bytes"]
+        and item["distribution_object"]["name"] == item["path"]
+        for item in receipts
+    )
     assert service.read_verified_artifact(
         first.artifact_set_sha256 or "",
         str(primary["sha256"]),
@@ -507,33 +610,51 @@ def test_protection_is_derived_from_durable_references_and_blocks_eviction(
         model_version_sha256=model,
         request_key="00000000-0000-4000-8000-000000000008",
     ).artifact_set_sha256 or ""
-    recipe_id = "00000000-0000-4000-8000-000000000021"
     recipe_revision_id = "00000000-0000-4000-8000-000000000022"
+    recipe_document = {
+        "kind": "recipe",
+        "models": [
+            {
+                "id": "primary",
+                "model": {
+                    "kind": "model",
+                    "publisher": "owner",
+                    "slug": "model",
+                    "content_sha256": model,
+                },
+                "files": [{"id": "weights", "file_id": "weights", "roles": ["model"]}],
+            }
+        ],
+    }
+    recipe_digest = hashlib.sha256(
+        json.dumps(recipe_document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     with sessions.begin() as session:
         session.add(
-            LocalRecipe(
-                id=recipe_id,
+            CatalogDocument(
+                id="00000000-0000-4000-8000-000000000021",
+                kind="recipe",
+                publisher="owner",
                 slug="protected-recipe",
                 title="Protected recipe",
-                description="",
-                source_kind="local",
                 created_by="test",
                 created_at=NOW,
                 updated_at=NOW,
             )
         )
         session.add(
-            LocalRecipeRevision(
+            CatalogDocumentRevision(
                 id=recipe_revision_id,
-                recipe_id=recipe_id,
+                document_id="00000000-0000-4000-8000-000000000021",
+                kind="recipe",
+                publisher="owner",
+                slug="protected-recipe",
                 revision_number=1,
-                lifecycle="resolved",
+                state="active",
                 schema_version=2,
-                document={
-                    "model": {"content_sha256": model},
-                    "dependencies": [],
-                },
-                content_sha256="f" * 64,
+                document=recipe_document,
+                content_digest=recipe_digest,
+                projected={},
                 created_by="test",
                 created_at=NOW,
             )
@@ -694,3 +815,64 @@ def test_controller_worker_drains_queued_cache_operations_without_inline_api_tra
     worker = Worker(Jobs(), "worker", {}, model_cache=CacheWorker())
     assert worker.run_once() is True
     assert calls == [1]
+
+
+def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
+    cache, tmp_path: Path
+) -> None:
+    _service, sessions = cache
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request, content=b"")
+
+    http_client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+    )
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "http-nas-cache",
+        reserve_bytes=0,
+        http_client=http_client,
+        fixture_sources=True,
+    )
+    artifact = {
+        "id": "metadata",
+        "path": "config/empty.json",
+        "kind": "http.file",
+        "source": "http://fixture.invalid/empty",
+        "repository": "http://fixture.invalid/empty",
+        "revision": "fixture-revision",
+        "sha256": hashlib.sha256(b"").hexdigest(),
+        "download_bytes": 0,
+        "roles": ["auxiliary"],
+        "model_version_sha256": "e" * 64,
+    }
+    try:
+        operation = _download(
+            service,
+            [artifact],
+            model_version_sha256="e" * 64,
+            request_key="00000000-0000-4000-8000-000000000018",
+        )
+        assert operation.state == "succeeded"
+        assert len(requests) == 1
+        assert requests[0].headers.get("range") is None
+        assert service.get_entry(operation.artifact_set_sha256 or "")["coverage"] == "complete"
+    finally:
+        http_client.close()
+
+
+def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> None:
+    progress = ModelCacheOperationProvider._progress(
+        {"phase": "downloading", "downloaded_bytes": 12}
+    )
+    assert progress == {
+        "phase": "download",
+        "completed_bytes": 12,
+        "total_bytes_known": False,
+    }
+    assert "percent" not in progress
+    assert "eta_seconds" not in progress

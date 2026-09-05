@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, net::IpAddr, path::Path};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use vonk_agent_protocol::DistributionObject;
 
 #[derive(Debug, Error)]
 pub enum WorkloadError {
@@ -23,6 +24,76 @@ pub struct WorkloadSpec {
     pub security: SecuritySpec,
     pub lifecycle: LifecycleSpec,
     pub topology: TopologySpec,
+}
+
+pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+// These bounds carry the compiler's structured argv without treating engine
+// arguments as container-engine options.  Keep the first item non-empty (it
+// is the executable), while subsequent items are opaque values and may be
+// empty.  The total bound prevents a large number of individually valid
+// values from creating an unbounded launch request.
+const MAX_ARGV_ITEMS: usize = 512;
+const MAX_ARGV_ITEM_BYTES: usize = 4096;
+const MAX_ARGV_BYTES: usize = 1024 * 1024;
+const MAX_RUNTIME_ARGUMENT_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledExecutionPlan {
+    pub schema_version: u8,
+    pub recipe_revision_sha256: String,
+    pub harness_sha256: String,
+    pub execution_sha256: String,
+    pub model_artifact_set_sha256: String,
+    pub model_artifact_set_bytes: u64,
+    pub artifacts: Vec<CompiledModelArtifact>,
+    pub runtime_image: CompiledRuntimeImage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledModelArtifact {
+    pub id: String,
+    pub selection_id: String,
+    pub file_id: String,
+    pub path: String,
+    pub sha256: String,
+    pub bytes: u64,
+    pub roles: Vec<String>,
+    pub mount: ExecutionMount,
+    pub materialized_path: String,
+    pub model: ModelArtifactIdentity,
+    pub distribution_object: DistributionObject,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionMount {
+    pub source: String,
+    pub target: String,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelArtifactIdentity {
+    pub publisher: String,
+    pub slug: String,
+    pub content_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledRuntimeImage {
+    pub image_digest: String,
+    pub oci_layout_sha256: String,
+    pub image_bytes: u64,
+    pub architecture: String,
+    pub runtime_interface: String,
+    pub source: String,
+    pub build_id: Option<String>,
+    pub distribution_object: DistributionObject,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -293,6 +364,132 @@ impl WorkloadSpec {
     }
 }
 
+impl CompiledExecutionPlan {
+    pub fn validate(&self) -> Result<(), WorkloadError> {
+        if self.schema_version != 2
+            || !lower_hex(&self.recipe_revision_sha256, 64)
+            || !lower_hex(&self.harness_sha256, 64)
+            || !lower_hex(&self.execution_sha256, 64)
+            || !lower_hex(&self.model_artifact_set_sha256, 64)
+            || self.artifacts.is_empty()
+            || self.artifacts.len() > 4096
+        {
+            return Err(WorkloadError::Invalid("compiled execution identity"));
+        }
+        let mut selected = BTreeSet::new();
+        let mut materialized = BTreeSet::new();
+        let mut by_digest = std::collections::BTreeMap::new();
+        for artifact in &self.artifacts {
+            artifact.validate()?;
+            if !selected.insert((artifact.selection_id.as_str(), artifact.file_id.as_str()))
+                || !materialized.insert(artifact.materialized_path.as_str())
+            {
+                return Err(WorkloadError::Invalid("compiled model artifact identity"));
+            }
+            if let Some(previous) = by_digest.insert(artifact.sha256.as_str(), artifact.bytes)
+                && previous != artifact.bytes
+            {
+                return Err(WorkloadError::Invalid("compiled model artifact bytes"));
+            }
+        }
+        let total = by_digest
+            .values()
+            .copied()
+            .try_fold(0_u64, |sum, value| sum.checked_add(value))
+            .ok_or(WorkloadError::Invalid("compiled model artifact bytes"))?;
+        if total != self.model_artifact_set_bytes {
+            return Err(WorkloadError::Invalid("compiled model artifact-set bytes"));
+        }
+        self.runtime_image.validate()
+    }
+}
+
+impl CompiledModelArtifact {
+    fn validate(&self) -> Result<(), WorkloadError> {
+        if !valid_name(&self.id)
+            || !valid_name(&self.selection_id)
+            || !valid_name(&self.file_id)
+            || !valid_model_path(&self.path)
+            || !lower_hex(&self.sha256, 64)
+            || (self.bytes == 0 && self.sha256 != EMPTY_SHA256)
+            || !self.roles.is_empty()
+                && (self.roles.windows(2).any(|pair| pair[0] >= pair[1])
+                    || self.roles.iter().any(|role| !valid_role(role)))
+            || !valid_name(&self.model.publisher)
+            || !valid_name(&self.model.slug)
+            || !lower_hex(&self.model.content_sha256, 64)
+            || self.distribution_object.kind != "model"
+            || self.distribution_object.name != self.path
+            || self.distribution_object.sha256 != self.sha256
+            || self.distribution_object.bytes != self.bytes
+            || self.mount.source != format!("/run/vonk/models/{}", self.selection_id)
+            || self.mount.target != "/models"
+            || !self.mount.read_only
+            || self.materialized_path
+                != format!("/run/vonk/models/{}/{}", self.selection_id, self.path)
+            || (self.bytes == 0
+                && self
+                    .roles
+                    .iter()
+                    .any(|role| matches!(role.as_str(), "model" | "weight" | "weights")))
+        {
+            return Err(WorkloadError::Invalid("compiled model artifact"));
+        }
+        if self.roles.is_empty() {
+            return Err(WorkloadError::Invalid("compiled model artifact roles"));
+        }
+        if self.bytes > 0 {
+            self.distribution_object
+                .validate()
+                .map_err(|_| WorkloadError::Invalid("compiled model distribution object"))?;
+        }
+        Ok(())
+    }
+}
+
+impl CompiledRuntimeImage {
+    fn validate(&self) -> Result<(), WorkloadError> {
+        if !self.image_digest.starts_with("sha256:")
+            || !lower_hex(&self.image_digest[7..], 64)
+            || !lower_hex(&self.oci_layout_sha256, 64)
+            || self.image_bytes == 0
+            || self.architecture != "linux-arm64"
+            || self.runtime_interface != "vonk.runtime.v1"
+            || !matches!(self.source.as_str(), "published" | "controller-build")
+            || (self.source == "published" && self.build_id.is_some())
+            || (self.source == "controller-build"
+                && self.build_id.as_deref().is_none_or(str::is_empty))
+            || self.distribution_object.kind != "oci-archive"
+            || self.distribution_object.name != "image.oci.tar"
+            || self.distribution_object.sha256 != self.oci_layout_sha256
+            || self.distribution_object.bytes != self.image_bytes
+        {
+            return Err(WorkloadError::Invalid("compiled runtime image"));
+        }
+        self.distribution_object
+            .validate()
+            .map_err(|_| WorkloadError::Invalid("compiled image distribution object"))
+    }
+}
+
+pub fn materialized_model_path(
+    root: &Path,
+    artifact: &CompiledModelArtifact,
+) -> Result<std::path::PathBuf, WorkloadError> {
+    if !root.is_absolute() {
+        return Err(WorkloadError::Invalid("compiled model root"));
+    }
+    artifact.validate()?;
+    let relative = Path::new(&artifact.selection_id).join(&artifact.path);
+    if relative
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(WorkloadError::Invalid("compiled model path"));
+    }
+    Ok(root.join(relative))
+}
+
 impl RuntimeSpec {
     fn validate(&self) -> Result<(), WorkloadError> {
         if self.interface != "vonk.runtime.v1"
@@ -306,6 +503,14 @@ impl RuntimeSpec {
         {
             return Err(WorkloadError::Invalid("runtime"));
         }
+        let argument_bytes = self.arguments.iter().try_fold(0_usize, |total, argument| {
+            total
+                .checked_add(argument.name.len())
+                .and_then(|value| value.checked_add(argument.value.as_string().map_or(0, str::len)))
+        });
+        if argument_bytes.is_none_or(|bytes| bytes > MAX_RUNTIME_ARGUMENT_BYTES) {
+            return Err(WorkloadError::Invalid("runtime argument size"));
+        }
         for argument in &self.arguments {
             if argument.name.is_empty()
                 || argument.name.len() > 64
@@ -318,7 +523,7 @@ impl RuntimeSpec {
                             || matches!(byte, b'_' | b'-')
                     }
                 })
-                || matches!(&argument.value, ArgumentValue::String(value) if value.len() > 1024 || value.contains('\0'))
+                || matches!(&argument.value, ArgumentValue::String(value) if value.len() > MAX_ARGV_ITEM_BYTES || value.contains('\0'))
             {
                 return Err(WorkloadError::Invalid("runtime argument"));
             }
@@ -557,6 +762,19 @@ fn valid_snapshot_selector(value: &str) -> bool {
         })
 }
 
+fn valid_model_path(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && !value.contains(['\\', '\0'])
+        && value.split('/').all(|part| {
+            !part.is_empty()
+                && !matches!(part, "." | "..")
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
+}
+
 impl Placement {
     pub fn validate(&self) -> Result<(), WorkloadError> {
         if self.rank >= self.world_size
@@ -644,10 +862,15 @@ fn valid_name(value: &str) -> bool {
 
 fn valid_argv(value: &[String]) -> bool {
     !value.is_empty()
-        && value.len() <= 64
+        && value.len() <= MAX_ARGV_ITEMS
+        && !value[0].is_empty()
         && value
             .iter()
-            .all(|item| !item.is_empty() && item.len() <= 512 && !item.contains('\0'))
+            .all(|item| item.len() <= MAX_ARGV_ITEM_BYTES && !item.contains('\0'))
+        && value
+            .iter()
+            .try_fold(0_usize, |total, item| total.checked_add(item.len()))
+            .is_some_and(|bytes| bytes <= MAX_ARGV_BYTES)
 }
 
 fn numeric_non_root_user(value: &str) -> bool {

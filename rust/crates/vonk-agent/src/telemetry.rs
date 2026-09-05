@@ -1122,7 +1122,28 @@ fn parse_prometheus_labels(value: &str) -> BTreeMap<String, String> {
     labels
 }
 
-fn prometheus_value(samples: &[PrometheusSample], terms: &[&str]) -> Option<f64> {
+fn runtime_metric_name_matches(name: &str, adapter: &str, terms: &[&str]) -> bool {
+    let name = name.to_ascii_lowercase();
+    let namespaced = match adapter {
+        "vllm" => name.starts_with("vllm_") || name.starts_with("vllm:"),
+        "sglang" => name.starts_with("sglang_") || name.starts_with("sglang:"),
+        // llama.cpp's metrics have been emitted with both spellings over its
+        // supported server versions.  Keep the allowlist explicit so an
+        // arbitrary /metrics response cannot make an adapter look complete.
+        "llama-cpp" => {
+            name.starts_with("llama_")
+                || name.starts_with("llama:")
+                || name.starts_with("llamacpp_")
+                || name.starts_with("llamacpp:")
+        }
+        "ds4" => name.starts_with("ds4_") || name.starts_with("ds4:"),
+        "exl3" => name.starts_with("exl3_") || name.starts_with("exl3:"),
+        _ => false,
+    };
+    namespaced && terms.iter().any(|term| name.contains(term))
+}
+
+fn prometheus_value(samples: &[PrometheusSample], adapter: &str, terms: &[&str]) -> Option<f64> {
     samples
         .iter()
         .filter(|sample| {
@@ -1130,37 +1151,62 @@ fn prometheus_value(samples: &[PrometheusSample], terms: &[&str]) -> Option<f64>
             !name.ends_with("_bucket")
                 && !name.ends_with("_sum")
                 && !name.ends_with("_count")
-                && terms.iter().any(|term| name.contains(term))
+                && runtime_metric_name_matches(&name, adapter, terms)
         })
         .map(|sample| sample.value)
         .next()
 }
 
-fn prometheus_histogram_p95(samples: &[PrometheusSample], terms: &[&str]) -> Option<f64> {
-    let mut buckets: Vec<(f64, f64)> = samples
-        .iter()
-        .filter_map(|sample| {
-            let name = sample.name.to_ascii_lowercase();
-            if !name.ends_with("_bucket") || !terms.iter().any(|term| name.contains(term)) {
-                return None;
+fn prometheus_histogram_p95(
+    samples: &[PrometheusSample],
+    adapter: &str,
+    terms: &[&str],
+) -> Option<(f64, bool)> {
+    let mut families = BTreeMap::<String, Vec<(f64, f64)>>::new();
+    for sample in samples.iter().filter(|sample| {
+        let name = sample.name.to_ascii_lowercase();
+        name.ends_with("_bucket")
+            && runtime_metric_name_matches(&name, adapter, terms)
+            // A p95 for a labelled family needs an explicit aggregation
+            // policy.  The agent currently owns one runtime scope, so only
+            // the unlabelled Prometheus histogram is safe to consume.
+            && sample.labels.keys().all(|key| key == "le")
+    }) {
+        let name = sample.name.to_ascii_lowercase();
+        let upper = sample.labels.get("le").and_then(|value| {
+            if value == "+Inf" {
+                Some(f64::INFINITY)
+            } else {
+                value.parse::<f64>().ok()
             }
-            let upper = sample.labels.get("le")?.parse::<f64>().ok()?;
-            (upper.is_finite() && upper >= 0.0).then_some((upper, sample.value))
-        })
-        .collect();
-    if buckets.is_empty() {
+        })?;
+        if !upper.is_nan() && upper >= 0.0 && sample.value.is_finite() && sample.value >= 0.0 {
+            families
+                .entry(name)
+                .or_default()
+                .push((upper, sample.value));
+        }
+    }
+    // Multiple matching histogram families (for example an adapter's mean
+    // and a current latency series beside its histogram) are ambiguous.
+    if families.len() != 1 {
         return None;
     }
+    let (family_name, mut buckets) = families.into_iter().next()?;
     buckets.sort_by(|left, right| left.0.total_cmp(&right.0));
+    if buckets.windows(2).any(|pair| pair[1].1 < pair[0].1) {
+        return None;
+    }
     let total = buckets.last()?.1;
     if !total.is_finite() || total <= 0.0 {
         return None;
     }
     let target = total * 0.95;
-    buckets
-        .into_iter()
-        .find(|(_, count)| *count >= target)
-        .map(|(upper, _)| upper)
+    let (upper, _) = buckets.into_iter().find(|(_, count)| *count >= target)?;
+    Some((
+        upper,
+        family_name.contains("_seconds") || family_name.contains("_second"),
+    ))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1288,7 +1334,50 @@ fn add_runtime_capability(
     capabilities.push(item);
 }
 
-fn runtime_metric_reading(key: &str, samples: &[PrometheusSample]) -> RuntimeMetricReading {
+fn runtime_metric_reading(
+    adapter: &str,
+    key: &str,
+    samples: &[PrometheusSample],
+) -> RuntimeMetricReading {
+    if matches!(adapter, "ds4" | "exl3") {
+        return RuntimeMetricReading {
+            value: None,
+            unit: runtime_metric_capabilities()
+                .into_iter()
+                .find(|(candidate, _, _)| *candidate == key)
+                .map_or("unknown", |(_, unit, _)| unit),
+            measurement_kind: runtime_metric_capabilities()
+                .into_iter()
+                .find(|(candidate, _, _)| *candidate == key)
+                .map_or("measured", |(_, _, kind)| kind),
+            aggregation: "last",
+            counter_key: None,
+        };
+    }
+    if adapter == "llama-cpp" {
+        let direct = match key {
+            "runtime.decode_tokens_per_second" => {
+                Some((&["predicted_tokens_seconds"][..], "tokens/s"))
+            }
+            "runtime.prefill_tokens_per_second" => {
+                Some((&["prompt_tokens_seconds"][..], "tokens/s"))
+            }
+            "runtime.output_tokens_total" => Some((&["tokens_predicted_total"][..], "tokens")),
+            "runtime.slots_active" => Some((&["total_slots"][..], "requests")),
+            "runtime.requests_running" => Some((&["requests_processing"][..], "requests")),
+            "runtime.requests_waiting" => Some((&["requests_deferred"][..], "requests")),
+            _ => None,
+        };
+        if let Some((terms, unit)) = direct {
+            return RuntimeMetricReading {
+                value: prometheus_value(samples, adapter, terms),
+                unit,
+                measurement_kind: "measured",
+                aggregation: "last",
+                counter_key: None,
+            };
+        }
+    }
     let (terms, unit, kind, aggregation, counter_key) = match key {
         "runtime.decode_tokens_per_second" => (
             &[
@@ -1425,9 +1514,9 @@ fn runtime_metric_reading(key: &str, samples: &[PrometheusSample]) -> RuntimeMet
         }
     };
     let value = if aggregation == "p95" {
-        prometheus_latency_p95_ms(samples, terms)
+        prometheus_latency_p95_ms(samples, adapter, terms)
     } else {
-        prometheus_value(samples, terms)
+        prometheus_value(samples, adapter, terms)
     };
     RuntimeMetricReading {
         value,
@@ -1438,36 +1527,24 @@ fn runtime_metric_reading(key: &str, samples: &[PrometheusSample]) -> RuntimeMet
     }
 }
 
-fn prometheus_latency_p95_ms(samples: &[PrometheusSample], terms: &[&str]) -> Option<f64> {
-    let value = prometheus_histogram_p95(samples, terms).or_else(|| {
-        samples
-            .iter()
-            .filter(|sample| {
-                let name = sample.name.to_ascii_lowercase();
-                !name.ends_with("_bucket")
-                    && !name.ends_with("_sum")
-                    && !name.ends_with("_count")
-                    && terms.iter().any(|term| name.contains(term))
-            })
-            .map(|sample| sample.value)
-            .next()
-    })?;
-    let seconds = samples.iter().any(|sample| {
-        let name = sample.name.to_ascii_lowercase();
-        terms.iter().any(|term| name.contains(term))
-            && (name.contains("_seconds") || name.contains("_second"))
-    });
+fn prometheus_latency_p95_ms(
+    samples: &[PrometheusSample],
+    adapter: &str,
+    terms: &[&str],
+) -> Option<f64> {
+    let (value, seconds) = prometheus_histogram_p95(samples, adapter, terms)?;
     let value = if seconds { value * 1_000.0 } else { value };
     (value.is_finite() && (0.0..=1_000_000.0).contains(&value)).then_some(value)
 }
 
 fn prometheus_ratio(
     samples: &[PrometheusSample],
+    adapter: &str,
     numerator_terms: &[&str],
     denominator_terms: &[&str],
 ) -> Option<f64> {
-    let numerator = prometheus_value(samples, numerator_terms)?;
-    let denominator = prometheus_value(samples, denominator_terms)?;
+    let numerator = prometheus_value(samples, adapter, numerator_terms)?;
+    let denominator = prometheus_value(samples, adapter, denominator_terms)?;
     if denominator <= 0.0 {
         return None;
     }
@@ -1498,21 +1575,24 @@ fn parse_prometheus_runtime(
     let mut capabilities = Vec::new();
     let mut recognized = false;
     let mut gaps = 0_i64;
+    let adapter = contract.adapter.as_deref().unwrap_or("");
     for (key, _, _) in runtime_metric_capabilities() {
-        let reading = runtime_metric_reading(key, &samples);
+        let reading = runtime_metric_reading(adapter, key, &samples);
         let mut metric = reading.value;
-        if key == "runtime.prefix_cache_hit_percent" {
+        if key == "runtime.prefix_cache_hit_percent" && adapter != "ds4" && adapter != "exl3" {
             metric = normalize_percent(metric.or_else(|| {
                 prometheus_ratio(
                     &samples,
+                    adapter,
                     &["prefix_cache_hits_total", "prefix_cache_hit_total"],
                     &["prefix_cache_queries_total", "prefix_cache_query_total"],
                 )
             }));
-        } else if key == "runtime.mtp_acceptance_percent" {
+        } else if key == "runtime.mtp_acceptance_percent" && adapter != "ds4" && adapter != "exl3" {
             metric = normalize_percent(metric.or_else(|| {
                 prometheus_ratio(
                     &samples,
+                    adapter,
                     &[
                         "mtp_accepted_total",
                         "mtp_accept_total",
@@ -2781,14 +2861,15 @@ fn build_metrics(
             Some(pool_id.to_owned()),
             series_context("identity", "configured", "last", observed_at),
         );
-        let pressure = (total > 0.0).then_some(used * 100.0 / total);
-        add_optional_series(
-            &mut series,
-            &mut capabilities,
+        // Used percent is a capacity measurement.  It is not an OOM signal,
+        // so leave the named OOM metric unavailable until a producer exposes
+        // reclaim/failure pressure with a documented basis.
+        capabilities.push(capability(
             metric_identity("memory.oom_pressure_percent", "memory", None, None, None),
-            pressure,
-            series_context("%", "derived", "last", observed_at),
-        );
+            capability_context("%", "derived"),
+            false,
+            Some("OOM pressure producer unavailable; memory.used_percent is not an OOM signal"),
+        ));
     } else {
         for (key, unit, kind) in [
             ("memory.total_bytes", "bytes", "measured"),
@@ -2797,11 +2878,16 @@ fn build_metrics(
             ("memory.used_percent", "%", "derived"),
             ("memory.oom_pressure_percent", "%", "derived"),
         ] {
+            let reason = if key == "memory.oom_pressure_percent" {
+                "OOM pressure producer unavailable; memory.used_percent is not an OOM signal"
+            } else {
+                "memory counters unavailable"
+            };
             capabilities.push(capability(
                 metric_identity(key, "memory", None, None, None),
                 capability_context(unit, kind),
                 false,
-                Some("memory counters unavailable"),
+                Some(reason),
             ));
         }
         capabilities.push(capability(
@@ -3041,7 +3127,7 @@ fn build_metrics(
                 (!value.is_some()).then_some("throttle reason unavailable"),
             ));
         }
-        let active_throttle = [
+        let throttle_flags = [
             accelerator.throttle_thermal,
             accelerator.throttle_hw,
             accelerator.throttle_power,
@@ -3049,18 +3135,22 @@ fn build_metrics(
         ]
         .into_iter()
         .flatten()
-        .any(|value| value);
-        series.push(series_bool(
-            metric_identity(
-                "gpu.throttle_active",
-                "accelerator",
-                Some(&device_id),
-                None,
-                None,
-            ),
-            active_throttle,
-            series_context("boolean", "derived", "last", observed_at),
-        ));
+        .collect::<Vec<_>>();
+        let active_throttle =
+            (!throttle_flags.is_empty()).then(|| throttle_flags.into_iter().any(|value| value));
+        if let Some(active_throttle) = active_throttle {
+            series.push(series_bool(
+                metric_identity(
+                    "gpu.throttle_active",
+                    "accelerator",
+                    Some(&device_id),
+                    None,
+                    None,
+                ),
+                active_throttle,
+                series_context("boolean", "derived", "last", observed_at),
+            ));
+        }
         capabilities.push(capability(
             metric_identity(
                 "gpu.throttle_active",
@@ -3070,8 +3160,8 @@ fn build_metrics(
                 None,
             ),
             capability_context("boolean", "derived"),
-            true,
-            None,
+            active_throttle.is_some(),
+            (!active_throttle.is_some()).then_some("all throttle reason flags unavailable"),
         ));
     }
     for process in processes.iter().take(MAX_GPU_PROCESSES) {
