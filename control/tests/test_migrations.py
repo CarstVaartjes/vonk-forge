@@ -314,7 +314,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            == "0017_artifact_distribution_assignments"
+            == "0017_dist_assignments"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -444,7 +444,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0017_artifact_distribution_assignments"
+            == "0017_dist_assignments"
         )
 
 
@@ -526,7 +526,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0017_artifact_distribution_assignments"
+            == "0017_dist_assignments"
         )
 
 
