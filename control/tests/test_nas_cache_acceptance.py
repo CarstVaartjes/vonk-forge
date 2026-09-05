@@ -19,7 +19,11 @@ from vonk_control.distribution import (
     ModelCacheVerifiedObjectSource,
     RecipeBuildVerifiedObjectSource,
 )
-from vonk_control.model_cache import ModelCacheConflict, ModelCacheService
+from vonk_control.model_cache import (
+    ModelCacheConflict,
+    ModelCacheResolutionError,
+    ModelCacheService,
+)
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -474,22 +478,15 @@ def test_succeeded_local_recipe_build_archive_uses_the_same_verified_distributio
         restarted_engine.dispose()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "empty model artifacts are not yet admitted by the schema-2 cache and "
-        "distribution byte contracts; this is an explicit production seam gap"
-    ),
-)
-def test_empty_model_file_can_be_cached_and_served_as_an_immutable_object(
+def test_empty_support_file_can_be_cached_and_served_as_an_immutable_object(
     controller, tmp_path: Path
 ) -> None:
-    _database, _engine, _sessions, cache = controller
+    database, engine, _sessions, cache = controller
     model_pin = "7" * 64
     empty = _artifact(
         tmp_path,
-        "weights",
-        "weights/empty.bin",
+        "metadata",
+        "config/empty.json",
         b"",
         model_version_sha256=model_pin,
         token="hf_never_forwarded",
@@ -501,5 +498,105 @@ def test_empty_model_file_can_be_cached_and_served_as_an_immutable_object(
         recipe_revision_sha256="8" * 64,
         request_key="00000000-0000-4000-8000-000000000104",
     )
-    descriptor = ModelCacheVerifiedObjectSource.from_service(cache).objects_for_set(set_digest)[0]
-    assert descriptor.bytes == 0
+    engine.dispose()
+    restarted_engine, _restarted_sessions, restarted_cache = _restart_controller(
+        database, cache.root
+    )
+    try:
+        entry = restarted_cache.get_entry(set_digest)
+        assert entry["coverage"] == "complete"
+        assert entry["expected_bytes"] == 0
+        assert entry["verified_bytes"] == 0
+        assert entry["unique_bytes"] == 0
+        assert entry["artifacts"][0]["expected_bytes"] == 0
+        descriptor = restarted_cache.resolve_verified_artifact_set(set_digest)[0]
+        assert descriptor["bytes"] == 0
+        assert descriptor["sha256"] == hashlib.sha256(b"").hexdigest()
+        path, size, digest = restarted_cache.verified_artifact_file(
+            set_digest,
+            str(descriptor["sha256"]),
+            str(descriptor["path"]),
+        )
+        assert (path.read_bytes(), size, digest) == (b"", 0, descriptor["sha256"])
+
+        object_path = (
+            restarted_cache.root
+            / "objects"
+            / str(descriptor["sha256"])[:2]
+            / str(descriptor["sha256"])
+        )
+        object_path.unlink()
+        restarted_cache.reconcile_storage()
+        assert restarted_cache.get_entry(set_digest)["coverage"] == "incomplete"
+    finally:
+        restarted_engine.dispose()
+
+
+def test_empty_weight_file_is_rejected_before_transfer(controller, tmp_path: Path) -> None:
+    _database, _engine, _sessions, cache = controller
+    artifact = _artifact(
+        tmp_path,
+        "weights",
+        "weights/empty.bin",
+        b"",
+        model_version_sha256="a" * 64,
+        token="hf_never_forwarded",
+    )
+    with pytest.raises(ModelCacheResolutionError) as error:
+        cache.download_preview(
+            model_version_sha256="a" * 64,
+            artifacts=[artifact],
+        )
+    assert error.value.code == "model_cache.artifact_invalid"
+
+
+def test_empty_support_file_requires_the_canonical_empty_digest(
+    controller, tmp_path: Path
+) -> None:
+    _database, _engine, _sessions, cache = controller
+    artifact = _artifact(
+        tmp_path,
+        "metadata",
+        "config/empty.json",
+        b"",
+        model_version_sha256="b" * 64,
+        token="hf_never_forwarded",
+    )
+    artifact["sha256"] = "0" * 64
+    with pytest.raises(ModelCacheResolutionError) as error:
+        cache.download_preview(
+            model_version_sha256="b" * 64,
+            artifacts=[artifact],
+        )
+    assert error.value.code == "model_cache.artifact_invalid"
+
+
+def test_nonempty_artifact_pin_rejects_an_empty_source_body(controller, tmp_path: Path) -> None:
+    _database, _engine, _sessions, cache = controller
+    artifact = _artifact(
+        tmp_path,
+        "metadata",
+        "config/metadata.json",
+        b"",
+        model_version_sha256="c" * 64,
+        token="hf_never_forwarded",
+    )
+    expected = b"declared metadata"
+    artifact["sha256"] = hashlib.sha256(expected).hexdigest()
+    artifact["download_bytes"] = len(expected)
+    preview = cache.download_preview(
+        model_version_sha256="c" * 64,
+        artifacts=[artifact],
+    )
+    operation = cache.start_download(
+        actor="acceptance",
+        request_key="00000000-0000-4000-8000-000000000105",
+        plan_digest=str(preview["plan_digest"]),
+        model_version_sha256="c" * 64,
+        artifacts=[artifact],
+    )
+    assert cache.run_pending() == 1
+    failed = cache.get_operation(operation.id)
+    assert failed.state == "failed"
+    assert failed.last_error and "before the immutable artifact size" in failed.last_error
+    assert cache.get_entry(str(operation.artifact_set_sha256))["coverage"] == "incomplete"

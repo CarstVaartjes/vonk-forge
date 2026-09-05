@@ -4,6 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
@@ -229,6 +230,71 @@ def test_cached_download_skip_reports_zero_transfer_but_complete_coverage(
     assert replay.progress["downloaded_bytes"] == 0
     assert replay.progress["expected_bytes"] == 0
     assert service.get_entry(first.artifact_set_sha256 or "")["coverage"] == "complete"
+
+
+def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
+    cache, tmp_path: Path
+) -> None:
+    _service, sessions = cache
+    requests: list[httpx.Request] = []
+
+    class FixtureHttpClient:
+        follow_redirects = False
+
+        class Response:
+            status_code = 200
+            headers: dict[str, str] = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _type, _value, _traceback) -> None:
+                return None
+
+            def iter_bytes(self):
+                yield b""
+
+            def close(self) -> None:
+                return None
+
+        def stream(self, _method: str, _url: str, *, headers: dict[str, str]):
+            request = httpx.Request("GET", _url, headers=headers)
+            requests.append(request)
+            return self.Response()
+
+        def close(self) -> None:
+            return None
+
+    http_client = FixtureHttpClient()
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "http-nas-cache",
+        reserve_bytes=0,
+        http_client=http_client,
+        fixture_sources=True,
+    )
+    artifact = {
+        "id": "metadata",
+        "path": "config/empty.json",
+        "kind": "http.file",
+        "source": "http://fixture.invalid/empty",
+        "repository": "http://fixture.invalid/empty",
+        "revision": "fixture-revision",
+        "sha256": hashlib.sha256(b"").hexdigest(),
+        "download_bytes": 0,
+        "roles": ["auxiliary"],
+        "model_version_sha256": "e" * 64,
+    }
+    operation = _download(
+        service,
+        [artifact],
+        model_version_sha256="e" * 64,
+        request_key="00000000-0000-4000-8000-000000000018",
+    )
+    assert operation.state == "succeeded"
+    assert len(requests) == 1
+    assert requests[0].headers.get("range") is None
+    assert service.get_entry(operation.artifact_set_sha256 or "")["coverage"] == "complete"
 
 
 def test_download_mutation_is_queued_until_the_controller_worker_runs(

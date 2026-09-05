@@ -61,7 +61,7 @@ def upgrade() -> None:
             name="ck_model_cache_sets_state",
         ),
         sa.CheckConstraint(
-            "expected_bytes > 0 AND verified_bytes >= 0 AND verified_bytes <= expected_bytes",
+            "expected_bytes >= 0 AND verified_bytes >= 0 AND verified_bytes <= expected_bytes",
             name="ck_model_cache_sets_sizes",
         ),
         sa.CheckConstraint(
@@ -102,7 +102,7 @@ def upgrade() -> None:
             _lower_hex("sha256", 64), name="ck_model_cache_artifacts_digest"
         ),
         sa.CheckConstraint(
-            "expected_bytes > 0 AND actual_bytes >= 0 AND actual_bytes <= expected_bytes",
+            "expected_bytes >= 0 AND actual_bytes >= 0 AND actual_bytes <= expected_bytes",
             name="ck_model_cache_artifacts_sizes",
         ),
         sa.CheckConstraint(

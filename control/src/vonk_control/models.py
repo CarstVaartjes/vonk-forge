@@ -1169,7 +1169,7 @@ class ModelCacheSet(Base):
             name="ck_model_cache_sets_state",
         ),
         CheckConstraint(
-            "expected_bytes > 0 AND verified_bytes >= 0 AND verified_bytes <= expected_bytes",
+            "expected_bytes >= 0 AND verified_bytes >= 0 AND verified_bytes <= expected_bytes",
             name="ck_model_cache_sets_sizes",
         ),
         CheckConstraint(
@@ -1215,7 +1215,7 @@ class ModelCacheArtifact(Base):
             _lower_hex("sha256", 64), name="ck_model_cache_artifacts_digest"
         ),
         CheckConstraint(
-            "expected_bytes > 0 AND actual_bytes >= 0 AND actual_bytes <= expected_bytes",
+            "expected_bytes >= 0 AND actual_bytes >= 0 AND actual_bytes <= expected_bytes",
             name="ck_model_cache_artifacts_sizes",
         ),
         CheckConstraint(

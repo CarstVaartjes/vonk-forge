@@ -45,6 +45,8 @@ from .models import (
 SCHEMA_VERSION = 2
 SOURCE_POLICY = "nas-first"
 _DIGEST_LENGTH = 64
+_EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+_WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 _MAX_ARTIFACTS = 128
 _MAX_MANIFEST_BYTES = 1_048_576
 _CHUNK_BYTES = 1024 * 1024
@@ -310,7 +312,7 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or not _is_hex(value.sha256)
         or not isinstance(value.expected_bytes, int)
         or isinstance(value.expected_bytes, bool)
-        or value.expected_bytes <= 0
+        or value.expected_bytes < 0
         or not value.roles
         or len(value.roles) > 32
         or any(not isinstance(role, str) for role in value.roles)
@@ -319,6 +321,14 @@ def _validate_artifact(value: ArtifactSpec) -> None:
     ):
         raise ModelCacheResolutionError(
             "model_cache.artifact_invalid", "cache artifact identity is invalid"
+        )
+    if value.expected_bytes == 0 and (
+        value.sha256 != _EMPTY_SHA256
+        or any(role.casefold() in _WEIGHT_ROLES for role in value.roles)
+    ):
+        raise ModelCacheResolutionError(
+            "model_cache.artifact_invalid",
+            "only non-weight support artifacts may be an exact empty file",
         )
     if value.kind != "file" and value.revision is None:
         raise ModelCacheResolutionError(
@@ -1803,6 +1813,19 @@ class ModelCacheService:
                 total += artifact.expected_bytes
         return total
 
+    def _manifest_coverage_complete(self, manifest: ArtifactSetManifest) -> bool:
+        """Return whether every unique immutable object is present and verified.
+
+        Byte totals alone cannot prove coverage when an allowed support artifact
+        is empty: a missing zero-byte object has the same total as a verified
+        zero-byte object. Re-check the content-addressed files so cache state
+        remains truthful after a restart or storage reconciliation.
+        """
+        return all(
+            self._object_is_verified(spec)
+            for spec in _unique_artifacts(manifest.artifacts).values()
+        )
+
     def _finish_partial(
         self,
         operation_id: str,
@@ -2574,7 +2597,12 @@ class ModelCacheService:
                     verified = self._verified_bytes(session, row.artifact_set_sha256)
                     row.verified_bytes = verified
                     if row.state not in {"downloading", "verifying"}:
-                        row.state = "cached" if verified == manifest.expected_bytes else "needs-repair"
+                        row.state = (
+                            "cached"
+                            if verified == manifest.expected_bytes
+                            and self._manifest_coverage_complete(manifest)
+                            else "needs-repair"
+                        )
                     row.updated_at = self._clock()
                     self._refresh_protection(session, row)
             return self.storage_summary().document()
@@ -3192,7 +3220,12 @@ class ModelCacheService:
         manifest = ArtifactSetManifest.from_document(row.manifest)
         row.verified_bytes = self._verified_bytes(session, set_digest)
         if row.state not in {"downloading", "verifying"}:
-            row.state = "cached" if row.verified_bytes == manifest.expected_bytes else "needs-repair"
+            row.state = (
+                "cached"
+                if row.verified_bytes == manifest.expected_bytes
+                and self._manifest_coverage_complete(manifest)
+                else "needs-repair"
+            )
 
     def _object_key(self, digest: str) -> str:
         return f"objects/{digest[:2]}/{digest}"
