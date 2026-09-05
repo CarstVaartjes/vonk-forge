@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from math import isfinite
 from pathlib import PurePosixPath
 
-from ..runtime_environment import distribution_allowed_environment
 from ..runtime_writable_paths import (
     effective_environment,
     reject_recipe_environment,
@@ -24,6 +23,44 @@ from ..runtime_writable_paths import (
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
+_SAFE_ENGINE_OPTION_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
+_RESERVED_ENGINE_OPTION_NAMES = frozenset(
+    {
+        "cap-add",
+        "cap-drop",
+        "device",
+        "init",
+        "mount",
+        "network",
+        "privileged",
+        "publish",
+        "read-only",
+        "security-opt",
+        "tmpfs",
+        "user",
+        "volume",
+    }
+)
+_SAFE_ENGINE_ENVIRONMENT_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
+_FORBIDDEN_ENGINE_ENVIRONMENT_NAMES = frozenset(
+    {
+        "BASH_ENV",
+        "CUDA_INJECTION32_PATH",
+        "CUDA_INJECTION64_PATH",
+        "ENV",
+        "GCONV_PATH",
+        "NODE_OPTIONS",
+        "PATH",
+        "PERL5OPT",
+        "PYTHONBREAKPOINT",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "RUBYOPT",
+        "SHELLOPTS",
+    }
+)
+_FORBIDDEN_ENGINE_ENVIRONMENT_PREFIXES = ("DYLD_", "LD_", "VONK_")
 _SAFE_ADAPTER_BASENAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 _SAFE_ARTIFACT_ID = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _NON_ROOT_UID = re.compile(r"^[1-9][0-9]*(?::[1-9][0-9]*)?$")
@@ -298,7 +335,18 @@ def compile_arguments(
             raise HarnessCompileError("harness recipe argument is invalid")
         specification = specifications.get(name)
         if specification is None:
-            raise HarnessCompileError(f"harness argument is not allowlisted: {name}")
+            normalized_name = name.replace("_", "-")
+            if (
+                _SAFE_ENGINE_OPTION_NAME.fullmatch(name) is None
+                or normalized_name in _RESERVED_ENGINE_OPTION_NAMES
+            ):
+                raise HarnessCompileError(
+                    f"harness engine option name is invalid or platform-owned: {name}"
+                )
+            # The recipe is bound to a trusted, digest-pinned runtime. Preserve
+            # safe options so a newer runtime can consume them without a
+            # platform allowlist silently dropping intent.
+            specification = ArgumentSpec(f"--{name}")
         if specification.flag in parsed:
             raise HarnessCompileError(
                 f"harness argument is repeated: {specification.flag}"
@@ -366,28 +414,25 @@ def compile_environment(
     *,
     engine_slug: str | None = None,
 ) -> tuple[tuple[str, str], ...]:
+    del distribution, allowlist
     runtime = recipe.get("runtime")
     environment = runtime.get("environment") if isinstance(runtime, Mapping) else None
     if type(environment) is not list:
         raise HarnessCompileError("harness environment is invalid")
-    try:
-        allowed_names = allowlist | distribution_allowed_environment(
-            distribution.get("capabilities")
-        )
-        if engine_slug is not None:
-            allowed_names |= {
-                name for name, _value in telemetry_contract(engine_slug).environment
-            }
-    except (TypeError, ValueError) as exc:
-        raise HarnessCompileError(str(exc)) from exc
     result: list[tuple[str, str]] = []
     names: set[str] = set()
     for item in environment:
         if not isinstance(item, Mapping) or set(item) != {"name", "value"}:
             raise HarnessCompileError("harness environment is invalid")
         name = item.get("name")
-        if type(name) is not str or name not in allowed_names or name in names:
-            raise HarnessCompileError("harness environment is not allowlisted")
+        if (
+            type(name) is not str
+            or _SAFE_ENGINE_ENVIRONMENT_NAME.fullmatch(name) is None
+            or name in _FORBIDDEN_ENGINE_ENVIRONMENT_NAMES
+            or name.startswith(_FORBIDDEN_ENGINE_ENVIRONMENT_PREFIXES)
+            or name in names
+        ):
+            raise HarnessCompileError("harness environment name is invalid")
         result.append((name, _safe_scalar(item.get("value"), "harness environment")))
         names.add(name)
     if engine_slug is not None:
@@ -697,10 +742,10 @@ def projection(
     runtime_paths = engine_writable_paths(slug)
     validate_runtime_paths(slug, runtime_paths, dict(environment))
     try:
-        effective = effective_environment(slug, environment, distribution)
+        effective = effective_environment(slug, environment)
     except (TypeError, ValueError) as error:
         raise HarnessCompileError(str(error)) from error
-    validate_runtime_paths(slug, runtime_paths, dict(effective), distribution)
+    validate_runtime_paths(slug, runtime_paths, dict(effective))
     value = HarnessProjection(
         slug=slug,
         contract_version=1,

@@ -114,24 +114,13 @@ def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
     ]
 
 
-def test_mia_vllm_runtime_spec_injects_trusted_optional_cache_paths() -> None:
+def test_runtime_spec_writable_paths_ignore_distribution_identity() -> None:
     document, resolved_entities = _exact_builtin_inputs()
-    distribution = json.loads(
-        (ROOT / "config/runtime-distributions/anemll-vllm-mia.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    distribution_digest = catalog_content_sha256(distribution)
-    document["runtime"]["distribution"].update(
-        {
-            "publisher": "anemll",
-            "slug": "anemll-vllm-mia",
-            "content_sha256": distribution_digest,
-        }
-    )
-    resolved_entities["runtime_distribution"] = SimpleNamespace(
-        document=distribution, content_sha256=distribution_digest
-    )
+    distribution = resolved_entities["runtime_distribution"]
+    distribution.document["identity"] = {
+        "publisher": "anemll",
+        "slug": "anemll-vllm-mia",
+    }
     spec = compile_runtime_spec(
         document,
         resolved_entities=resolved_entities,
@@ -142,11 +131,8 @@ def test_mia_vllm_runtime_spec_injects_trusted_optional_cache_paths() -> None:
         image_digest="sha256:" + "d" * 64,
     )
     values = {item["name"]: item["value"] for item in spec["runtime"]["environment"]}
-    assert values["FLASHINFER_WORKSPACE_BASE"] == "/outputs/cache/flashinfer"
-    assert (
-        values["TORCH_NCCL_DEBUG_INFO_PIPE_FILE"]
-        == "/outputs/cache/nccl-fr/fr_dump_pipe_"
-    )
+    assert "FLASHINFER_WORKSPACE_BASE" not in values
+    assert values["VLLM_CACHE_ROOT"] == "/outputs/cache/vllm"
 
 
 def _distributed_sglang_runtime_inputs():

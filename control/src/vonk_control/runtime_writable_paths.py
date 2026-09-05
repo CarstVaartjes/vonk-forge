@@ -133,13 +133,6 @@ _ENGINE_ENVIRONMENT: dict[str, dict[str, str]] = {
         "TRITON_CACHE_DIR": "/outputs/cache/triton",
     },
 }
-_MIA_VLLM_ENVIRONMENT = {
-    "FLASHINFER_WORKSPACE_BASE": "/outputs/cache/flashinfer",
-    "TILELANG_CACHE_DIR": "/outputs/cache/tilelang",
-    "B12X_CUTE_COMPILE_CACHE_DIR": "/outputs/cache/b12x-cute-compile",
-    "TORCH_FR_DUMP_TEMP_FILE": "/outputs/cache/nccl-fr/comm_lib_trace_rank_",
-    "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/outputs/cache/nccl-fr/fr_dump_pipe_",
-}
 for _slug in ("tensorrt-llm", "ds4", "diffusers", "comfyui", "pytorch-pipeline"):
     _ENGINE_ENVIRONMENT[_slug] = dict(_ENGINE_ENVIRONMENT["sglang"])
 for _name in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "TMPDIR"):
@@ -173,19 +166,13 @@ _TELEMETRY_ENV_NAMES = frozenset(
 
 
 def writable_paths(slug: str) -> tuple[RuntimeWritablePath, ...]:
-    return writable_paths_for_distribution(slug, None)
-
-
-def writable_paths_for_distribution(
-    slug: str, distribution: Mapping[str, object] | None
-) -> tuple[RuntimeWritablePath, ...]:
+    """Return the writable directories owned by the platform harness."""
     try:
-        paths = _ENGINE_PATHS[slug]
+        return _ENGINE_PATHS[slug]
     except KeyError as exc:
         raise _compile_error(
             f"runtime writable-path contract is unavailable: {slug}"
         ) from exc
-    return paths
 
 
 def telemetry_contract(slug: str) -> EngineTelemetryContract:
@@ -226,36 +213,33 @@ def environment(
 def effective_environment(
     slug: str,
     supplied: Iterable[tuple[str, str]],
-    distribution: Mapping[str, object] | None = None,
 ) -> tuple[tuple[str, str], ...]:
     supplied = tuple(supplied)
     reject_recipe_environment(slug, supplied)
     return _merge_environment(
-        slug, supplied, allow_reserved=True, distribution=distribution
+        slug, supplied, allow_reserved=True
     )
 
 
 def compile_environment(
     slug: str,
     supplied: Iterable[tuple[str, str]],
-    distribution: Mapping[str, object] | None = None,
 ) -> tuple[tuple[str, str], ...]:
     """Compile recipe declarations while rejecting platform-owned telemetry."""
     supplied = tuple(supplied)
     reject_recipe_environment(slug, supplied)
     return _merge_environment(
-        slug, supplied, allow_reserved=True, distribution=distribution
+        slug, supplied, allow_reserved=True
     )
 
 
 def materialize_environment(
     slug: str,
     supplied: Iterable[tuple[str, str]],
-    distribution: Mapping[str, object] | None = None,
 ) -> tuple[tuple[str, str], ...]:
     """Materialize an already-centralized projection for runtime serialization."""
     return _merge_environment(
-        slug, supplied, allow_reserved=True, distribution=distribution
+        slug, supplied, allow_reserved=True
     )
 
 
@@ -264,10 +248,9 @@ def _merge_environment(
     supplied: Iterable[tuple[str, str]],
     *,
     allow_reserved: bool,
-    distribution: Mapping[str, object] | None = None,
 ) -> tuple[tuple[str, str], ...]:
     defaults = {
-        **_environment_defaults(slug, distribution),
+        **_environment_defaults(slug),
         **dict(telemetry_contract(slug).environment),
     }
     if defaults is None:
@@ -303,18 +286,24 @@ def validate_paths(
     slug: str,
     paths: Iterable[RuntimeWritablePath],
     env: Mapping[str, str],
-    distribution: Mapping[str, object] | None = None,
 ) -> None:
-    expected = writable_paths_for_distribution(slug, distribution)
+    expected = writable_paths(slug)
     actual = tuple(paths)
     if actual != expected:
         raise _compile_error(
             "runtime writable paths are not the central engine contract"
         )
+    if len({item.name for item in actual}) != len(actual) or len(
+        {item.path for item in actual}
+    ) != len(actual):
+        raise _compile_error("runtime writable paths are repeated")
     known = {item.path for item in actual}
     for item in actual:
         if (
-            item.source != "outputs"
+            type(item.name) is not str
+            or not item.name
+            or type(item.persistent) is not bool
+            or item.source != "outputs"
             or not item.path.startswith("/outputs/")
             or "//" in item.path
             or ".." in PurePosixPath(item.path).parts
@@ -346,11 +335,10 @@ def validate_telemetry(
 def document(
     slug: str,
     env: Iterable[tuple[str, str]],
-    distribution: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     values = dict(env)
-    paths = writable_paths_for_distribution(slug, distribution)
-    validate_paths(slug, paths, values, distribution)
+    paths = writable_paths(slug)
+    validate_paths(slug, paths, values)
     return [
         {"name": item.name, "path": item.path, "persistent": item.persistent}
         for item in paths
@@ -365,39 +353,10 @@ def _compile_error(message: str) -> ValueError:
     return HarnessCompileError(message)
 
 
-def _environment_defaults(
-    slug: str, distribution: Mapping[str, object] | None
-) -> dict[str, str]:
+def _environment_defaults(slug: str) -> dict[str, str]:
     defaults = _ENGINE_ENVIRONMENT.get(slug)
     if defaults is None:
         raise _compile_error(
             f"runtime writable-path contract is unavailable: {slug}"
         )
-    if _is_mia_vllm_distribution(slug, distribution):
-        return {**defaults, **_MIA_VLLM_ENVIRONMENT}
     return defaults
-
-
-def _is_mia_vllm_distribution(
-    slug: str, distribution: Mapping[str, object] | None
-) -> bool:
-    if slug != "vllm" or not isinstance(distribution, Mapping):
-        return False
-    identity = distribution.get("identity")
-    capabilities = distribution.get("capabilities")
-    distributed_vllm = (
-        capabilities.get("distributed_vllm")
-        if isinstance(capabilities, Mapping)
-        else None
-    )
-    return (
-        isinstance(identity, Mapping)
-        and identity.get("publisher") == "anemll"
-        and identity.get("slug") == "anemll-vllm-mia"
-        and isinstance(distributed_vllm, Mapping)
-        and distributed_vllm.get("verified") is True
-        and distributed_vllm.get("mechanism") == "vllm-mp"
-        and distributed_vllm.get("topology_mode") == "distributed"
-        and distributed_vllm.get("node_count") == 2
-        and distributed_vllm.get("world_size") == 2
-    )

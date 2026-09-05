@@ -19,33 +19,29 @@ The indexed source set is deliberately concrete: `adapters/llm/vllm-openai/Docke
 Python/Triton defaults; `adapters/qwen/flash-next-sglang-dual/Dockerfile:22-29`
 and `adapters/llm/inkling-sglang-eight/Dockerfile:15-20` provide SGLang
 examples. The current Diffusers, ComfyUI, and pipeline images provide the
-shared Python framework defaults. The trusted MIA distribution identity and
-verified distributed-vLLM capability are
-`config/runtime-distributions/anemll-vllm-mia.json:4,90-109`; its
-vendored MIA wrappers provide the FlashInfer, TileLang, B12X, and NCCL trace
-paths. Upstream identities are pinned there to vLLM commit
-`752a3a504485790a2e8491cacbb35c137339ad34`, FlashInfer commit
-`0472b9b3f2fba11b463f8526f390297d52a8aad7`, and b12x commit
-`7dc6fb8fcc6446ea093537d1657df81985fa5f43`.
-Those source files remain recipe-owned; this contract only projects their
-effective runtime destinations.
+shared Python framework defaults. These defaults are selected by the
+platform-owned harness identity while compiling the canonical recipe's
+execution, runtime, and topology projection. A runtime image or source-build
+receipt cannot add a second writable root or change the selected destinations.
 
 The read-only catalog audit at 2026-09-05 found 84 recipes across six active
 families (vLLM 33, PyTorch pipeline 21, Diffusers 13, ComfyUI 10, SGLang 5,
 and DS4 2). Twelve reserved path variables occurred in the two MIA vLLM
 recipes before recipe commit `8da79f23`; that cleanup is complete and the
 recipe copies are absent there.
-The trusted `anemll/anemll-vllm-mia` identity plus its verified
-`distributed_vllm` capability enables the five MIA-specific path variables
-centrally; all other distributions reject them. Triton is a universal vLLM
-path and is injected for every vLLM distribution.
+Triton, TorchInductor, compiler, framework, and temporary paths are injected
+from the engine harness contract for every compatible image, whether the
+recipe consumes a direct image or a source-build receipt. Variant-specific
+variables such as FlashInfer or NCCL trace destinations remain reserved so a
+recipe cannot move them into the image root; they are supplied only by a
+future harness contract with direct source evidence.
 
 | Engine | Path | Default | Source | Validation | Test |
 | --- | --- | --- | --- | --- | --- |
 | vLLM | XDG cache | `/outputs/cache` | vLLM wrapper and `XDG_CACHE_HOME` contract | Exact harness value; recipe override rejected | `test_builtin_harnesses.py`, runtime spec tests |
 | vLLM | engine cache | `/outputs/cache/vllm` | vLLM wrapper `VLLM_CACHE_ROOT`; vLLM source defaults below XDG cache | Exact harness value; must be under output mount | `test_runtime_writable_paths.py` |
 | vLLM | Triton, TorchInductor, Torch extensions | `/outputs/cache/triton`, `/outputs/cache/torchinductor`, `/outputs/cache/torch_extensions` | Current vLLM recipe Dockerfiles | Exact harness values; recipe path variables rejected | `test_runtime_writable_paths.py` |
-| vLLM optional variant | FlashInfer, TileLang, TVM, B12X compile and NCCL traces | `/outputs/cache/{flashinfer,tilelang,tvm,b12x-cute-compile,nccl-fr}` only for trusted `anemll-vllm-mia`; TVM has no injected env name | `config/runtime-distributions/anemll-vllm-mia.json:4,90-136` capability and current MIA wrappers | Exact identity plus verified distributed-vLLM capability required; otherwise reserved names rejected | `test_builtin_harnesses.py`, `test_runtime_writable_paths.py` |
+| vLLM variant paths | FlashInfer, TileLang, TVM, B12X compile and NCCL traces | Reserved platform paths; no recipe injection | Harness contract and direct runtime evidence required before enabling a variant | Recipe values are rejected until a matching harness contract exists | `test_builtin_harnesses.py`, `test_runtime_writable_paths.py` |
 | SGLang | XDG cache, temp, Triton, Torch extensions/Inductor | `/outputs/cache`, `/outputs/tmp`, `/outputs/cache/triton`, `/outputs/cache/torch_extensions`, `/outputs/cache/torchinductor` | `adapters/qwen/flash-next-sglang-dual/Dockerfile` | Generic path set is injected by harness; recipe repeats and overrides are rejected | `test_runtime_writable_paths.py` |
 | Diffusers, ComfyUI, PyTorch pipeline, DS4 | Python/Hugging Face, Torch, Triton and temp paths | `/outputs/cache/{huggingface,torch,triton,...}`, `/outputs/tmp` | Current sibling recipe Dockerfiles and runtime wrappers | Shared Python engine contract; no unknown path envs are added | `test_runtime_writable_paths.py` |
 | llama.cpp | XDG cache, home and temp | `/outputs/cache`, `/outputs/cache/home`, `/outputs/tmp` | Built-in harness has no published recipe-specific cache source | Only proven generic paths are allowed | `test_runtime_writable_paths.py` |
@@ -58,7 +54,8 @@ binds it at `/outputs/cache`; it does not make the image root writable or
 replace packaged image content.
 
 Validation evidence is separated by boundary. The Python harness/runtime
-contract suite covers structural projection and the trusted MIA variant; the
+contract suite covers structural projection and distribution-independent
+engine defaults; the
 recipe-library validator passed the 84-recipe catalog at recipe commit
 `8da79f23` against this platform worktree. A disposable OrbStack container
 (`orbstack` Docker 29.4.0, `python:3.12-bookworm`) started with `--read-only`,

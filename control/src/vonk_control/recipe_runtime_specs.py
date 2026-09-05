@@ -112,7 +112,6 @@ def compile_runtime_spec(
     effective_environment = compile_runtime_environment(
         projection.slug,
         projection.environment,
-        getattr(resolved_entities.get("runtime_distribution"), "document", None),
     )
     compiled_runtime: dict[str, object] = {
         "interface": "vonk.runtime.v1",
@@ -129,7 +128,6 @@ def compile_runtime_spec(
         "writable_paths": runtime_writable_path_document(
             projection.slug,
             effective_environment,
-            getattr(resolved_entities.get("runtime_distribution"), "document", None),
         ),
     }
     if topology.get("mode") == "distributed":

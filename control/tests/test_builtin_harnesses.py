@@ -1563,6 +1563,26 @@ def test_vllm_injects_platform_owned_writable_cache_environment() -> None:
     assert projection.environment == environment("vllm", ())
 
 
+@pytest.mark.parametrize("slug", ["vllm", "sglang", "diffusers"])
+def test_runtime_contract_is_stable_for_direct_and_source_built_images(
+    slug: str,
+) -> None:
+    harness = _harness_document(slug)
+    direct = _distribution(slug, harness)
+    source_built = copy.deepcopy(direct)
+    source_built["image"] = (
+        f"registry.example/vonk/{slug}-source@sha256:" + "d" * 64
+    )
+
+    direct_projection = _compile(slug, distribution=direct)
+    source_projection = _compile(slug, distribution=source_built)
+
+    assert direct_projection.image != source_projection.image
+    assert direct_projection.environment == source_projection.environment
+    assert direct_projection.writable_paths == source_projection.writable_paths
+    assert direct_projection.output_mount.target == "/outputs"
+
+
 @pytest.mark.parametrize("name", ["XDG_CACHE_HOME", "VLLM_CACHE_ROOT"])
 def test_vllm_rejects_recipe_override_of_platform_cache_environment(
     name: str,
@@ -1581,14 +1601,25 @@ def test_vllm_rejects_recipe_override_of_platform_cache_environment(
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
-def test_builtin_harness_rejects_unallowlisted_engine_flags(slug: str) -> None:
+def test_builtin_harness_passes_unknown_engine_flags_to_pinned_runtime(
+    slug: str,
+) -> None:
     recipe = _recipe(slug)
     recipe["runtime"]["arguments"].append(
-        {"name": "arbitrary-executable-hook", "value": "/tmp/hook"}
+        {"name": "future-engine-option", "value": "preserve-me"}
     )
 
-    with pytest.raises(HarnessCompileError, match="allowlisted"):
-        _compile(slug, recipe=recipe)
+    projection = _compile(slug, recipe=recipe)
+    index = projection.command.index("--future-engine-option")
+    assert projection.command[index + 1] == "preserve-me"
+
+
+def test_builtin_harness_rejects_platform_owned_engine_flags() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append({"name": "privileged", "value": True})
+
+    with pytest.raises(HarnessCompileError, match="platform-owned"):
+        _compile("vllm", recipe=recipe)
 
 
 @pytest.mark.parametrize(
@@ -1633,43 +1664,41 @@ def test_builtin_harness_emits_only_allowlisted_environment(slug: str) -> None:
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
-def test_builtin_harness_accepts_distribution_environment_authority(slug: str) -> None:
+def test_builtin_harness_accepts_unknown_recipe_environment(slug: str) -> None:
     recipe = _recipe(slug)
     recipe["runtime"]["environment"] = [
-        {"name": "UPSTREAM_RUNTIME_TUNING", "value": "enabled"}
+        {"name": "UPSTREAM_ENGINE_TUNING", "value": "enabled"}
     ]
-    harness = _harness_document(slug)
-    distribution = _distribution(slug, harness)
-    distribution["capabilities"] = {
-        "runtime_environment": {"allowed_names": ["UPSTREAM_RUNTIME_TUNING"]}
-    }
-    recipe["runtime"]["distribution"]["content_sha256"] = catalog_content_sha256(
-        distribution
-    )
 
-    projection = _compile(slug, recipe=recipe, distribution=distribution)
+    projection = _compile(slug, recipe=recipe)
 
     expected = effective_environment(
-        slug, (("UPSTREAM_RUNTIME_TUNING", "enabled"),), distribution
+        slug, (("UPSTREAM_ENGINE_TUNING", "enabled"),)
     )
     assert projection.environment == expected
 
 
+@pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
+def test_builtin_harness_preserves_unknown_engine_environment(slug: str) -> None:
+    recipe = _recipe(slug)
+    recipe["runtime"]["environment"] = [
+        {"name": "FUTURE_ENGINE_SETTING", "value": "preserve-me"}
+    ]
+
+    projection = _compile(slug, recipe=recipe)
+
+    assert projection.environment[0] == ("FUTURE_ENGINE_SETTING", "preserve-me")
+
+
 @pytest.mark.parametrize("unsafe", ["LD_PRELOAD", "PATH", "VONK_MASTER_ADDR"])
-def test_builtin_harness_rejects_unsafe_distribution_environment_authority(
+def test_builtin_harness_rejects_unsafe_recipe_environment(
     unsafe: str,
 ) -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [{"name": unsafe, "value": "/tmp/value"}]
-    harness = _harness_document("vllm")
-    distribution = _distribution("vllm", harness)
-    distribution["capabilities"] = {"runtime_environment": {"allowed_names": [unsafe]}}
-    recipe["runtime"]["distribution"]["content_sha256"] = catalog_content_sha256(
-        distribution
-    )
 
     with pytest.raises(HarnessCompileError, match="invalid"):
-        _compile("vllm", recipe=recipe, distribution=distribution)
+        _compile("vllm", recipe=recipe)
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
