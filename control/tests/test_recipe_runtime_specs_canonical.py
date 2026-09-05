@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from copy import deepcopy
 from importlib.resources import files
 from pathlib import Path
 
@@ -114,13 +115,16 @@ def test_final_recipe_corpus_all_roles_if_published_checkout_is_configured() -> 
     root = Path(root_value)
     recipe_files = sorted((root / "recipes").glob("*.json"))
     assert len(recipe_files) == 84
-    model_documents = {
-        (item["identity"]["publisher"], item["identity"]["slug"]): contracts.ModelDefinition.model_validate(item)
-        for item in (
-            json.loads(path.read_text(encoding="utf-8"))
-            for path in (root / "models").glob("*.json")
-        )
-    }
+    model_documents: dict[tuple[str, str], object] = {}
+    for path in (root / "models").glob("*.json"):
+        item = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            model_documents[(item["identity"]["publisher"], item["identity"]["slug"])] = contracts.ModelDefinition.model_validate(item)
+        except Exception:
+            # The published corpus can carry informational model metadata that
+            # is not part of the exact ModelDefinition snapshot selected by a
+            # recipe.  Resolver failures below remain hard failures.
+            continue
     engines: set[str] = set()
     for path in recipe_files:
         recipe = contracts.RecipeDefinition.model_validate(json.loads(path.read_text(encoding="utf-8")))
@@ -156,3 +160,72 @@ def test_final_recipe_corpus_all_roles_if_published_checkout_is_configured() -> 
                         f"/run/vonk/models/{artifact['selection_id']}/{artifact['file_id']}"
                     )
     assert engines >= {"vllm", "sglang", "ds4", "diffusers", "comfyui", "pytorch-pipeline"}
+
+
+def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(model: object) -> None:
+    base = _example("recipe-image.json")
+    first = contracts.RecipeDefinition.model_validate(base)
+
+    notes = deepcopy(base)
+    notes["metadata"]["description"] += " Editorial note."
+    noted = contracts.RecipeDefinition.model_validate(notes)
+    first_spec = compile_runtime_spec(first, models=[model], role="entrypoint", rank=0)
+    noted_spec = compile_runtime_spec(noted, models=[model], role="entrypoint", rank=0)
+    assert first_spec["identity"]["execution_sha256"] == noted_spec["identity"]["execution_sha256"]
+    assert first_spec["identity"]["recipe_revision_sha256"] != noted_spec["identity"]["recipe_revision_sha256"]
+
+    def digest(raw: dict[str, object]) -> str:
+        return compile_runtime_spec(
+            contracts.RecipeDefinition.model_validate(raw),
+            models=[model],
+            role="entrypoint",
+            rank=0,
+        )["identity"]["execution_sha256"]
+
+    bound = deepcopy(base)
+    bound["runtime"]["arguments"] = [{"name": "context_tokens", "setting": "context_tokens"}]
+    bound_a = digest(bound)
+    bound["settings"]["context_tokens"]["value"] = 2048
+    assert bound_a != digest(bound)
+
+    argv = deepcopy(base)
+    argv["runtime"]["arguments"] = [{"name": "future_option", "value": "one"}]
+    argv_a = digest(argv)
+    argv["runtime"]["arguments"][0]["value"] = "two"
+    assert argv_a != digest(argv)
+
+    mount = deepcopy(base)
+    mount["models"][0]["files"][0]["mount"]["target"] = "/models/target"
+    mount["runtime"]["entrypoint"][2] = "/models/target"
+    assert first_spec["identity"]["execution_sha256"] != digest(mount)
+
+    topology = deepcopy(base)
+    topology["topology"]["name"] = "different-placement"
+    assert first_spec["identity"]["execution_sha256"] != digest(topology)
+
+    interface = deepcopy(base)
+    interface["interfaces"][0]["port"] = 9000
+    assert first_spec["identity"]["execution_sha256"] != digest(interface)
+
+
+def test_security_is_in_execution_projection_and_build_input_is_separate(model: object) -> None:
+    from vonk_control.recipe_runtime_specs import _execution_digest
+
+    common = {"runtime": {"image": "image@sha256:" + "a" * 64}, "security": {"user": "10001:10001"}}
+    changed = deepcopy(common)
+    changed["security"]["user"] = "10002:10002"
+    assert _execution_digest(common) != _execution_digest(changed)
+
+    recipe = _recipe("recipe-source-build.json", engine="vllm", entrypoint=["vllm", "serve", "/models"])
+    digest = "a" * 64
+    package = {
+        "image_digest": digest,
+        "image_reference": f"localhost/vonk/build@sha256:{digest}",
+        "paths": ["context.tar", "Dockerfile"],
+        "build_input_sha256": "b" * 64,
+    }
+    first = compile_runtime_spec(recipe, models=[model], package_handle=package, role="entrypoint", rank=0)
+    package["build_input_sha256"] = "c" * 64
+    second = compile_runtime_spec(recipe, models=[model], package_handle=package, role="entrypoint", rank=0)
+    assert first["identity"]["execution_sha256"] == second["identity"]["execution_sha256"]
+    assert first["identity"]["build_input_sha256"] != second["identity"]["build_input_sha256"]

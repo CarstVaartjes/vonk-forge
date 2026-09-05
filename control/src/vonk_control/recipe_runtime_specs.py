@@ -7,6 +7,8 @@ adds the platform execution invariants at the final boundary.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
@@ -155,6 +157,7 @@ def compile_runtime_spec(
         raise RecipeRuntimeSpecError("canonical harness binding is missing")
     interface = parsed.interfaces[0]
     environment = writable_path_document(parsed.runtime.engine, projection.environment)
+    compiled_arguments = _compiled_arguments(parsed, parameters)
     runtime: dict[str, object] = {
         "interface": "vonk.runtime.v1",
         "adapter": projection.slug,
@@ -162,7 +165,7 @@ def compile_runtime_spec(
         "image": projection.image,
         "architecture": projection.architecture,
         "entrypoint": list(projection.command),
-        "arguments": [],
+        "arguments": compiled_arguments,
         "environment": [
             {"name": name, "value": value, "secret": None}
             for name, value in projection.environment
@@ -199,45 +202,46 @@ def compile_runtime_spec(
     if projection.input_mount is not None:
         mounts.append({"source": "/run/vonk/inputs", "target": "/inputs", "read_only": True})
     lifecycle = parsed.runtime.lifecycle
+    security = {
+        "devices": [],
+        "user": projection.user,
+        "capabilities": list(projection.capabilities),
+        "privileged": False,
+        "host_network": False,
+        "mounts": mounts,
+        "read_only_root": projection.read_only_root,
+        "no_new_privileges": projection.no_new_privileges,
+    }
+    lifecycle_spec = {
+        "pre_start": copy.deepcopy(parsed.runtime.lifecycle.pre_start),
+        "post_stop": copy.deepcopy(parsed.runtime.lifecycle.post_stop),
+        "stop_timeout_seconds": lifecycle.stop_timeout_seconds,
+    }
+    topology_spec = {
+        "name": parsed.topology.name,
+        "mode": parsed.topology.mode,
+        "node_count": parsed.topology.node_count,
+        "world_size": parsed.topology.parallelism.world_size,
+        "rank": rank,
+        "role": role,
+        "backend": parsed.topology.parallelism.backend,
+    }
     spec: dict[str, object] = {
         "identity": {
             "recipe_revision_sha256": content_sha256(parsed),
             "model_dependencies": dependencies,
             "harness_sha256": binding.harness_content_sha256,
-            "execution_sha256": _execution_digest(parsed),
+            "execution_sha256": None,
+            "build_input_sha256": _build_input_digest(package),
         },
         "model_dependencies": dependencies,
-        "runtime": {
-            **runtime,
-            "arguments": _compiled_arguments(parsed, parameters),
-        },
+        "runtime": runtime,
         # These are compiler output, assembled from ModelDefinition selectors;
         # they are not a second recipe authoring authority.
         "artifacts": copy.deepcopy(list(artifacts)),
-        "security": {
-            "devices": [],
-            "user": projection.user,
-            "capabilities": list(projection.capabilities),
-            "privileged": False,
-            "host_network": False,
-            "mounts": mounts,
-            "read_only_root": projection.read_only_root,
-            "no_new_privileges": projection.no_new_privileges,
-        },
-        "lifecycle": {
-            "pre_start": copy.deepcopy(parsed.runtime.lifecycle.pre_start),
-            "post_stop": copy.deepcopy(parsed.runtime.lifecycle.post_stop),
-            "stop_timeout_seconds": lifecycle.stop_timeout_seconds,
-        },
-        "topology": {
-            "name": parsed.topology.name,
-            "mode": parsed.topology.mode,
-            "node_count": parsed.topology.node_count,
-            "world_size": parsed.topology.parallelism.world_size,
-            "rank": rank,
-            "role": role,
-            "backend": parsed.topology.parallelism.backend,
-        },
+        "security": security,
+        "lifecycle": lifecycle_spec,
+        "topology": topology_spec,
     }
     if interface.adapter == "openai":
         spec["endpoint"] = {
@@ -249,17 +253,56 @@ def compile_runtime_spec(
     else:
         spec["job"] = {
             "interface": interface.adapter,
-            "input": interface.input,
+            "input": (
+                None
+                if interface.input is None
+                else interface.input.model_dump(mode="json")
+            ),
             "output_path": interface.output.path,
             "timeout_seconds": lifecycle.stop_timeout_seconds,
         }
+    spec["identity"]["execution_sha256"] = _execution_digest(
+        {
+            "harness_sha256": binding.harness_content_sha256,
+            "model_dependencies": dependencies,
+            "artifacts": artifacts,
+            "runtime": runtime,
+            "security": security,
+            "lifecycle": lifecycle_spec,
+            "topology": topology_spec,
+            "interface": spec.get("endpoint", spec.get("job")),
+        }
+    )
     return spec
 
 
-def _execution_digest(recipe: RecipeDefinition) -> str:
-    return __import__("hashlib").sha256(
-        __import__("json").dumps(recipe.execution.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+def _execution_digest(projection: Mapping[str, object]) -> str:
+    """Hash only normalized compiled launch behavior and platform invariants."""
+    return hashlib.sha256(
+        json.dumps(projection, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     ).hexdigest()
+
+
+def _build_input_digest(package: object) -> str | None:
+    raw = (
+        package.get("build_input_sha256")
+        if isinstance(package, Mapping)
+        else getattr(package, "build_input_sha256", None)
+    )
+    if raw is None:
+        raw = (
+            package.get("build_input_digest")
+            if isinstance(package, Mapping)
+            else getattr(package, "build_input_digest", None)
+        )
+    if raw is None:
+        return None
+    if type(raw) is not str:
+        raise RecipeRuntimeSpecError("build input digest is invalid")
+    value = raw.removeprefix("sha256:")
+    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+        raise RecipeRuntimeSpecError("build input digest is invalid")
+    return value
 
 
 def _compiled_arguments(
