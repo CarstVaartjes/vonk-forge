@@ -23,7 +23,7 @@ dependencies = [
 [tool.uv.sources]
 vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" }
 vonk-cluster-profiles = { path = ".." }
-vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "5bbb0be4e604768499ccbcf82bbea181575c31d6", subdirectory = "contracts" }
+vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "2001c6502bfdc66141dd7224bfde5d77734e9959", subdirectory = "contracts" }
 
 [dependency-groups]
 dev = ["openapi-python-client==0.26.2", "pytest==9.1.1"]

@@ -58,6 +58,8 @@ from .schema_resources import read_runtime_schema
 from .source_bundles import SourceBundleError, SourceBundleStore
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
+_SHA1 = re.compile(r"^[0-9a-f]{40}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _RELEASE_VERSION = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
@@ -840,6 +842,9 @@ class CatalogService:
         dependency_documents: Sequence[Mapping[str, object]] = (),
         release_version: str | None = None,
         release_released_at: str | None = None,
+        package_handle: object | None = None,
+        package_sha256: str | None = None,
+        source_bundle_sha256: str | None = None,
     ) -> RecipeRevisionView:
         """Import one exact recipe from the public Git recipe library."""
 
@@ -964,6 +969,18 @@ class CatalogService:
                 "publisher": publisher,
                 "slug": slug,
             }
+            if package_sha256 is not None:
+                redacted_source["package_sha256"] = package_sha256
+            if source_bundle_sha256 is not None:
+                redacted_source["source_bundle_sha256"] = source_bundle_sha256
+            if package_handle is not None:
+                redacted_source["package_handle"] = _package_handle_metadata(
+                    package_handle,
+                    publisher=publisher,
+                    slug=slug,
+                    recipe_content_sha256=actual,
+                    package_sha256=package_sha256,
+                )
             if (release_version is None) != (release_released_at is None):
                 raise CatalogValidationError(
                     "recipe_library.release_invalid",
@@ -1263,6 +1280,95 @@ def _mapping(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CatalogValidationError("catalog.document", "recipe object is invalid")
     return value
+
+
+def _package_handle_metadata(
+    handle: object,
+    *,
+    publisher: str,
+    slug: str,
+    recipe_content_sha256: str,
+    package_sha256: str | None,
+) -> dict[str, object]:
+    """Persist the immutable package closure needed after a Controller restart."""
+
+    fields = (
+        "publication_commit",
+        "source_commit",
+        "package_sha256",
+        "package_size",
+        "package_path",
+        "recipe_content_sha256",
+        "archive_path",
+        "closure_path",
+    )
+    values: dict[str, object] = {}
+    for field in fields:
+        value = getattr(handle, field, None)
+        if field.endswith("_path"):
+            value = str(value) if value is not None else None
+        if value is None:
+            raise CatalogValidationError(
+                "recipe_library.package_handle_invalid",
+                "recipe package handle is incomplete",
+            )
+        values[field] = value
+    publication_commit = values["publication_commit"]
+    source_commit = values["source_commit"]
+    handle_package_sha256 = values["package_sha256"]
+    handle_recipe_sha256 = values["recipe_content_sha256"]
+    if (
+        not isinstance(publication_commit, str)
+        or _SHA1.fullmatch(publication_commit) is None
+        or not isinstance(source_commit, str)
+        or _SHA1.fullmatch(source_commit) is None
+        or not isinstance(handle_package_sha256, str)
+        or _SHA256.fullmatch(handle_package_sha256) is None
+        or not isinstance(handle_recipe_sha256, str)
+        or handle_recipe_sha256 != recipe_content_sha256
+        or (package_sha256 is not None and handle_package_sha256 != package_sha256)
+        or not isinstance(values["package_size"], int)
+        or isinstance(values["package_size"], bool)
+        or values["package_size"] <= 0
+        or not isinstance(values["package_path"], str)
+        or not values["package_path"]
+        or not isinstance(values["archive_path"], str)
+        or not values["archive_path"]
+        or not isinstance(values["closure_path"], str)
+        or not values["closure_path"]
+    ):
+        raise CatalogValidationError(
+            "recipe_library.package_handle_invalid",
+            "recipe package handle identity is invalid",
+        )
+    recipe_identity = getattr(handle, "recipe_identity", None)
+    if recipe_identity != (publisher, slug, recipe_content_sha256):
+        raise CatalogValidationError(
+            "recipe_library.package_handle_invalid",
+            "recipe package handle recipe identity is invalid",
+        )
+    model_identities = getattr(handle, "model_identities", None)
+    if not isinstance(model_identities, tuple) or not model_identities:
+        raise CatalogValidationError(
+            "recipe_library.package_handle_invalid",
+            "recipe package handle model closure is invalid",
+        )
+    clean_models: list[list[str]] = []
+    for identity in model_identities:
+        if (
+            not isinstance(identity, tuple)
+            or len(identity) != 3
+            or not all(isinstance(value, str) for value in identity)
+            or _SHA256.fullmatch(identity[2]) is None
+        ):
+            raise CatalogValidationError(
+                "recipe_library.package_handle_invalid",
+                "recipe package handle model closure is invalid",
+            )
+        clean_models.append(list(identity))
+    values["recipe_identity"] = [publisher, slug, recipe_content_sha256]
+    values["model_identities"] = clean_models
+    return values
 
 
 @lru_cache(maxsize=1)

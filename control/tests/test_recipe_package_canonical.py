@@ -9,6 +9,7 @@ import os
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -16,12 +17,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.models import Base, CatalogDocumentRevision, RecipeImport
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     RecipePackageClient,
     RecipePackageError,
 )
+from vonk_forge_contracts import ModelDefinition, content_sha256
 
 ROOT = Path(os.environ.get("VONK_RECIPE_CANDIDATE_ROOT", "/private/tmp/vonk-forge-recipes-contract-conversion-final"))
 
@@ -128,6 +130,27 @@ def test_candidate_package_imports_into_canonical_controller_documents(tmp_path:
         clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
         cursors=TokenCodec(b"c" * 32).cursor_codec(),
     )
+    package_sha256 = hashlib.sha256(package).hexdigest()
+    models = tuple(ModelDefinition.model_validate(value) for value in item.dependencies)
+    handle = SimpleNamespace(
+        publication_commit=item.library_commit,
+        source_commit=item.library_commit,
+        package_sha256=package_sha256,
+        package_size=len(package),
+        package_path=row["package"]["path"],
+        recipe_content_sha256=item.content_sha256,
+        archive_path=tmp_path / "packages" / package_sha256 / "archive.tar.gz",
+        closure_path=tmp_path / "packages" / package_sha256 / "closure",
+        recipe_identity=(item.publisher, item.slug, item.content_sha256),
+        model_identities=tuple(
+            (
+                model.identity.publisher,
+                model.identity.slug,
+                content_sha256(model),
+            )
+            for model in models
+        ),
+    )
     view = catalog.import_recipe_library(
         "package-test",
         library_commit=item.library_commit,
@@ -135,6 +158,9 @@ def test_candidate_package_imports_into_canonical_controller_documents(tmp_path:
         document=item.document,
         expected_content_sha256=item.content_sha256,
         dependency_documents=item.dependencies,
+        package_handle=handle,
+        package_sha256=package_sha256,
+        source_bundle_sha256="s" * 64,
     )
     assert view.schema_version == 2
     with sessions() as session:
@@ -142,4 +168,19 @@ def test_candidate_package_imports_into_canonical_controller_documents(tmp_path:
         assert {revision.kind for revision in revisions} == {"model", "recipe"}
         assert all(revision.state == "active" for revision in revisions)
         assert any(revision.content_digest == item.content_sha256 for revision in revisions)
+        receipt = session.scalar(select(RecipeImport).where(RecipeImport.source_sha256 == item.content_sha256))
+        assert receipt is not None
+        assert receipt.redacted_source["package_sha256"] == package_sha256
+        assert receipt.redacted_source["source_bundle_sha256"] == "s" * 64
+        assert receipt.redacted_source["package_handle"]["closure_path"].endswith(
+            f"{package_sha256}/closure"
+        )
+    restarted = CatalogService(
+        sessions,
+        clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
+        cursors=TokenCodec(b"c" * 32).cursor_codec(),
+    )
+    queried = restarted.get_recipe(view.recipe_id)
+    assert queried.content_sha256 == item.content_sha256
+    assert queried.document["identity"] == item.document["identity"]
     client.close()

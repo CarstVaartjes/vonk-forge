@@ -288,6 +288,11 @@ class ManagedRecipeCatalogSyncService:
                             if hydrated.release_history
                             else None
                         ),
+                        package_handle=getattr(hydrated, "package_handle", None),
+                        package_sha256=getattr(hydrated, "package_sha256", None),
+                        source_bundle_sha256=getattr(
+                            hydrated, "source_bundle_sha256", None
+                        ),
                     )
                     if package_mode:
                         pending_links.append((item, revision.id))
@@ -333,16 +338,13 @@ class ManagedRecipeCatalogSyncService:
         return result
 
     def _store_source_bundle(self, item: RecipeLibraryItem, actor: str) -> None:
-        if item.source_bundle is None:
+        source_bundle = getattr(item, "source_bundle", None)
+        source_digest = getattr(item, "source_bundle_sha256", None)
+        if source_bundle is None or not isinstance(source_digest, str):
             return
-        build = item.document.get("build")
-        context = build.get("context") if isinstance(build, Mapping) else None
-        digest = context.get("sha256") if isinstance(context, Mapping) else None
-        if not isinstance(digest, str):
-            raise CatalogSyncError(
-                "catalog.sync_source_invalid", "managed recipe source identity is invalid"
-            )
-        self._catalog.store_source_bundle(digest, io.BytesIO(item.source_bundle), actor)
+        self._catalog.store_source_bundle(
+            source_digest, io.BytesIO(source_bundle), actor
+        )
 
     def _initialize(self, run_id: str, snapshot: RecipeLibrarySnapshot) -> None:
         with self._sessions.begin() as session:
