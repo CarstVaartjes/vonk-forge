@@ -81,7 +81,6 @@ from .fleet_projection import (
     TelemetryWorkloadsResponse,
 )
 from .fleet_stream import parse_last_event_id
-from .global_catalog import GlobalCatalogClient
 from .library_api import install_library_routes
 from .library_placement_api import install_library_placement_routes
 from .metrics import MetricsRegistry
@@ -112,7 +111,7 @@ from .operation_api import (
 )
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
-from .recipe_library import RecipeLibraryClient, RecipeLibraryError
+from .recipe_library import RecipeLibraryError
 from .recipe_operations import RecipeOperationService
 from .recipe_packages import RecipePackageClient
 from .run_switch_api import install_run_switch_routes
@@ -493,7 +492,6 @@ def create_app(
     generic_jobs_enabled: bool = False,
     operations: OperationApiServices | None = None,
     catalog: CatalogService | None = None,
-    global_catalog: Any | None = None,
     recipe_library: Any | None = None,
     managed_catalog_sync: Any | None = None,
     workload_run: WorkloadRunWorkflow | None = None,
@@ -742,7 +740,6 @@ def create_app(
         actor_dependency=authenticated_actor,
         audits=audits,
         service=catalog,
-        global_catalog=global_catalog,
         recipe_library=recipe_library,
         managed_sync=managed_catalog_sync,
     )
@@ -1729,14 +1726,10 @@ def production_app() -> FastAPI:
             except (OSError, ValueError):
                 pass
 
-    global_catalog = GlobalCatalogClient(settings.global_catalog_url)
-    recipe_library = (
-        RecipePackageClient(
-            settings.recipe_library_package_url,
-            cache_root=settings.state_path / "recipe-library-packages",
-        )
-        if settings.recipe_library_package_url is not None
-        else RecipeLibraryClient(base_url=settings.recipe_library_api_url)
+    recipe_library = RecipePackageClient(
+        settings.recipe_library_package_url,
+        cache_root=settings.state_path / "recipe-library-packages",
+        api_url=settings.recipe_library_api_url,
     )
     catalog_service = CatalogService(
         sessions,
@@ -1791,7 +1784,6 @@ def production_app() -> FastAPI:
             model_cache,
         ),
         catalog=catalog_service,
-        global_catalog=global_catalog,
         recipe_library=recipe_library,
         managed_catalog_sync=managed_catalog_sync,
         workload_run=WorkloadRunWorkflow(
@@ -1857,11 +1849,10 @@ def production_app() -> FastAPI:
         automatic_sync_task = asyncio.create_task(run_automatic_catalog_sync())
 
     @app.on_event("shutdown")
-    async def close_global_catalog() -> None:
+    async def close_catalog_services() -> None:
         automatic_sync_stop.set()
         if automatic_sync_task is not None:
             await automatic_sync_task
-        global_catalog.close()
         recipe_library.close()
         agent_upgrades.close()
 
