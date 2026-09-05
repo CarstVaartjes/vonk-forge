@@ -40,3 +40,15 @@ User supplied concurrent-session context: the vLLM harness centrally injects and
 ## Engine-wide writable runtime audit
 
 User extends the vLLM observation to SGLang and other supported engines. Inventory actual harness/runtime families in the catalog, verify upstream cache/temp/JIT/compiler requirements, and centralize invariant writable paths in engine harness contracts. Recipe-specific model behavior remains separate. Avoid assuming all engines honor vLLM settings or blindly assigning environment variables. Check framework dependencies and persistent compatible kernel caches as well as primary engine paths. Preserve compiled image contents; writable mounts must not hide runtime installation directories. Validate effective environment/mount containment and reserved-variable conflicts. Test representative real consumers with non-root, read-only root and declared writable volumes; GPU-required behavior needs its matching hardware evidence. Coordinate concurrent vLLM fix and package/runtime workers to avoid duplicate changes. Report inventory coverage, unsupported probes and remaining gaps explicitly.
+
+## Five recipe contract improvements approved
+
+User explicitly requests immediate implementation of all five in [recipe contract improvements](recipe-contract-improvements-2026-09-05.md): canonical model-file authority; direct prebuilt-image recipes; harness-owned engine invariants; effective-settings resource planning; real serving/restart/reuse qualification tests. This expands the implementation scope across platform and full recipe conversion, while preserving simple Run/Switch and coordinated safe release.
+
+## Explicit three-repository delivery
+
+User explicitly requires updates to vonk-forge, vonk-forge-recipes and vonk-forge-web. Public website work must consume the agreed current model/recipe metadata and self-contained package contract, expose linked model/recipe overviews where applicable, and update installation/Controller/CLI documentation for the simple Download/Run/Switch workflow. Keep immutable public catalog facts separate from private Controller NAS cache/target/running state. Assign an isolated latest-main public-web owner using Luna high reasoning under Sol. Validate actual public producer-consumer contracts and UI/build tests; open scoped PRs for all affected repositories and coordinate CI/merge/deployment so readers are compatible before new package publication. Existing user authorization covers normal merges and deployments; unresolved auto-review blocks must be handled explicitly rather than bypassed.
+
+## Greenfield clarification
+
+User confirms no running workloads; do not preserve legacy recipe compatibility or add migration shims for this work. Deliver one clean coordinated contract across platform, all recipes/packages and public-web, validating fresh install and actual execution. No destructive volume/credential reset is implied.
