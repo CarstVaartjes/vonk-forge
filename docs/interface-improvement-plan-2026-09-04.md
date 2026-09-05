@@ -240,13 +240,16 @@ The plan is ready for scoped implementation/design work, but the current UI must
 
 The [metrics implementation and visual acceptance contract](interface-metrics-spec-2026-09-04.md) adds the SparkDash/PAIR coverage ledger, F2 hardware and inference detail designs, provenance and aggregation rules, and acceptance cases A17–A23. It is required scope for web, Controller/native telemetry and CLI, supervised by Sol.
 
+
 ## Controller preparation decision
 
 The [Controller-owned rollout preparation contract](controller-preparation-contract-2026-09-05.md) makes the Controller the preparation and delivery authority for both model files and runtime images. Profile preparation stages both onto selected Sparks before quick switching. This is required implementation scope.
 
+
 ## Superseding UX simplification — 2026-09-05
 
 User direction: recipes should just work. Normal actions are Run and Switch profile, with automatic Controller preparation and plain progress/errors. Mandatory review screens and readiness/qualification ceremonies are removed from the default workflow. Internal verification, scoped authorization and idempotency remain. See the superseding product direction in [Controller preparation](controller-preparation-contract-2026-09-05.md). Optional preparation, cache downloads and advanced plan inspection are secondary tools. Recipe updates remain deferred.
+
 
 ## Final workflow simplification — 2026-09-05
 
@@ -258,3 +261,8 @@ User confirmed: make it simple and communicate progress. This supersedes the ear
 - On failure, preserve completed work, identify the affected Spark and failed step, and offer a meaningful retry. A partially switched fleet must show what is actually running on each Spark. Background work remains durable when navigating away or reconnecting.
 
 Internal planning, staging and verification remain automatic implementation mechanisms. Advanced diagnostic APIs/CLI can expose them, but the normal web and CLI journeys must require only the user's intended Run/Switch action. Preparation speed is measured and reported; fast networking does not justify fabricated instantaneous completion.
+
+
+## Navigation correction — 2026-09-05
+
+Explicit user feedback: the large left Fleet/Library sidebar wastes screen space and is visually unappealing. Remove the permanent sidebar. Use a compact horizontal app header with small Vonk Forge identity, Fleet and Library navigation, and secondary account/connection controls. Library has a compact second navigation row: Models, Recipes, NAS cache, Profiles. Main content uses the recovered width. On mobile keep Fleet/Library directly reachable, with secondary account/admin actions in an accessible menu; do not replace the sidebar with an oversized header. Preserve active-route indication, semantic navigation, keyboard focus, skip link and access to existing administration routes. This supersedes earlier sidebar width/layout prescriptions in the design reference. Verify desktop1280 and mobile360 after the combined visual correction batch.

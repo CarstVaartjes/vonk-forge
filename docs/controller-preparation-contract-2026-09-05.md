@@ -4,7 +4,7 @@ Explicit user decision, 2026-09-05: the Controller prepares quick rollouts; Spar
 
 ## Ownership and workflow
 
-The Controller resolves exact model version, recipe revision, artifact set, compatible Linux/ARM64 runtime image and target placement. NAS-backed storage holds verified immutable model files and OCI content separately. The Controller orchestrates published-image retrieval or a compatible build worker; Controller ownership does not mean compiling CUDA workloads inside the API process or requiring NAS CPU compatibility. The runtime and known CUDA kernels are compiled into the Spark-target image when that image is created. Only unavoidable model-, configuration-, or hardware-dependent engine generation, JIT, or tuning remains as an explicit Prepare requirement with a compatibility key and reusable artifact identity. A normal Switch never repeats compilation that already matches those identities.
+The Controller resolves exact model version, recipe revision, artifact set, compatible Linux/ARM64 runtime image and target placement. NAS-backed storage holds verified immutable model files and OCI content separately. The Controller orchestrates published-image retrieval or a compatible build worker; Controller ownership does not mean compiling CUDA workloads inside the API process or requiring NAS CPU compatibility.
 
 Prepare is a durable, preview-bound operation: resolve identities and compatibility; fetch/build missing artifacts; verify their digests; make them available through authenticated Controller delivery; optionally stage to the complete selected Spark group; verify target files and import the runtime image. Profile Prepare stages both model and image artifacts for its explicit target scope. Show per-object and per-Spark progress, bytes remaining and actionable failures. Reuse exact verified objects across recipes/profiles wherever identities match.
 
@@ -74,6 +74,7 @@ Preview/digest/request-key, source verification, authorization, fit checks, exac
 Repository maintainers own recipe testing and compatibility. The goal is every shipped recipe working on its declared supported hardware with sensible defaults. Unsupported configurations should be unavailable with a concrete explanation; do not ask users to certify our recipes. Existing coverage gaps remain engineering work, not claims that all present recipes have already passed physical tests. Recipe definition changes and recipe test campaigns remain deferred until the user resumes that work.
 
 Acceptance adjustment: normal cached and uncached Run journeys and profile switching require no mandatory preview/approval screen. Automatic preparation must perform actual work and preserve the user's exact target/retention intent. Real missing credentials, insufficient resources, ambiguous placement or destructive cleanup outside that intent can require a specific actionable choice; never introduce a generic 'are you sure' ceremony. Existing reviewed-state UI fixtures/spec cases should become optional advanced inspection cases rather than the default path.
+
 
 ## Final workflow simplification — 2026-09-05
 
