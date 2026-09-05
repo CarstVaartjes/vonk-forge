@@ -180,6 +180,24 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
         }
     client.close()
 
+    # A fresh Controller process reuses every verified package object after a
+    # restart; only the trusted index is requested again.
+    calls.clear()
+    restarted_good = RecipePackageClient(
+        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
+    )
+    restarted_sync = ManagedRecipeCatalogSyncService(
+        sessions, catalog=catalog, reader=restarted_good, clock=sync._clock
+    )
+    restarted_result = restarted_sync.sync(
+        request_key="00000000-0000-0000-0000-000000000005",
+        trigger="automatic",
+        actor="test",
+    )
+    assert restarted_result.state == "current"
+    assert calls == ["/v1/recipe-library/index.json"]
+    restarted_good.close()
+
     # A malformed candidate fails during prepare, before any active link is changed.
     invalid_index = copy.deepcopy(changed_index)
     invalid_index["source_commit"] = "e" * 40
