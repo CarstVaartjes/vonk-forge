@@ -63,13 +63,28 @@ pub struct OciSecurityOptions {
     pub devices: Vec<String>,
     pub capabilities: Vec<String>,
     pub privileged: bool,
-    pub host_network: bool,
+    /// The only network mode admitted by the current signed compiled plan.
+    /// Host and bridge modes require a future signed contract field.
+    pub network_mode: OciNetworkMode,
     pub read_only_root: bool,
     pub no_new_privileges: bool,
     pub memory_bytes: u64,
     pub shared_memory_bytes: u64,
     pub pids_limit: u64,
     pub tmpfs: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OciNetworkMode {
+    None,
+}
+
+impl OciNetworkMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+        }
+    }
 }
 
 /// All pieces needed by the production executor to launch one compiled plan.
@@ -120,19 +135,10 @@ impl CompiledOciInvocation {
             "--pids-limit".to_owned(),
             self.security.pids_limit.to_string(),
         ]);
-        if self.security.host_network {
-            arguments.extend(["--network".to_owned(), "host".to_owned()]);
-            arguments.extend([
-                "--ipc".to_owned(),
-                "host".to_owned(),
-                "--device".to_owned(),
-                "/dev/infiniband:/dev/infiniband".to_owned(),
-                "--ulimit".to_owned(),
-                "memlock=-1:-1".to_owned(),
-                "--ulimit".to_owned(),
-                "stack=67108864:67108864".to_owned(),
-            ]);
-        }
+        arguments.extend([
+            "--network".to_owned(),
+            self.security.network_mode.as_str().to_owned(),
+        ]);
         for device in &self.security.devices {
             arguments.extend(["--device".to_owned(), device.clone()]);
         }
@@ -262,7 +268,7 @@ pub fn project(
         devices: plan.security.devices.clone(),
         capabilities: plan.security.capabilities.clone(),
         privileged: plan.security.privileged,
-        host_network: plan.security.host_network,
+        network_mode: OciNetworkMode::None,
         read_only_root: plan.security.read_only_root,
         no_new_privileges: plan.security.no_new_privileges,
         memory_bytes: plan.runtime.placement.reserved_memory_bytes,
@@ -327,8 +333,10 @@ fn validate_security(plan: &CompiledExecutionPlan) -> Result<(), CompiledOciErro
     {
         return Err(CompiledOciError::Invalid("security override"));
     }
-    if plan.security.host_network && plan.job.is_some() {
-        return Err(CompiledOciError::Invalid("job cannot use host network"));
+    if plan.security.host_network {
+        return Err(CompiledOciError::Invalid(
+            "host network mode is not authorized",
+        ));
     }
     Ok(())
 }
@@ -387,9 +395,6 @@ fn ordered_environment(
 }
 
 fn publications(plan: &CompiledExecutionPlan) -> Result<Vec<String>, CompiledOciError> {
-    if plan.security.host_network {
-        return Ok(Vec::new());
-    }
     let Some(endpoint) = &plan.endpoint else {
         return Ok(Vec::new());
     };
@@ -527,7 +532,13 @@ mod tests {
             .position(|item| item == &plan.runtime.image_digest)
             .unwrap();
         assert_eq!(&podman[image_index + 1..], &invocation.command);
+        assert!(
+            podman
+                .windows(2)
+                .any(|window| window == ["--network", "none"])
+        );
         assert!(!podman[..image_index].contains(&"bridge".to_owned()));
+        assert!(!podman[..image_index].contains(&"host".to_owned()));
     }
 
     #[test]
@@ -632,35 +643,21 @@ mod tests {
             invocation
                 .podman_arguments()
                 .windows(2)
-                .all(|window| window != ["--network", "bridge"])
+                .any(|window| window == ["--network", "none"])
         );
     }
 
     #[test]
-    fn host_network_is_emitted_only_when_signed_plan_allows_it() {
+    fn unauthorized_host_network_mode_is_rejected() {
         let mut value = fixture();
-        value["security"]["mounts"] = json!([
-            {"source":"model","target":"/models","read_only":true},
-            {"source":"outputs","target":"/outputs","read_only":false}
-        ]);
         value["security"]["host_network"] = json!(true);
-        value["topology"]["mode"] = json!("distributed");
-        value["topology"]["world_size"] = json!(2);
-        value["topology"]["node_count"] = json!(2);
-        value["runtime"]["placement"]["world_size"] = json!(2);
-        value["runtime"]["placement"]["rank"] = json!(0);
-        value["runtime"]["placement"]["local_address"] = json!("10.0.0.2");
-        value["runtime"]["placement"]["master_address"] = json!("10.0.0.1");
-        value["runtime"]["placement"]["master_port"] = json!(29500);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-        let invocation = project(&plan, &paths()).unwrap();
-        let podman = invocation.podman_arguments();
-        assert!(
-            podman
-                .windows(2)
-                .any(|window| window == ["--network", "host"])
-        );
-        assert!(invocation.publishes.is_empty());
+        assert!(matches!(
+            project(&plan, &paths()),
+            Err(CompiledOciError::Invalid(
+                "host network mode is not authorized"
+            ))
+        ));
     }
 
     #[test]
