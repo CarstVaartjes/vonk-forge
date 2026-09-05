@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Render a temporary Compose overlay that pins an accepted image graph.
+
+The installed Compose model continues to follow its channel aliases.  This
+overlay is used only by acceptance and is intentionally kept outside the NAS
+bundle.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import re
+import subprocess
+import tempfile
+from pathlib import Path
+
+IMAGE_REPOSITORIES = {
+    "api": "ghcr.io/carstvaartjes/vonk-forge-api",
+    "worker": "ghcr.io/carstvaartjes/vonk-forge-worker",
+    "hermes": "ghcr.io/carstvaartjes/vonk-forge-hermes",
+    "litellm": "ghcr.io/carstvaartjes/vonk-forge-litellm",
+}
+ROLE_SERVICES = {
+    "api": ("control-api",),
+    "worker": ("control-worker",),
+    "hermes": ("hermes-agent",),
+    "litellm": ("litellm", "hermes-litellm-key-provisioner"),
+}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--release", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--channel", choices=("dev", "stable"), required=True)
+    parser.add_argument("--generation", required=True)
+    parser.add_argument("--signature", type=Path, required=True)
+    parser.add_argument("--public-key", type=Path, required=True)
+    arguments = parser.parse_args()
+    raw = arguments.release.read_bytes()
+    try:
+        release = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise SystemExit("accepted release object is invalid") from error
+    if (
+        not isinstance(release, dict)
+        or raw
+        != (json.dumps(release, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    ):
+        raise SystemExit("accepted release object is not canonical")
+    if (
+        release.get("schema_version") != 2
+        or release.get("channel") != arguments.channel
+        or release.get("generation") != arguments.generation
+    ):
+        raise SystemExit("accepted release identity is invalid")
+    images = release.get("images")
+    if not isinstance(images, dict) or set(images) != set(IMAGE_REPOSITORIES):
+        raise SystemExit("accepted release image graph is invalid")
+    try:
+        signatures = base64.b64decode(
+            arguments.signature.read_bytes().strip(), validate=True
+        )
+        public_key = arguments.public_key.read_bytes()
+    except (OSError, ValueError) as error:
+        raise SystemExit("accepted release signature is invalid") from error
+    with tempfile.TemporaryDirectory(prefix=".accepted-overlay-") as directory:
+        root = Path(directory)
+        release_path = root / "release.json"
+        signature_path = root / "release.sig"
+        key_path = root / "release-public.pem"
+        release_path.write_bytes(raw)
+        signature_path.write_bytes(signatures)
+        key_path.write_bytes(public_key)
+        result = subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-verify",
+                key_path,
+                "-signature",
+                signature_path,
+                release_path,
+            ],
+            capture_output=True,
+            check=False,
+        )
+    if result.returncode != 0:
+        raise SystemExit("accepted release signature is invalid")
+    services = {}
+    for role, repository in IMAGE_REPOSITORIES.items():
+        image = images.get(role)
+        if not isinstance(image, str) or not image.startswith(repository + ":"):
+            raise SystemExit("accepted release image graph is invalid")
+        if not re.fullmatch(
+            re.escape(repository) + r":[^@ ]+@sha256:[0-9a-f]{64}", image
+        ):
+            raise SystemExit("accepted release image graph is invalid")
+        for service in ROLE_SERVICES[role]:
+            services[service] = {"image": image}
+    lines = ["services:"]
+    for service, definition in services.items():
+        lines.extend((f"  {service}:", f"    image: {definition['image']}"))
+    if arguments.output.exists() or arguments.output.is_symlink():
+        raise SystemExit("overlay output already exists")
+    arguments.output.parent.mkdir(parents=True, exist_ok=True)
+    arguments.output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

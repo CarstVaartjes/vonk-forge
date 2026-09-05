@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -76,3 +77,22 @@ def test_generated_supply_chain_manifest_does_not_broaden_its_source_change() ->
         "compose": False,
         "generated": False,
     }
+
+
+def test_deleted_rust_file_selects_rust_family(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    deleted = tmp_path / "rust" / "deleted.rs"
+    deleted.parent.mkdir()
+    deleted.write_text("fn main() {}\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "rust/deleted.rs"], check=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "initial"],
+        check=True,
+    )
+    deleted.unlink()
+    diff = subprocess.run(
+        ["git", "-C", str(tmp_path), "diff", "--name-only", "--diff-filter=ACMRD", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.splitlines()
+    selected = _module().select(diff, "pull_request")
+    assert selected["rust"] is True
