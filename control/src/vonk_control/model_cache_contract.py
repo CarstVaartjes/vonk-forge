@@ -96,7 +96,7 @@ class CacheArtifactResponse(StrictModel):
     id: str = Field(pattern=ARTIFACT_KEY_PATTERN)
     path: str = Field(min_length=1, max_length=512)
     sha256: Digest
-    expected_bytes: int = Field(gt=0)
+    expected_bytes: int = Field(ge=0)
     actual_bytes: int = Field(ge=0)
     roles: list[str] = Field(min_length=1, max_length=32)
     state: Literal["partial", "verified", "missing", "corrupt"]
@@ -124,7 +124,7 @@ class CacheEntryResponse(StrictModel):
         "incomplete", "downloading", "verifying", "cached", "needs-repair", "failed"
     ]
     coverage: Literal["complete", "incomplete"]
-    expected_bytes: int = Field(gt=0)
+    expected_bytes: int = Field(ge=0)
     verified_bytes: int = Field(ge=0)
     unique_bytes: int = Field(ge=0)
     artifacts: list[CacheArtifactResponse] = Field(max_length=128)
@@ -200,7 +200,7 @@ class ModelCacheDownloadPreviewResponse(StrictModel):
     plan_digest: Digest
     source_policy: Literal["nas-first"] = "nas-first"
     artifact_count: int = Field(ge=0)
-    expected_bytes: int = Field(gt=0)
+    expected_bytes: int = Field(ge=0)
     already_cached_bytes: int = Field(ge=0)
     new_bytes: int = Field(ge=0)
     blockers: list[str] = Field(max_length=32)

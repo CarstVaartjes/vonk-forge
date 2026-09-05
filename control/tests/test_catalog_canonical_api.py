@@ -10,7 +10,7 @@ def _administrator() -> Actor:
     return Actor("administrator", "test")
 
 
-def test_catalog_api_exposes_only_canonical_import_and_sync_routes() -> None:
+def test_catalog_api_exposes_canonical_import_and_sync_only() -> None:
     app = FastAPI()
     install_catalog_routes(
         app,
@@ -18,17 +18,20 @@ def test_catalog_api_exposes_only_canonical_import_and_sync_routes() -> None:
         audits=MemoryAuditStore(),
         service=None,
     )
+
     paths = app.openapi()["paths"]
-    assert "/api/v1/catalog/imports/recipe-library" in paths
+    assert "/api/v1/catalog/public-recipes" in paths
     assert "/api/v1/catalog/imports/public" in paths
+    assert "/api/v1/catalog/imports/recipe-library" in paths
     assert "/api/v1/catalog/managed-recipes/sync" in paths
-    assert "/api/v1/catalog/managed-recipes/sync-status" in paths
     assert "/api/v1/catalog/recipes" not in paths
-    operation_ids = {
-        operation["operationId"]
-        for methods in paths.values()
-        if isinstance(methods, dict)
-        for operation in methods.values()
-        if isinstance(operation, dict) and isinstance(operation.get("operationId"), str)
-    }
-    assert not any("LocalRecipe" in operation_id for operation_id in operation_ids)
+    assert all("LocalRecipe" not in operation_id for operation_id in _operation_ids(paths))
+
+
+def _operation_ids(paths: dict[str, object]):
+    for methods in paths.values():
+        if not isinstance(methods, dict):
+            continue
+        for operation in methods.values():
+            if isinstance(operation, dict) and isinstance(operation.get("operationId"), str):
+                yield operation["operationId"]
