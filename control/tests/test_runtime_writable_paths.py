@@ -45,6 +45,13 @@ def test_mia_distribution_enables_only_evidence_backed_optional_paths() -> None:
     distribution = {
         "identity": {"publisher": "anemll", "slug": "anemll-vllm-mia"},
         "capabilities": {
+            "distributed_vllm": {
+                "verified": True,
+                "mechanism": "vllm-mp",
+                "topology_mode": "distributed",
+                "node_count": 2,
+                "world_size": 2,
+            },
             "runtime_environment": {
                 "allowed_names": [
                     "FLASHINFER_WORKSPACE_BASE",
@@ -60,6 +67,23 @@ def test_mia_distribution_enables_only_evidence_backed_optional_paths() -> None:
     assert values["FLASHINFER_WORKSPACE_BASE"] == "/outputs/cache/flashinfer"
     assert values["B12X_CUTE_COMPILE_CACHE_DIR"] == "/outputs/cache/b12x-cute-compile"
     assert "FLASHINFER_WORKSPACE_BASE" not in dict(compile_environment("vllm", ()))
+
+
+def test_mia_variant_requires_verified_distributed_capability() -> None:
+    distribution = {
+        "identity": {"publisher": "anemll", "slug": "anemll-vllm-mia"},
+        "capabilities": {
+            "distributed_vllm": {
+                "verified": False,
+                "mechanism": "vllm-mp",
+                "topology_mode": "distributed",
+                "node_count": 2,
+                "world_size": 2,
+            }
+        },
+    }
+    values = dict(compile_environment("vllm", (), distribution))
+    assert "FLASHINFER_WORKSPACE_BASE" not in values
 
 
 @pytest.mark.parametrize(
