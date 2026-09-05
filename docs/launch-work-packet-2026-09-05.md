@@ -55,7 +55,8 @@ meaningful runtime checks remain requirements.
    preparation and report durable progress. Profiles describe the entire
    selected fleet scope, including Idle; switching stops unlisted runs in that
    scope and retains reusable cache. Fleet answers what runs and Spark state.
-   Collection views use continuous lists with one selected detail panel, per the
+   Model, Installation and Recipe overviews use compact lists; model/recipe
+   selection uses paired interacting lists, per the
    [latest list-interface design](list-interface-design-2026-09-05.md).
 8. **Web and agents use the same authority.** All changes go through Controller
    APIs. CLI mirrors browsing, filters, download/run/profile actions, progress,
@@ -227,7 +228,7 @@ controls and responsive design. Deep links, filters and model/recipe navigation
 must survive refresh; empty results differ from network errors, with retry.
 Avoid losing the model list while source metadata is loading.
 Apply the [list-interface design](list-interface-design-2026-09-05.md): replace
-model/recipe card grids and tile controls with rows and one contextual detail.
+model/recipe card grids and tile controls with rows; keep detail navigation.
 
 Acceptance: browser checks against the new published catalog after release,
 including a populated list and real model/recipe detail, filter/deep-link round
@@ -247,7 +248,8 @@ Run directly. Profiles edit complete placements/Idle. Fleet immediately shows
 what is running and each Spark's condition. Progress is durable and inspectable;
 display actual errors and next actions without mandatory review/readiness flows.
 Apply the [list-interface design](list-interface-design-2026-09-05.md) across
-Fleet, Models, Recipes, cache and Profiles, preserving list state in details.
+Model, Installation and Recipe overviews. Model/recipe installation selection
+uses two interacting lists, preserving existing Spark selection and Run controls.
 
 Retain useful SparkDash/PAIR-style hardware and inference metrics with correct
 units, history, provenance and missing/offline gaps. Do not invent measurements
