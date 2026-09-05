@@ -442,6 +442,7 @@ if __name__ == "__main__":
         settings.model_cache_root,
         reserve_bytes=settings.model_cache_reserve_bytes,
         clock=clock,
+        huggingface_token_path=settings.huggingface_token_path,
     )
     model_cache.resume_operations()
     worker = assemble_production_worker(

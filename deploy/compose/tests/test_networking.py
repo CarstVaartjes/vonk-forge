@@ -17,6 +17,7 @@ def _rendered() -> dict:
         "PROMETHEUS_IMAGE": "prom/prometheus:1@sha256:" + "e" * 64,
         "GRAFANA_IMAGE": "grafana/grafana:1@sha256:" + "f" * 64,
         "DATABASE_URL_FILE": "/dev/null",
+        "HF_TOKEN_FILE": "/dev/null",
         "ADMIN_PASSWORD_FILE": "/dev/null",
         "POSTGRES_PASSWORD_FILE": "/dev/null",
         "TOKEN_SIGNING_KEY_FILE": "/dev/null",
@@ -274,6 +275,7 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
         "package-helper-receipt-private-key",
         "host-runtime-grant-private-key",
         "database-url",
+        "hf-token",
     } <= api_secrets
     normalized = {volume["target"]: volume for volume in api["volumes"]}
     assert normalized["/normalized"].get("read_only") is not True
@@ -290,6 +292,7 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
         ("VONK_METRICS_TOKEN_FILE", "metrics-token"),
         ("VONK_CONTROLLER_CA_FILE", "controller-ca"),
         ("VONK_WORKER_API_TOKEN_FILE", "worker-api-token"),
+        ("VONK_HF_TOKEN_FILE", "hf-token"),
     ):
         assert api["environment"][variable] == f"/run/vonk-normalized-secrets/{name}"
     assert worker["environment"]["VONK_DATABASE_URL_FILE"] == (
@@ -297,6 +300,9 @@ def test_file_backed_private_keys_are_normalized_by_the_real_api_service() -> No
     )
     assert worker["environment"]["VONK_WORKER_API_TOKEN_FILE"] == (
         "/run/vonk-normalized-secrets/worker-api-token"
+    )
+    assert worker["environment"]["VONK_HF_TOKEN_FILE"] == (
+        "/run/vonk-normalized-secrets/hf-token"
     )
 
 

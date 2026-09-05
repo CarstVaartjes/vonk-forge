@@ -70,6 +70,7 @@ from .cluster_mappings import ClusterMappingService
 from .database_authority import (
     AuthorityChange,
 )
+from .distribution_executor import CompositeDistributionPhaseExecutor
 from .fleet_profile_api import install_fleet_profile_routes
 from .fleet_projection import (
     FleetNodeIdentity,
@@ -114,7 +115,6 @@ from .recipe_builds import RecipeBuildService
 from .recipe_library import RecipeLibraryClient, RecipeLibraryError
 from .recipe_operations import RecipeOperationService
 from .recipe_packages import RecipePackageClient
-from .distribution_executor import CompositeDistributionPhaseExecutor
 from .run_switch_api import install_run_switch_routes
 from .run_switch_operations import RunSwitchOperationService
 from .source_bundles import DatabaseSourceBundleStore
@@ -1552,6 +1552,7 @@ def production_app() -> FastAPI:
         settings.model_cache_root,
         reserve_bytes=settings.model_cache_reserve_bytes,
         clock=clock,
+        huggingface_token_path=settings.huggingface_token_path,
     )
     model_cache.resume_operations()
     revision_eligible = lambda revision: revision == authority.head()

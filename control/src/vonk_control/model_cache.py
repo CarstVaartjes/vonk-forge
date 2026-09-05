@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 import httpx
 from sqlalchemy import func, select
@@ -41,6 +41,7 @@ from .models import (
     RecipeRevision,
     RecipeRun,
 )
+from .runtime_init import RuntimeSecretError, read_runtime_secret
 
 SCHEMA_VERSION = 2
 SOURCE_POLICY = "nas-first"
@@ -48,7 +49,8 @@ _DIGEST_LENGTH = 64
 _MAX_ARTIFACTS = 128
 _MAX_MANIFEST_BYTES = 1_048_576
 _CHUNK_BYTES = 1024 * 1024
-_MAX_HTTP_REDIRECTS = 0
+_MAX_HTTP_REDIRECTS = 3
+_HF_CANONICAL_HOST = "huggingface.co"
 _USE_MANIFEST_BYTES = object()
 
 
@@ -527,6 +529,7 @@ class ModelCacheService:
         http_client: httpx.Client | None = None,
         fixture_sources: bool = False,
         trusted_source_hosts: Sequence[str] = ("huggingface.co",),
+        huggingface_token_path: Path | None = None,
     ) -> None:
         if not isinstance(root, Path):
             root = Path(root)
@@ -555,6 +558,9 @@ class ModelCacheService:
             host.strip().lower().rstrip(".")
             for host in trusted_source_hosts
             if isinstance(host, str) and host.strip()
+        )
+        self._huggingface_token_path = (
+            Path(huggingface_token_path) if huggingface_token_path is not None else None
         )
         self._lock = threading.RLock()
 
@@ -1535,40 +1541,13 @@ class ModelCacheService:
                 "production cache HTTP clients must not follow redirects",
             )
         headers = {"Range": f"bytes={offset}-"} if offset else {}
-        response = client.stream("GET", spec.source, headers=headers)
-        response.__enter__()
-        if response.status_code in {301, 302, 303, 307, 308}:
-            response.close()
-            if owns_client:
-                client.close()
-            raise ModelCacheStorageError(
-                "model_cache.redirect_forbidden", "cache source redirects are not followed"
-            )
-        if response.status_code not in {200, 206}:
-            status_code = response.status_code
-            response.close()
-            if owns_client:
-                client.close()
-            raise ModelCacheStorageError(
-                "model_cache.source_unavailable",
-                f"cache source request failed with status {status_code}",
-            )
+        response = self._open_http_response(client, spec.source, headers)
         effective_offset = offset
         if offset and response.status_code == 200:
             # The server ignored the range request; restart safely rather than
             # appending a complete payload to a checkpoint.
             response.close()
-            response = client.stream("GET", spec.source)
-            response.__enter__()
-            if response.status_code != 200:
-                status_code = response.status_code
-                response.close()
-                if owns_client:
-                    client.close()
-                raise ModelCacheStorageError(
-                    "model_cache.source_unavailable",
-                    f"cache source restart failed with status {status_code}",
-                )
+            response = self._open_http_response(client, spec.source, {})
             effective_offset = 0
         if response.status_code == 206:
             content_range = response.headers.get("content-range", "")
@@ -1584,6 +1563,119 @@ class ModelCacheService:
             effective_offset,
             lambda: (response.close(), client.close() if owns_client else None),
         )
+
+    def _open_http_response(
+        self,
+        client: httpx.Client,
+        source: str,
+        headers: Mapping[str, str],
+    ) -> httpx.Response:
+        """Open a pinned source, authenticating only the HF authority.
+
+        Hugging Face commonly redirects a resolve URL to a signed CDN URL.
+        Redirects are followed manually so an Authorization header is never
+        copied to an arbitrary host. Public files are requested anonymously;
+        a bearer token is used only after the canonical authority reports a
+        gated/private response.
+        """
+        current_url = source
+        try:
+            source_host = urlsplit(source).hostname
+        except ValueError:
+            source_host = None
+        source_is_huggingface = _is_hf_authority(source_host)
+        authenticated = False
+        token: str | None = None
+        token_loaded = False
+        for redirect_count in range(_MAX_HTTP_REDIRECTS + 1):
+            request_headers = dict(headers)
+            if authenticated and _is_hf_canonical_url(current_url):
+                # The token is intentionally constructed only for the
+                # canonical Hugging Face authority. It is never sent to CDN
+                # redirect hosts, even when they are trusted HF domains.
+                request_headers["Authorization"] = f"Bearer {token}"
+            request = client.build_request("GET", current_url, headers=request_headers)
+            response = client.send(request, stream=True)
+            status_code = response.status_code
+            if status_code in {401, 403} and _is_hf_canonical_url(current_url):
+                if not token_loaded:
+                    token = self._load_huggingface_token()
+                    token_loaded = True
+                if token is not None and not authenticated:
+                    response.close()
+                    authenticated = True
+                    continue
+                response.close()
+                if authenticated:
+                    raise ModelCacheStorageError(
+                        "model_cache.credentials_denied",
+                        "Hugging Face credentials were rejected; verify token scope and repository access",
+                    )
+                raise ModelCacheStorageError(
+                    "model_cache.credentials_missing",
+                    "Hugging Face credentials are required for this gated model; configure HF_TOKEN_FILE",
+                )
+            if status_code in {301, 302, 303, 307, 308}:
+                location = response.headers.get("location")
+                response.close()
+                if not location:
+                    raise ModelCacheStorageError(
+                        "model_cache.redirect_forbidden",
+                        "cache source redirect did not provide a destination",
+                    )
+                redirected_url = urljoin(current_url, location)
+                if not source_is_huggingface or not _is_allowed_huggingface_redirect(
+                    redirected_url
+                ):
+                    raise ModelCacheStorageError(
+                        "model_cache.redirect_forbidden",
+                        "cache source redirected outside the trusted Hugging Face authorities",
+                    )
+                current_url = redirected_url
+                continue
+            if status_code not in {200, 206}:
+                response.close()
+                raise ModelCacheStorageError(
+                    "model_cache.source_unavailable",
+                    f"cache source request failed with status {status_code}",
+                )
+            return response
+        raise ModelCacheStorageError(
+            "model_cache.redirect_forbidden",
+            "cache source exceeded the trusted Hugging Face redirect limit",
+        )
+
+    def _load_huggingface_token(self) -> str | None:
+        path = self._huggingface_token_path
+        if path is None:
+            return None
+        try:
+            if path.is_symlink() or not path.is_file():
+                return None
+            if path.stat().st_size == 0:
+                return None
+            raw = read_runtime_secret(path)
+        except (OSError, RuntimeSecretError):
+            raise ModelCacheStorageError(
+                "model_cache.credentials_missing",
+                "Hugging Face credential file is unavailable; configure HF_TOKEN_FILE",
+            ) from None
+        value = raw.strip()
+        if not value:
+            return None
+        try:
+            token = value.decode("ascii")
+        except UnicodeDecodeError:
+            raise ModelCacheStorageError(
+                "model_cache.credentials_invalid",
+                "Hugging Face credential file must contain one ASCII bearer token",
+            ) from None
+        if any(character.isspace() for character in token) or "\x00" in token:
+            raise ModelCacheStorageError(
+                "model_cache.credentials_invalid",
+                "Hugging Face credential file must contain one bearer token",
+            )
+        return token
 
     def _verify_file(self, path: Path, spec: ArtifactSpec) -> bool:
         if path.is_symlink() or not path.is_file():
@@ -3134,6 +3226,46 @@ def _is_private_host(value: str) -> bool:
         or address.is_reserved
         or address.is_multicast
         or address.is_unspecified
+    )
+
+
+def _is_hf_authority(value: str | None) -> bool:
+    if not value:
+        return False
+    host = value.lower().rstrip(".")
+    return (
+        host == _HF_CANONICAL_HOST or host.endswith((".huggingface.co", ".hf.co"))
+    )
+
+
+def _is_hf_canonical_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname is not None
+        and parsed.hostname.lower().rstrip(".") == _HF_CANONICAL_HOST
+        and parsed.port is None
+    )
+
+
+def _is_allowed_huggingface_redirect(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        parsed.scheme == "https"
+        and parsed.hostname
+        and port is None
+        and parsed.username is None
+        and parsed.password is None
+        and not parsed.fragment
+        and _is_hf_authority(parsed.hostname)
+        and not _is_private_host(parsed.hostname)
     )
 
 

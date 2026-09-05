@@ -48,6 +48,11 @@ PKI are generated locally unless the prompt explicitly offers an import. Secret
 values are written only under `secrets/`; `.env` contains non-secret site
 configuration and relative secret paths.
 
+For gated or private Hugging Face model-cache downloads, see the
+[Hugging Face model-cache authentication guide](../../docs/model-cache-huggingface-auth.md).
+The default install leaves `HF_TOKEN_FILE` unset and all public downloads
+anonymous.
+
 ## Start and verify
 
 In a Docker UI, select the complete directory as one Compose project, pull the

@@ -11,6 +11,7 @@ x-bounded-logging: &bounded-logging
 x-api-environment: &api-environment
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
+  VONK_HF_TOKEN_FILE: /run/vonk-normalized-secrets/hf-token
   VONK_TOKEN_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/token-signing-key
   VONK_METRICS_TOKEN_FILE: /run/vonk-normalized-secrets/metrics-token
   VONK_STATE_PATH: /state
@@ -42,6 +43,7 @@ x-api-environment: &api-environment
 x-worker-environment: &worker-environment
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
+  VONK_HF_TOKEN_FILE: /run/vonk-normalized-secrets/hf-token
   VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
   VONK_INTERNAL_API_URL: http://control-api:8000
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
@@ -102,7 +104,7 @@ services:
       VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
       VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
       VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
-    secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
+    secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
@@ -326,6 +328,10 @@ services:
       retries: 10
 
 secrets:
+  # An optional credential used only by the Controller for gated/private
+  # Hugging Face model-cache downloads. Public downloads remain anonymous.
+  hf-token:
+    file: "${HF_TOKEN_FILE:-/dev/null}"
   admin-password:
     file: "${ADMIN_PASSWORD_FILE:?set Vonk administrator password secret file}"
   database-url:

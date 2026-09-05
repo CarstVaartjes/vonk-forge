@@ -49,6 +49,19 @@ def _secret_path(name: str) -> Path:
     return path
 
 
+def _optional_secret_path(name: str) -> Path | None:
+    """Return an optional file secret path without reading its credential."""
+    source = os.environ.get(name)
+    if not source:
+        return None
+    path = Path(source)
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise SettingsError(f"{name} must name a regular non-symlink file")
+    # The normalized Compose secret is intentionally absent when the optional
+    # source was not configured. This keeps public downloads anonymous.
+    return path if path.exists() and path.stat().st_size else None
+
+
 def _secret_or_file(name: str, file_name: str) -> str:
     raw = os.environ.get(name)
     source = os.environ.get(file_name)
@@ -166,6 +179,7 @@ class Settings:
     artifact_job_retention_seconds: int = 7 * 24 * 60 * 60
     model_cache_root: Path = Path("/state/model-cache")
     model_cache_reserve_bytes: int = 10 * 1024**3
+    huggingface_token_path: Path | None = None
 
     @property
     def database_host(self) -> str | None:
@@ -568,6 +582,7 @@ class Settings:
                 "VONK_MODEL_CACHE_ROOT", "/state/model-cache"
             ),
             model_cache_reserve_bytes=model_cache_reserve_bytes,
+            huggingface_token_path=_optional_secret_path("VONK_HF_TOKEN_FILE"),
         )
 
 
@@ -590,6 +605,7 @@ class WorkerSettings:
     artifact_job_reconcile_batch_limit: int
     model_cache_root: Path = Path("/state/model-cache")
     model_cache_reserve_bytes: int = 10 * 1024**3
+    huggingface_token_path: Path | None = None
 
     @classmethod
     def from_env_and_secrets(cls) -> WorkerSettings:
@@ -725,4 +741,5 @@ class WorkerSettings:
                 "VONK_MODEL_CACHE_ROOT", "/state/model-cache"
             ),
             model_cache_reserve_bytes=model_cache_reserve_bytes,
+            huggingface_token_path=_optional_secret_path("VONK_HF_TOKEN_FILE"),
         )
