@@ -76,3 +76,8 @@ def test_generated_supply_chain_manifest_does_not_broaden_its_source_change() ->
         "compose": False,
         "generated": False,
     }
+
+
+def test_deleted_rust_file_selects_rust_family() -> None:
+    selected = _module().select(["rust/crates/vonk-agent/src/main.rs"], "pull_request")
+    assert selected["rust"] is True

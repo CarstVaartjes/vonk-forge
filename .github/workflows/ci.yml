@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$GITHUB_SHA" |
+            git diff --name-only --diff-filter=ACMRD "$BASE_SHA" "$GITHUB_SHA" |
               scripts/select-ci-areas --event pull_request --github-output \
                 >> "$GITHUB_OUTPUT"
           else
@@ -80,7 +80,7 @@ jobs:
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             mapfile -t changed_python < <(
-              git diff --name-only --diff-filter=ACMR "$GITHUB_BASE_SHA" "$GITHUB_SHA" -- '*.py'
+              git diff --name-only --diff-filter=ACMRD "$GITHUB_BASE_SHA" "$GITHUB_SHA" -- '*.py'
             )
             if ((${#changed_python[@]} == 0)); then
               echo "No changed Python files; skipping Ruff"
@@ -531,6 +531,50 @@ jobs:
           require_selected_result "$REPOSITORY_SELECTED" "$REPOSITORY_RESULT"
           require_selected_result "$CONTROL_SELECTED" "$CONTROL_RESULT"
           require_selected_result "$WEB_SELECTED" "$WEB_RESULT"
+
+  ci-gate:
+    name: CI gate
+    needs: [changes, lint, rust, generated-clients, compose-integration, repository-suite, control-suite, web-suite, catalog-runtime]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require selector and selected jobs
+        shell: bash
+        env:
+          SELECTOR_RESULT: ${{ needs.changes.result }}
+          SELECTED_RUST: ${{ needs.changes.outputs.rust }}
+          SELECTED_REPOSITORY: ${{ needs.changes.outputs.repository }}
+          SELECTED_CONTROL: ${{ needs.changes.outputs.control }}
+          SELECTED_WEB: ${{ needs.changes.outputs.web }}
+          SELECTED_GENERATED: ${{ needs.changes.outputs.generated }}
+          SELECTED_COMPOSE: ${{ needs.changes.outputs.compose }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          RUST_RESULT: ${{ needs.rust.result }}
+          REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
+          CONTROL_RESULT: ${{ needs.control-suite.result }}
+          WEB_RESULT: ${{ needs.web-suite.result }}
+          GENERATED_RESULT: ${{ needs.generated-clients.result }}
+          COMPOSE_RESULT: ${{ needs.compose-integration.result }}
+          CATALOG_RESULT: ${{ needs.catalog-runtime.result }}
+        run: |
+          set -euo pipefail
+          scripts/verify-ci-gate \
+            --selector-result "$SELECTOR_RESULT" \
+            --selected "rust=$SELECTED_RUST" \
+            --selected "repository=$SELECTED_REPOSITORY" \
+            --selected "control=$SELECTED_CONTROL" \
+            --selected "web=$SELECTED_WEB" \
+            --selected "generated=$SELECTED_GENERATED" \
+            --selected "compose=$SELECTED_COMPOSE" \
+            --result "lint=$LINT_RESULT" \
+            --result "rust=$RUST_RESULT" \
+            --result "repository=$REPOSITORY_RESULT" \
+            --result "control=$CONTROL_RESULT" \
+            --result "web=$WEB_RESULT" \
+            --result "generated=$GENERATED_RESULT" \
+            --result "compose=$COMPOSE_RESULT" \
+            --result "catalog-runtime=$CATALOG_RESULT"
 
   release-metadata:
     name: Validate container release tag
