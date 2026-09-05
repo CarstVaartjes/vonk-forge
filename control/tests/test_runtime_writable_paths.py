@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import pytest
-
 from vonk_control.harnesses.common import HarnessCompileError
 from vonk_control.runtime_writable_paths import (
     compile_environment,
     document,
+    effective_environment,
     environment,
+    telemetry_contract,
     writable_paths,
 )
 
@@ -113,3 +114,28 @@ def test_non_path_recipe_environment_remains_recipe_owned() -> None:
         "SGLANG_SANITIZE_NAN_LOGITS",
         "1",
     )
+
+
+@pytest.mark.parametrize(
+    ("slug", "adapter", "path"),
+    (
+        ("vllm", "vllm", "/metrics"),
+        ("sglang", "sglang", "/metrics"),
+        ("tensorrt-llm", "unsupported", None),
+        ("llama-cpp", "llama-cpp", "/metrics"),
+        ("ds4", "ds4", "/metrics"),
+        ("diffusers", "unsupported", None),
+        ("comfyui", "comfyui", "/queue"),
+        ("pytorch-pipeline", "unsupported", None),
+    ),
+)
+def test_telemetry_contract_matches_agent_producer(slug: str, adapter: str, path: str | None) -> None:
+    contract = telemetry_contract(slug)
+    assert (contract.adapter, contract.path) == (adapter, path)
+    values = dict(effective_environment(slug, ()))
+    assert all(values[name] == value for name, value in contract.environment)
+
+
+def test_telemetry_override_must_match_the_platform_value() -> None:
+    with pytest.raises(HarnessCompileError, match="telemetry|override"):
+        effective_environment("vllm", (("VLLM_NO_USAGE_STATS", "0"),))

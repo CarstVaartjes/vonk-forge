@@ -28,12 +28,6 @@ _DISTRIBUTED_BACKENDS = {
     "vllm-ray": "ray",
 }
 
-_PLATFORM_ENVIRONMENT = (
-    ("XDG_CACHE_HOME", "/outputs/cache"),
-    ("VLLM_CACHE_ROOT", "/outputs/cache/vllm"),
-)
-_PLATFORM_ENVIRONMENT_NAMES = frozenset(name for name, _value in _PLATFORM_ENVIRONMENT)
-
 _ARGUMENTS = {
     "max-model-len": ArgumentSpec("--max-model-len", validate=integer(1, 10_000_000)),
     "gpu-memory-utilization": ArgumentSpec(
@@ -425,13 +419,7 @@ class VllmHarnessCompiler:
             ),
             engine_slug=self.slug,
         )
-        if any(
-            name in _PLATFORM_ENVIRONMENT_NAMES for name, _value in recipe_environment
-        ):
-            raise HarnessCompileError(
-                "vLLM cache environment is platform-owned and cannot be overridden"
-            )
-        environment = (*_PLATFORM_ENVIRONMENT, *recipe_environment, *rank_environment)
+        environment = (*recipe_environment, *rank_environment)
         return projection(
             slug=self.slug,
             command=(
