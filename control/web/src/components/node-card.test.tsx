@@ -67,8 +67,8 @@ test("renders the complete node telemetry hierarchy and distinct recipe groups",
   expect(within(card).getByText("Updated 2 seconds ago")).toHaveAttribute("title");
 
   const workloads = within(card).getByLabelText("Workloads on Spark One");
-  expect(workloads).toHaveTextContent("Loaded now2");
-  expect(workloads).toHaveTextContent("Installed2");
+  expect(workloads).toHaveTextContent("Current work");
+  expect(workloads).toHaveTextContent("Local recipes");
   expect(within(workloads).getAllByText("Qwen pair")).toHaveLength(2);
   expect(within(workloads).getAllByText("Vision pair")).toHaveLength(2);
   expect(workloads).toHaveTextContent("vision · degraded");
@@ -91,8 +91,8 @@ test("renders offline certificate reasons and absent metrics honestly", () => {
   expect(within(card).getByText("Certificate expired")).toBeVisible();
   expect(within(card).getAllByText("Not reported").length).toBeGreaterThanOrEqual(6);
   expect(within(card).queryByText("0.0%")).not.toBeInTheDocument();
-  expect(within(card).getByText("No complete install")).toBeVisible();
-  expect(within(card).getByText("No active model")).toBeVisible();
+  expect(within(card).getByText("No local recipe reported")).toBeVisible();
+  expect(within(card).getByText("No active model reported")).toBeVisible();
 });
 
 test("uses a friendly hostname fallback and renders an accessible live trend", () => {

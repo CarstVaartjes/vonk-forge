@@ -5108,10 +5108,37 @@
           "source_kind": {
             "enum": [
               "model-version",
-              "recipe-revision"
+              "recipe-revision",
+              "model-capability-evidence"
             ],
             "title": "Source Kind",
             "type": "string"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
           }
         },
         "required": [
@@ -8110,9 +8137,16 @@
             "type": "integer"
           },
           "expected_bytes": {
-            "minimum": 0.0,
-            "title": "Expected Bytes",
-            "type": "integer"
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Bytes"
           },
           "phase": {
             "enum": [
@@ -8142,8 +8176,7 @@
           "phase",
           "completed_artifacts",
           "total_artifacts",
-          "downloaded_bytes",
-          "expected_bytes"
+          "downloaded_bytes"
         ],
         "title": "ModelCacheOperationProgress",
         "type": "object"

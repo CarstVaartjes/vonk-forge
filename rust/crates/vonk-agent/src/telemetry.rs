@@ -1520,40 +1520,8 @@ fn parse_prometheus_runtime(
             &mut capabilities,
             &contract.run_id,
             key,
-            match key {
-                "runtime.decode_tokens_per_second"
-                | "runtime.prefill_tokens_per_second"
-                | "runtime.prefill_cached_tokens_per_second"
-                | "runtime.prefill_uncached_tokens_per_second" => "tokens/s",
-                "runtime.output_tokens_total" => "tokens",
-                "runtime.slots_active"
-                | "runtime.requests_running"
-                | "runtime.requests_waiting" => "requests",
-                "runtime.kv_cache_usage_percent"
-                | "runtime.prefix_cache_hit_percent"
-                | "runtime.mtp_acceptance_percent" => "%",
-                "runtime.preemptions_total" => "count",
-                "runtime.ttft_p95_ms" | "runtime.e2e_p95_ms" | "runtime.itl_p95_ms" => "ms",
-                _ => "unknown",
-            },
-            match key {
-                "runtime.decode_tokens_per_second"
-                | "runtime.prefill_tokens_per_second"
-                | "runtime.prefill_cached_tokens_per_second"
-                | "runtime.prefill_uncached_tokens_per_second"
-                | "runtime.prefix_cache_hit_percent"
-                | "runtime.mtp_acceptance_percent"
-                | "runtime.ttft_p95_ms"
-                | "runtime.e2e_p95_ms"
-                | "runtime.itl_p95_ms" => "derived",
-                "runtime.output_tokens_total"
-                | "runtime.slots_active"
-                | "runtime.requests_running"
-                | "runtime.requests_waiting"
-                | "runtime.kv_cache_usage_percent"
-                | "runtime.preemptions_total" => "measured",
-                _ => "measured",
-            },
+            reading.unit,
+            reading.measurement_kind,
             raw_available,
             reason,
         );
@@ -1564,34 +1532,8 @@ fn parse_prometheus_runtime(
                 rank,
                 key,
                 metric,
-                match key {
-                    "runtime.decode_tokens_per_second"
-                    | "runtime.prefill_tokens_per_second"
-                    | "runtime.prefill_cached_tokens_per_second"
-                    | "runtime.prefill_uncached_tokens_per_second" => "tokens/s",
-                    "runtime.output_tokens_total" => "tokens",
-                    "runtime.slots_active"
-                    | "runtime.requests_running"
-                    | "runtime.requests_waiting" => "requests",
-                    "runtime.kv_cache_usage_percent"
-                    | "runtime.prefix_cache_hit_percent"
-                    | "runtime.mtp_acceptance_percent" => "%",
-                    "runtime.preemptions_total" => "count",
-                    "runtime.ttft_p95_ms" | "runtime.e2e_p95_ms" | "runtime.itl_p95_ms" => "ms",
-                    _ => "unknown",
-                },
-                match key {
-                    "runtime.decode_tokens_per_second"
-                    | "runtime.prefill_tokens_per_second"
-                    | "runtime.prefill_cached_tokens_per_second"
-                    | "runtime.prefill_uncached_tokens_per_second"
-                    | "runtime.prefix_cache_hit_percent"
-                    | "runtime.mtp_acceptance_percent"
-                    | "runtime.ttft_p95_ms"
-                    | "runtime.e2e_p95_ms"
-                    | "runtime.itl_p95_ms" => "derived",
-                    _ => "measured",
-                },
+                reading.unit,
+                reading.measurement_kind,
                 reading.aggregation,
                 observed_at,
             );
@@ -2668,10 +2610,6 @@ fn parse_accelerators(value: &[u8], _host_memory: Option<(u64, u64)>) -> Vec<Acc
         readings.push(reading);
     }
     readings
-}
-
-fn parse_accelerator(value: &[u8], host_memory: Option<(u64, u64)>) -> Option<AcceleratorReading> {
-    parse_accelerators(value, host_memory).into_iter().next()
 }
 
 fn parse_accelerator_fields(fields: &[&str]) -> Option<AcceleratorReading> {

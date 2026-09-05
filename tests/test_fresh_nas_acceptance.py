@@ -126,6 +126,7 @@ def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> 
     renderer.render(
         COMPOSE_TEMPLATE,
         rendered,
+        channel="pinned",
         api_image=f"ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:{digest}",
         worker_image=f"ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3@sha256:{digest}",
             hermes_image=f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{digest}",

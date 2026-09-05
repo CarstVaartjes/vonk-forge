@@ -285,24 +285,19 @@ def _is_mia_vllm_distribution(
         return False
     identity = distribution.get("identity")
     capabilities = distribution.get("capabilities")
-    runtime_environment = (
-        capabilities.get("runtime_environment")
+    distributed_vllm = (
+        capabilities.get("distributed_vllm")
         if isinstance(capabilities, Mapping)
-        else None
-    )
-    allowed_names = (
-        runtime_environment.get("allowed_names")
-        if isinstance(runtime_environment, Mapping)
         else None
     )
     return (
         isinstance(identity, Mapping)
         and identity.get("publisher") == "anemll"
         and identity.get("slug") == "anemll-vllm-mia"
-        and isinstance(allowed_names, list)
-        and {
-            "B12X_CUTE_COMPILE_CACHE_DIR",
-            "TORCH_FR_DUMP_TEMP_FILE",
-            "TORCH_NCCL_DEBUG_INFO_PIPE_FILE",
-        }.issubset(allowed_names)
+        and isinstance(distributed_vllm, Mapping)
+        and distributed_vllm.get("verified") is True
+        and distributed_vllm.get("mechanism") == "vllm-mp"
+        and distributed_vllm.get("topology_mode") == "distributed"
+        and distributed_vllm.get("node_count") == 2
+        and distributed_vllm.get("world_size") == 2
     )

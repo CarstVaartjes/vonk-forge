@@ -31,7 +31,7 @@ The release workflow:
 
 1. validates the signed release tag;
 2. promotes the exact tested API and worker images;
-3. renders the digest-pinned production Compose file;
+3. renders production Compose with `:latest` images and `pull_policy: always`;
 4. builds and verifies both native agent packages;
 5. creates an immutable GitHub Release containing the Compose and package assets;
 6. publishes the signed installer-channel manifest and setup binaries; and
@@ -47,3 +47,17 @@ uv run pytest -q tests/test_installer_publication_workflow.py
 Publication is performed by CI. Operators consume the stable or development
 curl endpoint; there is no second bundle registry, local build, or alternate
 control generation to select.
+
+
+Deployment Compose follows channels: Vonk images use `:dev` on development
+and `:latest` on production; every upstream service uses `:latest`. All services
+use `pull_policy: always`, so starting/redeploying the project checks the registry.
+Already-running containers do not update themselves. Upstream major releases may
+require operator migration, particularly PostgreSQL data directories.
+
+The NAS curl bootstrap verifies and passes the published payload to the native
+installer. Both fresh installs and reruns replace `docker-compose.yaml` with this
+channel policy while preserving operator configuration, secrets, and named volumes.
+Immutable image records and `docker-compose.pinned.yml` are publication evidence
+inputs; the payload builder converts every image to the deployment channel before
+embedding Compose. They are not the installed deployment configuration.

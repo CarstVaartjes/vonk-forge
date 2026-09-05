@@ -1,4 +1,4 @@
-import type {TelemetryHistory, TelemetryHistoryPoint, VisualFleetNode} from "../api/types";
+import type {TelemetryHistory, TelemetryHistoryPoint, TelemetryRollupPoint, VisualFleetNode} from "../api/types";
 import {
   formatBytes,
   formatMetric,
@@ -47,8 +47,12 @@ function utilizationTone(percent: number): "danger" | "healthy" | "warning" {
 type TrendMetric = "gpu_utilization_percent" | "memory_available_bytes" | "temperature_c";
 
 function pointValue(point: TelemetryHistoryPoint, metric: TrendMetric): number | null {
-  if ("resolution" in point) return point.metrics[metric]?.mean ?? null;
+  if (isRollupPoint(point)) return point.metrics[metric]?.mean ?? null;
   return finite(point[metric]);
+}
+
+function isRollupPoint(point: TelemetryHistoryPoint): point is TelemetryRollupPoint {
+  return typeof point === "object" && point !== null && "resolution" in point && typeof point.resolution === "string";
 }
 
 function CardTrend({
@@ -78,27 +82,30 @@ function CardTrend({
   const description = current === null || minimum === undefined || maximum === undefined
     ? "No reported samples."
     : `Latest ${format(current)}; range ${format(minimum)} to ${format(maximum)}; ${finiteValues.length} reported points.`;
-  return <figure className="node-card-trend">
+  const unavailable = finiteValues.length === 0;
+  return <figure className={`node-card-trend${unavailable ? " is-unavailable" : ""}`}>
     <figcaption><span>{label}</span><strong>{current === null ? "Not reported" : format(current)}</strong></figcaption>
-    <svg role="img" aria-label={`${label} ${historyLabel} trend`} aria-description={description} viewBox="0 0 100 30" preserveAspectRatio="none">
-      {path && <path aria-hidden="true" d={path} vectorEffect="non-scaling-stroke"/>}
-    </svg>
+    {unavailable
+      ? <div className="node-card-trend-unavailable" role="img" aria-label={`${label} ${historyLabel} trend unavailable`}>Unavailable</div>
+      : <svg role="img" aria-label={`${label} ${historyLabel} trend`} aria-description={description} viewBox="0 0 100 30" preserveAspectRatio="none">
+        {path && <path aria-hidden="true" d={path} vectorEffect="non-scaling-stroke"/>}
+      </svg>}
   </figure>;
 }
 
 function WorkloadSummary({node, name}: {node: VisualFleetNode; name: string}) {
   return <section className="node-workload-summary" aria-label={`Workloads on ${name}`}>
     <div>
-      <header><span>Loaded now</span><strong>{node.loaded.length}</strong></header>
+      <header><span>Current work</span></header>
       {node.loaded.length > 0
         ? <ul>{node.loaded.map(run => <li key={run.run_id} className={run.healthy ? "is-healthy" : "is-degraded"}><span>{run.title}</span><small>{run.alias ? `${run.alias} · ` : ""}{run.healthy ? "healthy" : run.group_state}</small></li>)}</ul>
-        : <small className="node-model-empty">No active model</small>}
+        : <small className="node-model-empty">No active model reported</small>}
     </div>
     <div>
-      <header><span>Installed</span><strong>{node.installed.length}</strong></header>
+      <header><span>Local recipes</span></header>
       {node.installed.length > 0
         ? <ul>{node.installed.map(item => <li key={item.installation_id} className={item.complete ? "is-healthy" : "is-degraded"}><span>{item.title}</span><small>{item.complete ? "ready" : item.group_state}</small></li>)}</ul>
-        : <small className="node-model-empty">No complete install</small>}
+        : <small className="node-model-empty">No local recipe reported</small>}
     </div>
   </section>;
 }
@@ -173,7 +180,7 @@ export function NodeCard({
       <div className="metric"><dt>CPU / load</dt><dd>{cpu === "Not reported" && load === "Not reported" ? "Not reported" : `${cpu} · load ${load}`}</dd></div>
       <div className="metric"><dt>Disk</dt><dd>{capacity(diskFree, diskTotal, "free")}</dd></div>
       <div className="metric"><dt>Network</dt><dd>{throughput(networkReceive, networkTransmit)}</dd></div>
-      <div className="metric"><dt>Power</dt><dd>{formatMetric(sample?.power_watts, value => `${value.toFixed(1)} W`)}</dd></div>
+      <div className="metric"><dt>Board power</dt><dd>{formatMetric(sample?.power_watts, value => `${value.toFixed(1)} W`)}</dd></div>
     </dl>
 
     <WorkloadSummary node={node} name={name}/>

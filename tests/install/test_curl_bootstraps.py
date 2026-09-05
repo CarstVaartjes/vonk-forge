@@ -54,7 +54,7 @@ def _run_bootstrap(
     package.write_bytes(b"exact published Debian package\n")
     package_digest = hashlib.sha256(package.read_bytes()).hexdigest()
     payload = tmp_path / "published-nas-payload.json"
-    payload.write_text('{"schema_version":1}\n')
+    payload.write_text('{"schema_version":2}\n')
     payload_digest = hashlib.sha256(payload.read_bytes()).hexdigest()
     release_manifest = tmp_path / "release.json"
     release_manifest.write_text('{"schema_version":1}\n')
@@ -189,7 +189,7 @@ def test_nas_bootstrap_needs_no_arguments_and_supplies_verified_payload(
     lines = receipt.read_text().splitlines()
     invocation = lines[0].split("|", 1)[1].split()
     assert invocation[0] == "--template"
-    assert lines[2] == 'payload={"schema_version":1}'
+    assert lines[2] == 'payload={"schema_version":2}'
     assert invocation[2:] == []
     assert not forbidden.exists()
 

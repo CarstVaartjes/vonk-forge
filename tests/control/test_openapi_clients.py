@@ -69,10 +69,38 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
     schema = json.loads(OPENAPI.read_text())
     components = schema["components"]["schemas"]
     library_model = components["LibraryModel"]
-    assert set(library_model["properties"]) == {"model", "page_local", "recipes"}
+    assert set(library_model["properties"]) == {
+        "model",
+        "model_capabilities",
+        "model_version",
+        "page_local",
+        "recipes",
+    }
     assert library_model["properties"]["model"] == {
         "$ref": "#/components/schemas/ModelVersionIdentity"
     }
+    assert library_model["properties"]["model_capabilities"] == {
+        "$ref": "#/components/schemas/LibraryCapabilityInventory"
+    }
+    assert library_model["properties"]["model_version"]["anyOf"] == [
+        {"$ref": "#/components/schemas/LibraryModelVersionFacts"},
+        {"type": "null"},
+    ]
+    assert components["LibraryRecipeSummary"]["properties"][
+        "recipe_capabilities"
+    ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
+    assert components["LibraryRecipeDetail"]["properties"][
+        "model_capabilities"
+    ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
+    assert components["LibraryRecipeDetail"]["properties"][
+        "recipe_capabilities"
+    ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
+    assert components["LibraryModelVersionFacts"]["properties"]["schema_version"][
+        "const"
+    ] == 2
+    assert components["LibraryCapabilityInventory"]["properties"]["schema_version"][
+        "const"
+    ] == 2
     model_identity = components["ModelVersionIdentity"]
     assert model_identity["properties"]["kind"]["const"] == "model-version"
     assert set(model_identity["required"]) == {
@@ -83,6 +111,14 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
     }
     assert (
         components["RecipeRevisionSummary"]["properties"]["schema_version"]["const"]
+        == 1
+    )
+    # CatalogEntityRevisionResponse is the genuine current entity-v1 wire
+    # contract; the nested model capability authority is schema 2.
+    assert (
+        components["CatalogEntityRevisionResponse"]["properties"]["schema_version"][
+            "const"
+        ]
         == 1
     )
 

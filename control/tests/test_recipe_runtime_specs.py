@@ -116,19 +116,11 @@ def test_runtime_spec_preserves_digest_bound_snapshot_selection() -> None:
 
 def test_mia_vllm_runtime_spec_injects_trusted_optional_cache_paths() -> None:
     document, resolved_entities = _exact_builtin_inputs()
-    distribution = resolved_entities["runtime_distribution"].document
-    distribution["identity"] = {"publisher": "anemll", "slug": "anemll-vllm-mia"}
-    distribution["capabilities"] = {
-        "runtime_environment": {
-            "allowed_names": [
-                "FLASHINFER_WORKSPACE_BASE",
-                "TILELANG_CACHE_DIR",
-                "B12X_CUTE_COMPILE_CACHE_DIR",
-                "TORCH_FR_DUMP_TEMP_FILE",
-                "TORCH_NCCL_DEBUG_INFO_PIPE_FILE",
-            ]
-        }
-    }
+    distribution = json.loads(
+        (ROOT / "config/runtime-distributions/anemll-vllm-mia.json").read_text(
+            encoding="utf-8"
+        )
+    )
     distribution_digest = catalog_content_sha256(distribution)
     document["runtime"]["distribution"].update(
         {

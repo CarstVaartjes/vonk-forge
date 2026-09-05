@@ -15,7 +15,11 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from .catalog_contract import CatalogContractError, validate_catalog_document
+from .catalog_contract import (
+    CatalogContractError,
+    catalog_content_sha256,
+    validate_catalog_document,
+)
 from .recipe_contract import RecipeContractError, recipe_content_sha256, validate_recipe
 from .recipe_library import (
     RecipeLibraryChange,
@@ -229,9 +233,27 @@ class RecipePackageClient:
                 raise TypeError
             dependencies = []
             for entry in metadata:
-                if not isinstance(entry, Mapping) or not isinstance(entry.get("path"), str):
+                if (
+                    not isinstance(entry, Mapping)
+                    or not all(
+                        isinstance(entry.get(field), str)
+                        for field in ("kind", "publisher", "slug", "content_sha256", "path")
+                    )
+                ):
                     raise TypeError
-                dependencies.append(_json(files[entry["path"]]))
+                document = _json(files[entry["path"]])
+                if not isinstance(document, dict):
+                    raise TypeError
+                identity = document.get("identity")
+                if (
+                    not isinstance(identity, Mapping)
+                    or document.get("kind") != entry["kind"]
+                    or identity.get("publisher") != entry["publisher"]
+                    or identity.get("slug") != entry["slug"]
+                    or catalog_content_sha256(document) != entry["content_sha256"]
+                ):
+                    raise ValueError
+                dependencies.append(document)
             release = _json(files["recipe-release.json"])
             if not isinstance(recipe, dict) or recipe_content_sha256(recipe) != item.content_sha256:
                 raise ValueError

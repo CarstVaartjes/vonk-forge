@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useId, useRef, useState} from "react";
 import type {MouseEvent as ReactMouseEvent} from "react";
-import type {ControlApi, LibraryOperation, TelemetryHistory, TelemetryHistoryPoint, TelemetryResolution, VisualFleetNode} from "../api/types";
+import type {ControlApi, LibraryOperation, TelemetryCapabilitiesResponse, TelemetryCurrentResponse, TelemetryHistory, TelemetryHistoryPoint, TelemetryResolution, TelemetryRuntime, TelemetrySeries, TelemetryWorkload, TelemetryWorkloadsResponse, VisualFleetNode} from "../api/types";
 import {formatBytes, installationGroupLabel, nodeDisplayName, nodeSecondaryName, nodeUnifiedMemory, nodeWarningsAt, runGroupLabel, timestampPresentation} from "../lib/fleet";
 import {CopyButton} from "./copy-button";
 import {LibraryActionDialog} from "./library-action-dialog";
@@ -8,7 +8,7 @@ import type {LibraryActionName, LibraryActionTarget} from "./library-action-type
 import {LibraryNodeNamesProvider} from "./library-node-names";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
 import {Meter} from "./meter";
-import {Sparkline, type SparklineDomain, type SparklineSeriesPoint} from "./sparkline";
+import {Sparkline, sparklinePath, type SparklineDomain, type SparklineSeriesPoint} from "./sparkline";
 import {StatusPill} from "./status-pill";
 
 type HistoryRange = "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y";
@@ -29,7 +29,7 @@ const LIFECYCLE_PREVIEW_POLICY = {
   telemetry_live_seconds: 6,
 };
 
-type RawMetricName = "gpu_utilization_percent" | "memory_available_bytes" | "temperature_c";
+type RawMetricName = "gpu_utilization_percent" | "memory_available_bytes" | "temperature_c" | "power_watts" | "disk_free_bytes" | "network_receive_bytes_per_second";
 
 function isRollupPoint(point: TelemetryHistoryPoint): point is Extract<TelemetryHistoryPoint, {resolution: string}> {
   return "resolution" in point;
@@ -70,11 +70,165 @@ function boundedError(value: unknown): string {
   return message.length > 512 ? `${message.slice(0, 512)}…` : message;
 }
 
+function humanMetricKey(key: string): string {
+  return key.replaceAll("_", " ").replaceAll(".", " · ").replace(/\b\w/g, value => value.toUpperCase());
+}
+
+function metricContext(series: TelemetrySeries): string {
+  return [series.device_id, series.interface_name, series.process_name, series.run_id].filter(Boolean).join(" · ") || "Node aggregate";
+}
+
+function metricValue(series: TelemetrySeries): string {
+  if (series.value === null) return "Unavailable";
+  if (typeof series.value === "number") return Number.isFinite(series.value) ? series.value.toLocaleString(undefined, {maximumFractionDigits: 3}) : "Unavailable";
+  return String(series.value);
+}
+
+type MetricGroupName = "GPU" | "CPU" | "Memory" | "Power" | "Storage" | "Network" | "Runtime" | "Other";
+const METRIC_GROUPS: MetricGroupName[] = ["GPU", "CPU", "Memory", "Power", "Storage", "Network", "Runtime", "Other"];
+const HISTORY_KEYS: Record<MetricGroupName, RawMetricName | undefined> = {
+  GPU: "gpu_utilization_percent",
+  CPU: "temperature_c",
+  Memory: "memory_available_bytes",
+  Power: "power_watts",
+  Storage: "disk_free_bytes",
+  Network: "network_receive_bytes_per_second",
+  Runtime: undefined,
+  Other: undefined,
+};
+
+function metricGroup(series: TelemetrySeries): MetricGroupName {
+  const key = series.key.toLocaleLowerCase();
+  if (series.scope === "accelerator" || key.includes("gpu") || key.includes("accelerator")) return "GPU";
+  if (key.includes("cpu") || key.includes("temperature") || key.includes("load")) return "CPU";
+  if (series.scope === "memory" || key.includes("memory") || key.includes("kv_cache")) return "Memory";
+  if (key.includes("power") || key.includes("watt")) return "Power";
+  if (series.scope === "storage" || key.includes("disk") || key.includes("storage")) return "Storage";
+  if (series.scope === "network" || key.includes("network") || key.includes("bandwidth")) return "Network";
+  if (["runtime", "workload", "service"].includes(series.scope) || key.includes("queue") || key.includes("ttft") || key.includes("prefill") || key.includes("decode") || key.includes("itl") || key.includes("cache") || key.includes("preempt")) return "Runtime";
+  return "Other";
+}
+
+function historyMetricValue(point: TelemetryHistoryPoint, key: RawMetricName): number | null {
+  if (isRollupPoint(point)) return point.metrics[key]?.mean ?? null;
+  const value = point[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function metricGroupPath(history: TelemetryHistory | undefined, key: RawMetricName | undefined, domain?: SparklineDomain): string {
+  if (!history || !key) return "";
+  const values = history.points.map(point => historyMetricValue(point, key));
+  const finite = values.filter((value): value is number => value !== null);
+  if (finite.length < 2) return "";
+  return sparklinePath(values, 100, 32, domain);
+}
+
+function TelemetryChartGroup({group, rows, history, rangeLabel}: {group: MetricGroupName; rows: TelemetrySeries[]; history?: TelemetryHistory; rangeLabel: string}) {
+  const key = HISTORY_KEYS[group];
+  const domain = group === "GPU" || group === "CPU" ? [0, 100] as const : undefined;
+  const path = metricGroupPath(history, key, domain);
+  return <article className={`telemetry-chart-group telemetry-chart-group-${group.toLocaleLowerCase()}`} aria-labelledby={`telemetry-group-${group.toLocaleLowerCase()}`}>
+    <header><div><h5 id={`telemetry-group-${group.toLocaleLowerCase()}`}>{group}</h5><span>{rangeLabel} · {rows.length > 0 ? `${rows.length} reported` : "No data reported"}</span></div>{path ? <span className="telemetry-chart-range">Trend</span> : <span className="telemetry-chart-range is-unavailable">No trend</span>}</header>
+    {path ? <svg className="telemetry-chart" role="img" aria-label={`${group} telemetry trend for ${rangeLabel}`} viewBox="0 0 100 32" preserveAspectRatio="none"><path d={path}/></svg> : <div className="telemetry-chart-unavailable" role="img" aria-label={`${group} trend unavailable`}>{rows.length > 0 ? "Current sample only" : "Unavailable"}</div>}
+    {rows.length > 0 ? <ul>{rows.slice(0, 8).map(row => <li key={`${row.key}:${row.scope}:${row.device_id ?? ""}:${row.interface_name ?? ""}:${row.run_id ?? ""}`}><div><strong>{humanMetricKey(row.key)}</strong><small>{metricContext(row)}</small></div><div><strong className={`telemetry-value status-${row.support_status}`}>{row.support_status === "available" ? metricValue(row) : row.support_status === "unsupported" ? "Unsupported" : "Unavailable"}</strong><small>{row.unit} · {row.scope}</small></div></li>)}</ul> : <p>No reported metrics in this group.</p>}
+    {rows.length > 8 && <small className="telemetry-chart-overflow">+{rows.length - 8} more in raw details</small>}
+  </article>;
+}
+
+function freshnessLabel(value: TelemetrySeries["freshness"] | TelemetryCurrentResponse["freshness"]): string {
+  if (value === "fresh") return "Fresh";
+  if (value === "live") return "Live";
+  return value === "delayed" ? "Delayed" : "Stale";
+}
+
+function runtimePlacement(runtime: TelemetryRuntime): string {
+  const nodes = runtime.serving_node_ids.length > 0 ? runtime.serving_node_ids.join(", ") : "Placement unavailable";
+  return runtime.ranks.length > 0 ? `${nodes} · ranks ${runtime.ranks.join(", ")}` : nodes;
+}
+
+function workloadIdentity(workload: TelemetryWorkload): string {
+  return workload.title || workload.job_id || workload.request_id || workload.run_id;
+}
+
 function RelativeTimestamp({label, now, value}: {label: string; now: Date; value: string | null | undefined}) {
   const timestamp = timestampPresentation(value, now, label);
   return timestamp
     ? <time dateTime={timestamp.dateTime} title={timestamp.exact} aria-label={`${timestamp.relative}; exact time ${timestamp.exact}`}>{timestamp.relative}</time>
     : <>Not reported</>;
+}
+
+type DetailTab = "overview" | "metrics" | "workloads" | "services" | "events";
+
+type RichTelemetryPanelProps = {
+  tab: Exclude<DetailTab, "overview">;
+  current?: TelemetryCurrentResponse;
+  capabilities?: TelemetryCapabilitiesResponse;
+  history?: TelemetryHistory;
+  rangeLabel: string;
+  workloads?: TelemetryWorkloadsResponse;
+  loading: boolean;
+  error: string;
+  paused: boolean;
+  onRetry(): void;
+  onPause(): void;
+  onExport(): void;
+};
+
+function RichTelemetryPanel({tab, current, capabilities, history, rangeLabel, workloads, loading, error, paused, onRetry, onPause, onExport}: RichTelemetryPanelProps) {
+  const metrics = current?.sample.metrics;
+  const series = metrics?.series ?? [];
+  const capabilityRows = (capabilities?.capabilities ?? metrics?.capabilities ?? [])
+    .filter(capability => !series.some(item => item.key === capability.key && item.scope === capability.scope && item.device_id === capability.device_id && item.interface_name === capability.interface_name && item.run_id === capability.run_id));
+  const metricRows = [...series, ...capabilityRows.map(capability => ({
+    key: capability.key,
+    scope: capability.scope,
+    device_id: capability.device_id,
+    process_id: null,
+    process_name: null,
+    interface_name: capability.interface_name,
+    run_id: capability.run_id,
+    value: capability.supported ? null : null,
+    unit: capability.unit,
+    source: capability.source,
+    measurement_kind: capability.measurement_kind,
+    observed_at: current?.observed_at ?? capabilities?.observed_at ?? "",
+    received_at: current?.received_at ?? capabilities?.received_at ?? null,
+    freshness: current?.freshness === "live" ? "fresh" as const : current?.freshness ?? "stale" as const,
+    freshness_threshold_seconds: capability.freshness_threshold_seconds,
+    support_status: capability.supported ? "unavailable" as const : "unsupported" as const,
+    reason: capability.reason ?? (capability.supported ? "No sample was reported." : "This metric is not supported by the collector."),
+    aggregation: "current",
+  } satisfies TelemetrySeries))];
+
+  if (loading) return <section className="node-detail-deep-surface" aria-live="polite"><p role="status">Loading Spark telemetry…</p></section>;
+  if (error) return <section className="node-detail-deep-surface node-detail-deep-error" aria-live="polite"><p role="alert">{error}</p><button type="button" className="button secondary" onClick={onRetry}>Retry telemetry</button></section>;
+
+  if (tab === "metrics") {
+    const grouped = new Map<MetricGroupName, TelemetrySeries[]>();
+    for (const group of METRIC_GROUPS) grouped.set(group, []);
+    for (const item of metricRows) grouped.get(metricGroup(item))?.push(item);
+    return <section className="node-detail-deep-surface" aria-labelledby="rich-metrics-heading">
+      <header className="node-detail-deep-heading"><div><h4 id="rich-metrics-heading">Metrics</h4><p>Live readings are grouped by system area. Every value keeps its unit, scope and source; missing readings stay unavailable.</p></div><div className="node-detail-deep-actions"><button type="button" className="button secondary" onClick={onPause}>{paused ? "Resume refresh" : "Pause refresh"}</button><button type="button" className="button secondary" disabled={!current && !capabilities} onClick={onExport}>Export JSON</button></div></header>
+      <div className="node-detail-telemetry-meta"><span>Sample: {current ? freshnessLabel(current.freshness) : "Unavailable"}</span>{current && <time dateTime={current.observed_at}>Observed {new Date(current.observed_at).toLocaleString()}</time>}<span>History range: {rangeLabel}</span>{metrics?.provenance && <span>Source: {metrics.provenance.collector} {metrics.provenance.collector_version}</span>}{metrics?.provenance?.host_uptime_seconds !== null && metrics?.provenance?.host_uptime_seconds !== undefined && <span>Host uptime: {Math.round(metrics.provenance.host_uptime_seconds / 3600)} h</span>}</div>
+      {metricRows.length === 0 ? <p role="status">No metric readings or capability declarations are available for this Spark.</p> : <>
+        <div className="telemetry-chart-grid">{METRIC_GROUPS.filter(group => group !== "Other" || grouped.get(group)?.length).map(group => <TelemetryChartGroup key={group} group={group} rows={grouped.get(group) ?? []} history={history} rangeLabel={rangeLabel}/>)}</div>
+        <details className="node-detail-raw-metrics"><summary>Raw readings and provenance</summary><div className="node-detail-metric-table-wrap"><table className="node-detail-metric-table"><caption className="visually-hidden">Raw Spark metrics with source and freshness evidence</caption><thead><tr><th scope="col">Metric</th><th scope="col">Scope</th><th scope="col">Value</th><th scope="col">Evidence</th></tr></thead><tbody>{metricRows.map((item, index) => <tr key={`${item.key}:${item.scope}:${item.device_id ?? ""}:${item.interface_name ?? ""}:${item.run_id ?? ""}:${index}`}><th scope="row"><span>{humanMetricKey(item.key)}</span><small>{metricContext(item)}</small></th><td>{item.scope}</td><td><strong className={`telemetry-value status-${item.support_status}`}>{item.support_status === "available" ? metricValue(item) : item.support_status === "unsupported" ? "Unsupported" : "Unavailable"}</strong><small>{item.unit}</small></td><td><span className={`telemetry-freshness freshness-${item.freshness}`}>{freshnessLabel(item.freshness)}</span><small>{item.source} · {item.measurement_kind} · {item.aggregation}</small>{item.reason && <small>{item.reason}</small>}</td></tr>)}</tbody></table></div></details>
+      </>}
+    </section>;
+  }
+
+  if (tab === "workloads") return <section className="node-detail-deep-surface" aria-labelledby="rich-workloads-heading">
+      <header className="node-detail-deep-heading"><div><h4 id="rich-workloads-heading">Workloads</h4><p>Live readings keep their units and scope; request placement is reported per run.</p></div><button type="button" className="button secondary" onClick={onRetry}>Refresh workloads</button></header>
+    {workloads?.runtimes.length ? <div className="node-detail-runtime-grid">{workloads.runtimes.map(runtime => <article key={`${runtime.run_id}:${runtime.engine_id}`}><header><strong>{runtime.model || runtime.run_id}</strong><span className={`telemetry-freshness readiness-${runtime.readiness}`}>{runtime.readiness}</span></header><dl><div><dt>Engine</dt><dd>{runtime.engine_id} · {runtime.backend}{runtime.version ? ` · ${runtime.version}` : ""}</dd></div><div><dt>Placement</dt><dd>{runtimePlacement(runtime)}</dd></div><div><dt>Endpoint</dt><dd>{runtime.endpoint || "Not reported"}</dd></div><div><dt>Recipe</dt><dd>{runtime.recipe_revision || "Not reported"}</dd></div><div><dt>Adapter</dt><dd>{runtime.adapter}{runtime.adapter_version ? ` · ${runtime.adapter_version}` : ""} · {runtime.adapter_supported ? "supported" : `unsupported: ${runtime.adapter_reason || "reason unavailable"}`}</dd></div></dl>{runtime.error && <p className="is-error">{runtime.error}</p>}</article>)}</div> : <p role="status">No runtime placement is reported for this Spark.</p>}
+    {workloads?.workloads.length ? <div className="node-detail-workload-table-wrap"><table className="node-detail-workload-table"><caption className="visually-hidden">Reported request and job workloads</caption><thead><tr><th scope="col">Workload</th><th scope="col">State</th><th scope="col">Placement</th><th scope="col">Timing</th></tr></thead><tbody>{workloads.workloads.map((workload, index) => <tr key={`${workload.run_id}:${workload.request_id ?? workload.job_id ?? index}`}><th scope="row"><span>{workloadIdentity(workload)}</span><small>{workload.model || workload.recipe_revision || workload.run_id}</small></th><td><span className={`telemetry-freshness workload-${workload.state}`}>{workload.state}</span>{workload.failure && <small className="is-error">{workload.failure}</small>}</td><td>{workload.executor_node_ids.length > 0 ? workload.executor_node_ids.join(", ") : "Not reported"}</td><td>{workload.elapsed_seconds !== null && workload.elapsed_seconds !== undefined ? `${workload.elapsed_seconds.toFixed(1)} s elapsed` : workload.started_at ? `Started ${new Date(workload.started_at).toLocaleString()}` : "Not reported"}</td></tr>)}</tbody></table></div> : <p role="status">No request or job workloads are reported for this Spark.</p>}
+  </section>;
+
+  if (tab === "services") return <section className="node-detail-deep-surface" aria-labelledby="rich-services-heading">
+    <header className="node-detail-deep-heading"><div><h4 id="rich-services-heading">Services</h4><p>Runtime adapters and endpoint ownership are shown with their reported support state.</p></div><button type="button" className="button secondary" onClick={onRetry}>Refresh services</button></header>
+    {workloads?.runtimes.length ? <div className="node-detail-services-list">{workloads.runtimes.map(runtime => <article key={`${runtime.run_id}:${runtime.adapter}`}><div><strong>{runtime.adapter}</strong><span>{runtime.adapter_version || "Version not reported"}</span></div><dl><div><dt>Run</dt><dd>{runtime.run_id}</dd></div><div><dt>Backend</dt><dd>{runtime.backend}</dd></div><div><dt>Readiness</dt><dd>{runtime.readiness}</dd></div><div><dt>Support</dt><dd>{runtime.adapter_supported ? "Supported" : `Unsupported · ${runtime.adapter_reason || "reason unavailable"}`}</dd></div></dl></article>)}</div> : <p role="status">No runtime services are reported for this Spark.</p>}
+  </section>;
+
+  return <section className="node-detail-deep-surface" aria-labelledby="rich-events-heading"><header className="node-detail-deep-heading"><div><h4 id="rich-events-heading">Events</h4><p>Telemetry delivery and capability exceptions reported by this Spark.</p></div><button type="button" className="button secondary" onClick={onRetry}>Refresh events</button></header><div className="node-detail-event-summary"><span>Telemetry: {current ? freshnessLabel(current.freshness) : capabilities ? freshnessLabel(capabilities.freshness) : "Unavailable"}</span><span>{capabilities?.capabilities.filter(item => !item.supported).length ?? 0} unsupported capability declarations</span><span>{current?.sample.gap_samples ?? "No gap count reported"} gap samples in latest sample</span></div></section>;
 }
 
 export function NodeDetail({
@@ -98,6 +252,8 @@ export function NodeDetail({
 }) {
   const headingId = useId();
   const closeButton = useRef<HTMLButtonElement>(null);
+  const detailRoot = useRef<HTMLElement>(null);
+  const [detailTab, setDetailTab] = useState<DetailTab>("overview");
   const [range, setRange] = useState<HistoryRange>("1h");
   const [history, setHistory] = useState<TelemetryHistory>();
   const [historyError, setHistoryError] = useState("");
@@ -106,9 +262,20 @@ export function NodeDetail({
   const [reviewTarget, setReviewTarget] = useState<LibraryActionTarget>();
   const [operation, setOperation] = useState<LibraryOperation>();
   const [operationName, setOperationName] = useState<LibraryActionName>("Stop");
+  const [richCurrent, setRichCurrent] = useState<TelemetryCurrentResponse>();
+  const [richCapabilities, setRichCapabilities] = useState<TelemetryCapabilitiesResponse>();
+  const [richWorkloads, setRichWorkloads] = useState<TelemetryWorkloadsResponse>();
+  const [richLoading, setRichLoading] = useState(false);
+  const [richError, setRichError] = useState("");
+  const [richRetry, setRichRetry] = useState(0);
+  const [telemetryPaused, setTelemetryPaused] = useState(false);
   const lifecycleTrigger = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => { closeButton.current?.focus(); }, []);
+  useEffect(() => {
+    const root = detailRoot.current;
+    if (root && typeof root.scrollIntoView === "function") root.scrollIntoView({block: "start", behavior: "auto"});
+    closeButton.current?.focus({preventScroll: true});
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -137,6 +304,39 @@ export function NodeDetail({
     });
     return () => controller.abort();
   }, [api, node.id, node.telemetry?.sample.id, range, retryRevision]);
+
+  useEffect(() => {
+    if (detailTab === "overview") return;
+    const controller = new AbortController();
+    setRichLoading(true);
+    setRichError("");
+    const currentRequest = detailTab === "metrics" || detailTab === "events"
+      ? api.nodeTelemetryCurrent(node.id, controller.signal)
+      : Promise.resolve(undefined);
+    const capabilitiesRequest = detailTab === "metrics" || detailTab === "events"
+      ? api.nodeTelemetryCapabilities(node.id, controller.signal)
+      : Promise.resolve(undefined);
+    const workloadsRequest = detailTab === "workloads" || detailTab === "services"
+      ? api.nodeTelemetryWorkloads(node.id, undefined, undefined, controller.signal)
+      : Promise.resolve(undefined);
+    void Promise.all([currentRequest, capabilitiesRequest, workloadsRequest]).then(([current, capabilities, workloads]) => {
+      if (controller.signal.aborted) return;
+      if (current) setRichCurrent(current);
+      if (capabilities) setRichCapabilities(capabilities);
+      if (workloads) setRichWorkloads(workloads);
+    }).catch(value => {
+      if (!controller.signal.aborted) setRichError(boundedError(value));
+    }).finally(() => {
+      if (!controller.signal.aborted) setRichLoading(false);
+    });
+    const refreshTimer = detailTab === "metrics" && !telemetryPaused
+      ? window.setInterval(() => setRichRetry(value => value + 1), 15_000)
+      : undefined;
+    return () => {
+      controller.abort();
+      if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+    };
+  }, [api, detailTab, node.id, richRetry, telemetryPaused]);
 
   const points = history?.points ?? [];
   const installed = node.installed.filter(item => item.complete);
@@ -171,6 +371,22 @@ export function NodeDetail({
   }, []);
   const blockingRuns = (installationId: string) => node.loaded.filter(run => run.installation_id === installationId && run.run_state !== "stopped");
 
+  function exportTelemetry() {
+    const payload = {node_id: node.id, current: richCurrent ?? null, capabilities: richCapabilities?.capabilities ?? [], workloads: richWorkloads ?? null};
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {type: "application/json"});
+    const urlFactory = URL as typeof URL & {createObjectURL?: (value: Blob) => string; revokeObjectURL?: (value: string) => void};
+    if (!urlFactory.createObjectURL) {
+      setRichError("Telemetry export is unavailable in this browser.");
+      return;
+    }
+    const link = document.createElement("a");
+    const objectUrl = urlFactory.createObjectURL(blob);
+    link.href = objectUrl;
+    link.download = `${node.id}-telemetry.json`;
+    link.click();
+    urlFactory.revokeObjectURL?.(objectUrl);
+  }
+
   function stopButton(run: VisualFleetNode["loaded"][number]) {
     if (run.run_state === "stopped") return null;
     const destination = run.member_node_ids.length === 1 ? "this Spark" : `${run.member_node_ids.length} Sparks`;
@@ -184,7 +400,7 @@ export function NodeDetail({
     return <button type="button" className="button secondary node-lifecycle-button" aria-label={`Remove ${installation.title} from ${destination}`} disabled={lifecycleBlocked} onClick={event => openLifecycleReview({kind: "uninstall", installationId: installation.installation_id}, event.currentTarget)}>Remove from {destination}</button>;
   }
 
-  return <LibraryNodeNamesProvider names={{[node.id]: name}}><aside className="node-detail" role="complementary" aria-labelledby={headingId}>
+  return <LibraryNodeNamesProvider names={{[node.id]: name}}><aside ref={detailRoot} className="node-detail" role="complementary" aria-labelledby={headingId}>
     <header className="node-detail-heading">
       <div>
         <h3 id={headingId}>{name} details</h3>
@@ -193,8 +409,13 @@ export function NodeDetail({
       <div>{onUpgrade && <><button type="button" className="secondary-button" onClick={onUpgrade}>Upgrade agent</button>{" "}</>}{onReenroll && <><button type="button" className="secondary-button" onClick={onReenroll}>Re-enroll</button>{" "}</>}<button ref={closeButton} type="button" className="secondary-button" aria-label={`Close ${name} details`} onClick={onClose}>Close</button></div>
     </header>
 
-    <section aria-labelledby={`${headingId}-overview`}>
-      <h4 id={`${headingId}-overview`}>Overview</h4>
+    <nav className="node-detail-tabs" aria-label={`${name} detail sections`} role="tablist">
+      {(["overview", "metrics", "workloads", "services", "events"] as DetailTab[]).map(tab => <button key={tab} type="button" role="tab" aria-selected={detailTab === tab} aria-controls={detailTab === tab ? `${headingId}-${tab}-panel` : undefined} id={`${headingId}-${tab}-tab`} className={detailTab === tab ? "is-active" : undefined} onClick={() => setDetailTab(tab)}>{tab[0].toUpperCase() + tab.slice(1)}</button>)}
+    </nav>
+    {detailTab !== "overview" && <div id={`${headingId}-${detailTab}-panel`} role="tabpanel" aria-labelledby={`${headingId}-${detailTab}-tab`}><RichTelemetryPanel tab={detailTab} current={richCurrent} capabilities={richCapabilities} history={history} rangeLabel={HISTORY_RANGES[range].label} workloads={richWorkloads} loading={richLoading} error={richError} paused={telemetryPaused} onRetry={() => setRichRetry(value => value + 1)} onPause={() => setTelemetryPaused(value => !value)} onExport={exportTelemetry}/></div>}
+
+    <section id={`${headingId}-overview-panel`} role="tabpanel" aria-labelledby={`${headingId}-overview-tab`}>
+      <h4 id={`${headingId}-overview-heading`}>Overview</h4>
       <dl className="detail-facts">
         <div><dt>Agent</dt><dd><StatusPill tone={node.connection.online_state === "online" ? "healthy" : "danger"}>{node.connection.online_state}</StatusPill> {node.connection.agent_state}</dd></div>
         <div><dt>Lifecycle</dt><dd>{node.lifecycle}</dd></div>
@@ -207,7 +428,7 @@ export function NodeDetail({
     </section>
 
     <section aria-labelledby={`${headingId}-recipes`}>
-      <div className="node-recipe-command"><div><h4 id={`${headingId}-recipes`}>Models and recipes</h4><p>Stop or remove what is here, or choose a model and exact recipe to install on this Spark.</p></div><a className="button" href={`/library?spark=${encodeURIComponent(node.id)}`}>Install model or recipe</a></div>
+      <div className="node-recipe-command"><div><h4 id={`${headingId}-recipes`}>Models and recipes</h4><p>Stop or remove what is here, or choose a model and exact recipe to download to the Controller.</p></div><a className="button" href={`/library?spark=${encodeURIComponent(node.id)}`}>Download to Library</a></div>
       {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={refreshLifecycle} operation={operation}/>}
       <div className="detail-recipe-columns">
         <section aria-label={`Loaded recipes in ${name} details`}><h5>Loaded now</h5>{loaded.length === 0 ? <p>Nothing is loaded now</p> : <ul>{loaded.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span>{stopButton(run)}</li>)}</ul>}</section>

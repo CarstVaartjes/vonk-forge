@@ -375,6 +375,27 @@ def is_immutable_image(image: str) -> bool:
     )
 
 
+def is_channel_image(image: str, channel: str | None = None) -> bool:
+    if "@" in image:
+        return False
+    if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
+        tags = (
+            ("dev", "latest")
+            if channel is None
+            else (("dev",) if channel == "dev" else ("latest",))
+        )
+        return (
+            re.fullmatch(
+                r"ghcr\.io/carstvaartjes/vonk-forge-(api|worker|hermes|litellm):("
+                + "|".join(tags)
+                + ")",
+                image,
+            )
+            is not None
+        )
+    return re.fullmatch(r"[a-z0-9][a-z0-9./_-]*:latest", image) is not None
+
+
 def run(
     command: list[str],
     *,
@@ -1492,8 +1513,10 @@ def exercise_compose(
         raise AcceptanceError("rendered Compose service topology is not canonical")
     images = run([*reference_compose(), "config", "--images"], cwd=bundle).stdout
     for image in images.splitlines():
-        if not is_immutable_image(image):
-            raise AcceptanceError(f"Compose image is not immutable: {image}")
+        if not is_channel_image(
+            image, parsed_environment(bundle).get("VONK_INSTALL_CHANNEL")
+        ):
+            raise AcceptanceError(f"Compose image does not follow its channel: {image}")
 
     try:
         try:
