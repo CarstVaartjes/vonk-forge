@@ -34,39 +34,6 @@ _JOB_ADAPTERS = frozenset(
 )
 _CONTROLLER_DISK_FLOOR_BYTES = 10_000_000_000
 _NODE_ID = re.compile(r"^spk_[0-9a-f]{32}$")
-_EU_JURISDICTIONS = frozenset(
-    {
-        "AT",
-        "BE",
-        "BG",
-        "HR",
-        "CY",
-        "CZ",
-        "DE",
-        "DK",
-        "EE",
-        "ES",
-        "FI",
-        "FR",
-        "GR",
-        "HU",
-        "IE",
-        "IT",
-        "LT",
-        "LU",
-        "LV",
-        "MT",
-        "NL",
-        "PL",
-        "PT",
-        "RO",
-        "SE",
-        "SI",
-        "SK",
-    }
-)
-
-
 class QualificationError(RuntimeError):
     """The runner cannot continue without violating a safety invariant."""
 
@@ -177,17 +144,6 @@ class RunnerOptions:
     allowed_node_ids: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
-        jurisdiction = self.jurisdiction
-        if jurisdiction is not None and (
-            len(jurisdiction) != 2
-            or not jurisdiction.isascii()
-            or not jurisdiction.isalpha()
-        ):
-            raise QualificationError(
-                "jurisdiction must be an uppercase ISO alpha-2 code"
-            )
-        if jurisdiction is not None and jurisdiction != jurisdiction.upper():
-            raise QualificationError("jurisdiction must be uppercase")
         if self.cleanup not in {"none", "stop", "uninstall"}:
             raise QualificationError("cleanup must be none, stop, or uninstall")
         if not 1 <= self.operation_timeout_seconds <= 86_400:
@@ -367,8 +323,11 @@ def _territorial_restrictions(
 
 
 def legal_blockers(
-    recipe: Mapping[str, object], jurisdiction: str | None
+    recipe: Mapping[str, object], jurisdiction: str | None = None
 ) -> list[Blocker]:
+    """Validate license metadata without enforcing territorial restrictions."""
+
+    del jurisdiction
     restrictions = _territorial_restrictions(recipe)
     if restrictions is None:
         return []
@@ -388,22 +347,9 @@ def legal_blockers(
                 "Resolved model license restrictions are malformed; qualification fails closed.",
             )
         ]
-    notice = restrictions.get("notice")
-    detail = (
-        str(notice)[:512]
-        if isinstance(notice, str) and notice
-        else "The model license restricts deployment by territory."
-    )
-    if jurisdiction is None:
-        return [
-            Blocker(
-                "license",
-                "license.jurisdiction_required",
-                "Operator jurisdiction is required for this restricted model.",
-            )
-        ]
-    if jurisdiction in denied or ("EU" in denied and jurisdiction in _EU_JURISDICTIONS):
-        return [Blocker("legal", "license.territory_denied", detail)]
+    # The declaration is retained and validated as catalog metadata.  The
+    # qualification runner has no reliable basis to determine an operator's
+    # territory, so these facts cannot block a plan or an execution smoke.
     return []
 
 
@@ -1172,7 +1118,6 @@ def build_plan(
             key: value.as_dict() for key, value in sorted(policy.items())
         },
         "options": {
-            "jurisdiction": options.jurisdiction,
             "cleanup": options.cleanup,
             "selected_recipes": sorted(options.selected_recipes),
             **(
@@ -1199,7 +1144,6 @@ def build_plan(
             "snapshot_sha256": _digest(fleet_fingerprint),
         },
         "options": {
-            "jurisdiction": options.jurisdiction,
             "cleanup": options.cleanup,
             **(
                 {"allowed_node_ids": sorted(options.allowed_node_ids)}
@@ -3059,7 +3003,6 @@ class QualificationRunner:
         intent_options = _object(intent.get("options"), "campaign intent options")
         if (
             intent_options.get("cleanup") != self.options.cleanup
-            or intent_options.get("jurisdiction") != self.options.jurisdiction
             or intent_options.get("selected_recipes")
             != sorted(self.options.selected_recipes)
             or intent_options.get("allowed_node_ids", [])

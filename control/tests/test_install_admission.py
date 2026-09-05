@@ -149,7 +149,7 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
     assert blocked.nodes[0].blockers[0].code == "install.insufficient_disk"
 
 
-def test_territorial_license_install_admission_is_fail_closed(tmp_path) -> None:
+def test_territorial_license_install_admission_is_informational(tmp_path) -> None:
     sessions, now, _node, mapping, build, sizes = setup(
         tmp_path,
         denied_jurisdictions=("EU", "GB", "KR"),
@@ -158,11 +158,14 @@ def test_territorial_license_install_admission_is_fail_closed(tmp_path) -> None:
     unconfigured = InstallAdmissionService(
         sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
     ).plan_install(mapping, build, now=now)
-    assert unconfigured.allowed is False
-    assert unconfigured.nodes[0].blockers[0].code == (
-        "install.license_jurisdiction_required"
+    assert unconfigured.allowed is True
+    assert not any(
+        blocker.code.startswith("install.license.")
+        for blocker in unconfigured.nodes[0].blockers
     )
-    assert "VONK_OPERATOR_JURISDICTION" in unconfigured.nodes[0].blockers[0].detail
+    assert unconfigured.nodes[0].warnings[0].code == (
+        "install.license_territorial_restrictions_informational"
+    )
 
     eu_member = InstallAdmissionService(
         sessions,
@@ -171,9 +174,10 @@ def test_territorial_license_install_admission_is_fail_closed(tmp_path) -> None:
         disk_floor_bytes=10,
         operator_jurisdiction="NL",
     ).plan_install(mapping, build, now=now)
-    assert eu_member.allowed is False
-    assert eu_member.nodes[0].blockers[0].code == ("install.license_territory_denied")
-    assert "NL" in eu_member.nodes[0].blockers[0].detail
+    assert eu_member.allowed is True
+    assert eu_member.nodes[0].warnings[0].code == (
+        "install.license_territorial_restrictions_informational"
+    )
 
     permitted = InstallAdmissionService(
         sessions,
@@ -183,7 +187,9 @@ def test_territorial_license_install_admission_is_fail_closed(tmp_path) -> None:
         operator_jurisdiction="US",
     ).plan_install(mapping, build, now=now)
     assert permitted.allowed is True
-    assert permitted.nodes[0].warnings[0].code == ("install.license_territory_checked")
+    assert permitted.nodes[0].warnings[0].code == (
+        "install.license_territorial_restrictions_informational"
+    )
 
 
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
