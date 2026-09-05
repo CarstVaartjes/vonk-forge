@@ -732,13 +732,17 @@ def _capability_digest(value: object) -> str | None:
 
 def _capability_provenance(
     *,
-    source_kind: Literal["model-version", "recipe-revision"],
+    source_kind: Literal[
+        "model-version", "recipe-revision", "model-capability-evidence"
+    ],
     publisher: object,
     slug: object,
     content_sha256: object,
     path: object,
     evidence_digest: object,
     revision_id: object = None,
+    source_url: object = None,
+    source_revision: object = None,
 ) -> LibraryCapabilityProvenance:
     return LibraryCapabilityProvenance(
         source_kind=source_kind,
@@ -748,6 +752,10 @@ def _capability_provenance(
         path=(None if path is None else _bounded_text(path, 256)),
         evidence_digest=_capability_digest(evidence_digest),
         revision_id=(None if revision_id is None else str(revision_id)),
+        source_url=(None if source_url is None else _bounded_text(source_url, 512)),
+        source_revision=(
+            None if source_revision is None else _bounded_text(source_revision, 80)
+        ),
     )
 
 
@@ -893,28 +901,155 @@ def _capability_inventory(
     )
 
 
+_MODEL_CAPABILITY_NAMES = frozenset(
+    {
+        "chat",
+        "text-generation",
+        "text-understanding",
+        "reasoning",
+        "tool-use",
+        "code-generation",
+        "ocr",
+        "image-generation",
+        "image-understanding",
+        "image-editing",
+        "video-generation",
+        "video-understanding",
+        "audio-generation",
+        "audio-understanding",
+        "embeddings",
+        "3d-generation",
+    }
+)
+
+
 def _model_capabilities(
     reference: Mapping[str, object],
+    document: Mapping[str, object] | None,
 ) -> LibraryCapabilityInventory:
-    """Keep model capability support unknown until catalog authority declares it."""
+    """Project only the accepted schema-2 model capability authority."""
 
+    provenance = _capability_provenance(
+        source_kind="model-version",
+        publisher=reference.get("publisher"),
+        slug=reference.get("slug"),
+        content_sha256=reference.get("content_sha256"),
+        path="capabilities" if document is not None else None,
+        evidence_digest=None,
+    )
+    raw = document.get("capabilities") if document is not None else None
+    if not isinstance(raw, Mapping):
+        return LibraryCapabilityInventory(
+            state="unknown",
+            provenance=provenance,
+            reasons=[
+                _reason(
+                    "model.capabilities_unknown",
+                    "The exact model-version has no accepted typed capability declaration.",
+                    "info",
+                )
+            ],
+        )
+    raw_provenance = raw.get("provenance")
+    if (
+        not isinstance(raw_provenance, Mapping)
+        or not isinstance(raw_provenance.get("source_url"), str)
+        or not raw_provenance.get("source_url", "").startswith("https://")
+        or not isinstance(raw_provenance.get("source_revision"), str)
+        or not isinstance(raw_provenance.get("evidence_digest"), str)
+    ):
+        return LibraryCapabilityInventory(
+            state="unknown",
+            provenance=provenance,
+            reasons=[
+                _reason(
+                    "model.capabilities_provenance_invalid",
+                    "The capability declaration does not identify the exact model-version.",
+                    "warning",
+                )
+            ],
+        )
+    facts: list[LibraryCapabilityFact] = []
+    invalid = 0
+    raw_facts = raw.get("facts")
+    for index, raw_fact in enumerate(raw_facts if isinstance(raw_facts, list) else []):
+        if not isinstance(raw_fact, Mapping):
+            invalid += 1
+            continue
+        capability = raw_fact.get("capability")
+        support = raw_fact.get("support")
+        evidence_status = raw_fact.get("evidence_status")
+        if capability not in _MODEL_CAPABILITY_NAMES:
+            invalid += 1
+            continue
+        if support not in {"supported", "unsupported", "unknown"}:
+            invalid += 1
+            support = "unknown"
+        if evidence_status not in {"declared", "tested", "contradicted", "unknown"}:
+            invalid += 1
+            evidence_status = "unknown"
+        evidence_digest = _capability_digest(raw_fact.get("evidence_digest"))
+        facts.append(
+            LibraryCapabilityFact(
+                capability=capability,
+                support=support,
+                evidence_status=evidence_status,
+                evidence_digest=evidence_digest,
+                provenance=_capability_provenance(
+                    source_kind="model-capability-evidence",
+                    publisher=reference.get("publisher"),
+                    slug=reference.get("slug"),
+                    content_sha256=reference.get("content_sha256"),
+                    path=f"capabilities.facts[{index}]",
+                    evidence_digest=evidence_digest,
+                    source_url=raw_provenance.get("source_url"),
+                    source_revision=raw_provenance.get("source_revision"),
+                ),
+            )
+        )
+    facts.sort(key=lambda item: (item.capability, item.support, item.evidence_status))
+    supports: dict[str, set[str]] = {}
+    for fact in facts:
+        supports.setdefault(fact.capability, set()).add(fact.support)
+    contradictory = any(len(values) > 1 for values in supports.values()) or any(
+        fact.evidence_status == "contradicted" for fact in facts
+    )
+    state: Literal["declared", "unknown", "contradictory"] = "declared"
+    if contradictory:
+        state = "contradictory"
+    elif not facts or all(fact.support == "unknown" for fact in facts):
+        state = "unknown"
+    reasons = []
+    if invalid:
+        reasons.append(
+            _reason(
+                "model.capabilities_invalid",
+                f"{invalid} model capability fact(s) were invalid and were not projected.",
+                "warning",
+            )
+        )
+    if not facts:
+        reasons.append(
+            _reason(
+                "model.capabilities_unknown",
+                "The exact model-version declares no usable capability facts.",
+                "info",
+            )
+        )
     return LibraryCapabilityInventory(
-        state="unknown",
+        state=state,
+        facts=facts[:_MAX_PROJECTED_CAPABILITIES],
         provenance=_capability_provenance(
-            source_kind="model-version",
+            source_kind="model-capability-evidence",
             publisher=reference.get("publisher"),
             slug=reference.get("slug"),
             content_sha256=reference.get("content_sha256"),
-            path=None,
-            evidence_digest=None,
+            path="capabilities.provenance",
+            evidence_digest=raw_provenance.get("evidence_digest"),
+            source_url=raw_provenance.get("source_url"),
+            source_revision=raw_provenance.get("source_revision"),
         ),
-        reasons=[
-            _reason(
-                "model.capabilities_unknown",
-                "The current model-version catalog contract has no accepted typed capability declaration.",
-                "info",
-            )
-        ],
+        reasons=reasons,
     )
 
 
@@ -1226,6 +1361,9 @@ class LibraryProjection:
             model_version_facts: dict[
                 tuple[str, str, str], LibraryModelVersionFacts
             ] = {}
+            model_capability_inventories: dict[
+                tuple[str, str, str], LibraryCapabilityInventory
+            ] = {}
             recipe_ids = [recipe.id for recipe, _revision in page]
             ranked_installations = (
                 select(
@@ -1487,7 +1625,6 @@ class LibraryProjection:
                     str(model["slug"]),
                     str(model["content_sha256"]),
                 )
-                model_capabilities = _model_capabilities(model)
                 model_key = (
                     str(model["publisher"]),
                     str(model["slug"]),
@@ -1497,6 +1634,17 @@ class LibraryProjection:
                 if model_version is None:
                     model_version = _model_version_facts(session, model)
                     model_version_facts[model_key] = model_version
+                model_capabilities = model_capability_inventories.get(model_key)
+                if model_capabilities is None:
+                    model_capabilities = _model_capabilities(
+                        model,
+                        (
+                            _resolved_model_version_reference(session, model)
+                            if model_version.state == "resolved"
+                            else None
+                        ),
+                    )
+                    model_capability_inventories[model_key] = model_capabilities
                 recipe_capabilities = _recipe_capabilities(recipe, revision, document)
                 capabilities = [
                     _bounded_text(item["adapter"], 64)
@@ -1569,12 +1717,9 @@ class LibraryProjection:
                         "content_sha256": content_sha256,
                     },
                     recipes=values,
-                    model_capabilities=_model_capabilities(
-                        {
-                            "publisher": publisher,
-                            "slug": slug,
-                        "content_sha256": content_sha256,
-                    }
+                    model_capabilities=model_capability_inventories.get(
+                        (publisher, slug, content_sha256),
+                        LibraryCapabilityInventory(),
                     ),
                     model_version=model_version_facts.get(
                         (publisher, slug, content_sha256)
@@ -1621,8 +1766,15 @@ class LibraryProjection:
                 model_version_document = _resolved_model_version_document(
                     session, document
                 )
-                model_capabilities = _model_capabilities(model_reference)
                 model_version = _model_version_facts(session, model_reference)
+                model_capabilities = _model_capabilities(
+                    model_reference,
+                    (
+                        model_version_document
+                        if model_version.state == "resolved"
+                        else None
+                    ),
+                )
                 recipe_capabilities = _recipe_capabilities(recipe, revision, document)
             else:
                 recipe_capabilities = _recipe_capabilities(
