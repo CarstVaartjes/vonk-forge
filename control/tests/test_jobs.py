@@ -206,27 +206,30 @@ def test_payload_is_bounded_and_rejects_credential_fields(service) -> None:
 @pytest.mark.parametrize(
     "payload",
     [
-        {"tokens_per_minute": "nested-secret"},
+        {"max_tokens": 512},
+        {"unfamiliar_token_parameter": "opaque"},
+        {"repeat": ""},
+        {"json": {"nested": [True, None, 3]}},
+        {"unicode": "日本語 🚲"},
         {"safe": {"tokens_per_minute": 10_000}},
-        {
-            "routes": {
-                "chat": {
-                    "quota": {
-                        "requests_per_minute": 30,
-                        "tokens_per_minute": "nested-secret",
-                    }
-                }
-            }
-        },
     ],
 )
-def test_token_named_fields_outside_validated_route_quota_are_sensitive(
-    service, payload: dict[str, object]
-) -> None:
+def test_opaque_engine_parameters_are_preserved(service, payload: dict[str, object]) -> None:
+    jobs, _ = service
+
+    job = jobs.enqueue("probe", "admin", "abc", ["spk_1"], payload)
+
+    assert job.payload == payload
+
+
+@pytest.mark.parametrize(
+    "field", ["token", "password", "api_key", "private-key", "database_password"]
+)
+def test_exact_secret_fields_are_rejected(service, field: str) -> None:
     jobs, _ = service
 
     with pytest.raises(ValueError, match="sensitive"):
-        jobs.enqueue("reconcile", "admin", "abc", ["spk_1"], payload)
+        jobs.enqueue("probe", "admin", "abc", ["spk_1"], {field: "secret-value"})
 
 
 def test_exact_bounded_reconciliation_route_quota_is_accepted(service) -> None:

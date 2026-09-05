@@ -95,12 +95,16 @@ def test_failure_evidence_is_bounded_and_secret_free() -> None:
             "error_code": "transfer_failed",
             "summary": "download failed",
             "token": "do-not-persist",
+            "max_tokens": 512,
+            "unfamiliar_token_parameter": "opaque",
             "detail": "x" * 5000,
             "nested": {"authorization": "hidden", "reason": "network"},
         }
     )
     assert "token" not in safe
     assert "authorization" not in str(safe)
+    assert safe["max_tokens"] == 512
+    assert safe["unfamiliar_token_parameter"] == "opaque"
     assert len(safe["detail"]) == 1024
     assert len(canonical_message(safe)) <= 8192
 
