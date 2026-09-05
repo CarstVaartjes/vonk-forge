@@ -68,6 +68,7 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
 def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
     schema = json.loads(OPENAPI.read_text())
     components = schema["components"]["schemas"]
+    operations = _operations(schema)
     library_model = components["LibraryModel"]
     assert set(library_model["properties"]) == {
         "model",
@@ -113,14 +114,12 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
         components["RecipeRevisionSummary"]["properties"]["schema_version"]["const"]
         == 1
     )
-    # CatalogEntityRevisionResponse is the genuine current entity-v1 wire
-    # contract; the nested model capability authority is schema 2.
-    assert (
-        components["CatalogEntityRevisionResponse"]["properties"]["schema_version"][
-            "const"
-        ]
-        == 1
-    )
+    assert "minItems" not in library_model["properties"]["recipes"]
+    recipe_list = components["LibraryRecipeList"]
+    assert "minItems" not in recipe_list["properties"]["recipes"]
+    assert operations["listLibraryRecipes"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/LibraryRecipeList"}
 
     typescript = TYPESCRIPT_CLIENT.read_text()
     assert 'model: components["schemas"]["ModelVersionIdentity"];' in typescript

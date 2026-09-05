@@ -15,6 +15,7 @@ from .library_contract import (
     LibraryCapabilityInventory,
     LibraryModel,
     LibraryRecipeDetail,
+    LibraryRecipeList,
     LibraryRecipeSummary,
     LibrarySnapshot,
     ModelVersionIdentity,
@@ -295,4 +296,34 @@ class LibraryProjection:
             model_capabilities=LibraryCapabilityInventory(),
             recipe_capabilities=LibraryCapabilityInventory(),
             model_version=None,
+        )
+
+    def recipes(
+        self, *, limit: int = 100, cursor: str | None = None
+    ) -> LibraryRecipeList:
+        if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
+            raise ValueError("library recipe limit is invalid")
+        if cursor is not None:
+            raise ValueError("canonical library recipe cursor is unsupported")
+        with self._sessions() as session:
+            revisions = list(
+                session.scalars(
+                    select(CatalogDocumentRevision)
+                    .where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.state == "active",
+                    )
+                    .order_by(
+                        CatalogDocumentRevision.publisher,
+                        CatalogDocumentRevision.slug,
+                        CatalogDocumentRevision.content_digest,
+                    )
+                    .limit(limit)
+                )
+            )
+        return LibraryRecipeList(
+            generated_at=_utc(self._clock()),
+            recipes=[_canonical_recipe_summary(revision) for revision in revisions],
+            next_cursor=None,
+            freshness_policy=self._freshness,
         )

@@ -17,8 +17,8 @@ from vonk_control.models import Base
 
 ROOT = Path(
     os.environ.get(
-        "VONK_RECIPE_CANDIDATE_ROOT",
-        "/private/tmp/vonk-forge-recipes-contract-conversion-final",
+        "VONK_LIBRARY_CORPUS_ROOT",
+        "/private/tmp/vonk-forge-recipes-qwen38-vllm-main57",
     )
 )
 
@@ -52,11 +52,14 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     assert len(snapshot.models) == 92
     assert len(snapshot.unlinked_recipes) == 0
     assert sum(bool(model.recipes) for model in snapshot.models) == 79
+    assert sum(not model.recipes for model in snapshot.models) == 13
     assert {
         recipe.recipe_id
         for model in snapshot.models
         for recipe in model.recipes
     } == recipe_ids
+    recipe_overview = projection.recipes(limit=100)
+    assert len(recipe_overview.recipes) == 85
 
     app = FastAPI()
     install_library_routes(
@@ -70,6 +73,13 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     payload = response.json()
     assert len(payload["models"]) == 92
     assert sum(bool(model["recipes"]) for model in payload["models"]) == 79
+    assert sum(not model["recipes"] for model in payload["models"]) == 13
+    assert any(model["recipes"] == [] for model in payload["models"])
+    library_model_schema = app.openapi()["components"]["schemas"]["LibraryModel"]
+    assert "minItems" not in library_model_schema["properties"]["recipes"]
+    recipe_response = client.get("/api/v1/library/recipes")
+    assert recipe_response.status_code == 200
+    assert len(recipe_response.json()["recipes"]) == 85
     recipe_id = payload["models"][0]["recipes"][0]["recipe_id"]
     detail = client.get(f"/api/v1/library/recipes/{recipe_id}")
     assert detail.status_code == 200
