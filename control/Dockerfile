@@ -13,6 +13,7 @@ WORKDIR /build
 COPY pyproject.toml /vonk-cluster-profiles/
 COPY src/cluster_profiles /vonk-cluster-profiles/src/cluster_profiles
 COPY control/pyproject.toml ./
+COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 COPY control/src ./src
 COPY control/alembic.ini ./alembic.ini
 COPY control/migrations ./migrations
@@ -22,9 +23,14 @@ COPY schemas/global/recipe-v1.schema.json /schemas/global/recipe-v1.schema.json
 COPY schemas/global/test-report-v1.schema.json /schemas/global/test-report-v1.schema.json
 COPY config/execution-harnesses /config/execution-harnesses
 COPY --from=web /web/dist ./src/vonk_control/web
-COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/
+COPY agent_protocol /agent-protocol
+COPY inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl /wheels/
+RUN python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /agent-protocol \
+    && test "$(sha256sum /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')"
 RUN python -m pip install --no-cache-dir --prefix=/install \
-    /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /vonk-cluster-profiles .
+    /wheels/vonk_agent_protocol-*.whl \
+    /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl \
+    /vonk-cluster-profiles .
 
 FROM ${PYTHON_IMAGE} AS runtime-root
 RUN groupadd --gid 10001 control \
