@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -47,3 +49,46 @@ def test_shard_selection_validates_bounds_and_applies_prefix() -> None:
     ]
     with pytest.raises(ValueError, match="within"):
         module.select_files(node_ids, index=2, total=2)
+
+
+def test_historical_durations_balance_files_and_leave_new_files_deterministic() -> None:
+    module = _module()
+    node_ids = [
+        *(f"tests/slow.py::test_{index}" for index in range(2)),
+        "tests/medium.py::test_one",
+        "tests/new.py::test_one",
+    ]
+    durations = {"tests/slow.py": 10.0, "tests/medium.py": 3.0}
+
+    shards = [
+        module.select_files(node_ids, index=index, total=2, durations=durations)
+        for index in range(2)
+    ]
+
+    assert shards == [["tests/slow.py"], ["tests/medium.py", "tests/new.py"]]
+
+
+def test_duration_loader_rejects_unknown_schema_and_stale_data(tmp_path: Path) -> None:
+    module = _module()
+    path = tmp_path / "durations.json"
+    old = datetime.now(UTC) - timedelta(hours=3)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 99,
+                "generated_at": old.isoformat(),
+                "files": {"tests/a.py": 4},
+            }
+        )
+    )
+    assert module.load_durations(path) == {}
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generated_at": old.isoformat(),
+                "files": {"tests/a.py": 4},
+            }
+        )
+    )
+    assert module.load_durations(path, max_age_hours=2) == {}
