@@ -205,7 +205,6 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     )
 
     assert '"vonk-agent-protocol==2.2.0"' in control_project
-    assert '"oras==0.2.43"' in control_project
     assert protocol_sources == [{"directory": "../agent_protocol"}]
     assert contract_package["source"] == {
         "path": "../inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
@@ -336,7 +335,7 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() 
             "python",
             image,
             "-c",
-            "import importlib.metadata, json; from importlib.resources import files; from vonk_agent_protocol import DistributionObject; from vonk_forge_contracts import ModelDefinition, RecipeDefinition; import oras; recipe = json.loads(files('vonk_forge_contracts').joinpath('examples/recipe-image.json').read_text()); RecipeDefinition.model_validate(recipe); print(json.dumps({'protocol': importlib.metadata.version('vonk-agent-protocol'), 'contracts': importlib.metadata.version('vonk-forge-public-contracts'), 'oras': importlib.metadata.version('oras'), 'model': ModelDefinition.__name__, 'recipe': RecipeDefinition.__name__, 'distribution': DistributionObject.__name__}))",
+            "import importlib.metadata, json; from importlib.resources import files; from vonk_agent_protocol import DistributionObject; from vonk_forge_contracts import ModelDefinition, RecipeDefinition; recipe = json.loads(files('vonk_forge_contracts').joinpath('examples/recipe-image.json').read_text()); RecipeDefinition.model_validate(recipe); print(json.dumps({'protocol': importlib.metadata.version('vonk-agent-protocol'), 'contracts': importlib.metadata.version('vonk-forge-public-contracts'), 'model': ModelDefinition.__name__, 'recipe': RecipeDefinition.__name__, 'distribution': DistributionObject.__name__}))",
         ],
         check=True,
         capture_output=True,
@@ -347,7 +346,6 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() 
     assert installed == {
         "protocol": "2.2.0",
         "contracts": "0.1.0",
-        "oras": "0.2.43",
         "model": "ModelDefinition",
         "recipe": "RecipeDefinition",
         "distribution": "DistributionObject",
