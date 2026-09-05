@@ -151,11 +151,12 @@ def _stage_optional_private_key(
     source = Path(source)
     destination = Path(destination)
     # Compose uses /dev/null as the bounded default for an unset optional
-    # secret. Treat only this exact character device as an absent secret.
-    source_is_absent = source == Path("/dev/null") or not source.exists()
-    if source.is_symlink() or (
-        not source_is_absent and not source.is_file()
-    ):
+    # secret. A bind mount appears at /run/secrets/hf-token, so identify it by
+    # its zero-length character-device type and exact Linux null-device ID.
+    if source.is_symlink():
+        raise RuntimeSecretError("optional runtime secret source is unsafe")
+    source_is_absent = _is_null_device(source) or not source.exists()
+    if not source_is_absent and not source.is_file():
         raise RuntimeSecretError("optional runtime secret source is unsafe")
     if source_is_absent or source.stat().st_size == 0:
         if destination.exists() or destination.is_symlink():
@@ -169,6 +170,19 @@ def _stage_optional_private_key(
         owner_uid=owner_uid,
         owner_gid=owner_gid,
         mode=mode,
+    )
+
+
+def _is_null_device(source: Path) -> bool:
+    try:
+        metadata = source.stat()
+    except OSError:
+        return False
+    return bool(
+        stat.S_ISCHR(metadata.st_mode)
+        and metadata.st_size == 0
+        and os.major(metadata.st_rdev) == 1
+        and os.minor(metadata.st_rdev) == 3
     )
 
 
