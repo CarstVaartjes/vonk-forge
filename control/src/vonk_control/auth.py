@@ -79,11 +79,6 @@ MUTATION_ROLES = {
     # preview calls too: previews accept untrusted source documents and are
     # part of the same explicitly audited authorization surface.
     ("POST", "/api/v1/catalog/recipes"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/entities"): frozenset({"administrator"}),
-    ("PUT", "/api/v1/catalog/entities/{entity_id}/draft"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/entities/{entity_id}/resolve"): frozenset(
-        {"administrator"}
-    ),
     ("PUT", "/api/v1/catalog/recipes/{recipe_id}/draft"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/recipes/{recipe_id}/resolve"): frozenset(
         {"administrator"}
@@ -93,8 +88,6 @@ MUTATION_ROLES = {
         {"administrator"}
     ),
     ("POST", "/api/v1/catalog/imports/workload_run"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/global/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/global"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/public/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/public"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/recipe-library"): frozenset({"administrator"}),
