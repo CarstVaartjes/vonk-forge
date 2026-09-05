@@ -168,13 +168,7 @@ class DistributionAssignment:
         return frozenset(item.sha256 for item in self.objects)
 
 
-# Names used by downstream integrations while the contract is converged.
-ArtifactDistributionObject = DistributionObject
-ArtifactDistributionAssignment = DistributionAssignment
-
 __all__ = [
-    "ArtifactDistributionAssignment",
-    "ArtifactDistributionObject",
     "DistributionAssignment",
     "DistributionObject",
 ]

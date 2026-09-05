@@ -424,10 +424,16 @@ pub struct DistributionObject {
 
 impl DistributionObject {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        if self.name.is_empty()
-            || self.name.len() > 512
-            || self.name.starts_with('/')
-            || self.name.contains(['\\', '\0', '\r', '\n'])
+        let valid_name = self.name.len() <= 512
+            && self
+                .name
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphanumeric)
+            && self.name.as_bytes()[1..].iter().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'-')
+            });
+        if !valid_name
             || self
                 .name
                 .split('/')
@@ -2081,5 +2087,57 @@ mod recipe_run_inspection_tests {
         );
         replay_shaped.claims.node_id = "wrong".to_owned();
         assert!(replay_shaped.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod distribution_tests {
+    use super::*;
+
+    fn assignment() -> DistributionAssignment {
+        DistributionAssignment {
+            schema_version: 2,
+            assignment_id: Uuid::new_v4(),
+            plan_digest: "a".repeat(64),
+            generation: 3,
+            node_id: "spk_".to_owned() + &"b".repeat(32),
+            expires_at: DateTime::parse_from_rfc3339("2026-09-05T12:00:00+00:00").unwrap(),
+            model_artifact_set_sha256: "c".repeat(64),
+            objects: vec![
+                DistributionObject {
+                    name: "weights/model.bin".to_owned(),
+                    sha256: "d".repeat(64),
+                    bytes: 13,
+                    kind: "model".to_owned(),
+                },
+                DistributionObject {
+                    name: "image.oci.tar".to_owned(),
+                    sha256: "e".repeat(64),
+                    bytes: 11,
+                    kind: "oci-archive".to_owned(),
+                },
+            ],
+            oci_image_digest: "sha256:".to_owned() + &"f".repeat(64),
+            oci_archive_sha256: "e".repeat(64),
+        }
+    }
+
+    #[test]
+    fn assignment_serde_round_trip_matches_python_wire_shape() {
+        let value = assignment();
+        value.validate().unwrap();
+        let encoded = serde_json::to_value(&value).unwrap();
+        let decoded: DistributionAssignment = serde_json::from_value(encoded.clone()).unwrap();
+        assert_eq!(decoded, value);
+        assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+    }
+
+    #[test]
+    fn object_name_validation_matches_python_boundary() {
+        let mut value = assignment();
+        value.objects[0].name = "weights/model bin".to_owned();
+        assert!(value.validate().is_err());
+        value.objects[0].name = "../model.bin".to_owned();
+        assert!(value.validate().is_err());
     }
 }
