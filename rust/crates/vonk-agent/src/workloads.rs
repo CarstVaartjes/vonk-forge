@@ -493,10 +493,10 @@ fn validate_runtime_writable_paths(
             }
             continue;
         }
-        if let Some((_, expected_value)) = expected.iter().find(|(name, _)| *name == item.name) {
-            if item.value.as_ref().and_then(ArgumentValue::as_string) != Some(*expected_value) {
-                return Err(WorkloadError::Invalid("runtime writable environment"));
-            }
+        if let Some((_, expected_value)) = expected.iter().find(|(name, _)| *name == item.name)
+            && item.value.as_ref().and_then(ArgumentValue::as_string) != Some(*expected_value)
+        {
+            return Err(WorkloadError::Invalid("runtime writable environment"));
         }
     }
     Ok(())
