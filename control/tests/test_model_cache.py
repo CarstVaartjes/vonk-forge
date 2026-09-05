@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,9 +27,9 @@ from vonk_control.model_cache_contract import (
 )
 from vonk_control.models import (
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     FleetProfile,
-    LocalRecipe,
-    LocalRecipeRevision,
     ModelCacheArtifact,
 )
 from vonk_control.worker import Worker
@@ -507,33 +508,51 @@ def test_protection_is_derived_from_durable_references_and_blocks_eviction(
         model_version_sha256=model,
         request_key="00000000-0000-4000-8000-000000000008",
     ).artifact_set_sha256 or ""
-    recipe_id = "00000000-0000-4000-8000-000000000021"
     recipe_revision_id = "00000000-0000-4000-8000-000000000022"
+    recipe_document = {
+        "kind": "recipe",
+        "models": [
+            {
+                "id": "primary",
+                "model": {
+                    "kind": "model",
+                    "publisher": "owner",
+                    "slug": "model",
+                    "content_sha256": model,
+                },
+                "files": [{"id": "weights", "file_id": "weights", "roles": ["model"]}],
+            }
+        ],
+    }
+    recipe_digest = hashlib.sha256(
+        json.dumps(recipe_document, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     with sessions.begin() as session:
         session.add(
-            LocalRecipe(
-                id=recipe_id,
+            CatalogDocument(
+                id="00000000-0000-4000-8000-000000000021",
+                kind="recipe",
+                publisher="owner",
                 slug="protected-recipe",
                 title="Protected recipe",
-                description="",
-                source_kind="local",
                 created_by="test",
                 created_at=NOW,
                 updated_at=NOW,
             )
         )
         session.add(
-            LocalRecipeRevision(
+            CatalogDocumentRevision(
                 id=recipe_revision_id,
-                recipe_id=recipe_id,
+                document_id="00000000-0000-4000-8000-000000000021",
+                kind="recipe",
+                publisher="owner",
+                slug="protected-recipe",
                 revision_number=1,
-                lifecycle="resolved",
+                state="active",
                 schema_version=2,
-                document={
-                    "model": {"content_sha256": model},
-                    "dependencies": [],
-                },
-                content_sha256="f" * 64,
+                document=recipe_document,
+                content_digest=recipe_digest,
+                projected={},
                 created_by="test",
                 created_at=NOW,
             )
