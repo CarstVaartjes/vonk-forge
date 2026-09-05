@@ -93,6 +93,7 @@
     "devices": [],
     "capabilities": [],
     "host_network": false,
+    "network_mode": "none",
     "privileged": false,
     "user": "10001:10001",
     "mounts": [

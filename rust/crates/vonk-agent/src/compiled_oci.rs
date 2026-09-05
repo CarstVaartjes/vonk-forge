@@ -162,8 +162,12 @@ impl CompiledOciInvocation {
             }
             arguments.extend(["--mount".to_owned(), value]);
         }
+        let Some(executable) = self.command.first() else {
+            return arguments;
+        };
+        arguments.extend(["--entrypoint".to_owned(), executable.clone()]);
         arguments.push(self.image.clone());
-        arguments.extend(self.command.iter().cloned());
+        arguments.extend(self.command.iter().skip(1).cloned());
         arguments
     }
 }
@@ -330,6 +334,7 @@ fn validate_security(plan: &CompiledExecutionPlan) -> Result<(), CompiledOciErro
         || !plan.security.capabilities.is_empty()
         || !plan.security.read_only_root
         || !plan.security.no_new_privileges
+        || plan.security.network_mode != "none"
     {
         return Err(CompiledOciError::Invalid("security override"));
     }
@@ -531,7 +536,11 @@ mod tests {
             .iter()
             .position(|item| item == &plan.runtime.image_digest)
             .unwrap();
-        assert_eq!(&podman[image_index + 1..], &invocation.command);
+        assert_eq!(
+            &podman[image_index - 2..image_index],
+            ["--entrypoint", "/opt/vonk/bin/vllm"]
+        );
+        assert_eq!(&podman[image_index + 1..], &plan.runtime.argv);
         assert!(
             podman
                 .windows(2)
