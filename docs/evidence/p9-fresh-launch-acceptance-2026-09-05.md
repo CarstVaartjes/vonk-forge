@@ -1,109 +1,83 @@
 # P9 fresh-launch acceptance evidence
 
 This evidence belongs to the isolated `codex/p9-launch-acceptance` checkout.
-The base is `codex/interface-integration` at
-`49124cc33261877b02fdc8d8f2f243eb37b9e04a`. The test owner only added
-`control/tests/test_p9_fresh_launch_acceptance.py` and this evidence file.
+The integrated base is `codex/interface-integration` at
+`8930f9fbef2bd3bb2889450bf0dfb46c0edbcd4e`. The P9 commits only add this
+evidence and `control/tests/test_p9_fresh_launch_acceptance.py`.
 
-The acceptance consumes the existing immutable evidence and cache paths:
+The acceptance consumes the supplied verified publication receipt and cache:
 
 - `/private/tmp/vonk-production-reader-corpus-evidence.json`
 - `/private/tmp/vonk-canonical-import-corpus-evidence.json`
-- the production reader `cache_root` named by the first file
+- the production reader `cache_root` named by the first receipt
 
-The index is schema 2 for `CarstVaartjes/vonk-forge-recipes`, publication
-commit `2001c6502bfdc66141dd7224bfde5d77734e9959`, and currently contains 92
-Models and 84 Recipes. The package archives contain 81 distinct Model
-snapshots, leaving 11 valid Models without a matching Recipe. The test derives
-the catalog and package counts from the index so additions do not require
-rewriting the assertions.
+The receipt currently describes a schema-2 index for
+`CarstVaartjes/vonk-forge-recipes` with 92 Models and 84 Recipes. Package
+archives currently carry 81 distinct Model snapshots, leaving 11 valid Models
+without a matching Recipe. Those values are evidence of this receipt, not
+test constants: the test validates the supplied publication SHA-1, derives all
+catalog/package/selector sets from the index, and compares every database/API
+count to those derived sets. A newer verified receipt and snapshot can be
+supplied through `VONK_CATALOG_CORPUS_EVIDENCE` without editing the test.
 
-## Checks run
+## OrbStack lane
 
-Using the existing control virtual environment and a task-specific cache:
-
-```text
-/opt/vonk-forge/control/.venv/bin/pytest -q \
-  control/tests/test_p9_fresh_launch_acceptance.py -k 'corpus or snapshot'
-3 passed
-
-/opt/vonk-forge/control/.venv/bin/pytest -q \
-  control/tests/test_p9_fresh_launch_acceptance.py
-3 passed, 1 skipped
-
-PYTHONPATH=/private/tmp/vonk-forge-recipes-publication-acceptance/contracts/src:\
-/private/tmp/vonk-forge-p9-launch-acceptance/control/src:\
-/private/tmp/vonk-forge-p9-launch-acceptance/src \
-  /opt/vonk-forge/control/.venv/bin/pytest -q \
-  control/tests/test_p9_fresh_launch_acceptance.py
-3 passed, 1 skipped
-
-The same explicit candidate-contract path allows the pre-existing connected
-catalog acceptance to collect:
-
-```text
-PYTHONPATH=/private/tmp/vonk-forge-recipes-publication-acceptance/contracts/src:\
-/private/tmp/vonk-forge-p9-launch-acceptance/control/src:\
-/private/tmp/vonk-forge-p9-launch-acceptance/src \
-  /opt/vonk-forge/control/.venv/bin/pytest -q \
-  control/tests/test_controller_catalog_postgres_acceptance.py
-2 passed, 1 skipped
-```
-```
-
-The passing checks validate canonical index closure, the 11 unlinked Model
-invariant, every package archive’s expected byte count and SHA-256, and the
-promoted durable `snapshot.json` state. The connected PostgreSQL/API test is
-the skipped test.
-
-The requested OrbStack lane is currently unavailable:
+The lightweight disposable lane ran against the restored engine:
 
 ```text
 docker context show
 orbstack
-docker info
-failed to connect to the docker API at
-unix:///Users/carstvaartjes/.orbstack/run/docker.sock
+docker info --format 'server={{.ServerVersion}} os={{.OperatingSystem}} arch={{.Architecture}}'
+server=29.4.0 os=OrbStack arch=aarch64
+docker ps
+<empty>
 ```
 
-Before the integrated profile change, the pre-existing connected acceptance
-was attempted with only the checked-out platform source on `PYTHONPATH`:
+No Rust or OCI builds were run. The PostgreSQL fixture created and removed its
+own temporary container and database. The package acceptance uses symlinked
+verified cache prefixes in its private pytest directory, so the production
+cache bytes and durable snapshot are not modified. The production cache was
+checked after the run and had no `snapshot.candidate.json` left behind.
+
+## Checks run
+
+The pinned control environment was run with the explicit editable contracts
+candidate because the frozen Git dependency is not reachable in this host:
 
 ```text
-PYTHONPATH=/private/tmp/vonk-forge-p9-launch-acceptance/control/src:/private/tmp/vonk-forge-p9-launch-acceptance/src \
-  /opt/vonk-forge/control/.venv/bin/pytest -q \
+PYTHONPATH=/private/tmp/vonk-forge-recipes-publication-acceptance/contracts/src:\
+/private/tmp/vonk-forge-p9-launch-acceptance/control/src:\
+/private/tmp/vonk-forge-p9-launch-acceptance/src \
+  /opt/vonk-forge/control/.venv/bin/pytest -q -rs \
+  control/tests/test_p9_fresh_launch_acceptance.py
+4 passed
+```
+
+This covers fresh PostgreSQL migration/import, exact Model/Recipe closure,
+package hashes and snapshot state, no legacy catalog entity routes, public
+recipe projection, canonical Library model-to-recipe list pairs, canonical
+recipe detail pairs, and the offline snapshot boundary.
+
+The corroborating pre-existing connected acceptance also passed:
+
+```text
+PYTHONPATH=/private/tmp/vonk-forge-recipes-publication-acceptance/contracts/src:\
+/private/tmp/vonk-forge-p9-launch-acceptance/control/src:\
+/private/tmp/vonk-forge-p9-launch-acceptance/src \
+  /opt/vonk-forge/control/.venv/bin/pytest -q -rs \
   control/tests/test_controller_catalog_postgres_acceptance.py
+3 passed
 ```
 
-That stale environment collected with the following blocker:
+That lane independently verifies the raw publication reader, fresh
+PostgreSQL import of the complete corpus, and offline restart continuation.
+Ruff and `git diff --check` also pass.
 
-```text
-ImportError: cannot import name 'validate_model_references'
-from 'vonk_forge_contracts.resolver'
-```
+The earlier stale environment had failed collection because its installed
+contracts package lacked `validate_model_references`. Supplying the integrated
+candidate contracts source resolves that mismatch. A normal frozen `uv run`
+still attempts the pinned GitHub dependency and is network-blocked here; no
+synthetic success was used.
 
-The first `uv run --project control --frozen --with-editable .` attempt is
-also network-blocked while trying to fetch the pinned contract commit from
-GitHub. No synthetic PostgreSQL/API success is claimed.
-
-## Rerun after integration
-
-The integrated profile change removes that import mismatch. With the
-published contracts candidate source available and OrbStack healthy, run:
-
-```text
-UV_CACHE_DIR=/private/tmp/vonk-p9-uv-cache \
-  uv run --project control --frozen --with-editable . pytest -q \
-  control/tests/test_p9_fresh_launch_acceptance.py \
-  control/tests/test_controller_catalog_postgres_acceptance.py
-```
-
-If the frozen environment still resolves the old Git dependency, prepend the
-candidate contract source explicitly as in the passing `PYTHONPATH` command
-above, or install that candidate into the task environment before rerunning.
-
-That connected lane will create a disposable PostgreSQL database, migrate a
-fresh schema, import the complete Model/Recipe corpus, verify public list and
-local detail model-to-recipe identities, and exercise the package snapshot
-after publication becomes offline. It does not qualify runtime inference,
-NVIDIA hardware, Spark behavior, or physical acceptance.
+No runtime inference, NVIDIA hardware, Spark behavior, or physical acceptance
+is claimed.
