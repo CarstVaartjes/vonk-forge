@@ -4405,6 +4405,39 @@ def _validate_artifact_execution(
         raise RunSwitchOperationConflict(
             f"run-switch.{phase.kind}-returned-invalid-evidence"
         )
+    if phase.kind == "transfer" and phase.subphase == "model-download":
+        preparation = plan.preparation
+        expected_set = (
+            preparation.model.artifact_set_sha256
+            if preparation is not None
+            else None
+        )
+        if result.get("artifact_set_sha256") != expected_set:
+            raise RunSwitchOperationConflict(
+                "run-switch.model-download-artifact-set-mismatch"
+            )
+        if result.get("coverage") != "complete":
+            raise RunSwitchOperationConflict(
+                "run-switch.model-download-coverage-incomplete"
+            )
+        expected_bytes = (
+            preparation.model.artifact_set_bytes
+            if preparation is not None
+            else None
+        )
+        completed = result.get("downloaded_bytes")
+        total = result.get("total_bytes")
+        if (
+            type(expected_bytes) is not int
+            or type(completed) is not int
+            or type(total) is not int
+            or completed != expected_bytes
+            or total != expected_bytes
+        ):
+            raise RunSwitchOperationConflict(
+                "run-switch.model-download-byte-evidence-mismatch"
+            )
+        return
     if phase.kind == "verify":
         if result.get("verified") is not True:
             raise RunSwitchOperationConflict(

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, timedelta
-from typing import Any, Mapping
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -15,6 +16,7 @@ from vonk_agent_protocol import DistributionAssignment, DistributionObject, cano
 from .agent_jobs import AgentJobService
 from .distribution import DistributionError, DistributionService
 from .models import AgentOperation, AgentOperationAttempt, Job, RecipeBuild
+from .model_cache import ModelCacheNotFound
 from .run_switch_contract import RunSwitchPhase, RunSwitchPlan
 from .run_switch_operations import PhaseExecution
 
@@ -531,4 +533,140 @@ class DurableDistributionPhaseExecutor:
         return hashlib.sha256(canonical_message(value)).hexdigest()
 
 
-__all__ = ["DurableDistributionPhaseExecutor"]
+class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
+    """Run the Controller cache child before Spark target distribution."""
+
+    def __init__(self, *args: Any, model_cache: object, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._model_cache = model_cache
+
+    def execute(
+        self,
+        plan: RunSwitchPlan,
+        phase: RunSwitchPhase,
+        *,
+        item_index: int,
+        actor: str,
+        request_key: str,
+        progress: Mapping[str, object],
+    ) -> PhaseExecution:
+        if phase.subphase != "model-download":
+            return super().execute(
+                plan,
+                phase,
+                item_index=item_index,
+                actor=actor,
+                request_key=request_key,
+                progress=progress,
+            )
+        if phase.kind != "transfer" or item_index != 0:
+            raise RuntimeError("invalid model-download phase")
+        preparation = plan.preparation
+        if preparation is None:
+            raise RuntimeError("exact model preparation is unavailable")
+        model = preparation.model
+        preview_method = getattr(self._model_cache, "download_preview", None)
+        start_method = getattr(self._model_cache, "start_download", None)
+        if not callable(preview_method) or not callable(start_method):
+            raise RuntimeError("model-cache download provider is unavailable")
+        # An exact persisted set is sufficient to resolve the opaque manifest.
+        # When a recipe revision ID is available, include the model pin as an
+        # additional cross-check; never send both recipe ID and recipe digest.
+        pins: dict[str, object] = {
+            "artifact_set_sha256": model.artifact_set_sha256,
+        }
+        if plan.recipe_revision_id is not None:
+            pins.update(
+                model_version_sha256=model.model_version_sha256,
+                recipe_revision_id=plan.recipe_revision_id,
+            )
+        preview = preview_method(**pins)
+        if (
+            not isinstance(preview, Mapping)
+            or preview.get("artifact_set_sha256") != model.artifact_set_sha256
+            or not isinstance(preview.get("plan_digest"), str)
+            or len(preview["plan_digest"]) != 64
+            or preview.get("artifact_count") != model.artifact_count
+            or preview.get("expected_bytes") != model.artifact_set_bytes
+        ):
+            raise RuntimeError("model-cache download preview is not exact")
+        manifest = preview.get("_manifest")
+        if getattr(manifest, "recipe_revision_sha256", None) != model.recipe_revision_sha256:
+            raise RuntimeError("model-cache manifest recipe identity is not exact")
+        blockers = preview.get("blockers", [])
+        if isinstance(blockers, Sequence) and not isinstance(blockers, (str, bytes, bytearray)) and blockers:
+            raise RuntimeError("model-cache download is blocked: " + "; ".join(map(str, blockers)))
+        expected_bytes = preview.get("expected_bytes")
+        if type(expected_bytes) is not int or expected_bytes < 1:
+            raise RuntimeError("model-cache download total is unavailable")
+        if preview.get("new_bytes") == 0:
+            return PhaseExecution(result={
+                "skipped": True,
+                "coverage": "complete",
+                "artifact_set_sha256": model.artifact_set_sha256,
+                "downloaded_bytes": expected_bytes,
+                "total_bytes": expected_bytes,
+            })
+        cache_request_key = str(uuid.uuid5(uuid.UUID(request_key), f"model-download:{phase.index}:{model.artifact_set_sha256}"))
+        view = start_method(
+            actor=actor,
+            request_key=cache_request_key,
+            plan_digest=preview["plan_digest"],
+            **pins,
+        )
+        return PhaseExecution(operation_id=view.id, result=self._cache_result(view))
+
+    def get(self, operation_id: str) -> Any:
+        getter = getattr(self._model_cache, "get_operation", None)
+        if callable(getter):
+            try:
+                view = getter(operation_id)
+                return _ChildView(
+                    state=self._cache_state(view.state),
+                    result=self._cache_result(view),
+                )
+            except ModelCacheNotFound:
+                pass
+        return super().get(operation_id)
+
+    @staticmethod
+    def _cache_state(state: object) -> str:
+        if state in {"downloading", "verifying", "partial"}:
+            return "running"
+        if state in {"queued", "succeeded", "failed"}:
+            return str(state)
+        return "unknown"
+
+    @staticmethod
+    def _cache_result(view: Any) -> Mapping[str, object]:
+        progress = dict(view.progress) if isinstance(view.progress, Mapping) else {}
+        downloaded = progress.get("downloaded_bytes")
+        expected = progress.get("expected_bytes")
+        if type(downloaded) is not int or downloaded < 0:
+            downloaded = 0
+        if type(expected) is not int or expected < 0:
+            expected = None
+        result: dict[str, object] = {
+            "progress": {
+                "phase": "model-download",
+                "completed_bytes": downloaded,
+                "total_bytes": expected,
+                "total_bytes_known": expected is not None,
+            },
+            "artifact_set_sha256": view.artifact_set_sha256,
+            "downloaded_bytes": downloaded,
+            "total_bytes": expected,
+        }
+        if view.last_error:
+            result["reason"] = view.last_error
+        if view.result is not None:
+            evidence = dict(view.result) if isinstance(view.result, Mapping) else {}
+            if evidence.get("artifact_set_sha256") != view.artifact_set_sha256:
+                raise RuntimeError("model-cache completion identity is not exact")
+            if evidence.get("coverage") == "complete":
+                result["coverage"] = "complete"
+            result["evidence"] = evidence
+        return result
+
+
+__all__ = ["CompositeDistributionPhaseExecutor", "DurableDistributionPhaseExecutor"]

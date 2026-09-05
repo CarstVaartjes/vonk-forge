@@ -246,7 +246,7 @@ def assemble_production_worker(
     from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
     from .distribution import build_distribution_service_from_components
-    from .distribution_executor import DurableDistributionPhaseExecutor
+    from .distribution_executor import CompositeDistributionPhaseExecutor
     from .fleet_profiles import FleetProfileService, RunSwitchFleetProfileAdapter
     from .install_admission import InstallAdmissionService
     from .recipe_builds import RecipeBuildService
@@ -270,10 +270,11 @@ def assemble_production_worker(
             agent_artifact_root,
             clock=clock,
         )
-        artifact_phase_executor = DurableDistributionPhaseExecutor(
+        artifact_phase_executor = CompositeDistributionPhaseExecutor(
             sessions,
             agent_jobs,
             distribution,
+            model_cache=model_cache,
             clock=clock,
         )
     else:

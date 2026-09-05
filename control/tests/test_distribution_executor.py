@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DistributionObject
 from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
-from vonk_control.distribution_executor import DurableDistributionPhaseExecutor
+from vonk_control.distribution_executor import (
+    CompositeDistributionPhaseExecutor,
+    DurableDistributionPhaseExecutor,
+)
 from vonk_control.models import AgentOperation, AgentOperationAttempt, Job
+from vonk_control.model_cache import ModelCacheService
+from vonk_control.models import Base
 
 from .test_agent_api import NODE_A, NODE_B, agent_system
 
@@ -151,3 +161,169 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
     view = executor.get(child_id)
     assert view.state == "failed"
     assert view.result["members"][0]["error"] == "digest mismatch"
+
+
+def test_model_download_is_a_durable_cache_child_with_exact_pins() -> None:
+    calls: list[dict[str, object]] = []
+    cache_view = SimpleNamespace(
+        id=str(uuid4()),
+        state="queued",
+        artifact_set_sha256="d" * 64,
+        progress={"downloaded_bytes": 3, "expected_bytes": 15},
+        last_error=None,
+        result=None,
+    )
+
+    class Cache:
+        def download_preview(self, **kwargs):
+            calls.append({"preview": kwargs})
+            return {
+                "artifact_set_sha256": "d" * 64,
+                "plan_digest": "e" * 64,
+                "expected_bytes": 15,
+                "artifact_count": 2,
+                "new_bytes": 12,
+                "blockers": [],
+                "_manifest": SimpleNamespace(recipe_revision_sha256="b" * 64),
+            }
+
+        def start_download(self, **kwargs):
+            calls.append({"start": kwargs})
+            return cache_view
+
+        def get_operation(self, operation_id):
+            if operation_id != cache_view.id:
+                from vonk_control.model_cache import ModelCacheNotFound
+                raise ModelCacheNotFound("model_cache.operation_missing", "missing")
+            return cache_view
+
+    plan = SimpleNamespace(
+        preparation=SimpleNamespace(model=SimpleNamespace(
+            artifact_set_sha256="d" * 64,
+            model_version_sha256="a" * 64,
+            recipe_revision_sha256="b" * 64,
+            artifact_count=2,
+            artifact_set_bytes=15,
+        )),
+        recipe_revision_id=str(uuid4()),
+    )
+    phase = SimpleNamespace(kind="transfer", subphase="model-download", index=2)
+    executor = CompositeDistributionPhaseExecutor(
+        None,
+        None,
+        None,
+        model_cache=Cache(),
+        clock=lambda: datetime.now(UTC),
+    )
+    result = executor.execute(
+        plan,
+        phase,
+        item_index=0,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress={},
+    )
+    assert result.operation_id == cache_view.id
+    assert calls[0]["preview"]["artifact_set_sha256"] == "d" * 64
+    assert calls[1]["start"]["plan_digest"] == "e" * 64
+    replay = executor.execute(
+        plan,
+        phase,
+        item_index=0,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress={},
+    )
+    assert replay.operation_id == cache_view.id
+    assert calls[1]["start"]["request_key"] == calls[3]["start"]["request_key"]
+    projected = executor.get(cache_view.id)
+    assert projected.state == "queued"
+    assert projected.progress["completed_bytes"] == 3
+
+
+def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "nas-cache",
+        reserve_bytes=0,
+        fixture_sources=True,
+    )
+    model_version = "a" * 64
+    recipe_digest = "b" * 64
+    payload = (b"model-payload-" * 100_000) + b"!"
+    source = tmp_path / "weights.source"
+    source.write_bytes(payload)
+    artifact = {
+        "id": "weights",
+        "path": "weights.bin",
+        "kind": "file",
+        "source": source.as_uri(),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "download_bytes": len(payload),
+        "roles": ["model"],
+        "model_version_sha256": model_version,
+    }
+    seed_preview = service.download_preview(
+        model_version_sha256=model_version,
+        recipe_revision_sha256=recipe_digest,
+        artifacts=[artifact],
+    )
+    seeded = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000011",
+        plan_digest=str(seed_preview["plan_digest"]),
+        model_version_sha256=model_version,
+        recipe_revision_sha256=recipe_digest,
+        artifacts=[artifact],
+        interrupt_after_bytes=1024,
+    )
+    assert seeded.state == "partial"
+    artifact_set = seeded.artifact_set_sha256
+    assert artifact_set
+    manifest = service.manifest_for_artifact_set(artifact_set)
+    plan = SimpleNamespace(
+        preparation=SimpleNamespace(
+            model=SimpleNamespace(
+                artifact_set_sha256=artifact_set,
+                model_version_sha256=model_version,
+                recipe_revision_sha256=recipe_digest,
+                artifact_count=1,
+                artifact_set_bytes=len(payload),
+            )
+        ),
+        recipe_revision_id=None,
+    )
+    phase = SimpleNamespace(kind="transfer", subphase="model-download", index=2)
+    executor = CompositeDistributionPhaseExecutor(
+        None,
+        None,
+        None,
+        model_cache=service,
+        clock=lambda: datetime.now(UTC),
+    )
+    first = executor.execute(
+        plan,
+        phase,
+        item_index=0,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000000012",
+        progress={},
+    )
+    assert first.operation_id
+    service.run_pending(limit=2)
+    completed = executor.get(first.operation_id)
+    assert completed.state == "succeeded"
+    assert completed.result["artifact_set_sha256"] == manifest.digest == artifact_set
+    assert completed.result["coverage"] == "complete"
+    assert completed.result["evidence"]["coverage"] == "complete"
+    assert completed.result["progress"]["completed_bytes"] == len(payload)
+    assert completed.result["progress"]["total_bytes"] == len(payload)
