@@ -239,7 +239,7 @@ ALLOWED_ENVIRONMENT = {
     "llama-cpp": ("LLAMA_ARG_N_THREADS", "8"),
     "ds4": ("DS4_LOG_LEVEL", "INFO"),
     "diffusers": ("HF_HUB_OFFLINE", "1"),
-    "comfyui": ("COMFYUI_DISABLE_TELEMETRY", "1"),
+    "comfyui": ("HF_HUB_OFFLINE", "1"),
     "pytorch-pipeline": ("HF_HUB_OFFLINE", "1"),
 }
 
@@ -1503,7 +1503,6 @@ def test_vllm_accepts_gemma4_chat_protocol() -> None:
 def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [
-        {"name": "VLLM_NO_USAGE_STATS", "value": "1"},
         {"name": "VLLM_NVFP4_GEMM_BACKEND", "value": "marlin"},
         {"name": "VLLM_USE_FLASHINFER_MOE_FP4", "value": "0"},
     ]

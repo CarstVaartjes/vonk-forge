@@ -69,6 +69,9 @@ _ENGINE_PATHS: dict[str, tuple[RuntimeWritablePath, ...]] = {
 
 # These endpoints mirror the agent's managed-runtime telemetry producer. An
 # endpoint is advertised only where that producer has an allowlisted parser.
+# The privacy flags are source-backed by the reviewed recipe Dockerfiles and
+# wrappers: vLLM's image defaults, SGLang's ``small-dual`` image, ComfyUI's
+# recipe contract, and the Hugging Face based media/runtime images.
 _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
     "vllm": EngineTelemetryContract(
         "vllm",
@@ -200,20 +203,23 @@ def reject_recipe_environment(
         raise _compile_error(
             f"runtime writable-path contract is unavailable: {slug}"
         )
-    telemetry_values = dict(telemetry_contract(slug).environment)
-    for name, value in supplied:
+    for name, _value in supplied:
+        if name in _TELEMETRY_ENV_NAMES:
+            raise _compile_error(
+                f"runtime telemetry variable is platform-owned: {name}"
+            )
         if name in _RESERVED_PATH_NAMES:
             raise _compile_error(
                 f"runtime writable path variable is platform-owned: {name}"
             )
-        if name in _TELEMETRY_ENV_NAMES and value != telemetry_values.get(name):
-            raise _compile_error(f"runtime telemetry variable is platform-owned: {name}")
 
 
 def environment(
     slug: str, supplied: Iterable[tuple[str, str]]
 ) -> tuple[tuple[str, str], ...]:
     """Return defaults and reject recipe ownership of reserved path names."""
+    supplied = tuple(supplied)
+    reject_recipe_environment(slug, supplied)
     return _merge_environment(slug, supplied, allow_reserved=False)
 
 
@@ -222,6 +228,8 @@ def effective_environment(
     supplied: Iterable[tuple[str, str]],
     distribution: Mapping[str, object] | None = None,
 ) -> tuple[tuple[str, str], ...]:
+    supplied = tuple(supplied)
+    reject_recipe_environment(slug, supplied)
     return _merge_environment(
         slug, supplied, allow_reserved=True, distribution=distribution
     )
@@ -232,7 +240,20 @@ def compile_environment(
     supplied: Iterable[tuple[str, str]],
     distribution: Mapping[str, object] | None = None,
 ) -> tuple[tuple[str, str], ...]:
-    """Merge defaults with values already injected by the central compiler."""
+    """Compile recipe declarations while rejecting platform-owned telemetry."""
+    supplied = tuple(supplied)
+    reject_recipe_environment(slug, supplied)
+    return _merge_environment(
+        slug, supplied, allow_reserved=True, distribution=distribution
+    )
+
+
+def materialize_environment(
+    slug: str,
+    supplied: Iterable[tuple[str, str]],
+    distribution: Mapping[str, object] | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """Materialize an already-centralized projection for runtime serialization."""
     return _merge_environment(
         slug, supplied, allow_reserved=True, distribution=distribution
     )

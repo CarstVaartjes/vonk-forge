@@ -136,6 +136,11 @@ def test_telemetry_contract_matches_agent_producer(slug: str, adapter: str, path
     assert all(values[name] == value for name, value in contract.environment)
 
 
-def test_telemetry_override_must_match_the_platform_value() -> None:
-    with pytest.raises(HarnessCompileError, match="telemetry|override"):
-        effective_environment("vllm", (("VLLM_NO_USAGE_STATS", "0"),))
+@pytest.mark.parametrize("value", ["0", "1"])
+def test_recipe_cannot_override_or_repeat_platform_telemetry(value: str) -> None:
+    with pytest.raises(HarnessCompileError, match="telemetry|platform-owned"):
+        environment("vllm", (("VLLM_NO_USAGE_STATS", value),))
+    with pytest.raises(HarnessCompileError, match="telemetry|platform-owned"):
+        effective_environment("vllm", (("VLLM_NO_USAGE_STATS", value),))
+    with pytest.raises(HarnessCompileError, match="telemetry|platform-owned"):
+        compile_environment("vllm", (("VLLM_NO_USAGE_STATS", value),))
