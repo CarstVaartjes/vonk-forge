@@ -5,7 +5,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0018_canonical_catalog_documents"
-down_revision = "0013_repeatable_install_plans"
+down_revision = "0017_dist_assignments"
 branch_labels = None
 depends_on = None
 
