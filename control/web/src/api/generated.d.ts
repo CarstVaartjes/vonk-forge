@@ -6992,11 +6992,243 @@ export interface components {
              */
             schema_version: 2;
         };
-        TelemetryHistoryResponse: {
-            [key: string]: unknown;
+        /** TelemetryDetails */
+        TelemetryDetails: {
+            /** Accelerator Name */
+            accelerator_name?: string | null;
+            /** Accelerator Performance State */
+            accelerator_performance_state?: string | null;
         };
+        /**
+         * TelemetryHistoryMetadata
+         * @description Coverage and downsampling facts for a history/export response.
+         */
+        TelemetryHistoryMetadata: {
+            /** Actual End */
+            actual_end?: string | null;
+            /**
+             * Actual Resolution
+             * @enum {string}
+             */
+            actual_resolution: "raw" | "minute" | "fifteen-minute" | "daily";
+            /** Actual Start */
+            actual_start?: string | null;
+            /** Coverage Seconds */
+            coverage_seconds: number;
+            /** Downsampled */
+            downsampled: boolean;
+            /** Gap Samples */
+            gap_samples: number;
+            /** Point Count */
+            point_count: number;
+            /**
+             * Requested End
+             * Format: date-time
+             */
+            requested_end: string;
+            /**
+             * Requested Resolution
+             * @enum {string}
+             */
+            requested_resolution: "raw" | "minute" | "fifteen-minute" | "daily";
+            /**
+             * Requested Start
+             * Format: date-time
+             */
+            requested_start: string;
+            /**
+             * Timezone
+             * @default UTC
+             * @constant
+             */
+            timezone: "UTC";
+        };
+        /** TelemetryHistoryResponse */
+        TelemetryHistoryResponse: {
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Maximum Points */
+            maximum_points: number;
+            metadata?: components["schemas"]["TelemetryHistoryMetadata"] | null;
+            /** Node Id */
+            node_id: string;
+            /** Points */
+            points: (components["schemas"]["TelemetryPoint"] | components["schemas"]["TelemetryRollupPoint"])[];
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "raw" | "minute" | "fifteen-minute" | "daily";
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+        };
+        /** TelemetryMetricSummary */
+        TelemetryMetricSummary: {
+            /**
+             * Aggregation
+             * @default mean
+             */
+            aggregation: string;
+            /** Count */
+            count: number;
+            /** Device Id */
+            device_id?: string | null;
+            /** Interface Name */
+            interface_name?: string | null;
+            /** Key */
+            key?: string | null;
+            /** Maximum */
+            maximum: number;
+            /** Mean */
+            mean: number;
+            /**
+             * Measurement Kind
+             * @default measured
+             */
+            measurement_kind: string;
+            /** Minimum */
+            minimum: number;
+            /** Process Id */
+            process_id?: number | null;
+            /** Process Name */
+            process_name?: string | null;
+            /** Run Id */
+            run_id?: string | null;
+            /** Scope */
+            scope?: string | null;
+            /**
+             * Source
+             * @default legacy
+             */
+            source: string;
+            /**
+             * Unit
+             * @default unknown
+             */
+            unit: string;
+        };
+        /**
+         * TelemetryMetrics
+         * @description Rich per-sample metrics kept alongside legacy scalar columns.
+         */
+        TelemetryMetrics: {
+            /** Capabilities */
+            capabilities: components["schemas"]["TelemetryCapability"][];
+            provenance: components["schemas"]["TelemetryProvenance"];
+            /** Runtimes */
+            runtimes: components["schemas"]["TelemetryRuntime"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Series */
+            series: components["schemas"]["TelemetrySeries"][];
+            /** Workloads */
+            workloads: components["schemas"]["TelemetryWorkload"][];
+        };
+        /** TelemetryPoint */
         TelemetryPoint: {
-            [key: string]: unknown;
+            /** Boot Id */
+            boot_id: string;
+            /** Cpu Utilization Percent */
+            cpu_utilization_percent?: number | null;
+            details: components["schemas"]["TelemetryDetails"];
+            /** Disk Free Bytes */
+            disk_free_bytes?: number | null;
+            /** Disk Total Bytes */
+            disk_total_bytes?: number | null;
+            /** Gap Samples */
+            gap_samples: number;
+            /** Gpu Memory Free Bytes */
+            gpu_memory_free_bytes?: number | null;
+            /** Gpu Memory Total Bytes */
+            gpu_memory_total_bytes?: number | null;
+            /** Gpu Utilization Percent */
+            gpu_utilization_percent?: number | null;
+            /** Id */
+            id: string;
+            /** Load Average 1M */
+            load_average_1m?: number | null;
+            /** Memory Available Bytes */
+            memory_available_bytes?: number | null;
+            /** Memory Total Bytes */
+            memory_total_bytes?: number | null;
+            metrics?: components["schemas"]["TelemetryMetrics"] | null;
+            /** Network Receive Bytes Per Second */
+            network_receive_bytes_per_second?: number | null;
+            /** Network Transmit Bytes Per Second */
+            network_transmit_bytes_per_second?: number | null;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Power Watts */
+            power_watts?: number | null;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Sequence */
+            sequence: number;
+            /** Temperature C */
+            temperature_c?: number | null;
+        };
+        /** TelemetryProvenance */
+        TelemetryProvenance: {
+            /** Collector */
+            collector: string;
+            /** Collector Version */
+            collector_version: string;
+            /** Host Uptime Seconds */
+            host_uptime_seconds?: number | null;
+            /** Source Observed At */
+            source_observed_at?: string | null;
+        };
+        /** TelemetryRollupPoint */
+        TelemetryRollupPoint: {
+            /**
+             * Bucket End
+             * Format: date-time
+             */
+            bucket_end: string;
+            /**
+             * Bucket Start
+             * Format: date-time
+             */
+            bucket_start: string;
+            /** Gap Samples */
+            gap_samples: number;
+            /** Metrics */
+            metrics: {
+                [key: string]: components["schemas"]["TelemetryMetricSummary"];
+            };
+            /** Node Id */
+            node_id: string;
+            /**
+             * Resolution
+             * @enum {string}
+             */
+            resolution: "minute" | "fifteen-minute" | "daily";
+            /** Source Sample Count */
+            source_sample_count: number;
         };
         /**
          * TelemetryRuntime
@@ -7040,6 +7272,66 @@ export interface components {
             serving_node_ids: string[];
             /** Version */
             version?: string | null;
+        };
+        /**
+         * TelemetrySeries
+         * @description One sampled or configured metric in canonical units.
+         */
+        TelemetrySeries: {
+            /** Aggregation */
+            aggregation: string;
+            /** Device Id */
+            device_id?: string | null;
+            /**
+             * Freshness
+             * @default fresh
+             * @enum {string}
+             */
+            freshness: "fresh" | "delayed" | "stale";
+            /** Freshness Threshold Seconds */
+            freshness_threshold_seconds: number;
+            /** Interface Name */
+            interface_name?: string | null;
+            /** Key */
+            key: string;
+            /**
+             * Measurement Kind
+             * @enum {string}
+             */
+            measurement_kind: "measured" | "derived" | "estimated" | "configured";
+            /** Node Id */
+            node_id?: string | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Process Id */
+            process_id?: number | null;
+            /** Process Name */
+            process_name?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Received At */
+            received_at?: string | null;
+            /** Run Id */
+            run_id?: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "node" | "accelerator" | "memory" | "storage" | "network" | "runtime" | "workload" | "service" | "benchmark";
+            /** Source */
+            source: string;
+            /**
+             * Support Status
+             * @enum {string}
+             */
+            support_status: "available" | "unsupported" | "unavailable" | "stale";
+            /** Unit */
+            unit: string;
+            /** Value */
+            value: number | string | boolean | null;
         };
         /** TelemetryState */
         TelemetryState: {
