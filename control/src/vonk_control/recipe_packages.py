@@ -193,6 +193,7 @@ class RecipePackageClient:
         )
         self._snapshot: RecipeLibrarySnapshot | None = None
         self._previous_snapshot: RecipeLibrarySnapshot | None = None
+        self._previous_packages: dict[str, dict[str, object]] = {}
         self._packages: dict[str, dict[str, object]] = {}
         self._prepared: dict[str, RecipeLibraryItem] = {}
         self._snapshot_path = self._cache_root / "snapshot.json"
@@ -238,7 +239,6 @@ class RecipePackageClient:
         snapshot, packages = self._parse_index(response.content, publication_commit=publication)
         self._persist_index(response.content, publication_commit=publication)
         self._candidate_active = True
-        self._previous_snapshot = self._snapshot
         self._packages = packages
         self._snapshot = snapshot
         self._prepared = {}
@@ -355,6 +355,15 @@ class RecipePackageClient:
                 "recipe_package.cache_unavailable",
                 "recipe package snapshot could not be committed",
             ) from error
+        # The candidate becomes the only previous-good generation after every
+        # package has been fetched and decoded.  A second list() in the same
+        # process must still compare against this generation, rather than the
+        # unvalidated candidate it replaced.
+        self._previous_snapshot = self._snapshot
+        self._previous_packages = {
+            key: dict(value) for key, value in self._packages.items()
+        }
+        self._candidate_active = False
 
     def _read_persisted_snapshot(self) -> RecipeLibrarySnapshot | None:
         self._candidate_active = False
@@ -376,6 +385,10 @@ class RecipePackageClient:
             return None
         self._packages = packages
         self._snapshot = snapshot
+        self._previous_snapshot = snapshot
+        self._previous_packages = {
+            key: dict(value) for key, value in packages.items()
+        }
         return snapshot
 
     def prepare(self, snapshot: RecipeLibrarySnapshot) -> None:
@@ -385,9 +398,22 @@ class RecipePackageClient:
         self._prepared = {
             item.uri: self.fetch(item.uri)
             for item in snapshot.items
-            if item.uri not in previous or previous[item.uri].content_sha256 != item.content_sha256
+            if item.uri not in previous
+            or previous[item.uri].content_sha256 != item.content_sha256
+            or not self._same_package(item)
         }
         self._promote_candidate()
+
+    def _same_package(self, item: RecipeLibraryItem) -> bool:
+        """Return whether the active generation points at the same bytes."""
+        current = self._packages.get(f"{item.publisher}/{item.slug}")
+        previous = self._previous_packages.get(f"{item.publisher}/{item.slug}")
+        if current is None or previous is None:
+            return False
+        return all(
+            current.get(field) == previous.get(field)
+            for field in ("package_sha256", "size", "location", "recipe_content_sha256")
+        )
 
     def fetch(self, uri: str) -> RecipeLibraryItem:
         match = re.fullmatch(r"vonk://catalog/([a-z0-9][a-z0-9-]{1,62})/([a-z0-9][a-z0-9-]{1,62})@sha256:([0-9a-f]{64})", uri)
