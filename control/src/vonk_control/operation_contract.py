@@ -17,12 +17,44 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .logging import redact_text
 
-_SENSITIVE = re.compile(
-    r"(?i)(password|secret|token|private.?key|authorization|cookie)"
+# ``token`` is overloaded by runtime parameters (for example ``max_tokens``),
+# so it is handled as an exact credential field below.  The other terms retain
+# field-boundary matching so names such as ``database_password`` remain blocked.
+_SENSITIVE_FIELD = re.compile(
+    r"(?:^|_)(?:api_key|authorization|cookie|credential|password|private_key|secret)(?:$|_)",
+    re.IGNORECASE,
+)
+_TOKEN_FIELDS = frozenset(
+    {
+        "access_token",
+        "bearer_token",
+        "gh_token",
+        "github_token",
+        "gitlab_token",
+        "hf_token",
+        "huggingface_token",
+        "id_token",
+        "refresh_token",
+        "session_token",
+        "token",
+    }
 )
 _MAX_EVIDENCE_ITEMS = 32
 _MAX_EVIDENCE_DEPTH = 4
 _MAX_FAILURE_EVIDENCE_BYTES = 8192
+
+
+def is_secret_field(name: object) -> bool:
+    """Return whether a key names a credential field owned by the platform."""
+
+    if not isinstance(name, str):
+        return False
+    # Split camelCase before case folding so API-shaped names cannot evade the
+    # same semantics as their snake_case and kebab-case spellings.
+    separated = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", name)
+    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", separated)
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "_", separated).strip("_").casefold()
+    return bool(_SENSITIVE_FIELD.search(normalized)) or normalized in _TOKEN_FIELDS
 
 
 class OperationPhase(StrEnum):
@@ -285,7 +317,7 @@ def sanitize_failure_evidence(value: Mapping[str, object]) -> dict[str, object]:
         if isinstance(item, Mapping):
             result: dict[str, object] = {}
             for key, child in list(item.items())[:_MAX_EVIDENCE_ITEMS]:
-                if not isinstance(key, str) or _SENSITIVE.search(key):
+                if not isinstance(key, str) or is_secret_field(key):
                     continue
                 result[key[:128]] = clean(child, depth + 1)
             return result
@@ -368,6 +400,7 @@ __all__ = [
     "OperationProgress",
     "OperationRecovery",
     "OperationRecoveryAction",
+    "is_secret_field",
     "normalize_operation_progress",
     "recovery_for_operation",
     "recovery_for_state",
