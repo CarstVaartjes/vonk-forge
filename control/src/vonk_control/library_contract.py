@@ -259,7 +259,7 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     run_returned_count: int = Field(ge=0, le=64)
     runs_truncated: bool
     reasons: list[ProjectionReason] = Field(max_length=16)
-    recipe_capabilities: "LibraryCapabilityInventory" = Field(
+    recipe_capabilities: LibraryCapabilityInventory = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )
 
@@ -267,8 +267,8 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
 class LibraryModel(_StrictModel):
     model: ModelVersionIdentity
     page_local: Literal[True] = True
-    recipes: list[LibraryRecipeSummary] = Field(min_length=1, max_length=100)
-    model_capabilities: "LibraryCapabilityInventory" = Field(
+    recipes: list[LibraryRecipeSummary] = Field(max_length=100)
+    model_capabilities: LibraryCapabilityInventory = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )
     model_version: LibraryModelVersionFacts | None = None
