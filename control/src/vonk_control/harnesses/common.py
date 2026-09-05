@@ -23,7 +23,6 @@ from ..runtime_writable_paths import (
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
-_CANONICAL_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{} ,"<>-]{1,4096}$')
 _SAFE_ENGINE_OPTION_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 _RESERVED_ENGINE_OPTION_NAMES = frozenset(
     {
@@ -108,8 +107,10 @@ def structured_command(value: object, *, canonical_argv: bool = False) -> tuple[
         raise HarnessCompileError("harness command size is invalid")
     if any(
         type(item) is not str
-        or ( _CANONICAL_ARGUMENT if canonical_argv else _SAFE_ARGUMENT ).fullmatch(item)
-        is None
+        or not item
+        or len(item) > (4096 if canonical_argv else 2048)
+        or "\x00" in item
+        or (not canonical_argv and _SAFE_ARGUMENT.fullmatch(item) is None)
         for item in command
     ):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
@@ -140,7 +141,12 @@ def custom_adapter_command(value: object) -> tuple[str, ...]:
     return command
 
 
-def validate_projection(projection: HarnessProjection, *, canonical_argv: bool = False) -> None:
+def validate_projection(
+    projection: HarnessProjection,
+    *,
+    canonical_argv: bool = False,
+    canonical_mounts: bool = False,
+) -> None:
     if type(projection.slug) is not str or not projection.slug:
         raise HarnessCompileError("harness projection slug is invalid")
     if type(projection.command) is not tuple:
@@ -150,7 +156,10 @@ def validate_projection(projection: HarnessProjection, *, canonical_argv: bool =
         raise HarnessCompileError("harness contract version is invalid")
     if type(projection.image) is not str or _IMAGE.fullmatch(projection.image) is None:
         raise HarnessCompileError("harness image must be digest-pinned")
-    if type(projection.network_mode) is not str or projection.network_mode != "none":
+    if type(projection.network_mode) is not str or (
+        projection.network_mode != "none"
+        and not (canonical_argv and projection.network_mode == "bridge")
+    ):
         raise HarnessCompileError("harness projection requires an offline network")
     if (
         type(projection.architecture) is not str
@@ -185,7 +194,10 @@ def validate_projection(projection: HarnessProjection, *, canonical_argv: bool =
             or type(item[0]) is not str
             or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", item[0])
             or type(item[1]) is not str
-            or ( _CANONICAL_ARGUMENT if canonical_argv else _SAFE_ARGUMENT ).fullmatch(item[1]) is None
+            or not item[1]
+            or len(item[1]) > (4096 if canonical_argv else 2048)
+            or "\x00" in item[1]
+            or (not canonical_argv and _SAFE_ARGUMENT.fullmatch(item[1]) is None)
             for item in projection.environment
         )
         or len({name for name, _value in projection.environment})
@@ -193,6 +205,8 @@ def validate_projection(projection: HarnessProjection, *, canonical_argv: bool =
     ):
         raise HarnessCompileError("harness projection environment is invalid")
     enforce_engine_contract = (
+        not canonical_argv
+        and
         projection.slug in _BUILTIN_HARNESS_SLUGS
         and _is_builtin_launch_command(projection.slug, projection.command)
     )
@@ -250,7 +264,8 @@ def validate_projection(projection: HarnessProjection, *, canonical_argv: bool =
     for mount in mounts:
         _mount_path(mount.source)
         _mount_path(mount.target)
-    _disjoint_mount_paths(tuple(mount.source for mount in mounts))
+    if not canonical_mounts:
+        _disjoint_mount_paths(tuple(mount.source for mount in mounts))
     _disjoint_mount_paths(tuple(mount.target for mount in mounts))
     for source in (mount.source for mount in mounts):
         for target in (mount.target for mount in mounts):

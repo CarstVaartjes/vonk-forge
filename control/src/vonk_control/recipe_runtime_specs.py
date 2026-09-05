@@ -203,11 +203,12 @@ def compile_runtime_spec(
         mounts.append({"source": "/run/vonk/inputs", "target": "/inputs", "read_only": True})
     lifecycle = parsed.runtime.lifecycle
     security = {
-        "devices": [],
+        "devices": list(projection.devices) if hasattr(projection, "devices") else [],
         "user": projection.user,
         "capabilities": list(projection.capabilities),
         "privileged": False,
-        "host_network": False,
+        "host_network": projection.network_mode == "host",
+        "network_mode": projection.network_mode,
         "mounts": mounts,
         "read_only_root": projection.read_only_root,
         "no_new_privileges": projection.no_new_privileges,

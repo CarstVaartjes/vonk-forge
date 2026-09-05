@@ -49,6 +49,8 @@ class HarnessProjection:
     telemetry: EngineTelemetryContract | None = None
     read_only_root: bool = True
     binding: HarnessBinding | None = None
+    devices: tuple[str, ...] = ()
+    host_network: bool = False
 
 
 class HarnessCompiler(Protocol):
