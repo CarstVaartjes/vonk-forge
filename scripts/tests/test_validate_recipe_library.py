@@ -7,6 +7,8 @@ import os
 import shutil
 import subprocess
 import tarfile
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
 import pytest
@@ -19,6 +21,13 @@ CANDIDATE = Path(
         "/private/tmp/vonk-forge-recipes-contract-conversion-final",
     )
 )
+
+
+_VALIDATOR_LOADER = SourceFileLoader("validate_recipe_library", str(SCRIPT))
+_VALIDATOR_SPEC = spec_from_loader(_VALIDATOR_LOADER.name, _VALIDATOR_LOADER)
+assert _VALIDATOR_SPEC is not None and _VALIDATOR_SPEC.loader is not None
+_VALIDATOR = module_from_spec(_VALIDATOR_SPEC)
+_VALIDATOR_SPEC.loader.exec_module(_VALIDATOR)
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -35,6 +44,40 @@ def _candidate_library_or_skip() -> Path:
     if not CANDIDATE.is_dir():
         pytest.skip("central contract recipe-library fixture is unavailable")
     return CANDIDATE
+
+
+def test_secret_scan_rejects_decoy_in_recipe_source(tmp_path: Path) -> None:
+    library = tmp_path / "library"
+    source = library / "recipes" / "producer.py"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"github_pat_producer-decoy")
+
+    with pytest.raises(_VALIDATOR.LibraryValidationError, match="producer.py"):
+        _VALIDATOR._scan_secrets(library, tmp_path / "platform")
+
+
+def test_secret_scan_rejects_decoy_in_recipe_package(tmp_path: Path) -> None:
+    library = tmp_path / "library"
+    package = library / "packages" / "producer.tar.gz"
+    package.parent.mkdir(parents=True)
+    payload = b"github_pat_package-decoy"
+    member = tarfile.TarInfo("recipe.json")
+    member.size = len(payload)
+    with tarfile.open(package, mode="w:gz") as archive:
+        archive.addfile(member, io.BytesIO(payload))
+
+    with pytest.raises(_VALIDATOR.LibraryValidationError, match="recipe package"):
+        _VALIDATOR._scan_secrets(library, tmp_path / "platform")
+
+
+def test_secret_scan_excludes_nested_platform_checkout(tmp_path: Path) -> None:
+    library = tmp_path / "library"
+    platform = library / ".vonk-forge"
+    fixture = platform / "tests" / "fixture.txt"
+    fixture.parent.mkdir(parents=True)
+    fixture.write_bytes(b"github_pat_platform-fixture-text")
+
+    _VALIDATOR._scan_secrets(library, platform)
 
 
 def test_contract_recipe_library_snapshot_is_validated_end_to_end() -> None:
