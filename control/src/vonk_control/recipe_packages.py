@@ -14,24 +14,18 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urljoin, urlsplit
 
 import httpx
-
-from .catalog_contract import (
-    CatalogContractError,
-    catalog_content_sha256,
-    validate_catalog_document,
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts.resolver import (
+    validate_model_references,
+    validate_recipe_models,
 )
-from .recipe_contract import RecipeContractError, recipe_content_sha256, validate_recipe
+
 from .recipe_library import (
     RecipeLibraryChange,
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibraryRelease,
     RecipeLibrarySnapshot,
-)
-from .source_bundles import (
-    SourceBundleError,
-    generate_source_bundle,
-    inspect_source_bundle,
 )
 
 PACKAGE_SCHEMA_VERSION = 2
@@ -64,6 +58,62 @@ def _json(raw: bytes) -> object:
     return json.loads(raw)
 
 
+def _release_history(recipe: RecipeDefinition, digest: str) -> tuple[RecipeLibraryRelease, ...]:
+    result: list[RecipeLibraryRelease] = []
+    for index, entry in enumerate(recipe.release.history):
+        changes = tuple(
+            RecipeLibraryChange(
+                change.kind,
+                change.summary,
+                change.details,
+                tuple(change.references),
+            )
+            for change in entry.changes
+        )
+        result.append(
+            RecipeLibraryRelease(
+                entry.version,
+                entry.released_at,
+                digest if index == 0 else (entry.prior_recipe_content_sha256 or digest),
+                entry.upgrade_effect,
+                changes,
+            )
+        )
+    return tuple(result)
+
+
+def _validate_package_paths(
+    recipe: RecipeDefinition, package_paths: set[str], build_inputs: object
+) -> None:
+    """Validate source and fixture closure using BuildContext as a prefix."""
+    if recipe.execution.mode == "build":
+        build = recipe.execution.build
+        context = build.context.path.rstrip("/")
+        if not any(path == context or path.startswith(f"{context}/") for path in package_paths):
+            raise ValueError("build context is missing from package")
+        required = {build.dockerfile, *(patch.path for patch in build.patches)}
+        missing = sorted(required - package_paths)
+        if missing:
+            raise ValueError(f"build package files are missing: {', '.join(missing)}")
+        if not isinstance(build_inputs, list) or not any(
+            isinstance(value, Mapping)
+            and value.get("kind") == "oci-image"
+            and isinstance(value.get("reference"), str)
+            and value["reference"].endswith(f"@sha256:{build.base_image.digest}")
+            for value in build_inputs
+        ):
+            raise ValueError("build base image digest is not in package inputs")
+    for check in recipe.validation.serving.checks:
+        request = check.request
+        fixture = getattr(request, "fixture", None)
+        slots = getattr(request, "input_slots", {})
+        if fixture is not None:
+            required = {fixture, *slots.values()}
+            missing = sorted(required - package_paths)
+            if missing:
+                raise ValueError(f"job serving package files are missing: {', '.join(missing)}")
+
+
 class RecipePackageClient:
     """Fetch complete recipe packages and persist verified bytes by digest."""
 
@@ -78,6 +128,7 @@ class RecipePackageClient:
         self._cache_root.mkdir(parents=True, exist_ok=True)
         self._client = httpx.Client(base_url=self._base_url, timeout=httpx.Timeout(timeout_seconds), follow_redirects=False, trust_env=False, transport=transport, headers={"Accept": "application/json"})
         self._snapshot: RecipeLibrarySnapshot | None = None
+        self._previous_snapshot: RecipeLibrarySnapshot | None = None
         self._packages: dict[str, dict[str, object]] = {}
         self._prepared: dict[str, RecipeLibraryItem] = {}
 
@@ -107,17 +158,17 @@ class RecipePackageClient:
         for recipe in raw_recipes:
             if not isinstance(recipe, Mapping) or not isinstance(recipe.get("document"), Mapping) or not isinstance(recipe.get("package"), Mapping):
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package entry is invalid")
-            identity = recipe["document"].get("identity")
-            metadata = recipe["document"].get("metadata")
+            try:
+                document = RecipeDefinition.model_validate(recipe["document"])
+            except (TypeError, ValueError) as error:
+                raise RecipePackageError("recipe_package.response_invalid", "recipe package recipe document is invalid") from error
             package = recipe["package"]
-            if not isinstance(identity, Mapping) or not isinstance(metadata, Mapping):
-                raise RecipePackageError("recipe_package.response_invalid", "recipe package recipe metadata is invalid")
             raw_packages.append({
-                "publisher": identity.get("publisher"), "slug": identity.get("slug"),
+                "publisher": document.identity.publisher, "slug": document.identity.slug,
                 "source_path": recipe.get("source_path"), "recipe_content_sha256": recipe.get("content_sha256"),
                 "package_sha256": package.get("sha256"), "size": package.get("expected_bytes"),
-                "location": package.get("path"), "title": metadata.get("title", ""),
-                "description": metadata.get("description", ""), "tags": metadata.get("tags", []),
+                "location": package.get("path"), "title": document.metadata.title,
+                "description": document.metadata.description, "tags": document.metadata.tags,
             })
         packages: dict[str, dict[str, object]] = {}
         items: list[RecipeLibraryItem] = []
@@ -137,6 +188,7 @@ class RecipePackageClient:
             items.append(RecipeLibraryItem(library_commit=commit, source_path=str(source_path), publisher=str(publisher), slug=str(slug), title=str(raw.get("title", "")), description=str(raw.get("description", "")), tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (), content_sha256=str(digest), uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}", document={}))
         if [(item.publisher, item.slug) for item in items] != sorted((item.publisher, item.slug) for item in items):
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index is not sorted")
+        self._previous_snapshot = self._snapshot
         self._packages = packages
         self._snapshot = RecipeLibrarySnapshot(commit=commit, items=tuple(items), repository=repository)
         self._prepared = {}
@@ -145,7 +197,12 @@ class RecipePackageClient:
     def prepare(self, snapshot: RecipeLibrarySnapshot) -> None:
         if self._snapshot is None or self._snapshot.commit != snapshot.commit:
             raise RecipePackageError("recipe_package.snapshot_changed", "package index changed during preparation")
-        self._prepared = {item.uri: self.fetch(item.uri) for item in snapshot.items}
+        previous = {item.uri: item for item in self._previous_snapshot.items} if self._previous_snapshot else {}
+        self._prepared = {
+            item.uri: self.fetch(item.uri)
+            for item in snapshot.items
+            if item.uri not in previous or previous[item.uri].content_sha256 != item.content_sha256
+        }
 
     def fetch(self, uri: str) -> RecipeLibraryItem:
         match = re.fullmatch(r"vonk://catalog/([a-z0-9][a-z0-9-]{1,62})/([a-z0-9][a-z0-9-]{1,62})@sha256:([0-9a-f]{64})", uri)
@@ -216,74 +273,33 @@ class RecipePackageClient:
             raise RecipePackageError("recipe_package.extract_invalid", "recipe package extraction failed") from error
         try:
             manifest = _json(files["manifest.json"])
-            if not isinstance(manifest, Mapping) or manifest.get("schema_version") != PACKAGE_SCHEMA_VERSION or manifest.get("kind") != "recipe-package" or manifest.get("package_type") != "recipe":
-                raise TypeError
-            identity = manifest.get("recipe")
-            if not isinstance(identity, Mapping) or identity.get("publisher") != item.publisher or identity.get("slug") != item.slug or manifest.get("recipe_content_sha256") != item.content_sha256:
-                raise ValueError
+            if not isinstance(manifest, Mapping) or manifest.get("schema_version") != PACKAGE_SCHEMA_VERSION or manifest.get("kind") != "recipe-package" or manifest.get("package_type") != "recipe" or manifest.get("recipe_content_sha256") != item.content_sha256:
+                raise ValueError("manifest identity is invalid")
             entries = manifest.get("files")
             if not isinstance(entries, list) or len(entries) != len(files) - 1 or {entry.get("path") for entry in entries if isinstance(entry, Mapping)} != set(files) - {"manifest.json"}:
-                raise ValueError
+                raise ValueError("manifest file inventory is invalid")
             for entry in entries:
                 if not isinstance(entry, Mapping) or not isinstance(entry.get("path"), str) or not _SHA256.fullmatch(str(entry.get("sha256"))) or entry.get("size") != len(files[entry["path"]]) or _sha256(files[entry["path"]]) != entry["sha256"]:
-                    raise TypeError
-            recipe = _json(files["recipe.json"])
-            metadata = manifest.get("metadata")
-            if not isinstance(metadata, list):
-                raise TypeError
-            dependencies = []
-            for entry in metadata:
-                if (
-                    not isinstance(entry, Mapping)
-                    or not all(
-                        isinstance(entry.get(field), str)
-                        for field in ("kind", "publisher", "slug", "content_sha256", "path")
-                    )
-                ):
-                    raise TypeError
-                document = _json(files[entry["path"]])
-                if not isinstance(document, dict):
-                    raise TypeError
-                identity = document.get("identity")
-                if (
-                    not isinstance(identity, Mapping)
-                    or document.get("kind") != entry["kind"]
-                    or identity.get("publisher") != entry["publisher"]
-                    or identity.get("slug") != entry["slug"]
-                    or catalog_content_sha256(document) != entry["content_sha256"]
-                ):
-                    raise ValueError
-                dependencies.append(document)
-            release = _json(files["recipe-release.json"])
-            if not isinstance(recipe, dict) or recipe_content_sha256(recipe) != item.content_sha256:
-                raise ValueError
-            validate_recipe(recipe)
-            if not all(isinstance(document, dict) for document in dependencies):
-                raise ValueError
-            for document in dependencies:
-                validate_catalog_document(document)
-            context = recipe.get("build", {}).get("context") if isinstance(recipe.get("build"), Mapping) else None
-            source_bundle: bytes | None = None
-            if isinstance(context, Mapping):
-                expected_source, expected_bytes = context.get("sha256"), context.get("expected_bytes")
-                source = manifest.get("source")
-                if not isinstance(expected_source, str) or not isinstance(expected_bytes, int) or not isinstance(source, Mapping) or source.get("content_sha256") != expected_source:
-                    raise ValueError
-                source_files = {path.removeprefix("source/"): content for path, content in files.items() if path.startswith("source/")}
-                if not source_files:
-                    raise ValueError
-                source_bundle = generate_source_bundle(source_files).archive
-                source_manifest = inspect_source_bundle(io.BytesIO(source_bundle))
-                if source_manifest.sha256 != expected_source or len(source_bundle) != expected_bytes:
-                    raise ValueError
-            release_history = _release_history(release, item.content_sha256)
-        except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, CatalogContractError, RecipeContractError, SourceBundleError) as error:
+                    raise ValueError("manifest file digest is invalid")
+            if [path for path in files if PurePosixPath(path).name == "recipe.json"] != ["recipe.json"]:
+                raise ValueError("package must contain exactly one recipe.json entrypoint")
+            recipe = RecipeDefinition.model_validate(_json(files["recipe.json"]))
+            if content_sha256(recipe) != item.content_sha256 or recipe.identity.publisher != item.publisher or recipe.identity.slug != item.slug:
+                raise ValueError("recipe identity or digest is invalid")
+            model_paths = [path for path in files if path.startswith("models/") and path.endswith(".json")]
+            if not model_paths or any(path != f"models/{Path(path).stem}.json" for path in model_paths):
+                raise ValueError("model snapshot paths are invalid")
+            models = [ModelDefinition.model_validate(_json(files[path])) for path in model_paths]
+            if {f"models/{model.identity.slug}.json" for model in models} != set(model_paths):
+                raise ValueError("model snapshot identity does not match its path")
+            validate_model_references(models)
+            validate_recipe_models(recipe, models)
+            _validate_package_paths(recipe, set(files) - {"manifest.json"}, manifest.get("build_inputs"))
+            release_history = _release_history(recipe, item.content_sha256)
+        except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise RecipePackageError("recipe_package.package_invalid", "recipe package identity or contents are invalid") from error
-        recipe_metadata = recipe.get("metadata")
-        if not isinstance(recipe_metadata, Mapping):
-            raise RecipePackageError("recipe_package.package_invalid", "recipe package metadata is invalid")
-        tags = recipe_metadata.get("tags")
-        return RecipeLibraryItem(library_commit=item.library_commit, source_path=item.source_path, publisher=item.publisher, slug=item.slug, title=str(recipe_metadata.get("title", "")), description=str(recipe_metadata.get("description", "")), tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (), content_sha256=item.content_sha256, uri=item.uri, document=recipe, release_history=release_history, dependencies=tuple(dependencies), source_bundle=source_bundle)
+        metadata = recipe.metadata
+        return RecipeLibraryItem(library_commit=item.library_commit, source_path=item.source_path, publisher=item.publisher, slug=item.slug, title=metadata.title, description=metadata.description, tags=tuple(metadata.tags), content_sha256=item.content_sha256, uri=item.uri, document=recipe.model_dump(mode="json"), release_history=release_history, dependencies=tuple(model.model_dump(mode="json") for model in models))
 
 
 def load_recipe_package(path: Path, *, package_sha256: str, publisher: str, slug: str, recipe_content_sha256: str, library_commit: str, source_path: str) -> RecipeLibraryItem:
@@ -296,27 +312,6 @@ def load_recipe_package(path: Path, *, package_sha256: str, publisher: str, slug
     item = RecipeLibraryItem(library_commit=library_commit, source_path=source_path, publisher=publisher, slug=slug, title="", description="", tags=(), content_sha256=recipe_content_sha256, uri=f"vonk://catalog/{publisher}/{slug}@sha256:{recipe_content_sha256}", document={})
     decoder = RecipePackageClient.__new__(RecipePackageClient)
     return decoder._decode_package(archive, item)
-
-
-def _release_history(value: object, digest: str) -> tuple[RecipeLibraryRelease, ...]:
-    if not isinstance(value, Mapping) or not isinstance(value.get("history"), list):
-        raise TypeError
-    result: list[RecipeLibraryRelease] = []
-    for entry in value["history"]:
-        if not isinstance(entry, Mapping) or not all(isinstance(entry.get(key), str) for key in ("version", "released_at", "recipe_content_sha256", "upgrade_effect")) or not isinstance(entry.get("changes"), list):
-            raise ValueError
-        changes: list[RecipeLibraryChange] = []
-        for change in entry["changes"]:
-            if not isinstance(change, Mapping) or not isinstance(change.get("kind"), str) or not isinstance(change.get("summary"), str):
-                raise TypeError
-            details, references = change.get("details"), change.get("references", [])
-            if details is not None and not isinstance(details, str) or not isinstance(references, list) or any(not isinstance(ref, str) for ref in references):
-                raise ValueError
-            changes.append(RecipeLibraryChange(str(change["kind"]), str(change["summary"]), details if isinstance(details, str) else None, tuple(references)))
-        result.append(RecipeLibraryRelease(version=str(entry["version"]), released_at=str(entry["released_at"]), content_sha256=str(entry["recipe_content_sha256"]), upgrade_effect=str(entry["upgrade_effect"]), changes=tuple(changes)))
-    if result and result[0].content_sha256 != digest:
-        raise ValueError
-    return tuple(result)
 
 
 __all__ = ["PACKAGE_INDEX_PATH", "PACKAGE_MEDIA_TYPE", "RecipePackageClient", "RecipePackageError", "load_recipe_package"]

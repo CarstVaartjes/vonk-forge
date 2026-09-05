@@ -16,13 +16,13 @@ from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .auth import CursorCodec
 from .catalog_contract import (
     CatalogContractError,
     CatalogKind,
     CatalogReference,
-    catalog_content_sha256,
     parse_catalog_reference,
 )
 from .catalog_entities import (
@@ -35,8 +35,9 @@ from .catalog_repository import CatalogRepository, sensitive_document_path
 from .global_catalog import GlobalRecipeRevision
 from .import_report import ImportDisposition, ImportReportItem
 from .models import (
-    CatalogEntity,
-    CatalogEntityRevision,
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
     LocalRecipe,
     LocalRecipeRevision,
     RecipeGlobalLink,
@@ -757,6 +758,78 @@ class CatalogService:
             session.flush()
             return _view(recipe, revision)
 
+    def _import_canonical_documents(
+        self,
+        session: Session,
+        recipe: RecipeDefinition,
+        models: Sequence[ModelDefinition],
+        *,
+        actor: str,
+    ) -> CatalogDocumentRevision:
+        """Persist a package's exact model closure before activating its recipe."""
+        entities = CatalogEntityService(session, clock=self._clock, cursors=self._cursors)
+
+        def upsert(document: Mapping[str, object], kind: str, publisher: str, slug: str, digest: str) -> CatalogDocumentRevision:
+            active = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == kind,
+                    CatalogDocumentRevision.publisher == publisher,
+                    CatalogDocumentRevision.slug == slug,
+                    CatalogDocumentRevision.content_digest == digest,
+                    CatalogDocumentRevision.state == "active",
+                ).limit(1)
+            )
+            if active is not None:
+                return active
+            root = session.scalar(
+                select(CatalogDocument).where(
+                    CatalogDocument.kind == kind,
+                    CatalogDocument.publisher == publisher,
+                    CatalogDocument.slug == slug,
+                ).with_for_update()
+            )
+            if root is None:
+                candidate = entities.create_draft(document, actor=actor)
+            else:
+                head = session.scalar(
+                    select(CatalogDocumentHead).where(
+                        CatalogDocumentHead.kind == kind,
+                        CatalogDocumentHead.publisher == publisher,
+                        CatalogDocumentHead.slug == slug,
+                    ).with_for_update()
+                )
+                if head is not None and head.candidate_revision_id is not None:
+                    entities.fail_candidate(root.id)
+                latest = session.scalar(
+                    select(CatalogDocumentRevision)
+                    .where(CatalogDocumentRevision.document_id == root.id)
+                    .order_by(CatalogDocumentRevision.revision_number.desc())
+                    .limit(1)
+                )
+                candidate = entities.revise(
+                    root.id,
+                    document,
+                    actor=actor,
+                    expected_revision=latest.revision_number if latest is not None else None,
+                )
+            return entities.resolve(candidate.id, actor=actor)
+
+        for model in models:
+            upsert(
+                model.model_dump(mode="json"),
+                "model",
+                model.identity.publisher,
+                model.identity.slug,
+                content_sha256(model),
+            )
+        return upsert(
+            recipe.model_dump(mode="json"),
+            "recipe",
+            recipe.identity.publisher,
+            recipe.identity.slug,
+            content_sha256(recipe),
+        )
+
     def import_recipe_library(
         self,
         actor: str,
@@ -772,11 +845,16 @@ class CatalogService:
         """Import one exact recipe from the public Git recipe library."""
 
         actor = _actor(actor)
-        raw_identity = _mapping(document.get("identity"))
-        clean = self._validated_document(
-            document, slug=str(raw_identity.get("slug", ""))
-        )
-        actual = recipe_content_sha256(clean)
+        try:
+            parsed_recipe = RecipeDefinition.model_validate(document)
+            parsed_models = [ModelDefinition.model_validate(value) for value in dependency_documents]
+        except (TypeError, ValueError) as error:
+            raise CatalogValidationError(
+                "recipe_library.document_invalid",
+                "recipe library package must contain a canonical recipe and model snapshots",
+            ) from error
+        clean = parsed_recipe.model_dump(mode="json")
+        actual = content_sha256(parsed_recipe)
         if actual != expected_content_sha256:
             raise CatalogValidationError(
                 "recipe_library.hash_mismatch",
@@ -812,10 +890,8 @@ class CatalogService:
                     )
                 return _view(recipe, revision)
 
-            self._materialize_recipe_library_entities(
-                session,
-                dependency_documents,
-                actor=actor,
+            self._import_canonical_documents(
+                session, parsed_recipe, parsed_models, actor=actor
             )
 
             recipe = self._repository.recipe_by_slug(session, slug)
@@ -860,7 +936,9 @@ class CatalogService:
                 )
             )
             if revision is None:
-                self._resolve_recipe_revision(session, clean, actor=actor)
+                # Canonical activation and exact model binding happen above in
+                # CatalogEntityService; the LocalRecipe row is only the
+                # operational installation projection.
                 metadata = _mapping(clean["metadata"])
                 revision = LocalRecipeRevision(
                     recipe_id=recipe.id,
@@ -868,7 +946,7 @@ class CatalogService:
                         session, recipe.id
                     ),
                     lifecycle="resolved",
-                    schema_version=1,
+                    schema_version=2,
                     document=clean,
                     content_sha256=actual,
                     created_by=actor,
@@ -923,103 +1001,6 @@ class CatalogService:
             )
             session.flush()
             return _view(recipe, revision)
-
-    def _materialize_recipe_library_entities(
-        self,
-        session: Session,
-        documents: Sequence[Mapping[str, object]],
-        *,
-        actor: str,
-    ) -> None:
-        """Resolve the exact dependency closure shipped with a library recipe."""
-
-        ordered: list[tuple[CatalogKind, Mapping[str, object]]] = []
-        for document in documents:
-            try:
-                kind = CatalogKind(document.get("kind"))
-            except (TypeError, ValueError) as error:
-                raise CatalogValidationError(
-                    "recipe_library.entity_kind",
-                    "recipe library dependency kind is invalid",
-                ) from error
-            if kind not in _LIBRARY_ENTITY_ORDER:
-                raise CatalogValidationError(
-                    "recipe_library.entity_kind",
-                    "recipe library dependency kind is invalid",
-                )
-            ordered.append((kind, document))
-        ordered.sort(
-            key=lambda item: (
-                _LIBRARY_ENTITY_ORDER[item[0]],
-                str(_mapping(item[1].get("identity")).get("publisher", "")),
-                str(_mapping(item[1].get("identity")).get("slug", "")),
-            )
-        )
-        entities = CatalogEntityService(
-            session,
-            clock=self._clock,
-            cursors=self._cursors,
-        )
-        for kind, document in ordered:
-            identity = _mapping(document.get("identity"))
-            publisher = str(identity.get("publisher", ""))
-            slug = str(identity.get("slug", ""))
-            try:
-                digest = catalog_content_sha256(document)
-            except CatalogContractError as error:
-                raise CatalogValidationError(
-                    error.code,
-                    f"{error.path}: {error.detail}",
-                ) from error
-            try:
-                entities.lookup_exact(kind, publisher, slug, digest)
-                continue
-            except CatalogConflict:
-                pass
-            entity = session.scalar(
-                select(CatalogEntity).where(
-                    CatalogEntity.kind == kind.value,
-                    CatalogEntity.publisher == publisher,
-                    CatalogEntity.slug == slug,
-                )
-            )
-            with session.begin_nested():
-                if entity is None:
-                    draft = entities.create_draft(document, actor=actor)
-                else:
-                    latest = session.scalar(
-                        select(CatalogEntityRevision)
-                        .where(CatalogEntityRevision.entity_id == entity.id)
-                        .order_by(CatalogEntityRevision.revision_number.desc())
-                        .limit(1)
-                    )
-                    if latest is None:
-                        raise CatalogConflict(
-                            "recipe_library.entity_history_inconsistent",
-                            "recipe library dependency history is inconsistent",
-                        )
-                    if (
-                        latest.lifecycle == "draft"
-                        and catalog_content_sha256(latest.document) == digest
-                    ):
-                        draft = latest
-                    else:
-                        draft = entities.revise(
-                            entity.id,
-                            document,
-                            actor=actor,
-                            expected_revision=latest.revision_number,
-                        )
-                resolved = entities.resolve(
-                    draft.id,
-                    actor=actor,
-                    expected_revision=draft.revision_number,
-                )
-                if resolved.content_sha256 != digest:
-                    raise CatalogConflict(
-                        "recipe_library.entity_digest_mismatch",
-                        "recipe library dependency resolved to a different digest",
-                    )
 
     def attach_test_report(
         self, recipe_id: str, report: Mapping[str, object], actor: str
@@ -1341,11 +1322,8 @@ def _summary(recipe: LocalRecipe, revision: LocalRecipeRevision) -> RecipeSummar
 def _document_summary(document: Mapping[str, object]) -> dict[str, Any]:
     runtime = _mapping(document["runtime"])
     execution = _mapping(document["execution"])
-    harness = _mapping(execution["harness"])
-    distribution = _mapping(runtime["distribution"])
-    build = _mapping(document["build"])
-    context = _mapping(build["context"])
-    artifacts = document["artifacts"]
+    mode = str(execution["mode"])
+    artifacts = document.get("models", [])
     topology = _mapping(document["topology"])
     assert isinstance(artifacts, list)
     installed: list[int] = []
@@ -1370,13 +1348,15 @@ def _document_summary(document: Mapping[str, object]) -> dict[str, Any]:
             )
         )
     return {
-        "execution_harness": str(harness["slug"]),
-        "runtime_distribution": str(distribution["slug"]),
-        "source_bundle_sha256": str(context["sha256"]),
-        "artifact_count": len(artifacts),
-        "expected_download_bytes": sum(
-            int(_mapping(artifact)["download_bytes"]) for artifact in artifacts
+        "execution_harness": str(runtime["engine"]),
+        "runtime_distribution": mode,
+        "source_bundle_sha256": "",
+        "artifact_count": sum(
+            len(selection.get("files", []))
+            for selection in artifacts
+            if isinstance(selection, Mapping) and isinstance(selection.get("files", []), list)
         ),
+        "expected_download_bytes": 0,
         "topology_name": str(topology["name"]),
         "topology_mode": str(topology["mode"]),
         "node_count": int(topology["node_count"]),

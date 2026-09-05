@@ -112,7 +112,7 @@ from .operation_api import (
 )
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
-from .recipe_library import RecipeLibraryClient, RecipeLibraryError
+from .recipe_library import RecipeLibraryError
 from .recipe_operations import RecipeOperationService
 from .recipe_packages import RecipePackageClient
 from .run_switch_api import install_run_switch_routes
@@ -1730,13 +1730,11 @@ def production_app() -> FastAPI:
                 pass
 
     global_catalog = GlobalCatalogClient(settings.global_catalog_url)
-    recipe_library = (
-        RecipePackageClient(
-            settings.recipe_library_package_url,
-            cache_root=settings.state_path / "recipe-library-packages",
-        )
-        if settings.recipe_library_package_url is not None
-        else RecipeLibraryClient(base_url=settings.recipe_library_api_url)
+    if settings.recipe_library_package_url is None:
+        raise RuntimeError("recipe library package URL is required")
+    recipe_library = RecipePackageClient(
+        settings.recipe_library_package_url,
+        cache_root=settings.state_path / "recipe-library-packages",
     )
     catalog_service = CatalogService(
         sessions,

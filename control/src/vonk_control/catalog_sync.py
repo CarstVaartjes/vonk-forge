@@ -164,10 +164,8 @@ class ManagedRecipeCatalogSyncService:
                     "catalog.sync_preview_changed",
                     "recipe library changed since it was reviewed",
                 )
-            # Package readers validate every object in the candidate generation
-            # before the first catalog link/revision is written.  The legacy
-            # GitHub reader has no prepare hook and retains its established
-            # per-item behavior.
+            # The package reader validates every object in the candidate
+            # generation before the first catalog link/revision is written.
             prepare = getattr(self._reader, "prepare", None)
             if callable(prepare):
                 prepare(snapshot)

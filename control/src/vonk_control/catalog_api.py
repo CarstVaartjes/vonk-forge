@@ -31,7 +31,7 @@ from .catalog_service import (
 )
 from .catalog_sync import CatalogSyncError, CatalogSyncView
 from .global_catalog import GlobalCatalogError, GlobalRecipeRevision
-from .models import CatalogEntityRevision
+from .models import CatalogDocumentRevision
 from .recipe_library import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -226,6 +226,7 @@ class RecipeLibraryImportRequest(StrictModel):
     source_path: str = Field(pattern=r"^recipes/[a-z0-9][a-z0-9-]{1,62}\.json$")
     expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     document: dict[str, object]
+    model_documents: list[dict[str, object]] = Field(min_length=1, max_length=32)
 
 
 class ManagedCatalogSyncRequest(StrictModel):
@@ -451,7 +452,7 @@ class RecipeListResponse(StrictModel):
 class RecipeRevisionResponse(RecipeSummaryResponse):
     id: str = Field(pattern=_UUID)
     description: str = Field(min_length=1, max_length=4000)
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     document: dict[str, object]
     created_by: str = Field(min_length=1, max_length=200)
     created_at: str
@@ -467,21 +468,14 @@ class SourceBundleResponse(StrictModel):
 
 class CatalogEntityRevisionResponse(StrictModel):
     entity_id: str = Field(pattern=_UUID)
-    kind: Literal[
-        "model-group",
-        "model",
-        "model-version",
-        "execution-harness",
-        "runtime-distribution",
-        "patch-bundle",
-    ]
+    kind: Literal["model", "recipe"]
     publisher: str = Field(pattern=_SLUG)
     slug: str = Field(pattern=_SLUG)
     title: str = Field(min_length=1, max_length=120)
     revision_id: str = Field(pattern=_UUID)
     revision_number: int = Field(ge=1)
-    lifecycle: Literal["draft", "blocked", "resolved", "deprecated"]
-    schema_version: Literal[1]
+    lifecycle: Literal["candidate", "active", "failed"]
+    schema_version: Literal[2]
     document: dict[str, object]
     content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     created_by: str = Field(min_length=1, max_length=200)
@@ -587,19 +581,24 @@ def _managed_sync(value: CatalogSyncView) -> dict[str, object]:
     }
 
 
-def _entity_revision(value: CatalogEntityRevision) -> dict[str, object]:
+def _entity_revision(value: CatalogDocumentRevision) -> dict[str, object]:
+    metadata = value.document.get("metadata", {})
+    title = metadata.get("title") if isinstance(metadata, Mapping) else None
+    if not isinstance(title, str):
+        identity = value.document.get("identity", {})
+        title = identity.get("slug", value.slug) if isinstance(identity, Mapping) else value.slug
     return {
         "entity_id": value.entity_id,
-        "kind": value.entity.kind,
-        "publisher": value.entity.publisher,
-        "slug": value.entity.slug,
-        "title": value.entity.title,
+        "kind": value.kind,
+        "publisher": value.publisher,
+        "slug": value.slug,
+        "title": title,
         "revision_id": value.id,
         "revision_number": value.revision_number,
-        "lifecycle": value.lifecycle,
+        "lifecycle": value.state,
         "schema_version": value.schema_version,
         "document": value.document,
-        "content_sha256": value.content_sha256,
+        "content_sha256": value.content_digest,
         "created_by": value.created_by,
         "created_at": value.created_at.isoformat(),
     }
@@ -609,7 +608,9 @@ def _public_recipe_metadata(
     document: Mapping[str, object],
     dependencies: tuple[dict[str, object], ...] = (),
 ) -> dict[str, object]:
-    model_version = document.get("model")
+    selections = document.get("models")
+    first_selection = selections[0] if isinstance(selections, list) and selections else {}
+    model_version = first_selection.get("model") if isinstance(first_selection, Mapping) else {}
     model_version = model_version if isinstance(model_version, Mapping) else {}
     model_version_publisher = str(model_version.get("publisher", "unknown"))
     model_version_slug = str(model_version.get("slug", "unknown"))
@@ -621,13 +622,12 @@ def _public_recipe_metadata(
     for dependency in dependencies:
         identity = dependency.get("identity")
         if (
-            dependency.get("kind") == "model-version"
+            dependency.get("kind") == "model"
             and isinstance(identity, Mapping)
             and identity.get("publisher") == model_version_publisher
             and identity.get("slug") == model_version_slug
         ):
-            value = dependency.get("model")
-            model_reference = value if isinstance(value, Mapping) else None
+            model_reference = identity
             metadata = dependency.get("metadata")
             if isinstance(metadata, Mapping):
                 model_version_title = str(metadata.get("title", model_version_slug)) or model_version_slug
@@ -772,7 +772,8 @@ def _public_recipe_metadata(
             }
         )
     artifact_identities.sort(key=lambda item: str(item["identity_sha256"]))
-    build = document.get("build")
+    execution = document.get("execution")
+    build = execution.get("build") if isinstance(execution, Mapping) else None
     build_resources = build.get("resources") if isinstance(build, Mapping) else None
     raw_fabric = topology.get("fabric")
     raw_fabric = raw_fabric if isinstance(raw_fabric, Mapping) else {}
@@ -2004,6 +2005,7 @@ def install_catalog_routes(
                 source_path=body.source_path,
                 document=body.document,
                 expected_content_sha256=body.expected_content_sha256,
+                dependency_documents=body.model_documents,
             )
         except CatalogError as error:
             return _problem(request, error)

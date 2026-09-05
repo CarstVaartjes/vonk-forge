@@ -8,6 +8,7 @@ from collections.abc import Mapping
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import RecipeDefinition
 
 from .catalog_contract import (
     CatalogContractError,
@@ -17,11 +18,10 @@ from .catalog_contract import (
 )
 from .harnesses import HarnessRegistry
 from .harnesses.common import HarnessCompileError
-from .models import CatalogEntity, CatalogEntityRevision
+from .models import CatalogDocumentRevision
 from .recipe_contract import (
     recipe_content_sha256,
     recipe_model_dependencies,
-    recipe_patch_bundle,
     recipe_references,
     recipe_topology,
     validate_recipe,
@@ -267,43 +267,32 @@ def compile_runtime_spec(
 def resolve_recipe_entities(
     session: Session, document: Mapping[str, object]
 ) -> dict[str, object]:
-    """Load and cross-check the recipe's exact immutable entity graph."""
-
-    references = recipe_references(document)
-    model_version_ref, harness_ref, distribution_ref = references[:3]
-    model_dependencies = recipe_model_dependencies(document)
-    patch_ref = recipe_patch_bundle(document)
-    model_version = _resolve_model_version(session, model_version_ref)
-    auxiliary_model_versions = tuple(
-        _resolve_model_version(session, reference) for reference in model_dependencies
-    )
-    harness = _lookup_exact(session, harness_ref)
-    distribution = _lookup_exact(session, distribution_ref)
-    implemented_harness = _entity_reference(
-        distribution.document, "implements_harness", CatalogKind.EXECUTION_HARNESS
-    )
-    if implemented_harness != harness_ref:
-        raise RecipeRuntimeSpecError("runtime distribution does not implement harness")
-    patch = None
-    if patch_ref is not None:
-        patch = _lookup_exact(session, patch_ref)
-        applies_to = _entity_reference(
-            patch.document, "applies_to", CatalogKind.RUNTIME_DISTRIBUTION
+    """Resolve the recipe's exact canonical model revisions."""
+    try:
+        recipe = RecipeDefinition.model_validate(document)
+    except (TypeError, ValueError) as error:
+        raise RecipeRuntimeSpecError("recipe does not satisfy the canonical contract") from error
+    models = []
+    for selection in recipe.models:
+        reference = selection.model
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.publisher == reference.publisher,
+                CatalogDocumentRevision.slug == reference.slug,
+                CatalogDocumentRevision.content_digest == reference.content_sha256,
+                CatalogDocumentRevision.state == "active",
+            ).limit(1)
         )
-        if applies_to != distribution_ref:
-            raise RecipeRuntimeSpecError("patch bundle does not apply to distribution")
-    return {
-        "model_version": model_version,
-        "model_dependencies": auxiliary_model_versions,
-        "harness": harness,
-        "runtime_distribution": distribution,
-        "patch_bundle": patch,
-    }
+        if revision is None:
+            raise RecipeRuntimeSpecError("exact recipe model is not active")
+        models.append(revision)
+    return {"recipe": recipe, "models": tuple(models)}
 
 
 def _resolve_model_version(
     session: Session, reference: CatalogReference
-) -> CatalogEntityRevision:
+) -> CatalogDocumentRevision:
     model_version = _lookup_exact(session, reference)
     model_ref = _entity_reference(model_version.document, "model", CatalogKind.MODEL)
     model = _lookup_exact(session, model_ref)
@@ -318,12 +307,13 @@ def _require_resolved_entity(
     resolved_entities: Mapping[str, object], key: str, reference: CatalogReference
 ) -> None:
     value = resolved_entities.get(key)
-    if getattr(value, "content_sha256", None) != reference.content_sha256:
+    digest = getattr(value, "content_digest", getattr(value, "content_sha256", None))
+    if digest != reference.content_sha256:
         raise RecipeRuntimeSpecError(f"resolved {key} identity is invalid")
 
 
 def _resolved_content_sha256(value: object) -> str:
-    digest = getattr(value, "content_sha256", None)
+    digest = getattr(value, "content_digest", getattr(value, "content_sha256", None))
     if not isinstance(digest, str):
         raise RecipeRuntimeSpecError("resolved catalog identity is missing")
     return digest
@@ -331,16 +321,16 @@ def _resolved_content_sha256(value: object) -> str:
 
 def _lookup_exact(
     session: Session, reference: CatalogReference
-) -> CatalogEntityRevision:
+) -> CatalogDocumentRevision:
+    kind = getattr(reference.kind, "value", reference.kind)
     revision = session.scalar(
-        select(CatalogEntityRevision)
-        .join(CatalogEntity)
+        select(CatalogDocumentRevision)
         .where(
-            CatalogEntity.kind == reference.kind.value,
-            CatalogEntity.publisher == reference.publisher,
-            CatalogEntity.slug == reference.slug,
-            CatalogEntityRevision.content_sha256 == reference.content_sha256,
-            CatalogEntityRevision.lifecycle == "resolved",
+            CatalogDocumentRevision.kind == kind,
+            CatalogDocumentRevision.publisher == reference.publisher,
+            CatalogDocumentRevision.slug == reference.slug,
+            CatalogDocumentRevision.content_digest == reference.content_sha256,
+            CatalogDocumentRevision.state == "active",
         )
     )
     if revision is None:
