@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .install_admission import AdmissionReason
 from .inventory_repository import InventoryRepository
-from .legal_admission import operator_jurisdiction as validate_operator_jurisdiction
 from .legal_admission import territorial_admission
 from .models import (
     AgentNode,
@@ -88,9 +87,11 @@ class RunAdmissionService:
         self._inventory = InventoryRepository(sessions)
         self._max_age = inventory_max_age
         self._floor = memory_floor_bytes
-        self._operator_jurisdiction = validate_operator_jurisdiction(
-            operator_jurisdiction
-        )
+        # Territorial declarations remain informational model metadata.  The
+        # run plan deliberately does not derive an operator location or enforce
+        # a territory denial.  Keep accepting the constructor keyword while
+        # callers converge on the geography-free admission contract.
+        del operator_jurisdiction
 
     def plan_run(
         self,
@@ -132,7 +133,7 @@ class RunAdmissionService:
                 )
             legal_admission = territorial_admission(
                 model_document,
-                self._operator_jurisdiction,
+                None,
                 operation="run",
             )
             mapping_nodes = tuple(

@@ -1,4 +1,9 @@
-"""Fail-closed territorial license admission for immutable model authorities."""
+"""Informational license metadata for immutable model authorities.
+
+Vonk Forge preserves territorial license declarations for operators to review,
+but does not determine or enforce operator geography. Provider access controls
+and all technical admission checks remain authoritative for execution.
+"""
 
 from __future__ import annotations
 
@@ -17,37 +22,6 @@ _ISO_ALPHA2_JURISDICTIONS = frozenset(
     TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU
     WF WS YE YT ZA ZM ZW""".split()  # noqa: SIM905 - auditable ISO table
 ) | {"EU"}
-_EU_MEMBER_JURISDICTIONS = frozenset(
-    {
-        "AT",
-        "BE",
-        "BG",
-        "HR",
-        "CY",
-        "CZ",
-        "DE",
-        "DK",
-        "EE",
-        "ES",
-        "FI",
-        "FR",
-        "GR",
-        "HU",
-        "IE",
-        "IT",
-        "LT",
-        "LU",
-        "LV",
-        "MT",
-        "NL",
-        "PL",
-        "PT",
-        "RO",
-        "SE",
-        "SI",
-        "SK",
-    }
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,11 +50,11 @@ def operator_jurisdiction(value: str | None) -> str | None:
 
 def territorial_admission(
     model_version: Mapping[str, object],
-    configured_jurisdiction: str | None,
+    configured_jurisdiction: str | None = None,
     *,
     operation: str,
 ) -> TerritorialAdmissionDecision:
-    """Evaluate the model license for install or run admission."""
+    """Expose territorial license facts without making them admission gates."""
 
     if operation not in {"install", "run"}:
         raise ValueError("territorial admission operation is invalid")
@@ -104,42 +78,16 @@ def territorial_admission(
         or not notice
     ):
         raise TypeError("model territorial restrictions are invalid")
+    del configured_jurisdiction
     prefix = f"{operation}.license"
-    if configured_jurisdiction is None:
-        return TerritorialAdmissionDecision(
-            (
-                f"{prefix}_jurisdiction_required",
-                (
-                    "This model has territorial license restrictions. Configure "
-                    "VONK_OPERATOR_JURISDICTION before installation or execution; "
-                    "admission fails closed while it is unset."
-                ),
-            ),
-            None,
-        )
-    jurisdiction = operator_jurisdiction(configured_jurisdiction)
-    assert jurisdiction is not None
-    matched = jurisdiction if jurisdiction in denied else None
-    if matched is None and "EU" in denied and jurisdiction in _EU_MEMBER_JURISDICTIONS:
-        matched = "EU"
-    if matched is not None:
-        return TerritorialAdmissionDecision(
-            (
-                f"{prefix}_territory_denied",
-                (
-                    f"{notice} Configured operator jurisdiction {jurisdiction} "
-                    f"matches denied jurisdiction {matched}; {operation} is prohibited."
-                ),
-            ),
-            None,
-        )
     return TerritorialAdmissionDecision(
         None,
         (
-            f"{prefix}_territory_checked",
+            f"{prefix}_territorial_restrictions_informational",
             (
-                "Territorial license restrictions were checked against configured "
-                f"operator jurisdiction {jurisdiction}."
+                f"{notice} Territorial restrictions are informational; Vonk Forge "
+                "does not determine or enforce operator geography. Declared denied "
+                f"jurisdictions: {', '.join(denied)}."
             ),
         ),
     )
