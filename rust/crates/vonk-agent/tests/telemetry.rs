@@ -328,6 +328,16 @@ vllm_inter_token_latency_seconds_count 100
     );
     assert_eq!(rich_number(&first, "runtime.requests_running"), Some(2.0));
     assert_eq!(rich_number(&first, "runtime.ttft_p95_ms"), Some(200.0));
+    let ttft = first
+        .metrics
+        .series
+        .iter()
+        .find(|series| series.key == "runtime.ttft_p95_ms")
+        .unwrap();
+    assert_eq!(ttft.unit, "ms");
+    assert_eq!(ttft.measurement_kind, "derived");
+    assert_eq!(ttft.aggregation, "p95");
+    assert_eq!(ttft.source, "runtime-adapter:managed-local");
     assert_eq!(
         rich_number(&first, "runtime.prefix_cache_hit_percent"),
         Some(80.0)
@@ -382,6 +392,111 @@ vllm_time_to_first_token_seconds_count 100
     assert_eq!(rich_number(&second, "runtime.ttft_p95_ms"), Some(200.0));
     assert!(second.metrics.runtimes[0].endpoint.is_none());
     assert!(second.metrics.runtimes[0].model.is_none());
+}
+
+#[test]
+fn runtime_latency_does_not_relabel_mean_or_current_as_p95() {
+    let fixtures = Fixtures::new();
+    let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+    write_runtime_contract(&fixtures, run_id, "vllm");
+    let mut collector = TelemetryCollector::new(
+        runner(
+            br#"vllm_time_to_first_token_seconds_mean 0.2
+vllm_time_to_first_token_seconds_count 100
+vllm_time_to_first_token_seconds 0.2
+"#,
+        ),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let sample = collector
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+        .unwrap();
+
+    assert_eq!(rich_number(&sample, "runtime.ttft_p95_ms"), None);
+    assert!(sample.metrics.series.iter().all(|series| {
+        series.key != "runtime.ttft_p95_ms"
+            || (series.aggregation == "p95" && series.measurement_kind == "derived")
+    }));
+    assert!(sample.metrics.capabilities.iter().any(|capability| {
+        capability.key == "runtime.ttft_p95_ms"
+            && !capability.supported
+            && capability.reason.is_some()
+    }));
+}
+
+#[test]
+fn namespaced_runtime_adapters_are_supported_only_when_their_producer_emits_metrics() {
+    for (adapter, output) in [
+        (
+            "llama-cpp",
+            b"llamacpp:tokens_predicted_total 12\nllamacpp:requests_processing 1\n".as_slice(),
+        ),
+        (
+            "ds4",
+            b"ds4_generation_tokens_total 12\nds4_requests_running 1\n".as_slice(),
+        ),
+        (
+            "exl3",
+            b"exl3_generation_tokens_total 12\nexl3_requests_running 1\n".as_slice(),
+        ),
+    ] {
+        let fixtures = Fixtures::new();
+        let run_id = "45ea6921-50c9-4971-be2a-4cd04ce05069";
+        write_runtime_contract(&fixtures, run_id, adapter);
+        let mut collector = TelemetryCollector::new(
+            runner(output),
+            FakeFileSystem {
+                capacity: FileSystemCapacity {
+                    total_bytes: 10_000,
+                    free_bytes: 4_000,
+                },
+            },
+            fixtures.paths(),
+            boot_id(),
+        )
+        .unwrap();
+        let sample = collector
+            .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+            .unwrap();
+        if adapter == "llama-cpp" {
+            assert!(sample.metrics.runtimes[0].adapter_supported, "{adapter}");
+            assert_eq!(rich_number(&sample, "runtime.requests_running"), Some(1.0));
+        } else {
+            assert!(!sample.metrics.runtimes[0].adapter_supported, "{adapter}");
+        }
+
+        let fixtures = Fixtures::new();
+        write_runtime_contract(&fixtures, run_id, adapter);
+        let mut collector = TelemetryCollector::new(
+            runner(b"generation_tokens_total 12\nrequests_running 1\n"),
+            FakeFileSystem {
+                capacity: FileSystemCapacity {
+                    total_bytes: 10_000,
+                    free_bytes: 4_000,
+                },
+            },
+            fixtures.paths(),
+            boot_id(),
+        )
+        .unwrap();
+        let sample = collector
+            .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+            .unwrap();
+        assert!(!sample.metrics.runtimes[0].adapter_supported, "{adapter}");
+        assert!(sample.metrics.capabilities.iter().any(|capability| {
+            capability.key == "runtime.requests_running"
+                && !capability.supported
+                && capability.reason.is_some()
+        }));
+    }
 }
 
 #[test]
@@ -443,6 +558,96 @@ fn comfy_runtime_adapter_reports_queue_and_explicitly_unsupported_token_metrics(
                 && !capability.supported
                 && capability.reason.is_some())
     );
+}
+
+#[test]
+fn unavailable_throttle_flags_do_not_become_false_active_state() {
+    let fixtures = Fixtures::new();
+    let mut collector = TelemetryCollector::new(
+        runner(b"0, NVIDIA H100, 25, [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], P0\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let sample = collector
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+        .unwrap();
+
+    assert!(sample.metrics.series.iter().all(|series| {
+        !(series.key == "gpu.throttle_active" && series.device_id.as_deref() == Some("0"))
+    }));
+    assert!(sample.metrics.capabilities.iter().any(|capability| {
+        capability.key == "gpu.throttle_active"
+            && capability.device_id.as_deref() == Some("0")
+            && !capability.supported
+            && capability.reason.as_deref() == Some("all throttle reason flags unavailable")
+    }));
+}
+
+#[test]
+fn oom_pressure_remains_unavailable_when_only_memory_capacity_is_known() {
+    let fixtures = Fixtures::new();
+    let mut collector = basic_collector(&fixtures, boot_id());
+    let sample = collector
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+        .unwrap();
+
+    assert_eq!(rich_number(&sample, "memory.used_percent"), Some(60.0));
+    assert_eq!(rich_number(&sample, "memory.oom_pressure_percent"), None);
+    assert!(sample.metrics.capabilities.iter().any(|capability| {
+        capability.key == "memory.oom_pressure_percent"
+            && !capability.supported
+            && capability
+                .reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("not an OOM signal"))
+    }));
+}
+
+#[test]
+fn throttle_state_preserves_mixed_device_scopes() {
+    let fixtures = Fixtures::new();
+    let mut collector = TelemetryCollector::new(
+        runner(b"0, NVIDIA H100, 25, 100, 20, 80, 45, 250, 300, 1000, 1500, Active, Not Active, Not Active, Not Active, P0\n1, NVIDIA H100, [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], [N/A], P0\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let sample = collector
+        .sample_at(None, Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap())
+        .unwrap();
+
+    let active = sample
+        .metrics
+        .series
+        .iter()
+        .find(|series| {
+            series.key == "gpu.throttle_active" && series.device_id.as_deref() == Some("0")
+        })
+        .unwrap();
+    assert_eq!(active.value, json!(true));
+    assert_eq!(active.unit, "boolean");
+    assert_eq!(active.measurement_kind, "derived");
+    assert!(sample.metrics.series.iter().all(|series| {
+        !(series.key == "gpu.throttle_active" && series.device_id.as_deref() == Some("1"))
+    }));
+    assert!(sample.metrics.capabilities.iter().any(|capability| {
+        capability.key == "gpu.throttle_active"
+            && capability.device_id.as_deref() == Some("1")
+            && !capability.supported
+    }));
 }
 
 #[test]
