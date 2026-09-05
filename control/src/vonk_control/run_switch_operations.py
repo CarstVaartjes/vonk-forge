@@ -4431,8 +4431,10 @@ def _validate_artifact_execution(
             type(expected_bytes) is not int
             or type(completed) is not int
             or type(total) is not int
-            or completed != expected_bytes
-            or total != expected_bytes
+            or completed < 0
+            or total < 0
+            or completed != total
+            or total > expected_bytes
         ):
             raise RunSwitchOperationConflict(
                 "run-switch.model-download-byte-evidence-mismatch"

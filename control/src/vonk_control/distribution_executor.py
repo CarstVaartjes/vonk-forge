@@ -590,8 +590,17 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             or preview.get("expected_bytes") != model.artifact_set_bytes
         ):
             raise RuntimeError("model-cache download preview is not exact")
-        manifest = preview.get("_manifest")
-        if getattr(manifest, "recipe_revision_sha256", None) != model.recipe_revision_sha256:
+        manifest_getter = getattr(self._model_cache, "manifest_for_artifact_set", None)
+        manifest = (
+            manifest_getter(model.artifact_set_sha256)
+            if callable(manifest_getter)
+            else preview.get("_manifest")
+        )
+        if (
+            getattr(manifest, "digest", None) != model.artifact_set_sha256
+            or getattr(manifest, "recipe_revision_sha256", None)
+            != model.recipe_revision_sha256
+        ):
             raise RuntimeError("model-cache manifest recipe identity is not exact")
         blockers = preview.get("blockers", [])
         if isinstance(blockers, Sequence) and not isinstance(blockers, (str, bytes, bytearray)) and blockers:

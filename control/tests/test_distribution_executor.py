@@ -184,7 +184,10 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins() -> None:
                 "artifact_count": 2,
                 "new_bytes": 12,
                 "blockers": [],
-                "_manifest": SimpleNamespace(recipe_revision_sha256="b" * 64),
+                "_manifest": SimpleNamespace(
+                    digest="d" * 64,
+                    recipe_revision_sha256="b" * 64,
+                ),
             }
 
         def start_download(self, **kwargs):
