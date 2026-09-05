@@ -292,7 +292,7 @@ def run_synthetic_conformance(
             "kind": "runtime-distribution",
             "publisher": "vonk-forge",
             "slug": "synthetic-arm64",
-            "content_sha256": projection.binding.distribution_content_sha256
+            "content_sha256": projection.binding.execution_content_sha256
             if projection.binding is not None
             else "0" * 64,
         },

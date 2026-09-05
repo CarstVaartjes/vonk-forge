@@ -4,12 +4,57 @@
 from __future__ import annotations
 
 import argparse
+import json
+import math
 import sys
 from collections import Counter
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+DURATION_SCHEMA_VERSION = 1
+
+
+def load_durations(
+    path: str | Path,
+    *,
+    now: datetime | None = None,
+    max_age_hours: float | None = None,
+) -> dict[str, float]:
+    """Load optional measured file durations, returning an empty map on bad input."""
+    try:
+        payload: Any = json.loads(Path(path).read_text(encoding="utf-8"))
+        if payload.get("schema_version") != DURATION_SCHEMA_VERSION:
+            return {}
+        durations = payload.get("files")
+        if not isinstance(durations, dict):
+            return {}
+        if max_age_hours is not None:
+            generated_at = datetime.fromisoformat(
+                str(payload["generated_at"])
+            )
+            if generated_at.tzinfo is None:
+                return {}
+            reference = now or datetime.now(UTC)
+            if (reference - generated_at).total_seconds() > max_age_hours * 3600:
+                return {}
+        result: dict[str, float] = {}
+        for file_name, duration in durations.items():
+            value = float(duration)
+            if isinstance(file_name, str) and math.isfinite(value) and value > 0:
+                result[file_name] = value
+        return result
+    except (AttributeError, OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return {}
 
 
 def select_files(
-    node_ids: list[str], *, index: int, total: int, prefix: str = ""
+    node_ids: list[str],
+    *,
+    index: int,
+    total: int,
+    prefix: str = "",
+    durations: dict[str, float] | None = None,
 ) -> list[str]:
     if total < 1 or not 0 <= index < total:
         raise ValueError("shard index must be within the positive shard total")
@@ -19,10 +64,28 @@ def select_files(
 
     shards: list[list[str]] = [[] for _ in range(total)]
     weights = [0] * total
-    for path, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+    measured = durations or {}
+    measured_counts = [
+        (measured[path], count)
+        for path, count in counts.items()
+        if path in measured and measured[path] > 0
+    ]
+    seconds_per_test = (
+        sum(duration for duration, _ in measured_counts)
+        / sum(count for _, count in measured_counts)
+        if measured_counts
+        else None
+    )
+    weights_by_file = {
+        path: measured.get(path, count * seconds_per_test if seconds_per_test else float(count))
+        for path, count in counts.items()
+    }
+    for path, weight in sorted(
+        weights_by_file.items(), key=lambda item: (-item[1], item[0])
+    ):
         destination = min(range(total), key=lambda shard: (weights[shard], shard))
         shards[destination].append(f"{prefix}{path}")
-        weights[destination] += count
+        weights[destination] += weight
     return sorted(shards[index])
 
 
@@ -31,6 +94,15 @@ def main() -> int:
     parser.add_argument("--index", type=int, required=True)
     parser.add_argument("--total", type=int, required=True)
     parser.add_argument("--prefix", default="")
+    parser.add_argument(
+        "--durations",
+        help="optional schema-1 JSON file of measured pytest file durations",
+    )
+    parser.add_argument(
+        "--max-duration-age-hours",
+        type=float,
+        help="ignore duration data older than this many hours",
+    )
     arguments = parser.parse_args()
     try:
         selected = select_files(
@@ -38,6 +110,14 @@ def main() -> int:
             index=arguments.index,
             total=arguments.total,
             prefix=arguments.prefix,
+            durations=(
+                load_durations(
+                    arguments.durations,
+                    max_age_hours=arguments.max_duration_age_hours,
+                )
+                if arguments.durations
+                else None
+            ),
         )
     except ValueError as error:
         parser.error(str(error))

@@ -52,7 +52,7 @@ def _load(path: Path, name: str):
 def _render(tmp_path: Path) -> Path:
     output = tmp_path / "docker-compose.yaml"
     _load(RENDERER, "nas_payload_production_renderer").render(
-        TEMPLATE, output, **IMAGES
+        TEMPLATE, output, **IMAGES, channel="pinned"
     )
     return output
 
@@ -123,9 +123,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "VONK_REGISTRY_HOSTNAME": "hostname",
     }
     defaults = {item["env"]: item["default"] for item in payload["required_values"]}
-    assert defaults["VONK_DIRECT_FABRIC_CIDRS"] == (
-        "192.168.100.0/24,192.168.101.0/24"
-    )
+    assert defaults["VONK_DIRECT_FABRIC_CIDRS"] == ("192.168.100.0/24,192.168.101.0/24")
     prompts = {item["env"]: item["prompt"] for item in payload["required_values"]}
     assert prompts["VONK_AGENT_ENROLL_HOSTNAME"] == (
         "Agent enrollment hostname (enroll.<tailnet>.ts.net)"
@@ -141,9 +139,16 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",
         "litellm-upstream-key",
+        "hf-token",
     }
     secret_prompts = {item["file"]: item for item in payload["secrets"]}
     assert secret_prompts["admin-password"]["generate_bytes"] == 24
+    assert secret_prompts["hf-token"] == {
+        "file": "hf-token",
+        "prompt": "Hugging Face access token (optional; leave blank for public models)",
+        "generate_bytes": None,
+        "optional": True,
+    }
     for external in (
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",
@@ -346,3 +351,24 @@ def test_payload_build_rejects_symlink_input(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert not (tmp_path / "payload.json").exists()
+
+
+@pytest.mark.parametrize("channel", ("dev", "stable"))
+def test_installer_compose_tracks_channel_for_every_image(
+    tmp_path: Path, channel: str
+) -> None:
+    document = yaml.safe_load(_render(tmp_path).read_text())
+    builder = _load(SCRIPT, "channel_bundle_builder")
+    payload = builder._payload(document, channel)
+    services = yaml.safe_load(payload["docker_compose_yaml"])["services"]
+    for service in services.values():
+        image = service["image"]
+        tag = (
+            "dev"
+            if channel == "dev"
+            and image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+            else "latest"
+        )
+        assert image.endswith(f":{tag}")
+        assert "@" not in image
+        assert service["pull_policy"] == "always"

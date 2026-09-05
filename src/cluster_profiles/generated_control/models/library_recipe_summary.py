@@ -8,13 +8,16 @@ from ..types import UNSET, Unset
 
 from ..models.library_recipe_summary_source_kind import check_library_recipe_summary_source_kind
 from ..models.library_recipe_summary_source_kind import LibraryRecipeSummarySourceKind
+from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
+from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.library_installation_summary import LibraryInstallationSummary
   from ..models.recipe_revision_summary import RecipeRevisionSummary
+  from ..models.library_capability_inventory import LibraryCapabilityInventory
   from ..models.library_run_summary import LibraryRunSummary
+  from ..models.library_installation_summary import LibraryInstallationSummary
   from ..models.library_projection_reason import LibraryProjectionReason
 
 
@@ -46,6 +49,8 @@ class LibraryRecipeSummary:
             source_kind (LibraryRecipeSummarySourceKind):
             title (str):
             topology_name (Union[None, str]):
+            recipe_capabilities (Union[Unset, LibraryCapabilityInventory]): Compare-friendly model or recipe capability
+                assertions with evidence state.
      """
 
     capabilities: list[str]
@@ -65,15 +70,17 @@ class LibraryRecipeSummary:
     source_kind: LibraryRecipeSummarySourceKind
     title: str
     topology_name: Union[None, str]
+    recipe_capabilities: Union[Unset, 'LibraryCapabilityInventory'] = UNSET
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.library_installation_summary import LibraryInstallationSummary
         from ..models.recipe_revision_summary import RecipeRevisionSummary
+        from ..models.library_capability_inventory import LibraryCapabilityInventory
         from ..models.library_run_summary import LibraryRunSummary
+        from ..models.library_installation_summary import LibraryInstallationSummary
         from ..models.library_projection_reason import LibraryProjectionReason
         capabilities = self.capabilities
 
@@ -131,6 +138,10 @@ class LibraryRecipeSummary:
         topology_name: Union[None, str]
         topology_name = self.topology_name
 
+        recipe_capabilities: Union[Unset, dict[str, Any]] = UNSET
+        if not isinstance(self.recipe_capabilities, Unset):
+            recipe_capabilities = self.recipe_capabilities.to_dict()
+
 
         field_dict: dict[str, Any] = {}
 
@@ -153,6 +164,8 @@ class LibraryRecipeSummary:
             "title": title,
             "topology_name": topology_name,
         })
+        if recipe_capabilities is not UNSET:
+            field_dict["recipe_capabilities"] = recipe_capabilities
 
         return field_dict
 
@@ -160,9 +173,10 @@ class LibraryRecipeSummary:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.library_installation_summary import LibraryInstallationSummary
         from ..models.recipe_revision_summary import RecipeRevisionSummary
+        from ..models.library_capability_inventory import LibraryCapabilityInventory
         from ..models.library_run_summary import LibraryRunSummary
+        from ..models.library_installation_summary import LibraryInstallationSummary
         from ..models.library_projection_reason import LibraryProjectionReason
         d = dict(src_dict)
         capabilities = cast(list[str], d.pop("capabilities"))
@@ -249,6 +263,16 @@ class LibraryRecipeSummary:
         topology_name = _parse_topology_name(d.pop("topology_name"))
 
 
+        _recipe_capabilities = d.pop("recipe_capabilities", UNSET)
+        recipe_capabilities: Union[Unset, LibraryCapabilityInventory]
+        if isinstance(_recipe_capabilities,  Unset):
+            recipe_capabilities = UNSET
+        else:
+            recipe_capabilities = LibraryCapabilityInventory.from_dict(_recipe_capabilities)
+
+
+
+
         library_recipe_summary = cls(
             capabilities=capabilities,
             description=description,
@@ -267,6 +291,7 @@ class LibraryRecipeSummary:
             source_kind=source_kind,
             title=title,
             topology_name=topology_name,
+            recipe_capabilities=recipe_capabilities,
         )
 
         return library_recipe_summary

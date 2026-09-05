@@ -866,3 +866,36 @@ def test_openssl_ed25519_probe_key_conversion_is_strict() -> None:
         lifecycle._openssl_compatible_ed25519_private_key(
             source.replace(b"PRIVATE KEY", b"RSA PRIVATE KEY")
         )
+
+
+@pytest.mark.parametrize("observed", ("sha256:expected", "sha256:different"))
+def test_running_channel_alias_must_match_the_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observed: str
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.project = "vonk-channel-test"
+    run.arguments = SimpleNamespace(candidate_release=tmp_path / "release.json")
+    monkeypatch.setattr(lifecycle, "COMPOSE_IMAGE_ROLES", {"api": "control-api"})
+    monkeypatch.setattr(
+        lifecycle,
+        "_read_canonical_document",
+        lambda *args: {"images": {"api": "ghcr.io/carstvaartjes/vonk-forge-api@sha256:candidate"}},
+    )
+
+    def command(argv, **kwargs):
+        if argv[:2] == ["docker", "inspect"]:
+            output = observed
+        elif argv[:3] == ["docker", "image", "inspect"]:
+            output = "sha256:expected"
+        else:
+            output = "container-id"
+        return subprocess.CompletedProcess(argv, 0, output + "\n", "")
+
+    run._run_command = command
+    if observed == "sha256:expected":
+        run._assert_running_publication_images()
+    else:
+        with pytest.raises(lifecycle.LifecycleError, match="differs from publication"):
+            run._assert_running_publication_images()

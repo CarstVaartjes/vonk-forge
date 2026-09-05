@@ -104,6 +104,8 @@ struct RuntimeContract<'a> {
     interface: &'static str,
     installation_id: &'a str,
     run_id: &'a str,
+    adapter: &'a str,
+    adapter_version: u32,
     artifacts: Vec<RuntimeArtifact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     endpoint: Option<RuntimeEndpoint<'a>>,
@@ -363,6 +365,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         fs::create_dir_all(&models)?;
         fs::create_dir_all(&installation)?;
         fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))?;
+        self.ensure_runtime_cache(installation_id)?;
         for artifact in &spec.artifacts {
             self.materialize_artifact(&models, artifact)?;
         }
@@ -615,6 +618,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 _ => return Err(OciError::Runtime),
             }
         }
+        let runtime_cache =
+            managed_path(self.data_root, "installations", installation_id)?.join("runtime-cache");
+        arguments.extend([
+            "--mount".to_owned(),
+            format!(
+                "type=bind,src={},dst=/outputs/cache",
+                runtime_cache.display()
+            ),
+        ]);
         arguments.extend([
             "--mount".to_owned(),
             format!(
@@ -634,6 +646,18 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
         }
         Ok(arguments)
+    }
+
+    fn ensure_runtime_cache(&self, installation_id: &str) -> Result<PathBuf, OciError> {
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        let cache = installation.join("runtime-cache");
+        fs::create_dir_all(&cache)?;
+        fs::set_permissions(&cache, fs::Permissions::from_mode(0o700))?;
+        let metadata = fs::symlink_metadata(&cache)?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(OciError::Artifact);
+        }
+        Ok(cache)
     }
 
     pub fn prepare_start(
@@ -672,6 +696,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let outputs = state.join("outputs");
         fs::create_dir_all(&outputs)?;
         fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
+        self.ensure_runtime_cache(installation_id)?;
         if spec.job.is_some() {
             let inputs = state.join("inputs");
             let metadata = fs::symlink_metadata(&inputs)?;
@@ -1480,6 +1505,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             interface: "vonk.runtime.v1",
             installation_id,
             run_id,
+            adapter: &spec.runtime.adapter,
+            adapter_version: spec.runtime.adapter_version,
             artifacts,
             endpoint: spec.endpoint.as_ref().map(|endpoint| RuntimeEndpoint {
                 listen_host: "0.0.0.0",

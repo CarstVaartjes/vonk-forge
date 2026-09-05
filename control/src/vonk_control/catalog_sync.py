@@ -12,6 +12,7 @@ from typing import Protocol
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition
 
 from .catalog_service import CatalogError, CatalogService
 from .models import (
@@ -164,6 +165,11 @@ class ManagedRecipeCatalogSyncService:
                     "catalog.sync_preview_changed",
                     "recipe library changed since it was reviewed",
                 )
+            # The package reader validates every object in the candidate
+            # generation before the first catalog link/revision is written.
+            prepare = getattr(self._reader, "prepare", None)
+            if callable(prepare):
+                prepare(snapshot)
             self._initialize(run.id, snapshot)
             result = self._apply(run.id, snapshot, actor=actor)
             self._finish(run.id, result)
@@ -221,10 +227,15 @@ class ManagedRecipeCatalogSyncService:
         self, run_id: str, snapshot: RecipeLibrarySnapshot, *, actor: str
     ) -> dict[str, object]:
         result = _empty_result()
+        package_mode = callable(getattr(self._reader, "prepare", None))
+        # The immutable index is authoritative for the complete Model catalog,
+        # including valid revisions that no package happens to reference.
+        self._catalog.import_catalog_models(actor, snapshot.catalog_entities)
         local = self._catalog.recipe_catalog_local_revisions(
             [item.slug for item in snapshot.items]
         )
         seen: set[tuple[str, str]] = set()
+        pending_links: list[tuple[RecipeLibraryItem, str]] = []
         for item in snapshot.items:
             seen.add((item.publisher, item.slug))
             recipe_uri = item.uri
@@ -242,14 +253,12 @@ class ManagedRecipeCatalogSyncService:
                     revision = self._revision_for_digest(
                         previous.recipe_id, item.content_sha256
                     )
-                    self._upsert_link(run_id, snapshot, item, revision.id)
+                    if package_mode:
+                        pending_links.append((item, revision.id))
+                    else:
+                        self._upsert_link(run_id, snapshot, item, revision.id)
                     result["unchanged_count"] = int(result["unchanged_count"]) + 1
                 else:
-                    if not _explicitly_executable(item.document):
-                        raise CatalogSyncError(
-                            "catalog.sync_recipe_not_executable",
-                            "managed recipe does not explicitly declare an executable contract",
-                        )
                     hydrated = self._reader.fetch(item.uri)
                     if (
                         hydrated.library_commit != snapshot.commit
@@ -258,6 +267,17 @@ class ManagedRecipeCatalogSyncService:
                         raise CatalogSyncError(
                             "catalog.sync_revision_changed",
                             "recipe changed while the exact library snapshot was applied",
+                        )
+                    if not _explicitly_executable(hydrated.document):
+                        raise CatalogSyncError(
+                            "catalog.sync_recipe_not_executable",
+                            "managed recipe does not explicitly declare an executable contract",
+                        )
+                    package_handle = getattr(hydrated, "package_handle", None)
+                    if package_mode and package_handle is None:
+                        raise CatalogSyncError(
+                            "catalog.sync_package_handle_missing",
+                            "managed package has no durable verified closure handle",
                         )
                     self._store_source_bundle(hydrated, actor)
                     revision = self._catalog.import_recipe_library(
@@ -277,11 +297,27 @@ class ManagedRecipeCatalogSyncService:
                             if hydrated.release_history
                             else None
                         ),
+                        package_handle=package_handle,
+                        package_sha256=getattr(hydrated, "package_sha256", None),
+                        source_bundle_sha256=getattr(
+                            hydrated, "source_bundle_sha256", None
+                        ),
                     )
-                    self._upsert_link(run_id, snapshot, item, revision.id)
+                    if package_mode:
+                        pending_links.append((item, revision.id))
+                    else:
+                        self._upsert_link(run_id, snapshot, item, revision.id)
                     key = "imported_count" if previous is None else "updated_count"
                     result[key] = int(result[key]) + 1
             except (CatalogError, RecipeLibraryError, CatalogSyncError) as error:
+                if package_mode:
+                    # A package candidate is a complete generation.  Keep the
+                    # previous active links untouched if any item cannot be
+                    # applied; only the durable run is marked failed by sync().
+                    raise CatalogSyncError(
+                        "catalog.sync_candidate_failed",
+                        f"recipe package apply failed for {item.publisher}/{item.slug}",
+                    ) from error
                 self._record_item_error(run_id, snapshot, item, error)
                 result["skipped_count"] = int(result["skipped_count"]) + 1
                 problems = list(result["problems"])
@@ -296,9 +332,14 @@ class ManagedRecipeCatalogSyncService:
                 result["problems"] = problems
             self._progress(run_id, result)
 
-        withdrawn, stale = self._reconcile_missing_and_stale(
-            run_id, snapshot, seen
-        )
+        if package_mode:
+            withdrawn, stale = self._commit_package_generation(
+                run_id, snapshot, seen, pending_links
+            )
+        else:
+            withdrawn, stale = self._reconcile_missing_and_stale(
+                run_id, snapshot, seen
+            )
         result["withdrawn_recipes"] = withdrawn
         result["withdrawn_count"] = len(withdrawn)
         result["stale_recipes"] = stale
@@ -306,16 +347,13 @@ class ManagedRecipeCatalogSyncService:
         return result
 
     def _store_source_bundle(self, item: RecipeLibraryItem, actor: str) -> None:
-        if item.source_bundle is None:
+        source_bundle = getattr(item, "source_bundle", None)
+        source_digest = getattr(item, "source_bundle_sha256", None)
+        if source_bundle is None or not isinstance(source_digest, str):
             return
-        build = item.document.get("build")
-        context = build.get("context") if isinstance(build, Mapping) else None
-        digest = context.get("sha256") if isinstance(context, Mapping) else None
-        if not isinstance(digest, str):
-            raise CatalogSyncError(
-                "catalog.sync_source_invalid", "managed recipe source identity is invalid"
-            )
-        self._catalog.store_source_bundle(digest, io.BytesIO(item.source_bundle), actor)
+        self._catalog.store_source_bundle(
+            source_digest, io.BytesIO(source_bundle), actor
+        )
 
     def _initialize(self, run_id: str, snapshot: RecipeLibrarySnapshot) -> None:
         with self._sessions.begin() as session:
@@ -400,19 +438,34 @@ class ManagedRecipeCatalogSyncService:
     ) -> None:
         now = self._clock()
         with self._sessions.begin() as session:
-            revision = session.get(LocalRecipeRevision, revision_id)
-            if revision is None:
-                raise CatalogSyncError(
-                    "catalog.sync_history_inconsistent", "managed recipe revision is missing"
-                )
-            recipe = session.get(LocalRecipe, revision.recipe_id)
-            if recipe is None or recipe.source_kind != "recipe_library":
-                raise CatalogSyncError(
-                    "catalog.sync_custom_conflict", "managed identity resolved to a custom recipe"
-                )
-            link = session.get(ManagedRecipeLibraryLink, recipe.id)
-            if link is None:
-                link = ManagedRecipeLibraryLink(
+            self._upsert_link_in_session(
+                session, run_id, snapshot, item, revision_id, now=now
+            )
+
+    def _upsert_link_in_session(
+        self,
+        session: Session,
+        run_id: str,
+        snapshot: RecipeLibrarySnapshot,
+        item: RecipeLibraryItem,
+        revision_id: str,
+        *,
+        now: datetime,
+    ) -> None:
+        revision = session.get(LocalRecipeRevision, revision_id)
+        if revision is None:
+            raise CatalogSyncError(
+                "catalog.sync_history_inconsistent", "managed recipe revision is missing"
+            )
+        recipe = session.get(LocalRecipe, revision.recipe_id)
+        if recipe is None or recipe.source_kind != "recipe_library":
+            raise CatalogSyncError(
+                "catalog.sync_custom_conflict", "managed identity resolved to a custom recipe"
+            )
+        link = session.get(ManagedRecipeLibraryLink, recipe.id)
+        if link is None:
+            session.add(
+                ManagedRecipeLibraryLink(
                     recipe_id=recipe.id,
                     repository=snapshot.repository,
                     publisher=item.publisher,
@@ -428,22 +481,22 @@ class ManagedRecipeCatalogSyncService:
                     first_synced_at=now,
                     updated_at=now,
                 )
-                session.add(link)
-            else:
-                if (link.publisher, link.slug) != (item.publisher, item.slug):
-                    raise CatalogSyncError(
-                        "catalog.sync_identity_changed",
-                        "managed recipe publisher or slug changed",
-                    )
-                link.source_path = item.source_path
-                link.remote_commit = snapshot.commit
-                link.remote_content_sha256 = item.content_sha256
-                link.local_revision_id = revision.id
-                link.availability = "present"
-                link.sync_state = "current"
-                link.last_error = None
-                link.last_seen_run_id = run_id
-                link.updated_at = now
+            )
+        else:
+            if (link.publisher, link.slug) != (item.publisher, item.slug):
+                raise CatalogSyncError(
+                    "catalog.sync_identity_changed",
+                    "managed recipe publisher or slug changed",
+                )
+            link.source_path = item.source_path
+            link.remote_commit = snapshot.commit
+            link.remote_content_sha256 = item.content_sha256
+            link.local_revision_id = revision.id
+            link.availability = "present"
+            link.sync_state = "current"
+            link.last_error = None
+            link.last_seen_run_id = run_id
+            link.updated_at = now
 
     def _record_item_error(
         self,
@@ -481,58 +534,88 @@ class ManagedRecipeCatalogSyncService:
         snapshot: RecipeLibrarySnapshot,
         seen: set[tuple[str, str]],
     ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-        now = self._clock()
+        with self._sessions.begin() as session:
+            withdrawn, stale = self._reconcile_in_session(
+                session, run_id, snapshot, seen, now=self._clock()
+            )
+        return withdrawn, stale
+
+    def _commit_package_generation(
+        self,
+        run_id: str,
+        snapshot: RecipeLibrarySnapshot,
+        seen: set[tuple[str, str]],
+        pending_links: list[tuple[RecipeLibraryItem, str]],
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        """Publish one complete package candidate as the active generation."""
+
+        with self._sessions.begin() as session:
+            now = self._clock()
+            for item, revision_id in pending_links:
+                self._upsert_link_in_session(
+                    session, run_id, snapshot, item, revision_id, now=now
+                )
+            return self._reconcile_in_session(
+                session, run_id, snapshot, seen, now=now
+            )
+
+    def _reconcile_in_session(
+        self,
+        session: Session,
+        run_id: str,
+        snapshot: RecipeLibrarySnapshot,
+        seen: set[tuple[str, str]],
+        *,
+        now: datetime,
+    ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         withdrawn: list[dict[str, object]] = []
         stale: list[dict[str, object]] = []
-        with self._sessions.begin() as session:
-            links = list(
-                session.scalars(
-                    select(ManagedRecipeLibraryLink).where(
-                        ManagedRecipeLibraryLink.repository == snapshot.repository
-                    )
+        links = list(
+            session.scalars(
+                select(ManagedRecipeLibraryLink).where(
+                    ManagedRecipeLibraryLink.repository == snapshot.repository
                 )
             )
-            for link in links:
-                if (link.publisher, link.slug) not in seen:
-                    link.availability = "missing"
-                    link.updated_at = now
-                stale_installations, stale_runs, installed, running = _operational_counts(
-                    session, link.recipe_id, link.local_revision_id
+        )
+        for link in links:
+            if (link.publisher, link.slug) not in seen:
+                link.availability = "missing"
+                link.updated_at = now
+            stale_installations, stale_runs, installed, running = _operational_counts(
+                session, link.recipe_id, link.local_revision_id
+            )
+            if (
+                link.availability == "missing"
+                and (installed or running)
+                and len(withdrawn) < _MAX_RESULT_ITEMS
+            ):
+                withdrawn.append(
+                    {
+                        "recipe_id": link.recipe_id,
+                        "recipe_uri": (
+                            f"vonk://catalog/{link.publisher}/{link.slug}"
+                            f"@sha256:{link.remote_content_sha256}"
+                        ),
+                        "release_version": _release_version(
+                            session, link.recipe_id, link.remote_content_sha256
+                        ),
+                        "model_version_key": _model_version_key(
+                            session, link.local_revision_id
+                        ),
+                    }
                 )
-                if (
-                    link.availability == "missing"
-                    and (installed or running)
-                    and len(withdrawn) < _MAX_RESULT_ITEMS
-                ):
-                    withdrawn.append(
-                        {
-                            "recipe_id": link.recipe_id,
-                            "recipe_uri": (
-                                f"vonk://catalog/{link.publisher}/{link.slug}"
-                                f"@sha256:{link.remote_content_sha256}"
-                            ),
-                            "release_version": _release_version(
-                                session, link.recipe_id, link.remote_content_sha256
-                            ),
-                            "model_version_key": _model_version_key(
-                                session, link.local_revision_id
-                            ),
-                        }
-                    )
-                if (
-                    stale_installations or stale_runs
-                ) and len(stale) < _MAX_RESULT_ITEMS:
-                    stale.append(
-                        {
-                            "recipe_id": link.recipe_id,
-                            "current_revision_id": link.local_revision_id,
-                            "stale_installation_count": stale_installations,
-                            "stale_run_count": stale_runs,
-                        }
-                    )
-            run = session.get(RecipeLibrarySyncRun, run_id)
-            if run is not None:
-                run.missing_count = len(withdrawn)
+            if (stale_installations or stale_runs) and len(stale) < _MAX_RESULT_ITEMS:
+                stale.append(
+                    {
+                        "recipe_id": link.recipe_id,
+                        "current_revision_id": link.local_revision_id,
+                        "stale_installation_count": stale_installations,
+                        "stale_run_count": stale_runs,
+                    }
+                )
+        run = session.get(RecipeLibrarySyncRun, run_id)
+        if run is not None:
+            run.missing_count = len(withdrawn)
         return withdrawn, stale
 
     def _by_request_key(self, request_key: str) -> RecipeLibrarySyncRun | None:
@@ -660,17 +743,14 @@ def _model_version_key(session: Session, revision_id: str) -> str | None:
     revision = session.get(LocalRecipeRevision, revision_id)
     if revision is None:
         return None
-    model = revision.document.get("model")
-    if not isinstance(model, Mapping):
+    try:
+        recipe = RecipeDefinition.model_validate(revision.document)
+    except (TypeError, ValueError):
         return None
-    publisher, slug, digest = (
-        model.get("publisher"),
-        model.get("slug"),
-        model.get("content_sha256"),
-    )
-    if not all(isinstance(value, str) and value for value in (publisher, slug, digest)):
+    if not recipe.models:
         return None
-    return f"{publisher}/{slug}@{digest}"
+    reference = recipe.models[0].model
+    return f"{reference.publisher}/{reference.slug}@{reference.content_sha256}"
 
 
 def _release_version(

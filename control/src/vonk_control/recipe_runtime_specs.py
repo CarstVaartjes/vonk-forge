@@ -1,115 +1,168 @@
-"""Compile a role-specific agent runtime spec from immutable local authority."""
+"""Compile canonical public RecipeDefinition documents into agent runtimes.
 
+RecipeDefinition and ModelDefinition are the only authoring authorities.  The
+compiler consumes their validated projections plus a package/build handle and
+adds the platform execution invariants at the final boundary.
+"""
 from __future__ import annotations
 
 import copy
-import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts.resolver import ContractResolutionError, validate_recipe_package_paths
 
-from .catalog_contract import (
-    CatalogContractError,
-    CatalogKind,
-    CatalogReference,
-    parse_catalog_reference,
-)
-from .harnesses import HarnessRegistry
+from .harnesses.canonical import compile_canonical_harness
 from .harnesses.common import HarnessCompileError
-from .models import CatalogEntity, CatalogEntityRevision
-from .recipe_contract import (
-    recipe_content_sha256,
-    recipe_model_dependencies,
-    recipe_patch_bundle,
-    recipe_references,
-    recipe_topology,
-    validate_recipe,
-)
-
-_OCI_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_BUILTIN_HARNESS_REGISTRY = HarnessRegistry.with_builtins()
-_JOB_INTERFACES = frozenset(
-    {"image-job", "audio-job", "video-job", "mesh-job", "artifact-job"}
-)
+from .models import CatalogDocumentRevision
+from .runtime_writable_paths import document as writable_path_document
 
 
 class RecipeRuntimeSpecError(ValueError):
-    pass
+    """The canonical recipe cannot produce a secure runtime projection."""
+
+
+def _recipe(value: object) -> RecipeDefinition:
+    if isinstance(value, RecipeDefinition):
+        return value
+    raw = getattr(value, "document", value)
+    if not isinstance(raw, Mapping):
+        raise RecipeRuntimeSpecError("recipe projection is invalid")
+    try:
+        return RecipeDefinition.model_validate(raw)
+    except Exception as error:
+        raise RecipeRuntimeSpecError("recipe does not satisfy RecipeDefinition v2") from error
+
+
+def _models(value: object) -> tuple[ModelDefinition, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise RecipeRuntimeSpecError("canonical model projections are missing")
+    result: list[ModelDefinition] = []
+    for item in value:
+        if isinstance(item, ModelDefinition):
+            result.append(item)
+            continue
+        raw = getattr(item, "document", item)
+        if not isinstance(raw, Mapping):
+            raise RecipeRuntimeSpecError("canonical model projection is invalid")
+        try:
+            result.append(ModelDefinition.model_validate(raw))
+        except Exception as error:
+            raise RecipeRuntimeSpecError("canonical model projection is invalid") from error
+    return tuple(result)
+
+
+def _package(value: object, resolved: Mapping[str, object]) -> object:
+    if value is not None:
+        return value
+    for name in ("package_handle", "build_receipt", "package"):
+        if name in resolved:
+            return resolved[name]
+    return None
+
+
+def _artifact_inputs(package: object) -> dict[str, str]:
+    raw = package.get("artifact_inputs") if isinstance(package, Mapping) else getattr(package, "artifact_inputs", None)
+    if raw is None:
+        return {}
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        raise RecipeRuntimeSpecError("package artifact projection is invalid")
+    result: dict[str, str] = {}
+    for item in raw:
+        if not isinstance(item, Mapping) or type(item.get("selection_id")) is not str or type(item.get("artifact_key")) is not str:
+            raise RecipeRuntimeSpecError("package artifact projection is invalid")
+        if item["selection_id"] in result:
+            raise RecipeRuntimeSpecError("package artifact projection repeats a selection")
+        result[item["selection_id"]] = item["artifact_key"]
+    return result
+
+
+def _package_paths(package: object) -> Sequence[str] | None:
+    raw = package.get("paths") if isinstance(package, Mapping) else getattr(package, "paths", None)
+    if raw is None and isinstance(package, Mapping):
+        raw = package.get("member_paths")
+    if raw is None:
+        return None
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)) or any(type(path) is not str for path in raw):
+        raise RecipeRuntimeSpecError("package paths are invalid")
+    return raw
+
+
+def _resolved_inputs(
+    resolved_entities: Mapping[str, object] | None,
+    models: Sequence[ModelDefinition] | None,
+    package_handle: object,
+    parsed: RecipeDefinition,
+) -> tuple[tuple[ModelDefinition, ...], object]:
+    resolved = {} if resolved_entities is None else dict(resolved_entities)
+    allowed = {"recipe", "models", "model_projections", "package_handle", "build_receipt", "package"}
+    unknown = set(resolved) - allowed
+    if unknown:
+        raise RecipeRuntimeSpecError("resolved inputs contain retired authorities")
+    resolved_recipe = resolved.get("recipe")
+    if resolved_recipe is not None:
+        candidate = _recipe(resolved_recipe)
+        if content_sha256(candidate) != content_sha256(parsed):
+            raise RecipeRuntimeSpecError("resolved recipe projection does not match the candidate")
+    supplied_models = models if models is not None else resolved.get("models", resolved.get("model_projections"))
+    return _models(supplied_models), _package(package_handle, resolved)
 
 
 def compile_runtime_spec(
-    document: Mapping[str, object],
-    resolved_entities: Mapping[str, object],
-    parameters: Mapping[str, object],
-    role: str,
-    rank: int,
-    recipe_build_id: str,
-    image_digest: str,
+    recipe: RecipeDefinition | Mapping[str, object] | object,
+    resolved_entities: Mapping[str, object] | None = None,
+    parameters: Mapping[str, object] | None = None,
+    role: str | None = None,
+    rank: int | None = None,
+    *,
+    models: Sequence[ModelDefinition] | None = None,
+    package_handle: object = None,
 ) -> dict[str, object]:
-    validate_recipe(document)
-    if _OCI_DIGEST.fullmatch(image_digest) is None:
-        raise RecipeRuntimeSpecError("built image digest is invalid")
-    if not isinstance(rank, int) or isinstance(rank, bool):
+    """Compile one canonical recipe role into a secure runtime transport.
+
+    ``resolved_entities`` is retained as the composition seam name used by
+    callers, but only canonical model projections and a package/build handle
+    are accepted.  Retired harness/distribution/patch identities are rejected.
+    """
+    parsed = _recipe(recipe)
+    if resolved_entities is not None and not isinstance(resolved_entities, Mapping):
+        raise RecipeRuntimeSpecError("resolved canonical inputs are invalid")
+    if type(role) is not str or not role:
+        raise RecipeRuntimeSpecError("mapped role is invalid")
+    if type(rank) is not int or isinstance(rank, bool) or rank < 0:
         raise RecipeRuntimeSpecError("mapped rank is invalid")
-    references = recipe_references(document)
-    model_version = references[0]
-    _require_resolved_entity(resolved_entities, "model_version", model_version)
-    model_dependencies = recipe_model_dependencies(document)
-    resolved_dependencies = resolved_entities.get("model_dependencies", ())
-    if not isinstance(resolved_dependencies, (tuple, list)):
-        raise RecipeRuntimeSpecError("resolved model dependencies are invalid")
-    if len(resolved_dependencies) != len(model_dependencies):
-        raise RecipeRuntimeSpecError("resolved model dependencies are incomplete")
-    for index, reference in enumerate(model_dependencies):
-        _require_resolved_entity(
-            {"model_version": resolved_dependencies[index]},
-            "model_version",
-            reference,
-        )
-    topology = recipe_topology(document)
+    supplied_models, package = _resolved_inputs(
+        resolved_entities, models, package_handle, parsed
+    )
     try:
-        projection = _BUILTIN_HARNESS_REGISTRY.compile(
-            resolved_entities.get("harness"),
-            recipe=document,
-            distribution=resolved_entities.get("runtime_distribution"),
-            patch=resolved_entities.get("patch_bundle"),
-            parameters=parameters,
-            topology=topology,
+        # The package handle is also the exact closure authority when member
+        # paths are available.  Source/build inputs are never inferred from a
+        # recipe document copy.
+        paths = _package_paths(package)
+        if paths is not None:
+            validate_recipe_package_paths(parsed, paths)
+        projection, artifacts, _image_digest = compile_canonical_harness(
+            parsed,
+            supplied_models,
+            package,
             role=role,
             rank=rank,
+            settings=parameters,
         )
-    except HarnessCompileError as error:
+    except (HarnessCompileError, ContractResolutionError, ValueError, TypeError) as error:
         raise RecipeRuntimeSpecError(str(error)) from error
     binding = projection.binding
     if binding is None:
-        raise RecipeRuntimeSpecError("harness projection binding is missing")
-    runtime = document["runtime"]
-    interfaces = document["interfaces"]
-    artifacts = document["artifacts"]
-    if (
-        not isinstance(runtime, Mapping)
-        or not isinstance(interfaces, list)
-        or not isinstance(artifacts, list)
-    ):
-        raise RecipeRuntimeSpecError("recipe runtime is invalid")
-    runtime_security = runtime.get("security")
-    if not isinstance(runtime_security, Mapping):
-        raise RecipeRuntimeSpecError("recipe runtime security is invalid")
-    role_artifacts = [
-        copy.deepcopy(item)
-        for item in artifacts
-        if isinstance(item, Mapping)
-        and isinstance(item.get("roles"), list)
-        and role in item["roles"]
-    ]
-    if not role_artifacts:
-        raise RecipeRuntimeSpecError("mapped role has no runtime artifacts")
-    compiled_runtime: dict[str, object] = {
+        raise RecipeRuntimeSpecError("canonical harness binding is missing")
+    interface = parsed.interfaces[0]
+    environment = writable_path_document(parsed.runtime.engine, projection.environment)
+    runtime: dict[str, object] = {
         "interface": "vonk.runtime.v1",
         "adapter": projection.slug,
         "adapter_version": projection.contract_version,
-        "image": (f"localhost/vonk/recipe-build-{recipe_build_id}@{image_digest}"),
+        "image": projection.image,
         "architecture": projection.architecture,
         "entrypoint": list(projection.command),
         "arguments": [],
@@ -117,230 +170,148 @@ def compile_runtime_spec(
             {"name": name, "value": value, "secret": None}
             for name, value in projection.environment
         ],
+        "writable_paths": environment,
     }
-    if topology.get("mode") == "distributed":
-        distribution_document = getattr(
-            resolved_entities.get("runtime_distribution"), "document", None
-        )
-        capabilities = (
-            distribution_document.get("capabilities")
-            if isinstance(distribution_document, Mapping)
-            else None
-        )
-        implementation = None
-        if isinstance(capabilities, Mapping):
-            implementations = tuple(
-                capabilities.get(name)
-                for name in ("distributed_vllm", "distributed_sglang")
-                if isinstance(capabilities.get(name), Mapping)
-            )
-            if len(implementations) == 1:
-                implementation = implementations[0]
-        launch = (
-            implementation.get("launch")
-            if isinstance(implementation, Mapping)
-            else None
-        )
-        rendezvous = launch.get("rendezvous") if isinstance(launch, Mapping) else None
-        if not isinstance(rendezvous, Mapping):
-            raise RecipeRuntimeSpecError("distributed launch contract is missing")
-        compiled_runtime["placement_environment"] = {
-            "local_address": rendezvous["local_address_environment"],
-            "master_address": rendezvous["master_address_environment"],
-            "master_port": rendezvous["master_port_environment"],
+    if parsed.topology.node_count > 1:
+        runtime["placement_environment"] = {
+            "local_address": "VONK_LOCAL_ADDR",
+            "master_address": "VONK_MASTER_ADDR",
+            "master_port": "VONK_MASTER_PORT",
         }
-    endpoint = next(
-        (
-            item
-            for item in interfaces
-            if isinstance(item, Mapping) and item.get("adapter") == "openai"
-        ),
-        None,
-    )
-    job_interface = next(
-        (
-            item
-            for item in interfaces
-            if isinstance(item, Mapping) and item.get("adapter") in _JOB_INTERFACES
-        ),
-        None,
-    )
-    if (endpoint is None) == (job_interface is None):
-        raise RecipeRuntimeSpecError(
-            "recipe must declare exactly one service or job interface"
-        )
-    lifecycle = runtime.get("lifecycle")
-    if not isinstance(lifecycle, Mapping):
-        raise RecipeRuntimeSpecError("recipe lifecycle is invalid")
-    spec = {
-        "identity": {
-            "recipe_revision_sha256": recipe_content_sha256(document),
-            "model_version_sha256": model_version.content_sha256,
-            "harness_sha256": _resolved_content_sha256(
-                resolved_entities.get("harness")
-            ),
-            "runtime_distribution_sha256": _resolved_content_sha256(
-                resolved_entities.get("runtime_distribution")
-            ),
-            "patch_bundle_sha256": (
-                None
-                if resolved_entities.get("patch_bundle") is None
-                else _resolved_content_sha256(resolved_entities.get("patch_bundle"))
-            ),
-        },
-        "model_dependencies": [
+    artifact_inputs = _artifact_inputs(package)
+    dependencies = []
+    for selection in parsed.models:
+        dependencies.append(
             {
-                "kind": reference.kind.value,
-                "publisher": reference.publisher,
-                "slug": reference.slug,
-                "content_sha256": reference.content_sha256,
+                "selection_id": selection.id,
+                "publisher": selection.model.publisher,
+                "slug": selection.model.slug,
+                "content_sha256": selection.model.content_sha256,
+                "artifact_key": artifact_inputs.get(selection.id),
             }
-            for reference in model_dependencies
-        ],
-        "runtime": compiled_runtime,
-        "artifacts": role_artifacts,
+        )
+    mounts = [
+        {
+            "source": mount.source,
+            "target": mount.target,
+            "read_only": mount.read_only,
+        }
+        for mount in projection.model_mounts
+    ]
+    mounts.append({"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False})
+    if projection.input_mount is not None:
+        mounts.append({"source": "/run/vonk/inputs", "target": "/inputs", "read_only": True})
+    lifecycle = parsed.runtime.lifecycle
+    spec: dict[str, object] = {
+        "identity": {
+            "recipe_revision_sha256": content_sha256(parsed),
+            "model_dependencies": dependencies,
+            "harness_sha256": binding.harness_content_sha256,
+            "execution_sha256": _execution_digest(parsed),
+        },
+        "model_dependencies": dependencies,
+        "runtime": {
+            **runtime,
+            "arguments": _compiled_arguments(parsed, parameters),
+        },
+        # These are compiler output, assembled from ModelDefinition selectors;
+        # they are not a second recipe authoring authority.
+        "artifacts": copy.deepcopy(list(artifacts)),
         "security": {
-            "devices": copy.deepcopy(runtime_security["devices"]),
+            "devices": [],
             "user": projection.user,
             "capabilities": list(projection.capabilities),
             "privileged": False,
-            "host_network": runtime_security.get("host_network") is True,
-            "mounts": copy.deepcopy(runtime_security["mounts"]),
+            "host_network": False,
+            "mounts": mounts,
+            "read_only_root": projection.read_only_root,
+            "no_new_privileges": projection.no_new_privileges,
         },
         "lifecycle": {
-            "pre_start": copy.deepcopy(lifecycle["pre_start"]),
-            "post_stop": copy.deepcopy(lifecycle["post_stop"]),
-            "stop_timeout_seconds": lifecycle["stop_timeout_seconds"],
+            "pre_start": copy.deepcopy(parsed.runtime.lifecycle.pre_start),
+            "post_stop": copy.deepcopy(parsed.runtime.lifecycle.post_stop),
+            "stop_timeout_seconds": lifecycle.stop_timeout_seconds,
         },
         "topology": {
-            "name": topology["name"],
-            "node_count": topology["node_count"],
+            "name": parsed.topology.name,
+            "mode": parsed.topology.mode,
+            "node_count": parsed.topology.node_count,
+            "world_size": parsed.topology.parallelism.world_size,
             "rank": rank,
             "role": role,
+            "backend": parsed.topology.parallelism.backend,
         },
     }
-    if endpoint is not None:
+    if interface.adapter == "openai":
         spec["endpoint"] = {
-            "protocol": endpoint["adapter"],
-            "port": endpoint["port"],
-            "model_aliases": copy.deepcopy(endpoint["model_aliases"]),
-            "health_path": endpoint["health_path"],
+            "protocol": "openai",
+            "port": interface.port,
+            "model_aliases": list(interface.model_aliases),
+            "health_path": interface.health_path,
         }
     else:
-        assert isinstance(job_interface, Mapping)
-        readiness = lifecycle.get("readiness")
-        if not isinstance(readiness, Mapping):
-            raise RecipeRuntimeSpecError("recipe job timeout is invalid")
-        timeout_seconds = readiness.get("timeout_seconds")
-        output_path = job_interface.get("path")
-        input_contract = job_interface.get("input")
-        if (
-            type(timeout_seconds) is not int
-            or not 1 <= timeout_seconds <= 3600
-            or output_path != "/outputs"
-            or (input_contract is not None and not isinstance(input_contract, Mapping))
-        ):
-            raise RecipeRuntimeSpecError("recipe job interface is invalid")
         spec["job"] = {
-            "interface": job_interface["adapter"],
-            "input": copy.deepcopy(input_contract),
-            "output_path": output_path,
-            "timeout_seconds": timeout_seconds,
+            "interface": interface.adapter,
+            "input": interface.input,
+            "output_path": interface.output.path,
+            "timeout_seconds": lifecycle.stop_timeout_seconds,
         }
     return spec
+
+
+def _execution_digest(recipe: RecipeDefinition) -> str:
+    return __import__("hashlib").sha256(
+        __import__("json").dumps(recipe.execution.model_dump(mode="json"), sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _compiled_arguments(
+    recipe: RecipeDefinition, supplied: Mapping[str, object] | None
+) -> list[dict[str, object]]:
+    values: dict[str, object] = {}
+    for name in ("context_tokens", "concurrency", "max_batch_tokens"):
+        setting = getattr(recipe.settings, name, None)
+        if setting is not None:
+            values[name] = setting.value
+    values.update({name: setting.value for name, setting in recipe.settings.knobs.items()})
+    if supplied:
+        values.update(supplied)
+    result: list[dict[str, object]] = []
+    for argument in recipe.runtime.arguments:
+        value = argument.value if argument.setting is None else values[argument.setting]
+        result.append({"name": argument.name, "value": value})
+    return result
 
 
 def resolve_recipe_entities(
     session: Session, document: Mapping[str, object]
 ) -> dict[str, object]:
-    """Load and cross-check the recipe's exact immutable entity graph."""
-
-    references = recipe_references(document)
-    model_version_ref, harness_ref, distribution_ref = references[:3]
-    model_dependencies = recipe_model_dependencies(document)
-    patch_ref = recipe_patch_bundle(document)
-    model_version = _resolve_model_version(session, model_version_ref)
-    auxiliary_model_versions = tuple(
-        _resolve_model_version(session, reference) for reference in model_dependencies
-    )
-    harness = _lookup_exact(session, harness_ref)
-    distribution = _lookup_exact(session, distribution_ref)
-    implemented_harness = _entity_reference(
-        distribution.document, "implements_harness", CatalogKind.EXECUTION_HARNESS
-    )
-    if implemented_harness != harness_ref:
-        raise RecipeRuntimeSpecError("runtime distribution does not implement harness")
-    patch = None
-    if patch_ref is not None:
-        patch = _lookup_exact(session, patch_ref)
-        applies_to = _entity_reference(
-            patch.document, "applies_to", CatalogKind.RUNTIME_DISTRIBUTION
-        )
-        if applies_to != distribution_ref:
-            raise RecipeRuntimeSpecError("patch bundle does not apply to distribution")
-    return {
-        "model_version": model_version,
-        "model_dependencies": auxiliary_model_versions,
-        "harness": harness,
-        "runtime_distribution": distribution,
-        "patch_bundle": patch,
-    }
-
-
-def _resolve_model_version(
-    session: Session, reference: CatalogReference
-) -> CatalogEntityRevision:
-    model_version = _lookup_exact(session, reference)
-    model_ref = _entity_reference(model_version.document, "model", CatalogKind.MODEL)
-    model = _lookup_exact(session, model_ref)
-    group_ref = _entity_reference(
-        model.document, "model_group", CatalogKind.MODEL_GROUP
-    )
-    _lookup_exact(session, group_ref)
-    return model_version
-
-
-def _require_resolved_entity(
-    resolved_entities: Mapping[str, object], key: str, reference: CatalogReference
-) -> None:
-    value = resolved_entities.get(key)
-    if getattr(value, "content_sha256", None) != reference.content_sha256:
-        raise RecipeRuntimeSpecError(f"resolved {key} identity is invalid")
-
-
-def _resolved_content_sha256(value: object) -> str:
-    digest = getattr(value, "content_sha256", None)
-    if not isinstance(digest, str):
-        raise RecipeRuntimeSpecError("resolved catalog identity is missing")
-    return digest
-
-
-def _lookup_exact(
-    session: Session, reference: CatalogReference
-) -> CatalogEntityRevision:
-    revision = session.scalar(
-        select(CatalogEntityRevision)
-        .join(CatalogEntity)
-        .where(
-            CatalogEntity.kind == reference.kind.value,
-            CatalogEntity.publisher == reference.publisher,
-            CatalogEntity.slug == reference.slug,
-            CatalogEntityRevision.content_sha256 == reference.content_sha256,
-            CatalogEntityRevision.lifecycle == "resolved",
-        )
-    )
-    if revision is None:
-        raise RecipeRuntimeSpecError("exact recipe dependency is not resolved")
-    return revision
-
-
-def _entity_reference(
-    document: Mapping[str, object], field: str, kind: CatalogKind
-) -> CatalogReference:
+    """Resolve a canonical recipe and its exact active Model revisions."""
     try:
-        return parse_catalog_reference(document.get(field), expected_kind=kind)
-    except CatalogContractError as error:
-        raise RecipeRuntimeSpecError("exact recipe dependency is invalid") from error
+        recipe = RecipeDefinition.model_validate(document)
+    except (TypeError, ValueError) as error:
+        raise RecipeRuntimeSpecError(
+            "recipe does not satisfy the canonical contract"
+        ) from error
+
+    models: list[CatalogDocumentRevision] = []
+    for selection in recipe.models:
+        reference = selection.model
+        revision = session.scalar(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.publisher == reference.publisher,
+                CatalogDocumentRevision.slug == reference.slug,
+                CatalogDocumentRevision.content_digest == reference.content_sha256,
+                CatalogDocumentRevision.state == "active",
+            )
+            .limit(1)
+        )
+        if revision is None:
+            raise RecipeRuntimeSpecError("exact recipe model is not active")
+        models.append(revision)
+    return {"recipe": recipe, "models": tuple(models)}
 
 
 __all__ = [

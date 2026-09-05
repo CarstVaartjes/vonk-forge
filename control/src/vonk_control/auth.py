@@ -58,16 +58,27 @@ MUTATION_ROLES = {
     ),
     ("POST", "/api/v1/library/placements/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/library/placements"): frozenset({"administrator"}),
+    ("POST", "/api/v1/model-cache/download-preview"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/download"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/repair-preview"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/repair"): frozenset(
+        {"operator", "administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/eviction-preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/evict"): frozenset({"administrator"}),
     # Local catalog authoring and WorkloadRun imports change the controller's
     # authoritative PostgreSQL state. Keep them administrator-only and list
     # preview calls too: previews accept untrusted source documents and are
     # part of the same explicitly audited authorization surface.
     ("POST", "/api/v1/catalog/recipes"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/entities"): frozenset({"administrator"}),
-    ("PUT", "/api/v1/catalog/entities/{entity_id}/draft"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/entities/{entity_id}/resolve"): frozenset(
-        {"administrator"}
-    ),
     ("PUT", "/api/v1/catalog/recipes/{recipe_id}/draft"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/recipes/{recipe_id}/resolve"): frozenset(
         {"administrator"}
@@ -77,8 +88,6 @@ MUTATION_ROLES = {
         {"administrator"}
     ),
     ("POST", "/api/v1/catalog/imports/workload_run"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/global/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/global"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/public/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/public"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/imports/recipe-library"): frozenset({"administrator"}),
@@ -106,6 +115,14 @@ MUTATION_ROLES = {
     ("POST", "/api/v1/recipes/installations"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/run-plans/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/runs"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/run-switch-plans/preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/recipes/run-switches"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/run-switch-stops/preview"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/recipes/run-switch-stops"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/job-runs"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/runs/{run_id}/artifact-jobs"): frozenset(
         {"operator", "administrator"}

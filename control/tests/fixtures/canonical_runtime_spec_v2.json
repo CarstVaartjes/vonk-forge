@@ -1,0 +1,250 @@
+{
+  "artifacts": [
+    {
+      "file_id": "weights",
+      "id": "weights",
+      "model": {
+        "content_sha256": "316f50462f9e44fe3f139e914a0d18c072807e389c81db714d633a565a4f4eaf",
+        "publisher": "vonk-forge",
+        "slug": "synthetic-tiny-fp16"
+      },
+      "mount": {
+        "read_only": true,
+        "source": "/run/vonk/models/primary/weights",
+        "target": "/models"
+      },
+      "path": "model.safetensors",
+      "roles": [
+        "entrypoint"
+      ],
+      "selection_id": "primary"
+    }
+  ],
+  "endpoint": {
+    "health_path": "/v1/models",
+    "model_aliases": [
+      "synthetic-tiny"
+    ],
+    "port": 8000,
+    "protocol": "openai"
+  },
+  "identity": {
+    "execution_sha256": "e8cd2ea8bb19a374a6ad62dd72eb4d07cadff46332755f6e18507801fd7ced41",
+    "harness_sha256": "830a82426fa7d2c0e60b7f97ffb9dbb915cb3ca39ff223001e14680722ce3a21",
+    "model_dependencies": [
+      {
+        "artifact_key": null,
+        "content_sha256": "316f50462f9e44fe3f139e914a0d18c072807e389c81db714d633a565a4f4eaf",
+        "publisher": "vonk-forge",
+        "selection_id": "primary",
+        "slug": "synthetic-tiny-fp16"
+      }
+    ],
+    "recipe_revision_sha256": "e898f5540d661ce203208420bce910b9b3ef77769630cd6fee871bf7965775ff"
+  },
+  "lifecycle": {
+    "post_stop": [],
+    "pre_start": [],
+    "stop_timeout_seconds": 30
+  },
+  "model_dependencies": [
+    {
+      "artifact_key": null,
+      "content_sha256": "316f50462f9e44fe3f139e914a0d18c072807e389c81db714d633a565a4f4eaf",
+      "publisher": "vonk-forge",
+      "selection_id": "primary",
+      "slug": "synthetic-tiny-fp16"
+    }
+  ],
+  "runtime": {
+    "adapter": "vllm",
+    "adapter_version": 1,
+    "architecture": "linux/arm64",
+    "arguments": [],
+    "entrypoint": [
+      "/opt/vonk/bin/vllm",
+      "serve",
+      "/models",
+      "--host",
+      "0.0.0.0",
+      "--port",
+      "8000"
+    ],
+    "environment": [
+      {
+        "name": "HOME",
+        "secret": null,
+        "value": "/outputs/cache/home"
+      },
+      {
+        "name": "XDG_CACHE_HOME",
+        "secret": null,
+        "value": "/outputs/cache"
+      },
+      {
+        "name": "XDG_CONFIG_HOME",
+        "secret": null,
+        "value": "/outputs/cache/config"
+      },
+      {
+        "name": "TMPDIR",
+        "secret": null,
+        "value": "/outputs/tmp"
+      },
+      {
+        "name": "HF_HOME",
+        "secret": null,
+        "value": "/outputs/cache/huggingface"
+      },
+      {
+        "name": "TRANSFORMERS_CACHE",
+        "secret": null,
+        "value": "/outputs/cache/huggingface/transformers"
+      },
+      {
+        "name": "VLLM_CACHE_ROOT",
+        "secret": null,
+        "value": "/outputs/cache/vllm"
+      },
+      {
+        "name": "TRITON_CACHE_DIR",
+        "secret": null,
+        "value": "/outputs/cache/triton"
+      },
+      {
+        "name": "TORCH_HOME",
+        "secret": null,
+        "value": "/outputs/cache/torch"
+      },
+      {
+        "name": "TORCH_EXTENSIONS_DIR",
+        "secret": null,
+        "value": "/outputs/cache/torch_extensions"
+      },
+      {
+        "name": "TORCHINDUCTOR_CACHE_DIR",
+        "secret": null,
+        "value": "/outputs/cache/torchinductor"
+      },
+      {
+        "name": "CUDA_CACHE_PATH",
+        "secret": null,
+        "value": "/outputs/cache/cuda"
+      },
+      {
+        "name": "UV_CACHE_DIR",
+        "secret": null,
+        "value": "/outputs/cache/uv"
+      },
+      {
+        "name": "HF_HUB_DISABLE_TELEMETRY",
+        "secret": null,
+        "value": "1"
+      },
+      {
+        "name": "VLLM_NO_USAGE_STATS",
+        "secret": null,
+        "value": "1"
+      }
+    ],
+    "image": "registry.example/vonk/vllm@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "interface": "vonk.runtime.v1",
+    "writable_paths": [
+      {
+        "name": "home",
+        "path": "/outputs/cache/home",
+        "persistent": true
+      },
+      {
+        "name": "xdg-cache",
+        "path": "/outputs/cache",
+        "persistent": true
+      },
+      {
+        "name": "xdg-config",
+        "path": "/outputs/cache/config",
+        "persistent": true
+      },
+      {
+        "name": "temporary",
+        "path": "/outputs/tmp",
+        "persistent": false
+      },
+      {
+        "name": "huggingface",
+        "path": "/outputs/cache/huggingface",
+        "persistent": true
+      },
+      {
+        "name": "transformers",
+        "path": "/outputs/cache/huggingface/transformers",
+        "persistent": true
+      },
+      {
+        "name": "torch",
+        "path": "/outputs/cache/torch",
+        "persistent": true
+      },
+      {
+        "name": "torch-extensions",
+        "path": "/outputs/cache/torch_extensions",
+        "persistent": true
+      },
+      {
+        "name": "torchinductor",
+        "path": "/outputs/cache/torchinductor",
+        "persistent": true
+      },
+      {
+        "name": "triton",
+        "path": "/outputs/cache/triton",
+        "persistent": true
+      },
+      {
+        "name": "cuda",
+        "path": "/outputs/cache/cuda",
+        "persistent": true
+      },
+      {
+        "name": "uv",
+        "path": "/outputs/cache/uv",
+        "persistent": true
+      },
+      {
+        "name": "vllm",
+        "path": "/outputs/cache/vllm",
+        "persistent": true
+      }
+    ]
+  },
+  "security": {
+    "capabilities": [],
+    "devices": [],
+    "host_network": false,
+    "mounts": [
+      {
+        "read_only": true,
+        "source": "/run/vonk/models",
+        "target": "/models"
+      },
+      {
+        "read_only": false,
+        "source": "/run/vonk/outputs",
+        "target": "/outputs"
+      }
+    ],
+    "no_new_privileges": true,
+    "privileged": false,
+    "read_only_root": true,
+    "user": "10001:10001"
+  },
+  "topology": {
+    "backend": "local",
+    "mode": "single",
+    "name": "solo",
+    "node_count": 1,
+    "rank": 0,
+    "role": "entrypoint",
+    "world_size": 1
+  }
+}

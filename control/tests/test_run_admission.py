@@ -203,7 +203,7 @@ def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -
         assert run.alias == plan.alias == run.plan["alias"]
 
 
-def test_territorial_license_run_admission_is_fail_closed(tmp_path) -> None:
+def test_territorial_license_run_admission_is_informational(tmp_path) -> None:
     sessions, now, _node, installation = setup(
         tmp_path,
         free_memory=300,
@@ -213,9 +213,13 @@ def test_territorial_license_run_admission_is_fail_closed(tmp_path) -> None:
     unconfigured = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
     ).plan_run(installation, alias="hunyuan", now=now)
-    assert unconfigured.allowed is False
-    assert unconfigured.nodes[0].blockers[0].code == (
-        "run.license_jurisdiction_required"
+    assert unconfigured.allowed is True
+    assert not any(
+        blocker.code.startswith("run.license.")
+        for blocker in unconfigured.nodes[0].blockers
+    )
+    assert unconfigured.nodes[0].warnings[0].code == (
+        "run.license_territorial_restrictions_informational"
     )
 
     south_korea = RunAdmissionService(
@@ -224,8 +228,10 @@ def test_territorial_license_run_admission_is_fail_closed(tmp_path) -> None:
         memory_floor_bytes=50,
         operator_jurisdiction="KR",
     ).plan_run(installation, alias="hunyuan", now=now)
-    assert south_korea.allowed is False
-    assert south_korea.nodes[0].blockers[0].code == ("run.license_territory_denied")
+    assert south_korea.allowed is True
+    assert south_korea.nodes[0].warnings[0].code == (
+        "run.license_territorial_restrictions_informational"
+    )
 
     permitted = RunAdmissionService(
         sessions,
@@ -234,7 +240,9 @@ def test_territorial_license_run_admission_is_fail_closed(tmp_path) -> None:
         operator_jurisdiction="US",
     ).plan_run(installation, alias="hunyuan", now=now)
     assert permitted.allowed is True
-    assert permitted.nodes[0].warnings[0].code == "run.license_territory_checked"
+    assert permitted.nodes[0].warnings[0].code == (
+        "run.license_territorial_restrictions_informational"
+    )
 
 
 def test_system_reserve_is_a_floor_not_workload_memory(tmp_path) -> None:

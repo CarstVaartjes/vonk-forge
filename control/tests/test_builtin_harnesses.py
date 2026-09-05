@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,10 +16,16 @@ from vonk_control.catalog_contract import (
 )
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessRegistry
-from vonk_control.harnesses.common import HarnessCompileError
+from vonk_control.harnesses.common import HarnessCompileError, validate_projection
 from vonk_control.harnesses.sglang import SglangHarnessCompiler
 from vonk_control.harnesses.vllm import VllmHarnessCompiler
 from vonk_control.models import Base
+from vonk_control.runtime_writable_paths import (
+    effective_environment,
+    environment,
+    telemetry_contract,
+    writable_paths,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 HARNESS_ROOT = ROOT / "config/execution-harnesses"
@@ -232,9 +239,14 @@ ALLOWED_ENVIRONMENT = {
     "llama-cpp": ("LLAMA_ARG_N_THREADS", "8"),
     "ds4": ("DS4_LOG_LEVEL", "INFO"),
     "diffusers": ("HF_HUB_OFFLINE", "1"),
-    "comfyui": ("COMFYUI_DISABLE_TELEMETRY", "1"),
+    "comfyui": ("HF_HUB_OFFLINE", "1"),
     "pytorch-pipeline": ("HF_HUB_OFFLINE", "1"),
 }
+
+VLLM_PLATFORM_ENVIRONMENT = (
+    ("XDG_CACHE_HOME", "/outputs/cache"),
+    ("VLLM_CACHE_ROOT", "/outputs/cache/vllm"),
+)
 
 
 def _harness_document(slug: str) -> dict[str, object]:
@@ -485,7 +497,40 @@ def test_builtin_harness_emits_an_exact_shell_free_projection(slug: str) -> None
     assert projection.user == "10001:10001"
     assert projection.no_new_privileges is True
     assert projection.capabilities == ()
+    assert projection.read_only_root is True
+    assert projection.telemetry == telemetry_contract(slug)
+    assert projection.writable_paths == writable_paths(slug)
     assert all(mount.read_only for mount in projection.model_mounts)
+
+
+def test_builtin_projection_rejects_launch_wrapper_substitution() -> None:
+    projection = _compile("vllm")
+    projection = replace(projection, command=("/bin/sh", "-c", "vllm"))
+    with pytest.raises(HarnessCompileError, match="launch|shell"):
+        validate_projection(projection)
+
+
+def test_builtin_projection_rejects_writable_contract_tampering() -> None:
+    projection = _compile("vllm")
+    with pytest.raises(HarnessCompileError, match="writable"):
+        validate_projection(replace(projection, writable_paths=()))
+    with pytest.raises(HarnessCompileError, match="read-only root"):
+        validate_projection(replace(projection, read_only_root=False))
+
+
+def test_builtin_telemetry_contract_matches_effective_launch() -> None:
+    for slug in BUILTIN_HARNESS_SLUGS:
+        projection = _compile(slug)
+        telemetry = projection.telemetry
+        assert telemetry is not None
+        if telemetry.path is None:
+            assert telemetry.adapter == "unsupported"
+        elif slug == "comfyui":
+            assert projection.command[0] == "/opt/vonk/bin/comfyui-job"
+            assert telemetry.path == "/queue"
+        else:
+            assert "--host" in projection.command
+            assert "--port" in projection.command
 
 
 def test_vllm_projects_the_single_artifacts_exact_named_mount_path() -> None:
@@ -1099,7 +1144,7 @@ def test_vllm_accepts_glm_sparse_mla_runtime_contract() -> None:
     assert "--hf-overrides" in projection.command
     assert "--compilation-config" in projection.command
     assert "--no-enable-flashinfer-autotune" in projection.command
-    assert set(projection.environment) == {
+    assert set(projection.environment) == set(environment("vllm", ())) | {
         (item["name"], item["value"]) for item in recipe["runtime"]["environment"]
     }
 
@@ -1458,7 +1503,6 @@ def test_vllm_accepts_gemma4_chat_protocol() -> None:
 def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [
-        {"name": "VLLM_NO_USAGE_STATS", "value": "1"},
         {"name": "VLLM_NVFP4_GEMM_BACKEND", "value": "marlin"},
         {"name": "VLLM_USE_FLASHINFER_MOE_FP4", "value": "0"},
     ]
@@ -1470,17 +1514,17 @@ def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     assert ("VLLM_USE_FLASHINFER_MOE_FP4", "0") in projection.environment
 
 
-def test_vllm_accepts_mia_dspark_cache_graph_and_scheduler_environment() -> None:
+def test_vllm_rejects_recipe_owned_optional_runtime_paths() -> None:
     recipe = _recipe("vllm")
     expected = {
-        "B12X_CUTE_COMPILE_CACHE_DIR": "/cache/b12x-cute-compile",
+        "B12X_CUTE_COMPILE_CACHE_DIR": "/outputs/cache/b12x-cute-compile",
         "DSPARK_MAX_INFLIGHT_PREFILLS": "2",
-        "FLASHINFER_WORKSPACE_BASE": "/cache/flashinfer",
-        "TILELANG_CACHE_DIR": "/cache/tilelang",
-        "TRITON_CACHE_DIR": "/cache/triton",
+        "FLASHINFER_WORKSPACE_BASE": "/outputs/cache/flashinfer",
+        "TILELANG_CACHE_DIR": "/outputs/cache/tilelang",
+        "TRITON_CACHE_DIR": "/outputs/cache/triton",
         "TORCH_FR_BUFFER_SIZE": "2000",
-        "TORCH_FR_DUMP_TEMP_FILE": "/outputs/nccl/comm_lib_trace_rank_",
-        "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/outputs/nccl/fr_dump_pipe_",
+        "TORCH_FR_DUMP_TEMP_FILE": "/outputs/cache/nccl-fr/comm_lib_trace_rank_",
+        "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/outputs/cache/nccl-fr/fr_dump_pipe_",
         "TORCH_NCCL_DUMP_ON_TIMEOUT": "1",
         "TORCH_NCCL_ENABLE_MONITORING": "1",
         "VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM": "1",
@@ -1509,20 +1553,73 @@ def test_vllm_accepts_mia_dspark_cache_graph_and_scheduler_environment() -> None
         distribution
     )
 
-    projection = _compile("vllm", recipe=recipe, distribution=distribution)
+    with pytest.raises(HarnessCompileError, match="platform-owned"):
+        _compile("vllm", recipe=recipe, distribution=distribution)
 
-    assert set(projection.environment) == set(expected.items())
+
+def test_vllm_injects_platform_owned_writable_cache_environment() -> None:
+    projection = _compile("vllm")
+
+    assert projection.environment == environment("vllm", ())
+
+
+@pytest.mark.parametrize("slug", ["vllm", "sglang", "diffusers"])
+def test_runtime_contract_is_stable_for_direct_and_source_built_images(
+    slug: str,
+) -> None:
+    harness = _harness_document(slug)
+    direct = _distribution(slug, harness)
+    source_built = copy.deepcopy(direct)
+    source_built["image"] = (
+        f"registry.example/vonk/{slug}-source@sha256:" + "d" * 64
+    )
+
+    direct_projection = _compile(slug, distribution=direct)
+    source_projection = _compile(slug, distribution=source_built)
+
+    assert direct_projection.image != source_projection.image
+    assert direct_projection.environment == source_projection.environment
+    assert direct_projection.writable_paths == source_projection.writable_paths
+    assert direct_projection.output_mount.target == "/outputs"
+
+
+@pytest.mark.parametrize("name", ["XDG_CACHE_HOME", "VLLM_CACHE_ROOT"])
+def test_vllm_rejects_recipe_override_of_platform_cache_environment(
+    name: str,
+) -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["environment"] = [{"name": name, "value": "/outputs/other"}]
+    harness = _harness_document("vllm")
+    distribution = _distribution("vllm", harness)
+    distribution["capabilities"] = {"runtime_environment": {"allowed_names": [name]}}
+    recipe["runtime"]["distribution"]["content_sha256"] = catalog_content_sha256(
+        distribution
+    )
+
+    with pytest.raises(HarnessCompileError, match="platform-owned"):
+        _compile("vllm", recipe=recipe, distribution=distribution)
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
-def test_builtin_harness_rejects_unallowlisted_engine_flags(slug: str) -> None:
+def test_builtin_harness_passes_unknown_engine_flags_to_pinned_runtime(
+    slug: str,
+) -> None:
     recipe = _recipe(slug)
     recipe["runtime"]["arguments"].append(
-        {"name": "arbitrary-executable-hook", "value": "/tmp/hook"}
+        {"name": "future-engine-option", "value": "preserve-me"}
     )
 
-    with pytest.raises(HarnessCompileError, match="allowlisted"):
-        _compile(slug, recipe=recipe)
+    projection = _compile(slug, recipe=recipe)
+    index = projection.command.index("--future-engine-option")
+    assert projection.command[index + 1] == "preserve-me"
+
+
+def test_builtin_harness_rejects_platform_owned_engine_flags() -> None:
+    recipe = _recipe("vllm")
+    recipe["runtime"]["arguments"].append({"name": "privileged", "value": True})
+
+    with pytest.raises(HarnessCompileError, match="platform-owned"):
+        _compile("vllm", recipe=recipe)
 
 
 @pytest.mark.parametrize(
@@ -1562,44 +1659,46 @@ def test_builtin_harness_emits_only_allowlisted_environment(slug: str) -> None:
 
     projection = _compile(slug, recipe=recipe)
 
-    assert projection.environment == ((name, value),)
+    expected = effective_environment(slug, ((name, value),))
+    assert projection.environment == expected
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
-def test_builtin_harness_accepts_distribution_environment_authority(slug: str) -> None:
+def test_builtin_harness_accepts_unknown_recipe_environment(slug: str) -> None:
     recipe = _recipe(slug)
     recipe["runtime"]["environment"] = [
-        {"name": "UPSTREAM_RUNTIME_TUNING", "value": "enabled"}
+        {"name": "UPSTREAM_ENGINE_TUNING", "value": "enabled"}
     ]
-    harness = _harness_document(slug)
-    distribution = _distribution(slug, harness)
-    distribution["capabilities"] = {
-        "runtime_environment": {"allowed_names": ["UPSTREAM_RUNTIME_TUNING"]}
-    }
-    recipe["runtime"]["distribution"]["content_sha256"] = catalog_content_sha256(
-        distribution
+
+    projection = _compile(slug, recipe=recipe)
+
+    expected = effective_environment(
+        slug, (("UPSTREAM_ENGINE_TUNING", "enabled"),)
     )
+    assert projection.environment == expected
 
-    projection = _compile(slug, recipe=recipe, distribution=distribution)
 
-    assert projection.environment == (("UPSTREAM_RUNTIME_TUNING", "enabled"),)
+@pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)
+def test_builtin_harness_preserves_unknown_engine_environment(slug: str) -> None:
+    recipe = _recipe(slug)
+    recipe["runtime"]["environment"] = [
+        {"name": "FUTURE_ENGINE_SETTING", "value": "preserve-me"}
+    ]
+
+    projection = _compile(slug, recipe=recipe)
+
+    assert projection.environment[0] == ("FUTURE_ENGINE_SETTING", "preserve-me")
 
 
 @pytest.mark.parametrize("unsafe", ["LD_PRELOAD", "PATH", "VONK_MASTER_ADDR"])
-def test_builtin_harness_rejects_unsafe_distribution_environment_authority(
+def test_builtin_harness_rejects_unsafe_recipe_environment(
     unsafe: str,
 ) -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["environment"] = [{"name": unsafe, "value": "/tmp/value"}]
-    harness = _harness_document("vllm")
-    distribution = _distribution("vllm", harness)
-    distribution["capabilities"] = {"runtime_environment": {"allowed_names": [unsafe]}}
-    recipe["runtime"]["distribution"]["content_sha256"] = catalog_content_sha256(
-        distribution
-    )
 
     with pytest.raises(HarnessCompileError, match="invalid"):
-        _compile("vllm", recipe=recipe, distribution=distribution)
+        _compile("vllm", recipe=recipe)
 
 
 @pytest.mark.parametrize("slug", BUILTIN_HARNESS_SLUGS)

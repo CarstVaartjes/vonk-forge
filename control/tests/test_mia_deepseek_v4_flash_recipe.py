@@ -97,6 +97,21 @@ def test_mia_is_vllm_distribution_plus_patch() -> None:
     assert recipe["topology"]["parallelism"]["world_size"] == 2
 
 
+def test_mia_recipe_delegates_platform_owned_runtime_paths() -> None:
+    recipe = _recipe()
+    platform_owned = {
+        "FLASHINFER_WORKSPACE_BASE",
+        "TILELANG_CACHE_DIR",
+        "TRITON_CACHE_DIR",
+        "B12X_CUTE_COMPILE_CACHE_DIR",
+        "TORCH_FR_DUMP_TEMP_FILE",
+        "TORCH_NCCL_DEBUG_INFO_PIPE_FILE",
+    }
+    assert not platform_owned.intersection(
+        item["name"] for item in recipe["runtime"]["environment"]
+    )
+
+
 def test_official_model_version_has_complete_exact_74_file_inventory() -> None:
     version = _resolve(_recipe()["model"])
     artifacts = version["artifacts"]
@@ -434,6 +449,20 @@ def test_mia_runtime_spec_preserves_verified_host_fabric_authority() -> None:
     environment = {
         item["name"]: item["value"] for item in spec["runtime"]["environment"]
     }
+    assert environment["XDG_CACHE_HOME"] == "/outputs/cache"
+    assert environment["VLLM_CACHE_ROOT"] == "/outputs/cache/vllm"
+    assert environment["FLASHINFER_WORKSPACE_BASE"] == "/outputs/cache/flashinfer"
+    assert environment["TILELANG_CACHE_DIR"] == "/outputs/cache/tilelang"
+    assert environment["TRITON_CACHE_DIR"] == "/outputs/cache/triton"
+    assert environment["B12X_CUTE_COMPILE_CACHE_DIR"] == (
+        "/outputs/cache/b12x-cute-compile"
+    )
+    assert environment["TORCH_FR_DUMP_TEMP_FILE"] == (
+        "/outputs/cache/nccl-fr/comm_lib_trace_rank_"
+    )
+    assert environment["TORCH_NCCL_DEBUG_INFO_PIPE_FILE"] == (
+        "/outputs/cache/nccl-fr/fr_dump_pipe_"
+    )
     projected = environment | {
         "VONK_LOCAL_ADDR": "192.168.100.11",
         "VONK_MASTER_ADDR": "192.168.100.10",

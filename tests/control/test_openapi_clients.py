@@ -69,10 +69,38 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
     schema = json.loads(OPENAPI.read_text())
     components = schema["components"]["schemas"]
     library_model = components["LibraryModel"]
-    assert set(library_model["properties"]) == {"model", "page_local", "recipes"}
+    assert set(library_model["properties"]) == {
+        "model",
+        "model_capabilities",
+        "model_version",
+        "page_local",
+        "recipes",
+    }
     assert library_model["properties"]["model"] == {
         "$ref": "#/components/schemas/ModelVersionIdentity"
     }
+    assert library_model["properties"]["model_capabilities"] == {
+        "$ref": "#/components/schemas/LibraryCapabilityInventory"
+    }
+    assert library_model["properties"]["model_version"]["anyOf"] == [
+        {"$ref": "#/components/schemas/LibraryModelVersionFacts"},
+        {"type": "null"},
+    ]
+    assert components["LibraryRecipeSummary"]["properties"][
+        "recipe_capabilities"
+    ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
+    assert components["LibraryRecipeDetail"]["properties"][
+        "model_capabilities"
+    ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
+    assert components["LibraryRecipeDetail"]["properties"][
+        "recipe_capabilities"
+    ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
+    assert components["LibraryModelVersionFacts"]["properties"]["schema_version"][
+        "const"
+    ] == 2
+    assert components["LibraryCapabilityInventory"]["properties"]["schema_version"][
+        "const"
+    ] == 2
     model_identity = components["ModelVersionIdentity"]
     assert model_identity["properties"]["kind"]["const"] == "model-version"
     assert set(model_identity["required"]) == {
@@ -83,6 +111,14 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
     }
     assert (
         components["RecipeRevisionSummary"]["properties"]["schema_version"]["const"]
+        == 1
+    )
+    # CatalogEntityRevisionResponse is the genuine current entity-v1 wire
+    # contract; the nested model capability authority is schema 2.
+    assert (
+        components["CatalogEntityRevisionResponse"]["properties"]["schema_version"][
+            "const"
+        ]
         == 1
     )
 
@@ -473,6 +509,132 @@ def test_generated_fleet_projection_vocabulary_is_finite() -> None:
     typescript = TYPESCRIPT_CLIENT.read_text()
     assert 'certificate_state: "valid" | "missing" | "not-yet-valid"' in typescript
     assert 'degraded_reason?: ("external-member" | "mapping-incomplete"' in typescript
+
+
+def test_generated_telemetry_contracts_are_concrete_and_versioned() -> None:
+    schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
+
+    for name in (
+        "TelemetryCapability",
+        "TelemetryDetails",
+        "TelemetryMetricSummary",
+        "TelemetryMetrics",
+        "TelemetryPoint",
+        "TelemetryProvenance",
+        "TelemetryRollupPoint",
+        "TelemetryRuntime",
+        "TelemetrySeries",
+        "TelemetryHistoryMetadata",
+        "TelemetryHistoryResponse",
+        "TelemetryWorkload",
+        "TelemetryCurrentResponse",
+        "TelemetryCapabilitiesResponse",
+        "TelemetryWorkloadsResponse",
+    ):
+        assert schema[name]["type"] == "object"
+        assert schema[name]["additionalProperties"] is False
+
+    point = schema["TelemetryPoint"]
+    assert point["properties"]["details"] == {
+        "$ref": "#/components/schemas/TelemetryDetails"
+    }
+    assert point["properties"]["metrics"]["anyOf"] == [
+        {"$ref": "#/components/schemas/TelemetryMetrics"},
+        {"type": "null"},
+    ]
+    history = schema["TelemetryHistoryResponse"]
+    assert history["properties"]["points"]["items"]["anyOf"] == [
+        {"$ref": "#/components/schemas/TelemetryPoint"},
+        {"$ref": "#/components/schemas/TelemetryRollupPoint"},
+    ]
+    assert history["properties"]["metadata"]["anyOf"] == [
+        {"$ref": "#/components/schemas/TelemetryHistoryMetadata"},
+        {"type": "null"},
+    ]
+    assert schema["TelemetryCurrentResponse"]["properties"]["schema_version"][
+        "const"
+    ] == 2
+    assert schema["TelemetryCapabilitiesResponse"]["properties"]["schema_version"][
+        "const"
+    ] == 2
+    assert schema["TelemetryWorkloadsResponse"]["properties"]["schema_version"][
+        "const"
+    ] == 2
+
+    typescript = TYPESCRIPT_CLIENT.read_text()
+    assert 'TelemetryPoint: {' in typescript
+    assert 'TelemetryHistoryResponse: {' in typescript
+    assert 'TelemetryPoint: {[key: string]: unknown};' not in typescript
+    assert 'TelemetryHistoryResponse: {[key: string]: unknown};' not in typescript
+
+
+def test_generated_telemetry_models_parse_legacy_and_rich_documents() -> None:
+    from cluster_profiles.generated_control.models.telemetry_history_response import (
+        TelemetryHistoryResponse,
+    )
+    from cluster_profiles.generated_control.models.telemetry_point import TelemetryPoint
+
+    legacy_document = {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "node_id": "spk_" + "1" * 32,
+        "boot_id": "00000000-0000-4000-8000-000000000002",
+        "sequence": 4,
+        "observed_at": "2026-09-05T00:00:00Z",
+        "received_at": "2026-09-05T00:00:01Z",
+        "gap_samples": 0,
+        "details": {},
+    }
+    legacy = TelemetryPoint.from_dict(legacy_document)
+    assert legacy.details.to_dict() == {}
+    assert "metrics" not in legacy.to_dict()
+
+    rich = TelemetryPoint.from_dict(
+        {
+            **legacy_document,
+            "metrics": {
+                "schema_version": 2,
+                "series": [
+                    {
+                        "aggregation": "instant",
+                        "freshness_threshold_seconds": 30,
+                        "key": "gpu.utilization_percent",
+                        "measurement_kind": "measured",
+                        "observed_at": "2026-09-05T00:00:00Z",
+                        "scope": "accelerator",
+                        "source": "fixture",
+                        "support_status": "available",
+                        "unit": "percent",
+                        "value": 75.0,
+                    }
+                ],
+                "capabilities": [],
+                "runtimes": [],
+                "workloads": [],
+                "provenance": {
+                    "collector": "fixture",
+                    "collector_version": "1",
+                },
+            },
+        }
+    )
+    assert rich.metrics is not None
+    assert rich.metrics.schema_version == 2
+    assert rich.metrics.series[0].key == "gpu.utilization_percent"
+
+    history = TelemetryHistoryResponse.from_dict(
+        {
+            "schema_version": 1,
+            "node_id": legacy.node_id,
+            "start": "2026-09-05T00:00:00Z",
+            "end": "2026-09-05T00:01:00Z",
+            "resolution": "raw",
+            "maximum_points": 2,
+            "points": [rich.to_dict()],
+        }
+    )
+    assert history.schema_version == 1
+    assert isinstance(history.points[0], TelemetryPoint)
+    assert history.points[0].metrics is not None
 
 
 def test_generated_python_client_parses_documented_operation_errors() -> None:

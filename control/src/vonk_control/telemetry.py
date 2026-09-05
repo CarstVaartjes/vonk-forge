@@ -6,7 +6,7 @@ import math
 import re
 import uuid
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -21,6 +21,7 @@ from .models import (
     NodeTelemetrySample,
 )
 from .telemetry_maintenance import mark_rollup_dirty
+from .telemetry_contract import TelemetryMetrics, empty_telemetry_metrics
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
@@ -28,11 +29,12 @@ _MAX_BYTES = 16 * 1024**4
 _MAX_RATE = 1_000_000_000_000_000.0
 _MAX_HISTORY_POINTS = 3_000
 _MAX_BATCH_SAMPLES = 16
-TelemetryResolution = Literal["raw", "minute", "fifteen-minute"]
+TelemetryResolution = Literal["raw", "minute", "fifteen-minute", "daily"]
 _HISTORY_WINDOWS: dict[str, timedelta] = {
     "raw": timedelta(hours=24),
     "minute": timedelta(days=30),
     "fifteen-minute": timedelta(days=365),
+    "daily": timedelta(days=365),
 }
 _ROLLUP_SECONDS: dict[str, int] = {"minute": 60, "fifteen-minute": 900}
 
@@ -131,6 +133,7 @@ class TelemetrySampleInput:
     network_transmit_bytes_per_second: float | None
     gap_samples: int
     details: TelemetryDetailsInput
+    metrics: TelemetryMetrics = field(default_factory=empty_telemetry_metrics)
 
     def __post_init__(self) -> None:
         if not isinstance(self.boot_id, uuid.UUID) or self.boot_id.int == 0:
@@ -209,6 +212,8 @@ class TelemetrySampleInput:
             raise ValueError("telemetry gap samples is invalid")
         if not isinstance(self.details, TelemetryDetailsInput):
             raise ValueError("telemetry details are invalid")  # noqa: TRY004
+        if not isinstance(self.metrics, TelemetryMetrics):
+            raise ValueError("telemetry metrics are invalid")  # noqa: TRY004
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +239,7 @@ class TelemetrySampleView:
     network_transmit_bytes_per_second: float | None
     gap_samples: int
     details: TelemetryDetailsInput
+    metrics: TelemetryMetrics = field(default_factory=empty_telemetry_metrics)
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,12 +248,64 @@ class TelemetryMetricView:
     minimum: float
     mean: float
     maximum: float
+    # metric_name is an opaque bounded storage key; history keeps the full
+    # identity and provenance with the values for unambiguous consumers.
+    key: str | None = None
+    scope: str | None = None
+    device_id: str | None = None
+    process_id: int | None = None
+    process_name: str | None = None
+    interface_name: str | None = None
+    run_id: str | None = None
+    unit: str = "unknown"
+    source: str = "legacy"
+    measurement_kind: str = "measured"
+    aggregation: str = "mean"
+
+
+def _merge_metric_views(left: TelemetryMetricView, right: TelemetryMetricView) -> TelemetryMetricView:
+    """Merge rollup values while preserving their series identity."""
+
+    count = left.count + right.count
+    minimum = min(left.minimum, right.minimum)
+    maximum = max(left.maximum, right.maximum)
+    if left.aggregation == "max" or right.aggregation == "max":
+        return replace(
+            right,
+            count=count,
+            minimum=minimum,
+            mean=maximum,
+            maximum=maximum,
+            key=right.key or left.key,
+            scope=right.scope or left.scope,
+            device_id=right.device_id or left.device_id,
+            process_id=right.process_id if right.process_id is not None else left.process_id,
+            process_name=right.process_name or left.process_name,
+            interface_name=right.interface_name or left.interface_name,
+            run_id=right.run_id or left.run_id,
+            aggregation="max",
+        )
+    return replace(
+        right,
+        count=count,
+        minimum=minimum,
+        mean=(left.mean * left.count + right.mean * right.count) / count,
+        maximum=maximum,
+        key=right.key or left.key,
+        scope=right.scope or left.scope,
+        device_id=right.device_id or left.device_id,
+        process_id=right.process_id if right.process_id is not None else left.process_id,
+        process_name=right.process_name or left.process_name,
+        interface_name=right.interface_name or left.interface_name,
+        run_id=right.run_id or left.run_id,
+        aggregation="mean",
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class TelemetryRollupPointView:
     node_id: str
-    resolution: Literal["minute", "fifteen-minute"]
+    resolution: Literal["minute", "fifteen-minute", "daily"]
     bucket_start: datetime
     bucket_end: datetime
     source_sample_count: int
@@ -288,6 +346,7 @@ def _row_values(value: TelemetrySampleInput) -> dict[str, object]:
         "network_transmit_bytes_per_second": value.network_transmit_bytes_per_second,
         "gap_samples": value.gap_samples,
         "details": value.details.as_dict(),
+        "metrics": value.metrics.model_dump(mode="json"),
     }
 
 
@@ -298,6 +357,8 @@ def _same_sample(row: NodeTelemetrySample, value: TelemetrySampleInput) -> bool:
             actual = _stored_utc(actual)
         elif field == "details":
             actual = dict(actual)
+        elif field == "metrics":
+            actual = dict(actual)
         if actual != expected:
             return False
     return True
@@ -305,6 +366,7 @@ def _same_sample(row: NodeTelemetrySample, value: TelemetrySampleInput) -> bool:
 
 def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
     details = dict(row.details)
+    metrics = TelemetryMetrics.model_validate(row.metrics or empty_telemetry_metrics())
     return TelemetrySampleView(
         id=row.id,
         node_id=row.node_id,
@@ -330,6 +392,7 @@ def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
             accelerator_name=details.get("accelerator_name"),
             accelerator_performance_state=details.get("accelerator_performance_state"),
         ),
+        metrics=metrics,
     )
 
 
@@ -523,8 +586,16 @@ class TelemetryRepository:
                 "raw": "24 hours",
                 "minute": "30 days",
                 "fifteen-minute": "365 days",
+                "daily": "365 days",
             }[resolution]
             raise ValueError(f"telemetry history {resolution} window exceeds {window}")
+        if resolution == "daily":
+            return self._daily_history(
+                node_id,
+                start_utc,
+                end_utc,
+                maximum_points,
+            )
         with self._sessions() as session:
             if resolution == "raw":
                 rows = session.scalars(
@@ -583,6 +654,19 @@ class TelemetryRepository:
                         minimum=float(metric.minimum),
                         mean=float(metric.mean),
                         maximum=float(metric.maximum),
+                        key=metric.key or metric.metric_name,
+                        scope=metric.scope,
+                        device_id=metric.device_id,
+                        process_id=(
+                            None if metric.process_id is None else int(metric.process_id)
+                        ),
+                        process_name=metric.process_name,
+                        interface_name=metric.interface_name,
+                        run_id=metric.run_id,
+                        unit=metric.unit,
+                        source=metric.source,
+                        measurement_kind=metric.measurement_kind,
+                        aggregation=metric.aggregation,
                     )
             return tuple(
                 TelemetryRollupPointView(
@@ -597,3 +681,109 @@ class TelemetryRepository:
                 )
                 for bucket in buckets
             )
+
+    def _daily_history(
+        self,
+        node_id: str,
+        start: datetime,
+        end: datetime,
+        maximum_points: int,
+    ) -> tuple[TelemetryRollupPointView, ...]:
+        """Aggregate bounded 15-minute rollups into UTC-local calendar days."""
+
+        # A year contains at most 35,040 quarter-hour buckets.  Cap the
+        # source scan so a large point request cannot turn an export into an
+        # unbounded JSON/SQL operation; the requested day count remains the
+        # response bound.
+        source_limit = min(maximum_points * 96, 35_040)
+        with self._sessions() as session:
+            buckets = session.scalars(
+                select(NodeTelemetryRollupBucket)
+                .where(
+                    NodeTelemetryRollupBucket.resolution_seconds == 900,
+                    NodeTelemetryRollupBucket.node_id == node_id,
+                    NodeTelemetryRollupBucket.bucket_start >= start,
+                    NodeTelemetryRollupBucket.bucket_start < end,
+                )
+                .order_by(NodeTelemetryRollupBucket.bucket_start.desc())
+                .limit(source_limit)
+            ).all()
+            buckets.reverse()
+            starts = [_stored_utc(row.bucket_start) for row in buckets]
+            metrics_by_bucket: dict[datetime, dict[str, TelemetryMetricView]] = {
+                value: {} for value in starts
+            }
+            if starts:
+                metric_rows = session.scalars(
+                    select(NodeTelemetryRollupMetric)
+                    .where(
+                        NodeTelemetryRollupMetric.resolution_seconds == 900,
+                        NodeTelemetryRollupMetric.node_id == node_id,
+                        NodeTelemetryRollupMetric.bucket_start.in_(starts),
+                    )
+                    .order_by(
+                        NodeTelemetryRollupMetric.bucket_start,
+                        NodeTelemetryRollupMetric.metric_name,
+                    )
+                ).all()
+                for metric in metric_rows:
+                    metrics_by_bucket[_stored_utc(metric.bucket_start)][
+                        metric.metric_name
+                    ] = TelemetryMetricView(
+                        count=int(metric.sample_count),
+                        minimum=float(metric.minimum),
+                        mean=float(metric.mean),
+                        maximum=float(metric.maximum),
+                        key=metric.key or metric.metric_name,
+                        scope=metric.scope,
+                        device_id=metric.device_id,
+                        process_id=(
+                            None if metric.process_id is None else int(metric.process_id)
+                        ),
+                        process_name=metric.process_name,
+                        interface_name=metric.interface_name,
+                        run_id=metric.run_id,
+                        unit=metric.unit,
+                        source=metric.source,
+                        measurement_kind=metric.measurement_kind,
+                        aggregation=metric.aggregation,
+                    )
+
+        grouped: dict[
+            datetime,
+            tuple[int, int, dict[str, TelemetryMetricView]],
+        ] = {}
+        for bucket in buckets:
+            start_of_day = _stored_utc(bucket.bucket_start).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            source_count, gaps, metrics = grouped.get(
+                start_of_day, (0, 0, {})
+            )
+            source_count += int(bucket.source_sample_count)
+            gaps += int(bucket.gap_samples)
+            for name, metric in metrics_by_bucket[
+                _stored_utc(bucket.bucket_start)
+            ].items():
+                prior = metrics.get(name)
+                if prior is None:
+                    metrics[name] = metric
+                else:
+                    metrics[name] = _merge_metric_views(prior, metric)
+            grouped[start_of_day] = (source_count, gaps, metrics)
+
+        points: list[TelemetryRollupPointView] = []
+        for day in sorted(grouped)[-maximum_points:]:
+            source_count, gaps, values = grouped[day]
+            points.append(
+                TelemetryRollupPointView(
+                    node_id=node_id,
+                    resolution="daily",
+                    bucket_start=day,
+                    bucket_end=day + timedelta(days=1),
+                    source_sample_count=source_count,
+                    gap_samples=gaps,
+                    metrics=values,
+                )
+            )
+        return tuple(points)

@@ -20,7 +20,8 @@ use vonk_agent::{
     workloads::{
         ArgumentValue, ArtifactMountSpec, ArtifactSpec, EndpointSpec, JobSpec, LifecycleSpec,
         ModelDependencySpec, MountSpec, Placement, PlacementEnvironmentSpec, RuntimeArgument,
-        RuntimeSpec, SecuritySpec, TopologySpec, WorkloadIdentitySpec, WorkloadSpec,
+        RuntimeEnvironment, RuntimeSpec, RuntimeWritablePath, SecuritySpec, TopologySpec,
+        WorkloadIdentitySpec, WorkloadSpec,
     },
 };
 
@@ -173,7 +174,148 @@ fn spec() -> WorkloadSpec {
                     value: ArgumentValue::Boolean(true),
                 },
             ],
-            environment: vec![],
+            environment: vec![
+                RuntimeEnvironment {
+                    name: "HOME".to_owned(),
+                    value: Some(ArgumentValue::String("/outputs/cache/home".to_owned())),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "XDG_CACHE_HOME".to_owned(),
+                    value: Some(ArgumentValue::String("/outputs/cache".to_owned())),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "XDG_CONFIG_HOME".to_owned(),
+                    value: Some(ArgumentValue::String("/outputs/cache/config".to_owned())),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "TMPDIR".to_owned(),
+                    value: Some(ArgumentValue::String("/outputs/tmp".to_owned())),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "VLLM_CACHE_ROOT".to_owned(),
+                    value: Some(ArgumentValue::String("/outputs/cache/vllm".to_owned())),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "HF_HOME".to_owned(),
+                    value: Some(ArgumentValue::String(
+                        "/outputs/cache/huggingface".to_owned(),
+                    )),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "TRANSFORMERS_CACHE".to_owned(),
+                    value: Some(ArgumentValue::String(
+                        "/outputs/cache/huggingface/transformers".to_owned(),
+                    )),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "TRITON_CACHE_DIR".to_owned(),
+                    value: Some(ArgumentValue::String("/outputs/cache/triton".to_owned())),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "TORCH_HOME".to_owned(),
+                    value: Some(ArgumentValue::String("/outputs/cache/torch".to_owned())),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "TORCH_EXTENSIONS_DIR".to_owned(),
+                    value: Some(ArgumentValue::String(
+                        "/outputs/cache/torch_extensions".to_owned(),
+                    )),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "TORCHINDUCTOR_CACHE_DIR".to_owned(),
+                    value: Some(ArgumentValue::String(
+                        "/outputs/cache/torchinductor".to_owned(),
+                    )),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "CUDA_CACHE_PATH".to_owned(),
+                    value: Some(ArgumentValue::String("/outputs/cache/cuda".to_owned())),
+                    secret: None,
+                },
+                RuntimeEnvironment {
+                    name: "UV_CACHE_DIR".to_owned(),
+                    value: Some(ArgumentValue::String("/outputs/cache/uv".to_owned())),
+                    secret: None,
+                },
+            ],
+            writable_paths: vec![
+                RuntimeWritablePath {
+                    name: "home".to_owned(),
+                    path: "/outputs/cache/home".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "xdg-cache".to_owned(),
+                    path: "/outputs/cache".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "xdg-config".to_owned(),
+                    path: "/outputs/cache/config".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "temporary".to_owned(),
+                    path: "/outputs/tmp".to_owned(),
+                    persistent: false,
+                },
+                RuntimeWritablePath {
+                    name: "huggingface".to_owned(),
+                    path: "/outputs/cache/huggingface".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "transformers".to_owned(),
+                    path: "/outputs/cache/huggingface/transformers".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "torch".to_owned(),
+                    path: "/outputs/cache/torch".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "torch-extensions".to_owned(),
+                    path: "/outputs/cache/torch_extensions".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "torchinductor".to_owned(),
+                    path: "/outputs/cache/torchinductor".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "triton".to_owned(),
+                    path: "/outputs/cache/triton".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "cuda".to_owned(),
+                    path: "/outputs/cache/cuda".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "uv".to_owned(),
+                    path: "/outputs/cache/uv".to_owned(),
+                    persistent: true,
+                },
+                RuntimeWritablePath {
+                    name: "vllm".to_owned(),
+                    path: "/outputs/cache/vllm".to_owned(),
+                    persistent: true,
+                },
+            ],
             placement_environment: None,
         },
         artifacts: vec![ArtifactSpec {

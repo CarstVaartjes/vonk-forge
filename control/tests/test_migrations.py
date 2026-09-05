@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 EXPECTED_BASELINE_TABLES = {
+    "artifact_distribution_assignments",
     "artifact_job_blobs",
     "artifact_job_files",
     "artifact_jobs",
@@ -28,8 +29,10 @@ EXPECTED_BASELINE_TABLES = {
     "agent_operations",
     "agent_presence",
     "audit_events",
-    "catalog_entities",
-    "catalog_entity_revisions",
+    "catalog_documents",
+    "catalog_document_heads",
+    "catalog_document_revisions",
+    "catalog_recipe_model_references",
     "cluster_mapping_nodes",
     "cluster_mappings",
     "control_process_heartbeats",
@@ -44,6 +47,10 @@ EXPECTED_BASELINE_TABLES = {
     "local_recipe_revisions",
     "local_recipes",
     "managed_recipe_library_links",
+    "model_cache_artifacts",
+    "model_cache_operations",
+    "model_cache_set_artifacts",
+    "model_cache_sets",
     "node_artifacts",
     "node_inventory_snapshots",
     "node_mutation_leases",
@@ -63,8 +70,6 @@ EXPECTED_BASELINE_TABLES = {
     "recipe_runs",
     "recipe_source_bundles",
     "source_bundle_archives",
-    "recipe_revisions",
-    "recipes",
     "recipe_test_reports",
     "reconciliation_cancellations",
     "reconciliation_completion_generation",
@@ -170,7 +175,36 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0012_recipe_run_generation.py",
         "0013_repeatable_install_plans.py",
         "0014_fleet_profile_scope.py",
+        "0015_model_cache.py",
+        "0016_rich_telemetry_metrics.py",
+        "0017_artifact_distribution_assignments.py",
+        "0018_canonical_catalog_documents.py",
+        "0019_recipe_builds_canonical_revision.py",
     ]
+
+
+def test_fresh_baseline_binds_recipe_builds_to_canonical_recipe_revision(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'recipe-build-fk.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+
+    foreign_keys = inspect(engine).get_foreign_keys("recipe_builds")
+    recipe_revision_keys = [
+        foreign_key
+        for foreign_key in foreign_keys
+        if foreign_key["constrained_columns"] == ["recipe_revision_id"]
+    ]
+
+    assert len(recipe_revision_keys) == 1
+    assert recipe_revision_keys[0]["referred_table"] == "catalog_document_revisions"
+    assert recipe_revision_keys[0]["referred_columns"] == ["id"]
+    assert all(
+        foreign_key["referred_table"] != "local_recipe_revisions"
+        for foreign_key in recipe_revision_keys
+    )
 
 
 def test_existing_compatibility_recovery_revision_upgrades_without_operational_model(
@@ -306,7 +340,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            == "0014_fleet_profile_scope"
+            == "0019_recipe_builds_revision_fk"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -436,7 +470,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0014_fleet_profile_scope"
+            == "0019_recipe_builds_revision_fk"
         )
 
 
@@ -518,7 +552,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0014_fleet_profile_scope"
+            == "0019_recipe_builds_revision_fk"
         )
 
 

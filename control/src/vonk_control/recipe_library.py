@@ -13,10 +13,13 @@ from dataclasses import dataclass, replace
 from datetime import date
 from itertools import pairwise
 from pathlib import PurePosixPath
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlsplit
 
 import httpx
+
+if TYPE_CHECKING:
+    from .recipe_packages import RecipePackageHandle
 
 from .catalog_contract import (
     CatalogContractError,
@@ -138,6 +141,12 @@ class RecipeLibraryItem:
     dependencies: tuple[dict[str, object], ...] = ()
     source_context: RecipeLibrarySourceContext | None = None
     source_bundle: bytes | None = None
+    # Package readers attach the immutable transport/closure identity here.
+    # Keeping this optional preserves the same item protocol for the GitHub
+    # metadata reader while giving package consumers one canonical handle.
+    package_handle: RecipePackageHandle | None = None
+    package_sha256: str | None = None
+    source_bundle_sha256: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +154,7 @@ class RecipeLibrarySnapshot:
     commit: str
     items: tuple[RecipeLibraryItem, ...]
     repository: str = _REPOSITORY
+    catalog_entities: tuple[dict[str, object], ...] = ()
 
 
 def recipe_release_is_older(older: str, newer: str) -> bool:

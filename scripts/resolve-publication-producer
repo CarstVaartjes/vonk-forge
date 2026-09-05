@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Resolve accepted producer evidence without waiting on a runner.
+
+Exit 0 prints run ID, run number and source SHA; 2 means a producer completion
+must retry readiness; 1 rejects failed evidence or invalid input.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import json
+import os
+import re
+import subprocess
+import sys
+
+import yaml
+
+WORKFLOWS = {"agent-release.yml", "dev-images.yml", "installer-setups.yml"}
+SHA = re.compile(r"[a-f0-9]{40}\Z")
+
+
+def run(*args: str) -> str:
+    return subprocess.check_output(args, text=True, timeout=60).strip()
+
+
+def paths_at(source: str, workflow: str) -> list[str]:
+    document = yaml.safe_load(
+        run("git", "show", f"{source}:.github/workflows/{workflow}")
+    )
+    triggers = document.get("on", document.get(True, {}))
+    patterns = triggers.get("push", {}).get("paths")
+    if (
+        not isinstance(patterns, list)
+        or not patterns
+        or not all(
+            isinstance(pattern, str) and pattern and not pattern.startswith("!")
+            for pattern in patterns
+        )
+    ):
+        raise ValueError("producer requires an explicit positive path filter")
+    return patterns
+
+
+def changed_matches(base: str, source: str, patterns: list[str]) -> bool:
+    # Disable rename detection: both the removed source and added destination
+    # are inputs, even when Git recognizes their contents as one renamed file.
+    names = run("git", "diff", "--name-only", "--no-renames", base, source).splitlines()
+    # fnmatch is deliberately conservative: '*' may match '/' here, selecting
+    # extra work rather than silently reusing a changed producer.
+    return any(
+        fnmatch.fnmatchcase(name, pattern) for name in names for pattern in patterns
+    )
+
+
+def resolve(
+    workflow: str, source: str, repo: str
+) -> tuple[int, tuple[int, int, str] | None]:
+    if workflow not in WORKFLOWS or not SHA.fullmatch(source):
+        raise ValueError("invalid producer identity")
+    endpoint = f"repos/{repo}/actions/workflows/{workflow}/runs"
+    exact = json.loads(
+        run("gh", "api", f"{endpoint}?event=push&head_sha={source}&per_page=100")
+    )["workflow_runs"]
+    exact = [
+        r
+        for r in exact
+        if r.get("head_sha") == source
+        and r.get("head_branch") == "main"
+        and r.get("event") == "push"
+    ]
+    exact.sort(key=lambda r: (r.get("created_at", ""), r.get("id", 0)), reverse=True)
+    if exact:
+        latest = exact[0]
+        if latest.get("status") != "completed":
+            return 2, None
+        if latest.get("conclusion") != "success":
+            return 1, None
+        return 0, (latest["id"], latest["run_number"], source)
+    pages = json.loads(
+        run(
+            "gh",
+            "api",
+            "--paginate",
+            "--slurp",
+            f"{endpoint}?event=push&status=completed&branch=main&per_page=100",
+        )
+    )
+    candidates = [r for page in pages for r in page["workflow_runs"]]
+    patterns = paths_at(source, workflow)
+    for candidate in sorted(
+        candidates,
+        key=lambda r: (r.get("created_at", ""), r.get("id", 0)),
+        reverse=True,
+    ):
+        base = candidate.get("head_sha", "")
+        if (
+            not SHA.fullmatch(base)
+            or candidate.get("head_branch") != "main"
+            or candidate.get("event") != "push"
+            or candidate.get("conclusion") != "success"
+        ):
+            continue
+        ancestry = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", base, source],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=False,
+        ).returncode
+        if ancestry == 0 and not changed_matches(base, source, patterns):
+            return 0, (candidate["id"], candidate["run_number"], base)
+        if ancestry not in {0, 1}:
+            raise ValueError("cannot establish producer ancestry")
+    return 2, None
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        return 64
+    try:
+        status, evidence = resolve(
+            sys.argv[1], sys.argv[2], os.environ["GITHUB_REPOSITORY"]
+        )
+        if evidence is not None:
+            print(*evidence, sep="\t")
+        return status
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        subprocess.SubprocessError,
+        OSError,
+    ) as error:
+        print(f"producer readiness: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

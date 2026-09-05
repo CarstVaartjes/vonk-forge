@@ -345,7 +345,7 @@ def test_service_claim_requires_rust_capability_with_packaged_runtime_identity(
         )
 
 
-def test_signed_observation_receipt_key_is_capability_bound_and_immutable(
+def test_signed_observation_receipt_key_is_bound_on_upgrade_and_immutable(
     service,
 ) -> None:
     jobs, sessions, _clock = service
@@ -368,10 +368,9 @@ def test_signed_observation_receipt_key_is_capability_bound_and_immutable(
         is None
     )
     with sessions() as session:
-        assert session.get(AgentNode, NODE_A).observation_receipt_public_key is None
-
-    with sessions.begin() as session:
-        session.get(AgentNode, NODE_A).observation_receipt_public_key = "1" * 64
+        assert (
+            session.get(AgentNode, NODE_A).observation_receipt_public_key == "1" * 64
+        )
 
     with pytest.raises(ValueError, match="receipt key changed"):
         jobs.claim(

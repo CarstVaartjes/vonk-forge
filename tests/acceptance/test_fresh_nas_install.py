@@ -18,6 +18,7 @@ from pathlib import Path
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+import yaml
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -84,9 +85,7 @@ def require_tailnet_client() -> bool:
 def tailscale_acceptance_mode() -> str:
     value = os.environ.get("VONK_ACCEPTANCE_TAILSCALE_MODE", "full")
     if value not in {"disabled", "full"}:
-        raise AcceptanceError(
-            "VONK_ACCEPTANCE_TAILSCALE_MODE must be disabled or full"
-        )
+        raise AcceptanceError("VONK_ACCEPTANCE_TAILSCALE_MODE must be disabled or full")
     return value
 
 
@@ -201,9 +200,7 @@ def nas_responses(
     hermes_dashboard_hostname = tailscale_service_hostname(
         hermes_dashboard_service, tailnet_suffix
     )
-    enrollment_hostname = (
-        enrollment_hostname or f"enroll.acceptance.{tailnet_suffix}"
-    )
+    enrollment_hostname = enrollment_hostname or f"enroll.acceptance.{tailnet_suffix}"
     agent_hostname = agent_hostname or f"agents.acceptance.{tailnet_suffix}"
     registry_hostname = registry_hostname or f"registry.acceptance.{tailnet_suffix}"
     derived_enrollment_hostname = f"enroll.{tailnet_suffix}"
@@ -305,15 +302,11 @@ def configure_tailnet_service_names(
     settings = services | {
         "VONK_TAILSCALE_EPHEMERAL": "true",
         "VONK_TAILSCALE_GATEWAY_HOSTNAME": gateway_hostname,
-        "TS_REQUIRE_PRIMARY_ROUTES": (
-            "1" if require_external_tailnet_client else "0"
-        ),
+        "TS_REQUIRE_PRIMARY_ROUTES": ("1" if require_external_tailnet_client else "0"),
         # A child tailnet without a separate client cannot reliably publish a
         # service-host mapping. Keep the gateway and exact Serve checks active,
         # while leaving service-host/route publication to external acceptance.
-        "TS_REQUIRE_SERVICE_HOST": (
-            "1" if require_external_tailnet_client else "0"
-        ),
+        "TS_REQUIRE_SERVICE_HOST": ("1" if require_external_tailnet_client else "0"),
     }
     environment = bundle / ".env"
     try:
@@ -349,7 +342,9 @@ def generate_bundle(
         if root.is_symlink() or not root.is_dir():
             raise AcceptanceError("NAS acceptance target is unsafe") from error
     answers = root / ".installer-answers"
-    if any("\n" in answer or "\r" in answer or "\0" in answer for _, answer in responses):
+    if any(
+        "\n" in answer or "\r" in answer or "\0" in answer for _, answer in responses
+    ):
         raise AcceptanceError("installer answer is not a single line")
     descriptor = os.open(answers, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -373,6 +368,27 @@ def is_immutable_image(image: str) -> bool:
         PINNED_IMAGE.fullmatch(image) is not None
         and MUTABLE_IMAGE_TAG.search(image) is None
     )
+
+
+def is_channel_image(image: str, channel: str | None = None) -> bool:
+    if "@" in image:
+        return False
+    if image.startswith("ghcr.io/carstvaartjes/vonk-forge-"):
+        tags = (
+            ("dev", "latest")
+            if channel is None
+            else (("dev",) if channel == "dev" else ("latest",))
+        )
+        return (
+            re.fullmatch(
+                r"ghcr\.io/carstvaartjes/vonk-forge-(api|worker|hermes|litellm):("
+                + "|".join(tags)
+                + ")",
+                image,
+            )
+            is not None
+        )
+    return re.fullmatch(r"[a-z0-9][a-z0-9./_-]*:latest", image) is not None
 
 
 def run(
@@ -480,9 +496,7 @@ def compose_startup_diagnostics(bundle: Path) -> str:
     # healthcheck deliberately performs strict route and Serve validation.
     docker = shutil.which("docker")
     if docker is not None:
-        ids = _diagnostic_command(
-            bundle, [*reference_compose(), "ps", "-q", *broken]
-        )
+        ids = _diagnostic_command(bundle, [*reference_compose(), "ps", "-q", *broken])
         container_ids = (
             [line.strip() for line in ids.stdout.splitlines()]
             if ids is not None and ids.returncode == 0
@@ -505,9 +519,7 @@ def compose_startup_diagnostics(bundle: Path) -> str:
                 ],
             )
             if health is not None:
-                health_output = _redact_diagnostics(
-                    health.stdout or health.stderr
-                )
+                health_output = _redact_diagnostics(health.stdout or health.stderr)
                 return (
                     f"{details}; failing service healthchecks:\n"
                     f"{health_output or 'no output'}"
@@ -555,6 +567,12 @@ def reference_compose() -> list[str]:
         or not os.access(executable, os.X_OK)
     ):
         raise AcceptanceError("reference Compose fixture is unavailable")
+    overlay = os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+    if overlay:
+        candidate = Path(overlay)
+        if not candidate.is_absolute() or not candidate.is_file():
+            raise AcceptanceError("candidate Compose overlay is unavailable")
+        return [str(executable), "-f", "docker-compose.yaml", "-f", str(candidate)]
     return [str(executable)]
 
 
@@ -1465,6 +1483,25 @@ def verify_tailscale_services(
         )
 
 
+def assert_candidate_image_graph(services: dict, expected: dict) -> None:
+    """Match each effective Vonk service to the verified candidate overlay."""
+    for name, service in services.items():
+        image = service.get("image") if isinstance(service, dict) else None
+        if name in expected:
+            if image != expected[name]["image"] or not is_immutable_image(image):
+                raise AcceptanceError(
+                    "candidate Compose image differs from publication"
+                )
+        elif (
+            not isinstance(image, str)
+            or image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+            or not is_channel_image(image)
+        ):
+            raise AcceptanceError(
+                "candidate upstream image does not follow its channel"
+            )
+
+
 def exercise_compose(
     bundle: Path,
     *,
@@ -1490,10 +1527,18 @@ def exercise_compose(
         raise AcceptanceError("Compose validation emitted output")
     if compose_services(bundle) != complete:
         raise AcceptanceError("rendered Compose service topology is not canonical")
-    images = run([*reference_compose(), "config", "--images"], cwd=bundle).stdout
-    for image in images.splitlines():
-        if not is_immutable_image(image):
-            raise AcceptanceError(f"Compose image is not immutable: {image}")
+    base_images = run([reference_compose()[0], "config", "--images"], cwd=bundle).stdout
+    for image in base_images.splitlines():
+        if not is_channel_image(
+            image, parsed_environment(bundle).get("VONK_INSTALL_CHANNEL")
+        ):
+            raise AcceptanceError(f"Compose image does not follow its channel: {image}")
+    if overlay := os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+        document = json.loads(
+            run([*reference_compose(), "config", "--format", "json"], cwd=bundle).stdout
+        )
+        candidate = yaml.safe_load(Path(overlay).read_text())
+        assert_candidate_image_graph(document["services"], candidate["services"])
 
     try:
         try:

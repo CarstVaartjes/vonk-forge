@@ -48,6 +48,11 @@ PKI are generated locally unless the prompt explicitly offers an import. Secret
 values are written only under `secrets/`; `.env` contains non-secret site
 configuration and relative secret paths.
 
+For gated or private Hugging Face model-cache downloads, see the
+[Hugging Face model-cache authentication guide](../../docs/model-cache-huggingface-auth.md).
+The default install leaves `HF_TOKEN_FILE` unset and all public downloads
+anonymous.
+
 ## Start and verify
 
 In a Docker UI, select the complete directory as one Compose project, pull the
@@ -88,6 +93,12 @@ inputs. Place the resulting directory over the controller project, pull, and
 redeploy. Keep named volumes during normal upgrades.
 
 Development and production use this exact topology and configuration contract.
-They differ only in the immutable application image and Spark package versions
+They use development `:dev` or production `:latest` application images and channel-specific Spark package versions
 selected by the installer publication channel. Hermes is the sole optional
 service.
+
+
+Generated deployment Compose and the NAS curl installer payload use floating image
+tags: Vonk images follow `:dev` or production `:latest`; upstream services follow
+`:latest`. Every service pulls on startup/redeploy. The source templates and pinned
+publication artifact provide evidence inputs, not the installed image policy.

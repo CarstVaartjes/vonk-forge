@@ -7,13 +7,14 @@ import {LibraryNodeNamesProvider} from "./library-node-names";
 import {LibraryProfileComposer} from "./library-profile-composer";
 
 const savedProfile: FleetProfile = {
-  schema_version: 1,
+  schema_version: 2,
   id: "00000000-0000-4000-8000-000000000001",
   name: "Qwen Chat ready",
   description: "Keep Qwen Chat ready on its selected Spark group.",
   installation_policy: "keep-cached",
   labels: {source: "library"},
   favorite: true,
+  scope: {node_ids: ["node-alpha", "node-beta"]},
   assignments: [{
     id: "00000000-0000-4000-8000-000000000002",
     recipe_id: fullLibraryDetail.recipe.recipe_id,

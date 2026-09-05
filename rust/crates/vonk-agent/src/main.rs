@@ -36,6 +36,7 @@ const CLAIM_CAPABILITIES: &[&str] = &[
     "agent.runtime.rust.v1",
     "runtime.vonk.v1",
     "agent.upgrade.v1",
+    "artifact.distribution.v1",
     "recipe.build.v1",
     "recipe.image.import.v1",
     "recipe.job.run.v1",
@@ -372,9 +373,14 @@ async fn run_telemetry_lane(
         TelemetryPaths {
             stat: PathBuf::from("/proc/stat"),
             loadavg: PathBuf::from("/proc/loadavg"),
+            uptime: PathBuf::from("/proc/uptime"),
             meminfo: PathBuf::from("/proc/meminfo"),
             net_dev: PathBuf::from("/proc/net/dev"),
             store: data_dir,
+            sys_block: PathBuf::from("/sys/block"),
+            sys_class_net: PathBuf::from("/sys/class/net"),
+            thermal: PathBuf::from("/sys/class/thermal"),
+            powercap: PathBuf::from("/sys/class/powercap"),
         },
         boot_id,
     );

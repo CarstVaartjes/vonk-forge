@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState} from "react";
 import type {DragEvent, MouseEvent, ReactNode} from "react";
 import type {
-  LibraryApi,
+  ControlApi,
   ManagedCatalogSyncSummary,
   LibraryModel,
   LibraryOperation,
@@ -12,6 +12,9 @@ import type {
   PublicRecipeCapability,
   VisualFleetNode,
   VisualFleetSnapshot,
+  RunSwitchOperation,
+  RunSwitchPlan,
+  RunSwitchPreviewRequest,
 } from "../api/types";
 import {formatBytes, nodeDisplayName} from "../lib/fleet";
 import type {LibraryRoute} from "../lib/library-route";
@@ -20,8 +23,7 @@ import type {LibraryPlacementGroup} from "./library-action-types";
 import {LibraryActionDialog} from "./library-action-dialog";
 import {LibraryModelDeletionDialog} from "./library-model-deletion-dialog";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
-import {LibraryPlacementDialog} from "./library-placement-dialog";
-import type {LibraryPlacementInvocation} from "./library-placement-dialog";
+import {LibraryRunSwitchProgress} from "./library-run-switch-progress";
 import {friendlyModelName, humanizeIdentifier} from "./library-technical-details";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
@@ -54,14 +56,41 @@ export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {
   repository: "", runtime: "", sourceOwner: "", sparks: "", updated: "",
 };
 
+const FILTER_QUERY_KEYS: Array<keyof LibraryWorkcellFilters> = [
+  "abliterated", "installedOn", "local", "model", "modelFamily", "qualification", "quantization", "readiness", "repository", "runtime", "sourceOwner", "sparks", "updated",
+];
+
+/** Keep model collection filters addressable so a copied URL opens the same result set. */
+export function libraryFiltersFromSearch(params: URLSearchParams): LibraryWorkcellFilters {
+  const filters: LibraryWorkcellFilters = {...EMPTY_LIBRARY_WORKCELL_FILTERS};
+  for (const key of FILTER_QUERY_KEYS) {
+    const value = params.get(key);
+    if (value !== null) filters[key] = value as never;
+  }
+  const capabilities = params.getAll("capability").flatMap(value => value.split(","));
+  filters.capabilities = [...new Set(capabilities.filter(value => ["chat", "reasoning", "vision", "image-generation", "image-editing", "video", "audio", "3d"].includes(value)))] as PublicRecipeCapability[];
+  return filters;
+}
+
+export function libraryFiltersToSearch(filters: LibraryWorkcellFilters, params = new URLSearchParams()): URLSearchParams {
+  for (const key of FILTER_QUERY_KEYS) {
+    if (filters[key]) params.set(key, String(filters[key])); else params.delete(key);
+  }
+  params.delete("capability");
+  for (const capability of filters.capabilities) params.append("capability", capability);
+  return params;
+}
+
 export type LibraryRecipeRecord = {
   catalog?: PublicRecipe;
   custom: boolean;
   key: string;
   managed: boolean;
   model?: LibraryModel["model"];
+  modelCapabilities?: LibraryModel["model_capabilities"];
   modelKey: string;
   modelTitle: string;
+  modelVersion?: LibraryModel["model_version"];
   recipe?: LibraryRecipeSummary;
   title: string;
   withdrawal?: ManagedCatalogWithdrawal;
@@ -94,6 +123,13 @@ export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot, publicRecip
   const catalogByLocalId = new Map(publicRecipes.flatMap(recipe => recipe.local.recipe_id ? [[recipe.local.recipe_id, recipe] as const] : []));
   const records: LibraryRecipeRecord[] = [];
   for (const libraryModel of snapshot.models) {
+    // The model-version projection is the authority for the exact payload.
+    // Keep the legacy-shaped `model` field only as a transport fallback; it
+    // must never let a recipe title become the model identity shown in UI.
+    const model = libraryModel.model_version?.identity ?? libraryModel.model;
+    const modelTitle = libraryModel.model_version?.metadata?.title?.trim()
+      || libraryModel.model_version?.version?.trim()
+      || friendlyModelName(model);
     for (const recipe of libraryModel.recipes) {
       const catalog = catalogByLocalId.get(recipe.recipe_id);
       records.push({
@@ -101,9 +137,11 @@ export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot, publicRecip
         custom: !catalog,
         key: recipe.recipe_id,
         managed: Boolean(catalog),
-        model: libraryModel.model,
-        modelKey: modelVersionKey(libraryModel.model),
-        modelTitle: catalog?.model_version_title ?? friendlyModelName(libraryModel.model),
+        model,
+        modelCapabilities: libraryModel.model_capabilities,
+        modelKey: modelVersionKey(model),
+        modelTitle,
+        modelVersion: libraryModel.model_version,
         recipe,
         title: recipe.title,
         withdrawnInstalled: false,
@@ -122,8 +160,8 @@ export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot, publicRecip
       custom: false,
       key: catalog.uri,
       managed: true,
-      modelKey: `${catalog.model_version_publisher}/${catalog.model_version_slug}`,
-      modelTitle: catalog.model_version_title,
+      modelKey: "unlinked",
+      modelTitle: "Model identity unavailable",
       title: catalog.title,
       withdrawnInstalled: false,
     });
@@ -155,18 +193,21 @@ export function applyManagedCatalogWithdrawals(
   });
 }
 
-function recordCapabilities(record: LibraryRecipeRecord): PublicRecipeCapability[] {
+export function recordCapabilities(record: LibraryRecipeRecord): PublicRecipeCapability[] {
   return record.catalog?.capabilities ?? (record.recipe ? normalizedCapabilities(record.recipe) : []);
 }
 
 function modelFamilyTitle(value: string): string {
-  const title = value.replace(/\s+[0-9a-f]{8}$/i, "").replace(/^NVIDIA\s+/i, "");
-  const variant = /\s+(?:NVFP4|BF16|FP16|FP8|FP4|INT8|INT4|EXL3|AQLM|AWQ|GPTQ|GGUF|TorchAO|DFlash\d*|Abliterated)(?:\s|$)/i.exec(title);
-  return (variant ? title.slice(0, variant.index) : title).trim();
+  return value.trim();
 }
 
 function recordModelFamily(record: LibraryRecipeRecord): string {
-  return modelFamilyTitle(record.catalog?.model_title ?? record.modelTitle);
+  return modelFamilyTitle(
+    record.modelVersion?.family?.metadata.title
+      || record.modelVersion?.family?.family
+      || record.catalog?.model_title
+      || record.modelTitle,
+  );
 }
 
 function recordIsAbliterated(record: LibraryRecipeRecord): boolean {
@@ -312,11 +353,19 @@ function repositoryLabel(value: string): string {
   return value.replace(/^https?:\/\/(?:www\.)?github\.com\//, "").replace(/\/$/, "");
 }
 
+function runAlias(value: string): string {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 128);
+}
+
+function runOperationTerminal(state: string): boolean {
+  return ["succeeded", "failed", "cancelled", "partially_succeeded", "blocked"].includes(state);
+}
+
 export function LibraryWorkcell({
   api, catalogCommit, catalogRepository, detail, detailContent, detailError, detailLoading, fleet, fleetError, filters, onBusyChange,
   onFiltersChange, onNavigate, onRefresh, onRetryDetail, onRetryFleet, publicRecipes, query, route, snapshot, syncError, syncSummary, windowed,
 }: {
-  api: LibraryApi;
+  api: ControlApi;
   catalogCommit?: string;
   catalogRepository?: string;
   detail?: LibraryRecipeDetail;
@@ -346,15 +395,22 @@ export function LibraryWorkcell({
   const [placementDetail, setPlacementDetail] = useState<LibraryRecipeDetail>();
   const [placementError, setPlacementError] = useState("");
   const [placementLoading, setPlacementLoading] = useState(false);
-  const [review, setReview] = useState<{invocation: LibraryPlacementInvocation; nodeIds: string[]; record: LibraryRecipeRecord}>();
+  const [runOperation, setRunOperation] = useState<RunSwitchOperation>();
+  const [runPlan, setRunPlan] = useState<RunSwitchPlan>();
+  const [runRecord, setRunRecord] = useState<LibraryRecipeRecord>();
+  const [runGroup, setRunGroup] = useState<LibraryPlacementGroup>();
+  const [runError, setRunError] = useState("");
+  const [runStarting, setRunStarting] = useState(false);
+  const [runRequestKey, setRunRequestKey] = useState("");
+  const [runTitle, setRunTitle] = useState("Model");
   const [recipeRemovalId, setRecipeRemovalId] = useState("");
   const [modelDeletionOpen, setModelDeletionOpen] = useState(false);
   const [removalOperation, setRemovalOperation] = useState<LibraryOperation>();
   const [announcement, setAnnouncement] = useState("");
-  const placementTrigger = useRef<HTMLButtonElement | null>(null);
   const removalTrigger = useRef<HTMLButtonElement | null>(null);
   const modelDeletionTrigger = useRef<HTMLButtonElement | null>(null);
   const placementRequest = useRef(0);
+  const runRequest = useRef(0);
   const allRecords = useMemo(
     () => applyManagedCatalogWithdrawals(buildLibraryRecipeRecords(snapshot, publicRecipes), fleet, syncSummary?.withdrawn_recipes ?? []),
     [fleet, publicRecipes, snapshot, syncSummary?.withdrawn_recipes],
@@ -399,8 +455,44 @@ export function LibraryWorkcell({
     : syncSummary?.state === "partial" ? "Repository synced with items to review"
       : syncSummary?.state === "failed" ? "Automatic repository sync failed"
         : syncSummary?.state === "syncing" ? "Repository sync in progress"
-          : syncSummary?.state === "current" ? "Recipe repository is current"
-            : "Automatic repository sync enabled";
+            : syncSummary?.state === "current" ? "Recipe repository is current"
+              : "Automatic repository sync enabled";
+
+  const runActive = Boolean(runOperation && !runOperationTerminal(runOperation.state));
+  const runNodeNames = Object.fromEntries(fleet?.nodes.map(node => [node.id, node.display_name || node.hostname]) ?? []);
+
+  useEffect(() => {
+    onBusyChange?.(runStarting || runActive);
+    return () => onBusyChange?.(false);
+  }, [onBusyChange, runActive, runStarting]);
+
+  useEffect(() => {
+    if (!runOperation) return;
+    try {
+      sessionStorage.setItem("vonk-library-run-switch", JSON.stringify({operation_id: runOperation.operation_id, title: runRecord?.title ?? selectedRecord?.title ?? "Model", request_key: runOperation.request_key}));
+    } catch {
+      // A private browsing context can deny session storage; the live operation remains visible.
+    }
+  }, [runOperation, runRecord?.title, selectedRecord?.title]);
+
+  const restoreRunOperation = useRef(false);
+  useEffect(() => {
+    if (restoreRunOperation.current) return;
+    restoreRunOperation.current = true;
+    let stored: {operation_id?: string; title?: string} | undefined;
+    try {
+      const value = sessionStorage.getItem("vonk-library-run-switch");
+      stored = value ? JSON.parse(value) as {operation_id?: string; title?: string} : undefined;
+    } catch {
+      stored = undefined;
+    }
+    if (!stored?.operation_id) return;
+    void api.getRecipeRunSwitchOperation(stored.operation_id)
+      .then(operation => { setRunOperation(operation); setRunTitle(stored?.title ?? "Model"); })
+      .catch(() => {
+        try { sessionStorage.removeItem("vonk-library-run-switch"); } catch { /* storage is optional */ }
+      });
+  }, [api]);
 
   useEffect(() => {
     setRecipeRemovalId("");
@@ -422,11 +514,11 @@ export function LibraryWorkcell({
     if (!record.recipe) return;
     if (detail?.recipe.recipe_id === record.recipe.recipe_id) {
       setPlacementDetail(detail);
-      setAnnouncement(`Choose a compatible Spark for ${record.title}.`);
+      setAnnouncement(`Choose a compatible Spark to run ${record.title}.`);
       return;
     }
     if (placementDetail?.recipe.recipe_id === record.recipe.recipe_id) {
-      setAnnouncement(`Choose a compatible Spark for ${record.title}.`);
+      setAnnouncement(`Choose a compatible Spark to run ${record.title}.`);
       return;
     }
     setPlacementDetail(undefined);
@@ -447,9 +539,64 @@ export function LibraryWorkcell({
     }
   }
 
-  async function openPlacement(record: LibraryRecipeRecord, node: VisualFleetNode, trigger: HTMLButtonElement, invocation: LibraryPlacementInvocation) {
+  async function runGroupNow(record: LibraryRecipeRecord, group: LibraryPlacementGroup, retry = false) {
+    if (runStarting || runActive) return;
+    if (!record.recipe || !record.recipe.selected_revision?.id || record.recipe.selected_revision.lifecycle !== "resolved") {
+      setRunError("This recipe has no resolved revision to run.");
+      return;
+    }
+    const modelDigest = record.model?.content_sha256;
+    if (!modelDigest || !/^[0-9a-f]{64}$/.test(modelDigest)) {
+      setRunError("The exact model version digest is not reported. The Controller cannot run this recipe safely yet.");
+      return;
+    }
+    const nodes = group.nodes.map(node => ({node_id: node.node_id, rank: node.rank, role: node.role, endpoint_owner: node.endpoint_owner}));
+    if (nodes.length === 0 || nodes.filter(node => node.endpoint_owner).length !== 1) {
+      setRunError("The selected Spark group is incomplete. Choose a complete group with one endpoint owner.");
+      return;
+    }
+    const requestId = ++runRequest.current;
+    const requestKey = retry && runRequestKey ? runRequestKey : crypto.randomUUID();
+    const input: RunSwitchPreviewRequest = {
+      schema_version: 2,
+      model_version_sha256: modelDigest,
+      recipe_revision_id: record.recipe.selected_revision.id,
+      spark_group: {nodes},
+      alias: runAlias(record.recipe.slug) || "model",
+      action: "run",
+      retention: "retain-cached",
+      invocation: {origin: "web.library", context: {recipe_id: record.recipe.recipe_id, node_ids: nodes.map(node => node.node_id).join(",")}},
+    };
+    setRunRecord(record);
+    setRunGroup(group);
+    setRunTitle(record.title);
+    setRunRequestKey(requestKey);
+    setRunError("");
+    setRunPlan(undefined);
+    setRunStarting(true);
+    try {
+      const plan = await api.previewRecipeRunSwitch(input);
+      if (requestId !== runRequest.current) return;
+      setRunPlan(plan);
+      if (!plan.allowed || plan.blockers.length > 0) {
+        setRunError("The Controller needs attention before this model can run.");
+        return;
+      }
+      const operation = await api.applyRecipeRunSwitch({...input, plan_digest: plan.plan_digest, request_key: requestKey});
+      if (requestId === runRequest.current) setRunOperation(operation);
+    } catch (value) {
+      if (requestId === runRequest.current) setRunError(value instanceof Error ? value.message.slice(0, 256) : "The Controller could not start this model.");
+    } finally {
+      if (requestId === runRequest.current) setRunStarting(false);
+    }
+  }
+
+  function retryRun() {
+    if (runRecord && runGroup) void runGroupNow(runRecord, runGroup, true);
+  }
+
+  async function openPlacement(record: LibraryRecipeRecord, node: VisualFleetNode) {
     if (!record.recipe || node.connection?.online_state !== "online") return;
-    placementTrigger.current = trigger;
     setPlacementLoading(true);
     setPlacementError("");
     try {
@@ -464,7 +611,7 @@ export function LibraryWorkcell({
         setPlacementError(`${node.display_name || node.hostname} is not in a compatible complete placement group for ${record.title}.`);
         return;
       }
-      setReview({invocation, nodeIds: [...group.node_ids].sort(), record});
+      void runGroupNow(record, group);
     } catch (value) {
       setPlacementError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load placement authority");
     } finally {
@@ -478,11 +625,6 @@ export function LibraryWorkcell({
     event.dataTransfer.setData("text/plain", record.recipe.recipe_id);
     setDraggedRecipe(record);
     void preparePlacement(record);
-  }
-
-  function closeReview() {
-    setReview(undefined);
-    queueMicrotask(() => placementTrigger.current?.focus());
   }
 
   function closeRecipeRemoval() {
@@ -539,7 +681,7 @@ export function LibraryWorkcell({
                 <td>{recordModelFamily(record)}</td><td>{record.modelTitle}</td><td>{catalog?.quantizations.join(" · ") || "—"}</td><td>{catalog ? humanizeIdentifier(catalog.runtime_distribution) : "—"}</td><td>{recordIsAbliterated(record) ? "True" : "False"}</td><td>{catalog?.node_count ?? "—"}</td><td>{catalog?.source_owner ?? "—"}</td><td>{catalog?.release_released_at ?? "—"}</td>
                 <td>{catalog ? humanizeIdentifier(catalog.execution_readiness) : "—"}</td><td>{recordCapabilities(record).map(value => CAPABILITIES.find(option => option.value === value)?.label ?? value).join(" · ") || "—"}</td><td>{catalog ? (catalog.qualification === "cataloged" ? "Accepted" : "Candidate") : "Custom"}</td><td>{catalog?.source_repository ? <a href={catalog.source_repository} target="_blank" rel="noreferrer">{repositoryLabel(catalog.source_repository)}<span className="visually-hidden"> opens in a new tab</span></a> : "—"}</td>
                 <td>{catalog ? formatBytes(catalog.expected_download_bytes) : "—"}</td><td>{catalog ? formatBytes(catalog.maximum_installed_bytes_per_node) : "—"}</td><td>{catalog ? formatBytes(catalog.maximum_runtime_memory_bytes_per_node) : "—"}</td>
-                <td><button type="button" className="button secondary" disabled={!record.recipe} title={!record.recipe ? "Waiting for automatic repository synchronization." : undefined} onClick={event => { placementTrigger.current = event.currentTarget; void preparePlacement(record); }}>{placementRecipe?.key === record.key ? (placementLoading ? "Checking Sparks…" : "Choose a Spark") : record.recipe ? "Place on Spark" : "Syncing…"}</button></td>
+                <td><button type="button" className="button secondary" disabled={!record.recipe} title={!record.recipe ? "Waiting for automatic repository synchronization." : undefined} onClick={() => { void preparePlacement(record); }}>{placementRecipe?.key === record.key ? (placementLoading ? "Checking Sparks…" : "Choose a Spark") : record.recipe ? "Run" : "Syncing…"}</button></td>
               </tr>;
             })}</tbody>
           </table>
@@ -563,6 +705,17 @@ export function LibraryWorkcell({
           <button ref={modelDeletionTrigger} type="button" className="button secondary" onClick={() => setModelDeletionOpen(true)}>Review model deletion</button>
           <small>Shared unrelated caches remain protected. The server preview lists every affected placement before confirmation.</small>
         </section>}
+        {runStarting && <section className="library-run-switch-progress is-starting" aria-label="Run progress" aria-live="polite"><strong>Checking Controller plan…</strong><span>Preparing the exact model and runtime for the selected Spark group.</span></section>}
+        {runError && <section className="library-run-switch-error" role="alert"><span>{runError}</span>{runGroup && <button type="button" className="button secondary" onClick={retryRun}>Retry run</button>}</section>}
+        {runPlan && !runOperation && !runStarting && runRecord && runGroup && (
+          <section className="library-run-switch-plan" aria-label="Run issues">
+            <header><strong>Run needs attention</strong><span>The Controller did not dispatch this request.</span></header>
+            {runPlan.blockers.length > 0 && <ul>{runPlan.blockers.map(reason => <li key={`${reason.code}:${reason.detail}`}><strong>{reason.code}</strong><span>{reason.detail}</span></li>)}</ul>}
+            {runPlan.warnings.length > 0 && <details><summary>{runPlan.warnings.length} warning{runPlan.warnings.length === 1 ? "" : "s"}</summary><ul>{runPlan.warnings.map(reason => <li key={`${reason.code}:${reason.detail}`}>{reason.detail}</li>)}</ul></details>}
+            <button type="button" className="button secondary" onClick={() => void runGroupNow(runRecord, runGroup, true)}>Recheck run</button>
+          </section>
+        )}
+        {runOperation && <LibraryRunSwitchProgress api={api} nodeNames={runNodeNames} onChange={setRunOperation} onRefresh={() => void onRefresh(new AbortController().signal)} onRetry={retryRun} operation={runOperation} title={runTitle}/>}
         {removalOperation && <LibraryOperationProgress api={api} name="Remove" onChange={setRemovalOperation} onRefresh={onRefresh} operation={removalOperation}/>}
         {!fleet && !fleetError && <p className="library-placeholder" role="status">Loading live Spark state…</p>}
         {fleetError && <div className="library-spark-error" role="alert"><p>{fleetError}</p><button type="button" className="button secondary" onClick={onRetryFleet}>Retry Sparks</button></div>}
@@ -581,13 +734,13 @@ export function LibraryWorkcell({
           const compatible = Boolean(railRecord?.recipe) && node.connection?.online_state === "online" && Boolean(activeDetail && groupReady);
           const atomicNodes = group?.node_ids ?? [];
           const dropActive = dropNodeId === node.id;
-          return <article key={node.id} className={`library-spark-target state-${state}${dropActive ? " is-drop-active" : ""}${compatibilityPending ? " is-drop-pending" : ""}${(draggedRecipe || placementRecipe) && !compatible && !compatibilityPending ? " is-drop-incompatible" : ""}`} onDragEnter={event => { event.preventDefault(); setDropNodeId(node.id); }} onDragOver={event => { if (compatible) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={() => setDropNodeId(current => current === node.id ? "" : current)} onDrop={event => { event.preventDefault(); setDropNodeId(""); const record = draggedRecipe ?? placementRecipe; setDraggedRecipe(undefined); const trigger = event.currentTarget.querySelector<HTMLButtonElement>(".library-place-target"); if (record && compatible && trigger) void openPlacement(record, node, trigger, "drag-drop"); }}>
+          return <article key={node.id} className={`library-spark-target state-${state}${dropActive ? " is-drop-active" : ""}${compatibilityPending ? " is-drop-pending" : ""}${(draggedRecipe || placementRecipe) && !compatible && !compatibilityPending ? " is-drop-incompatible" : ""}`} onDragEnter={event => { event.preventDefault(); setDropNodeId(node.id); }} onDragOver={event => { if (compatible) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }} onDragLeave={() => setDropNodeId(current => current === node.id ? "" : current)} onDrop={event => { event.preventDefault(); setDropNodeId(""); const record = draggedRecipe ?? placementRecipe; setDraggedRecipe(undefined); if (record && compatible) void openPlacement(record, node); }}>
             <header><div><strong>{node.display_name || node.hostname}</strong><span>{node.hostname}</span></div><span className={`library-spark-state state-${state}`}>{stateLabel(state)}</span></header>
             <dl><div><dt>Connection</dt><dd>{node.connection?.online_state ?? "Unknown"}</dd></div><div><dt>Workloads</dt><dd>{(node.loaded ?? []).length} running · {(node.installed ?? []).length} installed</dd></div>{node.inventory && <div><dt>Disk free</dt><dd>{formatBytes(node.inventory.disk_free_bytes)}</dd></div>}</dl>
             {(runningRecords.length > 0 || installedRecords.length > 0) && <div className="library-selected-locations" role="group" aria-label={`Selected content on ${node.display_name || node.hostname}`}>{runningRecords.map(record => { const run = (node.loaded ?? []).find(item => item.recipe_id === record.recipe?.recipe_id); return <p key={`run-${record.key}`}><strong>{run?.healthy === false ? "Running · attention" : "Running"}</strong><span>{record.title}</span></p>; })}{installedRecords.map(record => <p key={`installed-${record.key}`}><strong>Installed</strong><span>{record.title}</span></p>)}</div>}
             {atomicNodes.length > 1 && <p className="library-atomic-placement"><strong>Atomic {atomicNodes.length}-Spark placement</strong><span>{atomicNodes.map(nodeId => fleet.nodes.find(item => item.id === nodeId)?.display_name ?? nodeId).join(" + ")}</span></p>}
             {state === "withdrawn" && <p className="library-withdrawn-impact"><strong>Installed content is withdrawn upstream</strong><span>{activeSelectedRun ? "This content is running. Stop the complete run before reviewing removal." : "This exact local content stays pinned and cannot receive further catalog updates."}</span></p>}
-            {(draggedRecipe || placementRecipe) && <button type="button" className="button secondary library-place-target" disabled={!compatible || placementLoading} onClick={event => { const record = draggedRecipe ?? placementRecipe; if (record) void openPlacement(record, node, event.currentTarget, event.detail === 0 ? "keyboard" : "button"); }}>{compatibilityPending ? "Checking compatibility…" : compatible ? `Review placement on ${node.display_name || node.hostname}` : `${state === "offline" ? "Offline" : "Incompatible"} for placement`}</button>}
+            {(draggedRecipe || placementRecipe) && <button type="button" className="button secondary library-place-target" disabled={!compatible || placementLoading || runStarting || runActive} onClick={() => { const record = draggedRecipe ?? placementRecipe; if (record) void openPlacement(record, node); }}>{compatibilityPending ? "Checking compatibility…" : compatible ? `Run on ${node.display_name || node.hostname}` : `${state === "offline" ? "Offline" : "Incompatible"} for run`}</button>}
           </article>;
         })}</div>
         {fleet && fleet.nodes.length === 0 && <div className="library-workcell-empty"><strong>No Sparks enrolled</strong><p>Enroll a Spark before previewing placement.</p></div>}
@@ -600,17 +753,6 @@ export function LibraryWorkcell({
       </section>}
     </div>
     <p className="visually-hidden" role="status" aria-live="polite">{announcement}</p>
-    {review?.record.recipe && <LibraryPlacementDialog
-      api={api}
-      invocation={review.invocation}
-      nodeIds={review.nodeIds}
-      nodeNames={Object.fromEntries(fleet?.nodes.map(node => [node.id, node.display_name || node.hostname]) ?? [])}
-      onBusyChange={onBusyChange}
-      onClose={closeReview}
-      onRefresh={onRefresh}
-      recipeId={review.record.recipe.recipe_id}
-      recipeTitle={review.record.title}
-    />}
     {selectedRecord && recipeRemovalId && <LibraryActionDialog
       alias={selectedRecord.recipe?.slug ?? selectedRecord.title}
       api={api}

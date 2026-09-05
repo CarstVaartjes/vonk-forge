@@ -52,6 +52,7 @@ from tests.acceptance.test_fresh_nas_install import (
     command_environment,
     generate_bundle,
     host_command_environment,
+    is_channel_image,
     is_immutable_image,
     nas_responses,
     tailscale_service_hostname,
@@ -85,6 +86,7 @@ COMPOSE_IMAGE_ROLES = {
     "api": "control-api",
     "worker": "control-worker",
     "hermes": "hermes-agent",
+    "litellm": "litellm",
 }
 
 ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
@@ -627,11 +629,14 @@ class SparkLifecycle:
         self._cleanup()
 
     def _compose(self, *arguments: str) -> list[str]:
+        overlay = os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+        files = ["-f", "docker-compose.yaml", "-f", overlay] if overlay else []
         return [
             "docker",
             "compose",
             "--project-name",
             self.project,
+            *files,
             *arguments,
         ]
 
@@ -913,6 +918,7 @@ class SparkLifecycle:
             raise LifecycleError(
                 "candidate controller services are not healthy"
             ) from error
+        self._assert_running_publication_images()
         # Both package lanes need deterministic NVIDIA discovery so the agent
         # can start on a GPU-less CI runner. Only ARM64 consumes it in a recipe.
         self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
@@ -996,16 +1002,104 @@ class SparkLifecycle:
             raise LifecycleError("Compose image graph is invalid") from error
         if not isinstance(services, dict):
             raise LifecycleError("Compose image graph is invalid")
+        base = self._run_command(
+            [
+                "docker",
+                "compose",
+                "--project-name",
+                self.project,
+                "--profile",
+                "hermes",
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=self.bundle,
+        )
+        try:
+            base_services = json.loads(base.stdout)["services"]
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            raise LifecycleError("base Compose image graph is invalid") from error
+        if not isinstance(base_services, dict):
+            raise LifecycleError("base Compose image graph is invalid")
+        for service in base_services.values():
+            image = service.get("image") if isinstance(service, dict) else None
+            if not isinstance(image, str) or not is_channel_image(
+                image, self.arguments.channel
+            ):
+                raise LifecycleError("base Compose image does not follow its channel")
         for role, service in COMPOSE_IMAGE_ROLES.items():
             configured_service = services.get(service)
-            if not isinstance(configured_service, dict) or configured_service.get(
-                "image"
-            ) != images.get(role):
+            expected_image = str(images.get(role)).split("@", 1)[0].rsplit(":", 1)[
+                0
+            ] + (":dev" if self.arguments.channel == "dev" else ":latest")
+            if os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+                expected_image = str(images.get(role))
+            if (
+                not isinstance(configured_service, dict)
+                or configured_service.get("image") != expected_image
+            ):
                 raise LifecycleError("Compose image graph differs from publication")
+        provisioner = services.get("hermes-litellm-key-provisioner")
+        provisioner_expected = str(images["litellm"])
+        if not os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+            provisioner_expected = provisioner_expected.split("@", 1)[0].rsplit(":", 1)[
+                0
+            ] + (":dev" if self.arguments.channel == "dev" else ":latest")
+        if (
+            not isinstance(provisioner, dict)
+            or provisioner.get("image") != provisioner_expected
+        ):
+            raise LifecycleError("Compose image graph differs from publication")
         for service in services.values():
             image = service.get("image") if isinstance(service, dict) else None
-            if not isinstance(image, str) or not is_immutable_image(image):
-                raise LifecycleError("Compose contains a mutable image")
+            if (
+                not isinstance(image, str)
+                or (
+                    image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+                    and os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+                    and not is_immutable_image(image)
+                )
+                or (
+                    (
+                        not os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+                        or not image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+                    )
+                    and not is_channel_image(image, self.arguments.channel)
+                )
+            ):
+                raise LifecycleError("Compose image does not follow its channel")
+
+    def _assert_running_publication_images(self) -> None:
+        """A moving alias must still resolve to the candidate being qualified."""
+        assert self.bundle is not None
+        candidate = _read_canonical_document(
+            self.arguments.candidate_release, "candidate release object"
+        )
+        images = _object(candidate.get("images"), "candidate image graph")
+        for role, service in COMPOSE_IMAGE_ROLES.items():
+            if service not in LOCAL_CONTROLLER_SERVICES:
+                continue
+            container = self._run_command(
+                self._compose("ps", "-q", service), cwd=self.bundle
+            ).stdout.strip()
+            observed = self._run_command(
+                ["docker", "inspect", "--format", "{{.Image}}", container],
+                cwd=self.bundle,
+            ).stdout.strip()
+            expected = self._run_command(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{.Id}}",
+                    str(images[role]),
+                ],
+                cwd=self.bundle,
+            ).stdout.strip()
+            if not observed or observed != expected:
+                raise LifecycleError("running channel image differs from publication")
 
     def _read_secret(self, relative: str) -> str:
         assert self.bundle is not None
@@ -1897,10 +1991,7 @@ class SparkLifecycle:
                 agent = matching[0]
                 node_id = agent.get("node_id")
                 agent_mismatches = []
-                if (
-                    not isinstance(node_id, str)
-                    or NODE_ID.fullmatch(node_id) is None
-                ):
+                if not isinstance(node_id, str) or NODE_ID.fullmatch(node_id) is None:
                     agent_mismatches.append("node_id")
                 if agent.get("state") != "active":
                     agent_mismatches.append("state")

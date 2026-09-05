@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import String, cast, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import CursorCodec
@@ -177,9 +178,29 @@ class JobService:
             updated_at=now,
             reconciliation_id=reconciliation_id,
         )
-        with self._sessions.begin() as session:
-            session.add(job)
-        return job
+        try:
+            with self._sessions.begin() as session:
+                existing = session.scalar(
+                    select(Job).where(Job.request_id == job.request_id)
+                )
+                if existing is not None:
+                    if not self._same_request(existing, job):
+                        raise ValueError("request key was already used differently")
+                    session.expunge(existing)
+                    return existing
+                session.add(job)
+            return job
+        except IntegrityError:
+            with self._sessions() as session:
+                existing = session.scalar(
+                    select(Job).where(Job.request_id == job.request_id)
+                )
+                if existing is None or not self._same_request(existing, job):
+                    raise ValueError(
+                        "request key was already used differently"
+                    ) from None
+                session.expunge(existing)
+                return existing
 
     def get(self, job_id: str) -> Job:
         with self._sessions() as session:
@@ -237,7 +258,9 @@ class JobService:
             if normalized_status is not None:
                 filters.append(Job.state == normalized_status)
             if normalized_target is not None:
-                filters.append(cast(Job.targets, String).contains(f'"{normalized_target}"'))
+                filters.append(
+                    cast(Job.targets, String).contains(f'"{normalized_target}"')
+                )
             statement = select(Job).where(*filters)
             if boundary is not None:
                 created_at, job_id = boundary
@@ -314,14 +337,46 @@ class JobService:
             updated_at=now,
             reconciliation_id=reconciliation_id,
         )
-        with self._sessions.begin() as session:
-            if authority_check() is not True:
-                raise ValueError("fleet acceptance evidence is stale")
-            session.add(job)
-            session.flush()
-            if authority_check() is not True:
-                raise ValueError("fleet acceptance evidence is stale")
-        return job
+        try:
+            with self._sessions.begin() as session:
+                existing = session.scalar(
+                    select(Job).where(Job.request_id == job.request_id)
+                )
+                if existing is not None:
+                    if not self._same_request(existing, job):
+                        raise ValueError("request key was already used differently")
+                    session.expunge(existing)
+                    return existing
+                if authority_check() is not True:
+                    raise ValueError("fleet acceptance evidence is stale")
+                session.add(job)
+                session.flush()
+                if authority_check() is not True:
+                    raise ValueError("fleet acceptance evidence is stale")
+            return job
+        except IntegrityError:
+            with self._sessions() as session:
+                existing = session.scalar(
+                    select(Job).where(Job.request_id == job.request_id)
+                )
+                if existing is None or not self._same_request(existing, job):
+                    raise ValueError(
+                        "request key was already used differently"
+                    ) from None
+                session.expunge(existing)
+                return existing
+
+    @staticmethod
+    def _same_request(existing: Job, requested: Job) -> bool:
+        """Compare immutable request semantics for safe idempotent replay."""
+
+        return (
+            existing.kind == requested.kind
+            and existing.actor == requested.actor
+            and existing.authority_revision == requested.authority_revision
+            and existing.targets == requested.targets
+            and existing.payload_digest == requested.payload_digest
+        )
 
     def claim(self, worker_id: str, lease_seconds: int) -> AttemptFence | None:
         if not worker_id.strip() or lease_seconds <= 0:
@@ -375,13 +430,22 @@ class JobService:
                 )
             )
             return AttemptFence(
-                job.id, job.current_attempt, fence, worker_id, deadline, job.kind,
-                dict(job.payload), job.authority_revision, tuple(job.targets),
+                job.id,
+                job.current_attempt,
+                fence,
+                worker_id,
+                deadline,
+                job.kind,
+                dict(job.payload),
+                job.authority_revision,
+                tuple(job.targets),
             )
 
     def _active(self, session: Session, fence: AttemptFence) -> tuple[Job, JobAttempt]:
         job = session.get(Job, fence.job_id)
-        attempt = session.scalar(select(JobAttempt).where(JobAttempt.fence == fence.fence))
+        attempt = session.scalar(
+            select(JobAttempt).where(JobAttempt.fence == fence.fence)
+        )
         if (
             job is None
             or attempt is None
@@ -402,11 +466,24 @@ class JobService:
             attempt.lease_deadline = deadline
             job.updated_at = self._clock()
             return AttemptFence(
-                fence.job_id, fence.attempt, fence.fence, fence.worker_id, deadline,
-                fence.kind, fence.payload, fence.authority_revision, fence.targets,
+                fence.job_id,
+                fence.attempt,
+                fence.fence,
+                fence.worker_id,
+                deadline,
+                fence.kind,
+                fence.payload,
+                fence.authority_revision,
+                fence.targets,
             )
 
-    def _finish(self, fence: AttemptFence, state: str, result: Mapping[str, object] | None, reason: str | None) -> None:
+    def _finish(
+        self,
+        fence: AttemptFence,
+        state: str,
+        result: Mapping[str, object] | None,
+        reason: str | None,
+    ) -> None:
         with self._sessions.begin() as session:
             job, attempt = self._active(session, fence)
             attempt.state = state

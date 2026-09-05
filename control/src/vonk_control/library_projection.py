@@ -33,7 +33,23 @@ from .library_contract import (
     InstallPreviewInput,
     InstallPreviewTarget,
     LibraryInstallationSummary,
+    LibraryCapabilityFact,
+    LibraryCapabilityInventory,
+    LibraryCapabilityProvenance,
+    LibraryCatalogReference,
     LibraryModel,
+    LibraryModelArtifact,
+    LibraryModelDefinition,
+    LibraryModelFamily,
+    LibraryModelFormat,
+    LibraryModelLineage,
+    LibraryModelLimits,
+    LibraryModelMetadata,
+    LibraryModelParameters,
+    LibraryModelSizes,
+    LibraryModelSource,
+    LibraryModelVersionFacts,
+    ModelVersionIdentity,
     LibraryRecipeDetail,
     LibraryRecipeIdentity,
     LibraryRecipeSummary,
@@ -124,6 +140,7 @@ from .models import (
     ResourceReservation,
     RunNode,
 )
+from .catalog_contract import catalog_content_sha256, validate_catalog_document
 from .recipe_contract import RecipeContractError, recipe_topology, validate_recipe
 from .topology import Placement, TopologyError, validate_topology
 
@@ -486,12 +503,20 @@ def _resolved_model_version_document(
 ) -> Mapping[str, object] | None:
     """Load the exact immutable model authority without projecting arbitrary fields."""
 
-    reference = recipe_document["model"]
-    revision = session.scalar(
+    return _resolved_model_version_reference(session, recipe_document["model"])
+
+
+def _resolved_catalog_revision(
+    session: Session,
+    reference: Mapping[str, object],
+) -> CatalogEntityRevision | None:
+    """Load the resolved revision addressed by one content-addressed reference."""
+
+    return session.scalar(
         select(CatalogEntityRevision)
         .join(CatalogEntity, CatalogEntity.id == CatalogEntityRevision.entity_id)
         .where(
-            CatalogEntity.kind == "model-version",
+            CatalogEntity.kind == reference["kind"],
             CatalogEntity.publisher == reference["publisher"],
             CatalogEntity.slug == reference["slug"],
             CatalogEntityRevision.content_sha256 == reference["content_sha256"],
@@ -500,7 +525,561 @@ def _resolved_model_version_document(
         .order_by(CatalogEntityRevision.revision_number.desc())
         .limit(1)
     )
+
+
+def _resolved_model_version_reference(
+    session: Session,
+    reference: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    """Load one exact model-version revision addressed by a recipe reference."""
+
+    revision = _resolved_catalog_revision(session, reference)
     return revision.document if revision is not None else None
+
+
+def _catalog_reference(reference: Mapping[str, object]) -> LibraryCatalogReference:
+    return LibraryCatalogReference(
+        kind=reference["kind"],
+        publisher=reference["publisher"],
+        slug=reference["slug"],
+        content_sha256=reference["content_sha256"],
+    )
+
+
+def _model_version_facts(
+    session: Session,
+    reference: Mapping[str, object],
+) -> LibraryModelVersionFacts:
+    """Project only schema-valid facts from the exact model-version revision.
+
+    The recipe reference is enough to identify a version, but it is not enough
+    to claim that version metadata is authoritative.  Invalid, missing, or
+    content-mismatched catalog documents therefore remain visible as unknown.
+    """
+
+    identity = ModelVersionIdentity(
+        kind="model-version",
+        publisher=reference["publisher"],
+        slug=reference["slug"],
+        content_sha256=reference["content_sha256"],
+    )
+    revision = _resolved_catalog_revision(session, reference)
+    if revision is None or not isinstance(revision.document, Mapping):
+        return LibraryModelVersionFacts(
+            state="unknown",
+            identity=identity,
+            model=None,
+            artifacts=[],
+            dependencies=[],
+            reasons=[
+                _reason(
+                    "model.version_metadata_unknown",
+                    "The exact resolved model-version document is unavailable.",
+                    "info",
+                )
+            ],
+        )
+    document = revision.document
+    try:
+        validate_catalog_document(document)
+    except Exception as error:
+        return LibraryModelVersionFacts(
+            state="unknown",
+            identity=identity,
+            model=None,
+            artifacts=[],
+            dependencies=[],
+            reasons=[
+                _reason(
+                    "model.version_metadata_invalid",
+                    f"The exact model-version document is not schema-valid: {error}",
+                    "warning",
+                )
+            ],
+        )
+    if catalog_content_sha256(document) != revision.content_sha256:
+        return LibraryModelVersionFacts(
+            state="unknown",
+            identity=identity,
+            model=None,
+            artifacts=[],
+            dependencies=[],
+            reasons=[
+                _reason(
+                    "model.version_metadata_digest_mismatch",
+                    "The resolved model-version document does not match its content digest.",
+                    "warning",
+                )
+            ],
+        )
+    document_identity = document["identity"]
+    if (
+        document_identity["publisher"] != reference["publisher"]
+        or document_identity["slug"] != reference["slug"]
+    ):
+        return LibraryModelVersionFacts(
+            state="unknown",
+            identity=identity,
+            model=None,
+            artifacts=[],
+            dependencies=[],
+            reasons=[
+                _reason(
+                    "model.version_metadata_identity_mismatch",
+                    "The resolved model-version document identity does not match its reference.",
+                    "warning",
+                )
+            ],
+        )
+
+    model_reference = document["model"]
+    reasons: list[ProjectionReason] = []
+    model_definition = None
+    family = None
+    model_revision = _resolved_catalog_revision(session, model_reference)
+    if model_revision is not None and isinstance(model_revision.document, Mapping):
+        model_document = model_revision.document
+        try:
+            validate_catalog_document(model_document)
+            if catalog_content_sha256(model_document) != model_revision.content_sha256:
+                raise ValueError("resolved model document digest mismatch")
+            model_definition = LibraryModelDefinition(
+                identity=_catalog_reference(model_reference),
+                model_group=_catalog_reference(model_document["model_group"]),
+                architecture=model_document["architecture"],
+                metadata=LibraryModelMetadata(**model_document["metadata"]),
+            )
+            family_reference = model_document["model_group"]
+            family_revision = _resolved_catalog_revision(session, family_reference)
+            if family_revision is not None and isinstance(
+                family_revision.document, Mapping
+            ):
+                family_document = family_revision.document
+                validate_catalog_document(family_document)
+                if catalog_content_sha256(family_document) != family_revision.content_sha256:
+                    raise ValueError("resolved model-group document digest mismatch")
+                family = LibraryModelFamily(
+                    identity=_catalog_reference(family_reference),
+                    family=family_document["family"],
+                    metadata=LibraryModelMetadata(**family_document["metadata"]),
+                )
+            else:
+                reasons.append(
+                    _reason(
+                        "model.family_metadata_unknown",
+                        "The exact model-group document is unavailable.",
+                        "info",
+                    )
+                )
+        except Exception:
+            reasons.append(
+                _reason(
+                    "model.definition_metadata_unknown",
+                    "The exact model document is not an accepted schema-valid authority.",
+                    "warning",
+                )
+            )
+            model_definition = None
+    else:
+        reasons.append(
+            _reason(
+                "model.definition_metadata_unknown",
+                "The exact model document is unavailable.",
+                "info",
+            )
+        )
+
+    def catalog_references(values: object) -> list[LibraryCatalogReference]:
+        if not isinstance(values, list):
+            return []
+        return [_catalog_reference(value) for value in values]
+
+    return LibraryModelVersionFacts(
+        state="resolved",
+        identity=identity,
+        model=_catalog_reference(model_reference),
+        family=family,
+        model_definition=model_definition,
+        metadata=LibraryModelMetadata(**document["metadata"]),
+        version=document["version"],
+        source=LibraryModelSource(**document["source"]),
+        lineage=LibraryModelLineage(
+            publisher=document["lineage"]["publisher"],
+            relation=document["lineage"]["relation"],
+            source_model=_catalog_reference(document["lineage"]["source_model"]),
+            derivation=document["lineage"]["derivation"],
+        ),
+        format=LibraryModelFormat(**document["format"]),
+        parameters=LibraryModelParameters(**document["parameters"]),
+        limits=LibraryModelLimits(**document["limits"]),
+        sizes=LibraryModelSizes(**document["sizes"]),
+        artifacts=[LibraryModelArtifact(**artifact) for artifact in document["artifacts"]],
+        dependencies=catalog_references(document["dependencies"]),
+        availability=document["availability"],
+        reasons=reasons,
+    )
+
+
+def _capability_digest(value: object) -> str | None:
+    if isinstance(value, str) and len(value) == 64:
+        try:
+            int(value, 16)
+        except ValueError:
+            return None
+        return value
+    return None
+
+
+def _capability_provenance(
+    *,
+    source_kind: Literal[
+        "model-version", "recipe-revision", "model-capability-evidence"
+    ],
+    publisher: object,
+    slug: object,
+    content_sha256: object,
+    path: object,
+    evidence_digest: object,
+    revision_id: object = None,
+    source_url: object = None,
+    source_revision: object = None,
+) -> LibraryCapabilityProvenance:
+    return LibraryCapabilityProvenance(
+        source_kind=source_kind,
+        publisher=_bounded_text(publisher, 128),
+        slug=_bounded_text(slug, 128),
+        content_sha256=_capability_digest(content_sha256),
+        path=(None if path is None else _bounded_text(path, 256)),
+        evidence_digest=_capability_digest(evidence_digest),
+        revision_id=(None if revision_id is None else str(revision_id)),
+        source_url=(None if source_url is None else _bounded_text(source_url, 512)),
+        source_revision=(
+            None if source_revision is None else _bounded_text(source_revision, 80)
+        ),
+    )
+
+
+def _capability_inventory(
+    *,
+    source_kind: Literal["model-version", "recipe-revision"],
+    publisher: object,
+    slug: object,
+    content_sha256: object,
+    document: Mapping[str, object] | None,
+    raw: object,
+    path: str,
+    unknown_code: str,
+    revision_id: object = None,
+) -> LibraryCapabilityInventory:
+    """Project explicit capability assertions while preserving unknown state."""
+
+    document_evidence_digest = (
+        document.get("capability_evidence_digest") if document is not None else None
+    )
+    if (
+        document_evidence_digest is None
+        and isinstance(raw, Mapping)
+        and raw.get("evidence_digest") is not None
+    ):
+        document_evidence_digest = raw.get("evidence_digest")
+    provenance = _capability_provenance(
+        source_kind=source_kind,
+        publisher=publisher,
+        slug=slug,
+        content_sha256=content_sha256,
+        path=path if document is not None else None,
+        evidence_digest=document_evidence_digest,
+        revision_id=revision_id,
+    )
+    if document is None or raw is None:
+        return LibraryCapabilityInventory(
+            state="unknown",
+            provenance=provenance,
+            reasons=[
+                _reason(
+                    unknown_code,
+                    "No authoritative capability declaration is available for this "
+                    "exact identity.",
+                    "info",
+                )
+            ],
+        )
+
+    entries: list[tuple[str | None, object, str]] = []
+    invalid = 0
+    if isinstance(raw, list):
+        entries = [(None, item, f"{path}[{index}]") for index, item in enumerate(raw)]
+    elif isinstance(raw, Mapping):
+        declared = raw.get("declared")
+        if isinstance(declared, list):
+            entries = [
+                (None, item, f"{path}.declared[{index}]")
+                for index, item in enumerate(declared)
+            ]
+        else:
+            entries = [
+                (str(name), value, f"{path}.{name}")
+                for name, value in raw.items()
+                if name not in {"evidence_digest", "source", "declared"}
+            ]
+    else:
+        invalid = 1
+
+    facts: list[LibraryCapabilityFact] = []
+    for name_hint, value, value_path in entries:
+        name: object = name_hint
+        support: object = "supported"
+        evidence_status: object = "declared"
+        evidence_digest: object = document_evidence_digest
+        if isinstance(value, str):
+            if name_hint is not None and value in {
+                "supported",
+                "unsupported",
+                "unknown",
+            }:
+                name = name_hint
+                support = value
+            else:
+                name = value if name_hint is None else name_hint
+        elif isinstance(value, Mapping):
+            name = value.get("name", name_hint)
+            support = value.get("support", value.get("status", "supported"))
+            evidence_status = value.get(
+                "evidence_status", value.get("evidence", "declared")
+            )
+            evidence_digest = value.get("evidence_digest", evidence_digest)
+        elif name_hint is None:
+            invalid += 1
+            continue
+        if not isinstance(name, str) or not name or len(name) > 64:
+            invalid += 1
+            continue
+        if support not in {"supported", "unsupported", "unknown"}:
+            support = "unknown"
+            invalid += 1
+        if evidence_status not in {"declared", "tested", "contradicted", "unknown"}:
+            evidence_status = "unknown"
+            invalid += 1
+        facts.append(
+            LibraryCapabilityFact(
+                capability=name,
+                support=support,
+                evidence_status=evidence_status,
+                evidence_digest=_capability_digest(evidence_digest),
+                provenance=_capability_provenance(
+                    source_kind=source_kind,
+                    publisher=publisher,
+                    slug=slug,
+                    content_sha256=content_sha256,
+                    path=value_path,
+                    evidence_digest=evidence_digest,
+                    revision_id=revision_id,
+                ),
+            )
+        )
+
+    # Stable ordering makes JSON comparison and client caching deterministic.
+    facts.sort(key=lambda item: (item.capability, item.support, item.evidence_status))
+    reasons = []
+    if invalid:
+        reasons.append(
+            _reason(
+                "capability.invalid_declaration",
+                f"{invalid} capability declaration value(s) were not well formed "
+                "and remain unknown.",
+                "warning",
+            )
+        )
+    state: Literal["declared", "unknown", "contradictory"] = "declared"
+    if not facts and invalid:
+        state = "unknown"
+    return LibraryCapabilityInventory(
+        state=state,
+        facts=facts[:_MAX_PROJECTED_CAPABILITIES],
+        provenance=provenance,
+        reasons=reasons,
+    )
+
+
+_MODEL_CAPABILITY_NAMES = frozenset(
+    {
+        "chat",
+        "text-generation",
+        "text-understanding",
+        "reasoning",
+        "tool-use",
+        "code-generation",
+        "ocr",
+        "image-generation",
+        "image-understanding",
+        "image-editing",
+        "video-generation",
+        "video-understanding",
+        "audio-generation",
+        "audio-understanding",
+        "embeddings",
+        "3d-generation",
+    }
+)
+
+
+def _model_capabilities(
+    reference: Mapping[str, object],
+    document: Mapping[str, object] | None,
+) -> LibraryCapabilityInventory:
+    """Project only the accepted schema-2 model capability authority."""
+
+    provenance = _capability_provenance(
+        source_kind="model-version",
+        publisher=reference.get("publisher"),
+        slug=reference.get("slug"),
+        content_sha256=reference.get("content_sha256"),
+        path="capabilities" if document is not None else None,
+        evidence_digest=None,
+    )
+    raw = document.get("capabilities") if document is not None else None
+    if not isinstance(raw, Mapping):
+        return LibraryCapabilityInventory(
+            state="unknown",
+            provenance=provenance,
+            reasons=[
+                _reason(
+                    "model.capabilities_unknown",
+                    "The exact model-version has no accepted typed capability declaration.",
+                    "info",
+                )
+            ],
+        )
+    raw_provenance = raw.get("provenance")
+    if (
+        not isinstance(raw_provenance, Mapping)
+        or not isinstance(raw_provenance.get("source_url"), str)
+        or not raw_provenance.get("source_url", "").startswith("https://")
+        or not isinstance(raw_provenance.get("source_revision"), str)
+        or not isinstance(raw_provenance.get("evidence_digest"), str)
+    ):
+        return LibraryCapabilityInventory(
+            state="unknown",
+            provenance=provenance,
+            reasons=[
+                _reason(
+                    "model.capabilities_provenance_invalid",
+                    "The capability declaration does not identify the exact model-version.",
+                    "warning",
+                )
+            ],
+        )
+    facts: list[LibraryCapabilityFact] = []
+    invalid = 0
+    raw_facts = raw.get("facts")
+    for index, raw_fact in enumerate(raw_facts if isinstance(raw_facts, list) else []):
+        if not isinstance(raw_fact, Mapping):
+            invalid += 1
+            continue
+        capability = raw_fact.get("capability")
+        support = raw_fact.get("support")
+        evidence_status = raw_fact.get("evidence_status")
+        if capability not in _MODEL_CAPABILITY_NAMES:
+            invalid += 1
+            continue
+        if support not in {"supported", "unsupported", "unknown"}:
+            invalid += 1
+            support = "unknown"
+        if evidence_status not in {"declared", "tested", "contradicted", "unknown"}:
+            invalid += 1
+            evidence_status = "unknown"
+        evidence_digest = _capability_digest(raw_fact.get("evidence_digest"))
+        facts.append(
+            LibraryCapabilityFact(
+                capability=capability,
+                support=support,
+                evidence_status=evidence_status,
+                evidence_digest=evidence_digest,
+                provenance=_capability_provenance(
+                    source_kind="model-capability-evidence",
+                    publisher=reference.get("publisher"),
+                    slug=reference.get("slug"),
+                    content_sha256=reference.get("content_sha256"),
+                    path=f"capabilities.facts[{index}]",
+                    evidence_digest=evidence_digest,
+                    source_url=raw_provenance.get("source_url"),
+                    source_revision=raw_provenance.get("source_revision"),
+                ),
+            )
+        )
+    facts.sort(key=lambda item: (item.capability, item.support, item.evidence_status))
+    supports: dict[str, set[str]] = {}
+    for fact in facts:
+        supports.setdefault(fact.capability, set()).add(fact.support)
+    contradictory = any(len(values) > 1 for values in supports.values()) or any(
+        fact.evidence_status == "contradicted" for fact in facts
+    )
+    state: Literal["declared", "unknown", "contradictory"] = "declared"
+    if contradictory:
+        state = "contradictory"
+    elif not facts or all(fact.support == "unknown" for fact in facts):
+        state = "unknown"
+    reasons = []
+    if invalid:
+        reasons.append(
+            _reason(
+                "model.capabilities_invalid",
+                f"{invalid} model capability fact(s) were invalid and were not projected.",
+                "warning",
+            )
+        )
+    if not facts:
+        reasons.append(
+            _reason(
+                "model.capabilities_unknown",
+                "The exact model-version declares no usable capability facts.",
+                "info",
+            )
+        )
+    return LibraryCapabilityInventory(
+        state=state,
+        facts=facts[:_MAX_PROJECTED_CAPABILITIES],
+        provenance=_capability_provenance(
+            source_kind="model-capability-evidence",
+            publisher=reference.get("publisher"),
+            slug=reference.get("slug"),
+            content_sha256=reference.get("content_sha256"),
+            path="capabilities.provenance",
+            evidence_digest=raw_provenance.get("evidence_digest"),
+            source_url=raw_provenance.get("source_url"),
+            source_revision=raw_provenance.get("source_revision"),
+        ),
+        reasons=reasons,
+    )
+
+
+def _recipe_capabilities(
+    recipe: LocalRecipe,
+    revision: LocalRecipeRevision | None,
+    document: Mapping[str, object] | None,
+) -> LibraryCapabilityInventory:
+    reference_digest = None if revision is None else revision.content_sha256
+    raw = None
+    if document is not None:
+        interfaces = document.get("interfaces")
+        if isinstance(interfaces, list):
+            raw = [
+                {"name": item.get("adapter"), "support": "supported"}
+                for item in interfaces
+                if isinstance(item, Mapping)
+            ]
+    inventory = _capability_inventory(
+        source_kind="recipe-revision",
+        publisher="local-recipe",
+        slug=recipe.slug,
+        content_sha256=reference_digest,
+        document=document,
+        raw=raw,
+        path="interfaces",
+        unknown_code="recipe.capabilities_unknown",
+        revision_id=None if revision is None else revision.id,
+    )
+    return inventory
 
 
 def _visual_recipe(
@@ -779,6 +1358,12 @@ class LibraryProjection:
         with self._sessions.begin() as session:
             rows = list(session.execute(statement.limit(limit + 1)))
             page = rows[:limit]
+            model_version_facts: dict[
+                tuple[str, str, str], LibraryModelVersionFacts
+            ] = {}
+            model_capability_inventories: dict[
+                tuple[str, str, str], LibraryCapabilityInventory
+            ] = {}
             recipe_ids = [recipe.id for recipe, _revision in page]
             ranked_installations = (
                 select(
@@ -1028,6 +1613,11 @@ class LibraryProjection:
             capabilities: list[str] = []
             topology_name: str | None = None
             model_identity: tuple[str, str, str] | None = None
+            model_capabilities = LibraryCapabilityInventory()
+            model_version = None
+            recipe_capabilities = _recipe_capabilities(
+                recipe, revision, document
+            )
             if document is not None:
                 model = document["model"]
                 model_identity = (
@@ -1035,6 +1625,27 @@ class LibraryProjection:
                     str(model["slug"]),
                     str(model["content_sha256"]),
                 )
+                model_key = (
+                    str(model["publisher"]),
+                    str(model["slug"]),
+                    str(model["content_sha256"]),
+                )
+                model_version = model_version_facts.get(model_key)
+                if model_version is None:
+                    model_version = _model_version_facts(session, model)
+                    model_version_facts[model_key] = model_version
+                model_capabilities = model_capability_inventories.get(model_key)
+                if model_capabilities is None:
+                    model_capabilities = _model_capabilities(
+                        model,
+                        (
+                            _resolved_model_version_reference(session, model)
+                            if model_version.state == "resolved"
+                            else None
+                        ),
+                    )
+                    model_capability_inventories[model_key] = model_capabilities
+                recipe_capabilities = _recipe_capabilities(recipe, revision, document)
                 capabilities = [
                     _bounded_text(item["adapter"], 64)
                     for item in document["interfaces"]
@@ -1080,6 +1691,7 @@ class LibraryProjection:
                 run_returned_count=len(recipe_runs),
                 runs_truncated=run_total > len(recipe_runs),
                 reasons=_bounded_reasons(reasons, 16),
+                recipe_capabilities=recipe_capabilities,
             )
             if model_identity is None:
                 unlinked.append(summary)
@@ -1105,6 +1717,13 @@ class LibraryProjection:
                         "content_sha256": content_sha256,
                     },
                     recipes=values,
+                    model_capabilities=model_capability_inventories.get(
+                        (publisher, slug, content_sha256),
+                        LibraryCapabilityInventory(),
+                    ),
+                    model_version=model_version_facts.get(
+                        (publisher, slug, content_sha256)
+                    ),
                 )
                 for (publisher, slug, content_sha256), values in sorted(grouped.items())
             ],
@@ -1118,6 +1737,10 @@ class LibraryProjection:
         latest = self._latest_revision_ids()
         placement_evidence: _PlacementOperationalEvidence | None = None
         model_version_document: Mapping[str, object] | None = None
+        model_reference: Mapping[str, object] | None = None
+        model_capabilities = LibraryCapabilityInventory()
+        recipe_capabilities = LibraryCapabilityInventory()
+        model_version = None
         with self._sessions.begin() as session:
             row = session.execute(
                 select(LocalRecipe, LocalRecipeRevision)
@@ -1139,8 +1762,23 @@ class LibraryProjection:
             recipe, revision = row
             document, reasons = _validated_document(revision)
             if document is not None:
+                model_reference = document["model"]
                 model_version_document = _resolved_model_version_document(
                     session, document
+                )
+                model_version = _model_version_facts(session, model_reference)
+                model_capabilities = _model_capabilities(
+                    model_reference,
+                    (
+                        model_version_document
+                        if model_version.state == "resolved"
+                        else None
+                    ),
+                )
+                recipe_capabilities = _recipe_capabilities(recipe, revision, document)
+            else:
+                recipe_capabilities = _recipe_capabilities(
+                    recipe, revision, None
                 )
             operational_truncations: dict[str, int] = {}
             # Phase 1: prioritize active runs before the bounded public history.
@@ -1433,6 +2071,10 @@ class LibraryProjection:
                 operational_state=operational,
                 placement=[],
                 reasons=_bounded_reasons(reasons, 16),
+                model=None,
+                model_capabilities=model_capabilities,
+                recipe_capabilities=recipe_capabilities,
+                model_version=model_version,
             )
         assert revision is not None
         assert placement_evidence is not None
@@ -1463,6 +2105,15 @@ class LibraryProjection:
             operational_state=operational,
             placement=[placement],
             reasons=_bounded_reasons(reasons, 16),
+            model=ModelVersionIdentity(
+                kind="model-version",
+                publisher=str(model_reference["publisher"]),
+                slug=str(model_reference["slug"]),
+                content_sha256=str(model_reference["content_sha256"]),
+            ),
+            model_capabilities=model_capabilities,
+            recipe_capabilities=recipe_capabilities,
+            model_version=model_version,
         )
 
     @staticmethod

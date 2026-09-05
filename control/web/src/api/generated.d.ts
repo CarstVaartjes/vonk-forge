@@ -790,6 +790,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fleet-profiles/capture-current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Capture Current Profile */
+        post: operations["captureCurrentFleetProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/fleet-profiles/{profile_id}": {
         parameters: {
             query?: never;
@@ -826,6 +843,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fleet-profiles/{profile_id}/duplicate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Duplicate Profile */
+        post: operations["duplicateFleetProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fleet-profiles/{profile_id}/prepare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Profile */
+        post: operations["prepareFleetProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fleet-profiles/{profile_id}/prepare/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Prepare Preview Profile */
+        post: operations["previewFleetProfilePreparation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/fleet-profiles/{profile_id}/preview": {
         parameters: {
             query?: never;
@@ -837,6 +905,40 @@ export interface paths {
         put?: never;
         /** Preview Profile */
         post: operations["previewFleetProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fleet-profiles/{profile_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Profile Status */
+        get: operations["getFleetProfileStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fleet-profiles/{profile_id}/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Switch Profile */
+        post: operations["switchFleetProfile"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1081,6 +1183,193 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/model-cache": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Inventory */
+        get: operations["getModelCacheInventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Download */
+        post: operations["downloadModelCache"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/download-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Download */
+        post: operations["previewModelCacheDownload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/entries/{artifact_set_sha256}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Entry */
+        get: operations["getModelCacheEntry"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/evict": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evict */
+        post: operations["evictModelCache"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/eviction-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Eviction */
+        post: operations["previewModelCacheEviction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Operations */
+        get: operations["listModelCacheOperations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Operation */
+        get: operations["getModelCacheOperation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/repair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Repair */
+        post: operations["repairModelCache"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/repair-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Repair */
+        post: operations["previewModelCacheRepair"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Updates */
+        get: operations["getModelCacheUpdates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nodes/status": {
         parameters: {
             query?: never;
@@ -1127,6 +1416,91 @@ export interface paths {
         };
         /** Node Telemetry History */
         get: operations["getNodeTelemetryHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{node_id}/telemetry/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Node Telemetry Capabilities */
+        get: operations["getNodeTelemetryCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{node_id}/telemetry/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Node Telemetry Current */
+        get: operations["getNodeTelemetryCurrent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/nodes/{node_id}/telemetry/workloads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Node Telemetry Workloads */
+        get: operations["listNodeTelemetryWorkloads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Operations View */
+        get: operations["listOperations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Operation View */
+        get: operations["getOperation"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1367,6 +1741,91 @@ export interface paths {
         put?: never;
         /** Preview Run */
         post: operations["previewRecipeRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recipes/run-switch-plans/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Run Switch */
+        post: operations["previewRecipeRunSwitch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recipes/run-switch-stops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Run Switch Stop */
+        post: operations["applyRecipeRunSwitchStop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recipes/run-switch-stops/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Run Switch Stop */
+        post: operations["previewRecipeRunSwitchStop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recipes/run-switches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Run Switch */
+        post: operations["applyRecipeRunSwitch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recipes/run-switches/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run Switch */
+        get: operations["getRecipeRunSwitchOperation"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1675,6 +2134,63 @@ export interface components {
             /** Timeout Seconds */
             timeout_seconds: number;
         };
+        /**
+         * ArtifactStorageImpact
+         * @description Byte impact with unknown values preserved as unknown, never guessed.
+         */
+        ArtifactStorageImpact: {
+            /** Artifact Digests */
+            artifact_digests?: string[];
+            /**
+             * Copied Bytes
+             * @default 0
+             */
+            copied_bytes: number;
+            /** Missing Nas Bytes */
+            missing_nas_bytes?: number | null;
+            /** Missing Spark Bytes */
+            missing_spark_bytes?: number | null;
+            /**
+             * Nas Coverage
+             * @enum {string}
+             */
+            nas_coverage: "complete" | "partial" | "unknown";
+            /**
+             * Reclaimable Bytes
+             * @default 0
+             */
+            reclaimable_bytes: number;
+            /** Reclaimable Digests */
+            reclaimable_digests?: string[];
+            /**
+             * Reclaimed Bytes
+             * @default 0
+             */
+            reclaimed_bytes: number;
+            /** Required Bytes */
+            required_bytes?: number | null;
+            /**
+             * Retention
+             * @enum {string}
+             */
+            retention: "retain-cached" | "reclaim-unreferenced";
+            /**
+             * Reused Bytes
+             * @default 0
+             */
+            reused_bytes: number;
+            /**
+             * Running Coverage
+             * @default unknown
+             * @enum {string}
+             */
+            running_coverage: "complete" | "partial" | "unknown";
+            /**
+             * Spark Coverage
+             * @enum {string}
+             */
+            spark_coverage: "complete" | "partial" | "unknown";
+        };
         /** AuthSession */
         AuthSession: {
             /**
@@ -1694,6 +2210,22 @@ export interface components {
         BoundedErrorResponse: {
             /** Detail */
             detail: string;
+        };
+        /** BuildCompatibilityEvidence */
+        BuildCompatibilityEvidence: {
+            /** Detail */
+            detail?: string | null;
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /** Expected Architecture */
+            expected_architecture: string;
+            /** Observed Architecture */
+            observed_architecture?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "compatible" | "incompatible" | "unknown";
         };
         /** BuildPlanResponse */
         BuildPlanResponse: {
@@ -1744,10 +2276,150 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /** BuildSourceEvidence */
+        BuildSourceEvidence: {
+            /** Detail */
+            detail?: string | null;
+            /** Source Bundle Sha256 */
+            source_bundle_sha256?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "missing" | "unknown";
+        };
+        /** CacheArtifactResponse */
+        CacheArtifactResponse: {
+            /** Actual Bytes */
+            actual_bytes: number;
+            /** Expected Bytes */
+            expected_bytes: number;
+            /** Id */
+            id: string;
+            /** Key */
+            key: string;
+            /** Path */
+            path: string;
+            /** Roles */
+            roles: string[];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Sha256 */
+            sha256: string;
+            /** Source */
+            source: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "partial" | "verified" | "missing" | "corrupt";
+        };
+        /** CacheEntryResponse */
+        CacheEntryResponse: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Artifacts */
+            artifacts: components["schemas"]["CacheArtifactResponse"][];
+            /**
+             * Coverage
+             * @enum {string}
+             */
+            coverage: "complete" | "incomplete";
+            /** Created At */
+            created_at: string;
+            /** Expected Bytes */
+            expected_bytes: number;
+            /** Last Error */
+            last_error?: string | null;
+            /** Model Version Sha256 */
+            model_version_sha256: string | null;
+            /** Protected */
+            protected: boolean;
+            /** Protected Reasons */
+            protected_reasons: string[];
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256: string | null;
+            /** Recipe Update Available */
+            recipe_update_available: boolean;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "incomplete" | "downloading" | "verifying" | "cached" | "needs-repair" | "failed";
+            /** Unique Bytes */
+            unique_bytes: number;
+            /** Update Available */
+            update_available: boolean;
+            /** Updated At */
+            updated_at: string;
+            /** Verified At */
+            verified_at: string | null;
+            /** Verified Bytes */
+            verified_bytes: number;
+        };
+        /** CacheStorageResponse */
+        CacheStorageResponse: {
+            /** Available Bytes */
+            available_bytes: number;
+            /** Free Bytes */
+            free_bytes: number;
+            /** In Flight Bytes */
+            in_flight_bytes: number;
+            /** Protected Bytes */
+            protected_bytes: number;
+            /** Reclaimable Bytes */
+            reclaimable_bytes: number;
+            /** Reserve Bytes */
+            reserve_bytes: number;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Total Bytes */
+            total_bytes: number;
+            /** Unique Used Bytes */
+            unique_used_bytes: number;
+        };
         /** CancelRequest */
         CancelRequest: {
             /** Reason */
             reason: string;
+        };
+        /**
+         * CapabilityEvidence
+         * @description One capability's declaration and evidence, kept separate by owner.
+         */
+        CapabilityEvidence: {
+            /** Declared */
+            declared: boolean | null;
+            /** Detail */
+            detail?: string | null;
+            /**
+             * Evidence
+             * @enum {string}
+             */
+            evidence: "tested" | "observed" | "not-tested" | "unknown";
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Support
+             * @enum {string}
+             */
+            support: "supported" | "unsupported" | "unknown";
         };
         /** CapacityReservations */
         CapacityReservations: {
@@ -1822,6 +2494,88 @@ export interface components {
         ChangeRequest: {
             /** Proposal Digest */
             proposal_digest: string;
+        };
+        /**
+         * CompatibilityIdentity
+         * @description Immutable inputs for an exceptional reusable preparation artifact.
+         */
+        CompatibilityIdentity: {
+            /** Hardware Profile Sha256 */
+            hardware_profile_sha256?: string | null;
+            /** Model Version Sha256 */
+            model_version_sha256: string;
+            /** Parameters Sha256 */
+            parameters_sha256: string;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256: string;
+            /** Runtime Image Digest */
+            runtime_image_digest: string;
+        };
+        /**
+         * CompatibilityPreparation
+         * @description Explicit reusable work that cannot be embedded in the base image.
+         */
+        CompatibilityPreparation: {
+            /** Artifact Sha256 */
+            artifact_sha256?: string | null;
+            compatibility: components["schemas"]["CompatibilityIdentity"];
+            /** Compatibility Key Sha256 */
+            compatibility_key_sha256: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "engine-generation" | "jit" | "tuning";
+            /** Node Ids */
+            node_ids?: string[];
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Reusable
+             * @constant
+             */
+            reusable: true;
+            /**
+             * Stage
+             * @enum {string}
+             */
+            stage: "controller-prepare" | "target-prepare";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "unknown" | "missing" | "preparing" | "verifying" | "ready" | "failed" | "unsupported";
+        };
+        /**
+         * ControllerAssetState
+         * @description Availability of one immutable asset in Controller/NAS storage.
+         */
+        ControllerAssetState: {
+            /** Expected Bytes */
+            expected_bytes?: number | null;
+            /** Missing Bytes */
+            missing_bytes?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "published" | "controller-build" | "nas-cache" | "unknown";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "unknown" | "missing" | "preparing" | "verifying" | "ready" | "failed" | "unsupported";
+            /** Verified At */
+            verified_at?: string | null;
+            /**
+             * Verified Bytes
+             * @default 0
+             */
+            verified_bytes: number;
+            /** Verified Sha256 */
+            verified_sha256?: string | null;
         };
         /** CreateCatalogEntityRequest */
         CreateCatalogEntityRequest: {
@@ -1986,10 +2740,10 @@ export interface components {
             } | null;
             /**
              * Schema Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            schema_version: 1;
+            schema_version: 2;
             /**
              * State
              * @enum {string}
@@ -2052,10 +2806,16 @@ export interface components {
             /** Topology Name */
             topology_name: string;
         };
+        /** FleetProfileAssignmentPreparation */
+        FleetProfileAssignmentPreparation: {
+            /** Assignment Id */
+            assignment_id: string;
+            preparation: components["schemas"]["RolloutPreparation"];
+        };
         /** FleetProfileAssignmentPreview */
         FleetProfileAssignmentPreview: {
             /** Actions */
-            actions: ("stop" | "create-placement" | "build" | "distribute-image" | "install" | "start" | "keep")[];
+            actions: ("stop" | "create-placement" | "build" | "distribute-image" | "install" | "start" | "switch" | "keep")[];
             /** Assignment Id */
             assignment_id: string;
             /**
@@ -2076,6 +2836,38 @@ export interface components {
             recipe_revision_id: string;
             /** Recipe Title */
             recipe_title: string;
+        };
+        /** FleetProfileCaptureInput */
+        FleetProfileCaptureInput: {
+            /**
+             * Description
+             * @default Captured current Fleet setup
+             */
+            description: string;
+            /**
+             * Favorite
+             * @default false
+             */
+            favorite: boolean;
+            /**
+             * Installation Policy
+             * @default keep-cached
+             * @enum {string}
+             */
+            installation_policy: "keep-cached" | "exact";
+            /** Labels */
+            labels?: {
+                [key: string]: string;
+            };
+            /** Name */
+            name: string;
+        };
+        /** FleetProfileDuplicateInput */
+        FleetProfileDuplicateInput: {
+            /** Description */
+            description?: string | null;
+            /** Name */
+            name: string;
         };
         /** FleetProfileInput */
         FleetProfileInput: {
@@ -2103,6 +2895,7 @@ export interface components {
             };
             /** Name */
             name: string;
+            scope: components["schemas"]["FleetProfileScope"];
         };
         /** FleetProfileList */
         FleetProfileList: {
@@ -2115,10 +2908,10 @@ export interface components {
             profiles: components["schemas"]["FleetProfileView"][];
             /**
              * Schema Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            schema_version: 1;
+            schema_version: 2;
         };
         /** FleetProfileNode */
         FleetProfileNode: {
@@ -2144,7 +2937,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "stop" | "uninstall" | "create-placement" | "build" | "distribute-image" | "install" | "start";
+            kind: "stop" | "uninstall" | "create-placement" | "build" | "distribute-image" | "install" | "start" | "switch";
             /** Label */
             label: string;
             /** Node Ids */
@@ -2175,6 +2968,18 @@ export interface components {
             /** Uninstalls */
             uninstalls: number;
         };
+        /**
+         * FleetProfilePreparePreviewRequest
+         * @description Explicit empty body for the digest-bound preparation preview.
+         */
+        FleetProfilePreparePreviewRequest: Record<string, never>;
+        /** FleetProfilePrepareRequest */
+        FleetProfilePrepareRequest: {
+            /** Plan Digest */
+            plan_digest: string;
+            /** Request Key */
+            request_key: string;
+        };
         /** FleetProfilePreview */
         FleetProfilePreview: {
             /** Allowed */
@@ -2188,6 +2993,8 @@ export interface components {
             generated_at: string;
             /** Plan Digest */
             plan_digest: string;
+            /** Preparations */
+            preparations?: components["schemas"]["FleetProfileAssignmentPreparation"][];
             /** Profile Digest */
             profile_digest: string;
             /** Profile Id */
@@ -2198,10 +3005,11 @@ export interface components {
             reasons: components["schemas"]["FleetProfileReason"][];
             /**
              * Schema Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            schema_version: 1;
+            schema_version: 2;
+            scope: components["schemas"]["FleetProfileScopePreview"];
             /** Steps */
             steps: components["schemas"]["FleetProfilePlanStep"][];
             summary: components["schemas"]["FleetProfilePlanSummary"];
@@ -2222,6 +3030,54 @@ export interface components {
              * @enum {string}
              */
             severity: "info" | "warning" | "error";
+        };
+        /**
+         * FleetProfileScope
+         * @description The complete set of Sparks reconciled by a profile.
+         *
+         *     Scope is deliberately independent from assignments.  A member with no
+         *     assignment is an intentional idle outcome when the profile is applied.
+         */
+        FleetProfileScope: {
+            /** Node Ids */
+            node_ids: string[];
+        };
+        /** FleetProfileScopePreview */
+        FleetProfileScopePreview: {
+            /** Idle Node Ids */
+            idle_node_ids?: string[];
+            /** Node Ids */
+            node_ids: string[];
+        };
+        /** FleetProfileStatusView */
+        FleetProfileStatusView: {
+            /** Drifted */
+            drifted: boolean;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Matched */
+            matched: boolean;
+            /** Profile Digest */
+            profile_digest: string;
+            /** Profile Id */
+            profile_id: string;
+            /** Reasons */
+            reasons: components["schemas"]["FleetProfileReason"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            scope: components["schemas"]["FleetProfileScopePreview"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "draft" | "needs-preparation" | "ready" | "matched" | "switching" | "partially-applied" | "blocked" | "drifted";
         };
         /** FleetProfileView */
         FleetProfileView: {
@@ -2255,10 +3111,11 @@ export interface components {
             profile_digest: string;
             /**
              * Schema Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            schema_version: 1;
+            schema_version: 2;
+            scope: components["schemas"]["FleetProfileScope"];
             /**
              * Updated At
              * Format: date-time
@@ -2300,6 +3157,24 @@ export interface components {
             revision: number;
             /** Slug */
             slug: string;
+        };
+        /** FreshnessEvidence */
+        FreshnessEvidence: {
+            /** Age Seconds */
+            age_seconds?: number | null;
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /** Maximum Age Seconds */
+            maximum_age_seconds?: number | null;
+            /** Observed At */
+            observed_at?: string | null;
+            /** Source */
+            source: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "fresh" | "stale" | "unknown";
         };
         /** FreshnessPolicy */
         FreshnessPolicy: {
@@ -2557,6 +3432,25 @@ export interface components {
              */
             received_at: string;
         };
+        /**
+         * InvocationMetadata
+         * @description Context for audit and tracing which has no decision-making authority.
+         */
+        InvocationMetadata: {
+            /** Context */
+            context?: {
+                [key: string]: string;
+            };
+            /** Correlation Id */
+            correlation_id?: string | null;
+            /**
+             * Origin
+             * @default operator
+             */
+            origin: string;
+            /** Reason */
+            reason?: string | null;
+        };
         /** JobDetailResponse */
         JobDetailResponse: {
             agent_upgrade_diagnostics?: components["schemas"]["AgentUpgradeDiagnosticsResponse"] | null;
@@ -2597,13 +3491,31 @@ export interface components {
         };
         /** JobOperationProgress */
         JobOperationProgress: {
+            /** Bytes Per Second */
+            bytes_per_second?: number | null;
+            /** Checkpoint */
+            checkpoint?: {
+                [key: string]: unknown;
+            } | null;
+            /** Completed Bytes */
+            completed_bytes?: number | null;
+            /** Eta Seconds */
+            eta_seconds?: number | null;
+            /** Members */
+            members?: components["schemas"]["OperationMemberProgress"][] | null;
             /** Phase */
             phase: string;
+            /** Total Bytes */
+            total_bytes?: number | null;
+            /** Total Bytes Known */
+            total_bytes_known?: boolean | null;
         };
         /** JobOperationResponse */
         JobOperationResponse: {
             /** Attempt */
             attempt: number;
+            evidence_download?: components["schemas"]["OperationEvidenceDownload"] | null;
+            failure?: components["schemas"]["OperationFailureEvidence"] | null;
             /** Graph Operation Id */
             graph_operation_id?: string | null;
             /** Id */
@@ -2613,6 +3525,8 @@ export interface components {
             /** Node Id */
             node_id: string;
             progress?: components["schemas"]["JobOperationProgress"] | null;
+            provenance?: components["schemas"]["OperationEvidenceProvenance"] | null;
+            recovery?: components["schemas"]["OperationRecovery"] | null;
             /** State */
             state: string;
             /** Updated At */
@@ -2659,6 +3573,94 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * LibraryCapabilityFact
+         * @description One explicit capability assertion; absence is never represented as support.
+         */
+        LibraryCapabilityFact: {
+            /** Capability */
+            capability: string;
+            /** Evidence Digest */
+            evidence_digest: string | null;
+            /**
+             * Evidence Status
+             * @enum {string}
+             */
+            evidence_status: "declared" | "tested" | "contradicted" | "unknown";
+            provenance: components["schemas"]["LibraryCapabilityProvenance"];
+            /**
+             * Support
+             * @enum {string}
+             */
+            support: "supported" | "unsupported" | "unknown";
+        };
+        /**
+         * LibraryCapabilityInventory
+         * @description Compare-friendly model or recipe capability assertions with evidence state.
+         */
+        LibraryCapabilityInventory: {
+            /** Facts */
+            facts?: components["schemas"]["LibraryCapabilityFact"][];
+            provenance?: components["schemas"]["LibraryCapabilityProvenance"] | null;
+            /** Reasons */
+            reasons?: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * State
+             * @default unknown
+             * @enum {string}
+             */
+            state: "declared" | "unknown" | "contradictory";
+        };
+        /**
+         * LibraryCapabilityProvenance
+         * @description Exact source identity and bounded location for one capability inventory.
+         */
+        LibraryCapabilityProvenance: {
+            /** Content Sha256 */
+            content_sha256: string | null;
+            /** Evidence Digest */
+            evidence_digest: string | null;
+            /** Path */
+            path: string | null;
+            /** Publisher */
+            publisher: string;
+            /** Revision Id */
+            revision_id?: string | null;
+            /** Slug */
+            slug: string;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "model-version" | "recipe-revision" | "model-capability-evidence";
+            /** Source Revision */
+            source_revision?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+        };
+        /**
+         * LibraryCatalogReference
+         * @description A content addressed catalog identity retained in a Library response.
+         */
+        LibraryCatalogReference: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "model-group" | "model" | "model-version";
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+        };
         /** LibraryInstallationSummary */
         LibraryInstallationSummary: {
             /** Complete */
@@ -2680,6 +3682,8 @@ export interface components {
         /** LibraryModel */
         LibraryModel: {
             model: components["schemas"]["ModelVersionIdentity"];
+            model_capabilities?: components["schemas"]["LibraryCapabilityInventory"];
+            model_version?: components["schemas"]["LibraryModelVersionFacts"] | null;
             /**
              * Page Local
              * @default true
@@ -2688,6 +3692,149 @@ export interface components {
             page_local: true;
             /** Recipes */
             recipes: components["schemas"]["LibraryRecipeSummary"][];
+        };
+        /** LibraryModelArtifact */
+        LibraryModelArtifact: {
+            /** Download Bytes */
+            download_bytes: number;
+            /** Id */
+            id: string;
+            /** Installed Bytes */
+            installed_bytes: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "huggingface.file" | "http.file" | "oci.artifact";
+            /** Path */
+            path: string;
+            /** Repository */
+            repository: string;
+            /** Revision */
+            revision: string;
+            /** Roles */
+            roles: string[];
+            /** Sha256 */
+            sha256: string;
+        };
+        /** LibraryModelDefinition */
+        LibraryModelDefinition: {
+            /** Architecture */
+            architecture: string;
+            identity: components["schemas"]["LibraryCatalogReference"];
+            metadata: components["schemas"]["LibraryModelMetadata"];
+            model_group: components["schemas"]["LibraryCatalogReference"];
+        };
+        /** LibraryModelFamily */
+        LibraryModelFamily: {
+            /** Family */
+            family: string;
+            identity: components["schemas"]["LibraryCatalogReference"];
+            metadata: components["schemas"]["LibraryModelMetadata"];
+        };
+        /** LibraryModelFormat */
+        LibraryModelFormat: {
+            /**
+             * Container
+             * @enum {string}
+             */
+            container: "gguf" | "safetensors";
+            /** Precision */
+            precision: string;
+            /** Quantization */
+            quantization: string;
+        };
+        /** LibraryModelLimits */
+        LibraryModelLimits: {
+            /** Context Tokens */
+            context_tokens?: number | null;
+            /** Frames */
+            frames?: number | null;
+            /** Resolution Pixels */
+            resolution_pixels?: number | null;
+            /** Sample Rate Hz */
+            sample_rate_hz?: number | null;
+        };
+        /** LibraryModelLineage */
+        LibraryModelLineage: {
+            /** Derivation */
+            derivation: string;
+            /** Publisher */
+            publisher: string;
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "official" | "derived" | "quantized";
+            source_model: components["schemas"]["LibraryCatalogReference"];
+        };
+        /** LibraryModelMetadata */
+        LibraryModelMetadata: {
+            /** Description */
+            description: string;
+            /** Tags */
+            tags: string[];
+            /** Title */
+            title: string;
+        };
+        /** LibraryModelParameters */
+        LibraryModelParameters: {
+            /** Active */
+            active?: number | null;
+            /** Total */
+            total?: number | null;
+        };
+        /** LibraryModelSizes */
+        LibraryModelSizes: {
+            /** Download Bytes */
+            download_bytes: number;
+            /** Installed Bytes */
+            installed_bytes: number;
+        };
+        /** LibraryModelSource */
+        LibraryModelSource: {
+            /** Repository */
+            repository: string;
+            /** Revision */
+            revision: string;
+        };
+        /**
+         * LibraryModelVersionFacts
+         * @description Exact schema-valid model-version facts, with unknown fields fail-closed.
+         */
+        LibraryModelVersionFacts: {
+            /** Artifacts */
+            artifacts: components["schemas"]["LibraryModelArtifact"][];
+            /** Availability */
+            availability?: ("active" | "withdrawn" | "superseded") | null;
+            /** Dependencies */
+            dependencies: components["schemas"]["LibraryCatalogReference"][];
+            family?: components["schemas"]["LibraryModelFamily"] | null;
+            format?: components["schemas"]["LibraryModelFormat"] | null;
+            identity: components["schemas"]["ModelVersionIdentity"];
+            limits?: components["schemas"]["LibraryModelLimits"] | null;
+            lineage?: components["schemas"]["LibraryModelLineage"] | null;
+            metadata?: components["schemas"]["LibraryModelMetadata"] | null;
+            model?: components["schemas"]["LibraryCatalogReference"] | null;
+            model_definition?: components["schemas"]["LibraryModelDefinition"] | null;
+            parameters?: components["schemas"]["LibraryModelParameters"] | null;
+            /** Reasons */
+            reasons?: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            sizes?: components["schemas"]["LibraryModelSizes"] | null;
+            source?: components["schemas"]["LibraryModelSource"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "resolved" | "unknown";
+            /** Version */
+            version?: string | null;
         };
         /** LibraryPlacementApplication */
         LibraryPlacementApplication: {
@@ -2907,12 +4054,16 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
+            model?: components["schemas"]["ModelVersionIdentity"] | null;
+            model_capabilities?: components["schemas"]["LibraryCapabilityInventory"];
+            model_version?: components["schemas"]["LibraryModelVersionFacts"] | null;
             operational_state: components["schemas"]["OperationalState"];
             /** Placement */
             placement: components["schemas"]["TopologyPlacement"][];
             /** Reasons */
             reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
             recipe: components["schemas"]["LibraryRecipeIdentity"];
+            recipe_capabilities?: components["schemas"]["LibraryCapabilityInventory"];
             /**
              * Schema Version
              * @default 1
@@ -2955,6 +4106,7 @@ export interface components {
             installations_truncated: boolean;
             /** Reasons */
             reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
+            recipe_capabilities?: components["schemas"]["LibraryCapabilityInventory"];
             /** Recipe Id */
             recipe_id: string;
             /** Run Returned Count */
@@ -3218,6 +4370,416 @@ export interface components {
             /** Placement Digest */
             placement_digest: string;
         };
+        /** MappingSelection */
+        MappingSelection: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "reuse" | "create";
+            /** Mapping Generation */
+            mapping_generation?: number | null;
+            /** Mapping Id */
+            mapping_id: string | null;
+            /** Nodes */
+            nodes: components["schemas"]["SparkGroupNode"][];
+            /** Parameters */
+            parameters?: {
+                [key: string]: unknown;
+            };
+            /** Placement Digest */
+            placement_digest: string;
+            /** Topology Name */
+            topology_name: string;
+        };
+        /**
+         * ModelArtifactPreparation
+         * @description Complete exact model set, including auxiliary and dependency files.
+         */
+        ModelArtifactPreparation: {
+            /** Artifact Count */
+            artifact_count: number;
+            /** Artifact Set Bytes */
+            artifact_set_bytes: number;
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /**
+             * Completeness
+             * @enum {string}
+             */
+            completeness: "complete" | "incomplete" | "unknown";
+            controller: components["schemas"]["ControllerAssetState"];
+            /** Dependency Model Version Sha256 */
+            dependency_model_version_sha256?: string[];
+            /** Model Version Sha256 */
+            model_version_sha256: string;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256?: string | null;
+            /** Targets */
+            targets: components["schemas"]["TargetAssetState"][];
+        };
+        /** ModelCacheDownloadPreviewRequest */
+        ModelCacheDownloadPreviewRequest: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256?: string | null;
+            /** Model Version Sha256 */
+            model_version_sha256?: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id?: string | null;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256?: string | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source Policy
+             * @default nas-first
+             * @constant
+             */
+            source_policy: "nas-first";
+        };
+        /** ModelCacheDownloadPreviewResponse */
+        ModelCacheDownloadPreviewResponse: {
+            /** Already Cached Bytes */
+            already_cached_bytes: number;
+            /** Artifact Count */
+            artifact_count: number;
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Blockers */
+            blockers: string[];
+            /** Expected Bytes */
+            expected_bytes: number;
+            /** New Bytes */
+            new_bytes: number;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source Policy
+             * @default nas-first
+             * @constant
+             */
+            source_policy: "nas-first";
+            /** Warnings */
+            warnings: string[];
+        };
+        /** ModelCacheDownloadRequest */
+        ModelCacheDownloadRequest: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256?: string | null;
+            /** Model Version Sha256 */
+            model_version_sha256?: string | null;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Recipe Revision Id */
+            recipe_revision_id?: string | null;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256?: string | null;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source Policy
+             * @default nas-first
+             * @constant
+             */
+            source_policy: "nas-first";
+        };
+        /** ModelCacheEvictRequest */
+        ModelCacheEvictRequest: {
+            /** Plan Digest */
+            plan_digest: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Target Bytes */
+            target_bytes: number;
+        };
+        /** ModelCacheEvictionEntry */
+        ModelCacheEvictionEntry: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Last Accessed At */
+            last_accessed_at: string;
+            /** Protected */
+            protected: boolean;
+            /** Protected Reasons */
+            protected_reasons: string[];
+            /** Reclaimable Bytes */
+            reclaimable_bytes: number;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /** ModelCacheEvictionPreviewRequest */
+        ModelCacheEvictionPreviewRequest: {
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Target Bytes */
+            target_bytes: number;
+        };
+        /** ModelCacheEvictionPreviewResponse */
+        ModelCacheEvictionPreviewResponse: {
+            /** Blockers */
+            blockers: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Protected Entries */
+            protected_entries: components["schemas"]["ModelCacheEvictionEntry"][];
+            /** Reclaimable Bytes */
+            reclaimable_bytes: number;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Selected */
+            selected: components["schemas"]["ModelCacheEvictionEntry"][];
+            /** Selected Bytes */
+            selected_bytes: number;
+            storage_after: components["schemas"]["CacheStorageResponse"];
+            storage_before: components["schemas"]["CacheStorageResponse"];
+            /** Target Bytes */
+            target_bytes: number;
+        };
+        /** ModelCacheInventoryResponse */
+        ModelCacheInventoryResponse: {
+            /** Entries */
+            entries: components["schemas"]["CacheEntryResponse"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source Policy
+             * @default nas-first
+             * @constant
+             */
+            source_policy: "nas-first";
+            storage: components["schemas"]["CacheStorageResponse"];
+            /** Total */
+            total: number;
+        };
+        /** ModelCacheOperationProgress */
+        ModelCacheOperationProgress: {
+            /** Completed Artifacts */
+            completed_artifacts: number;
+            /** Current Artifact Key */
+            current_artifact_key?: string | null;
+            /** Downloaded Bytes */
+            downloaded_bytes: number;
+            /** Expected Bytes */
+            expected_bytes?: number | null;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "queued" | "downloading" | "verifying" | "reclaiming" | "completed" | "failed";
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Total Artifacts */
+            total_artifacts: number;
+        };
+        /** ModelCacheOperationResponse */
+        ModelCacheOperationResponse: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string | null;
+            /** Attempt */
+            attempt: number;
+            /** Completed At */
+            completed_at: string | null;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "download" | "repair" | "evict";
+            /** Last Error */
+            last_error?: string | null;
+            /** Plan Digest */
+            plan_digest: string | null;
+            progress: components["schemas"]["ModelCacheOperationProgress"];
+            /** Request Key */
+            request_key: string;
+            /** Result */
+            result?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
+            /** Updated At */
+            updated_at: string;
+        };
+        /** ModelCacheOperationsResponse */
+        ModelCacheOperationsResponse: {
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Operations */
+            operations: components["schemas"]["ModelCacheOperationResponse"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Total */
+            total: number;
+        };
+        /** ModelCacheRepairPreviewRequest */
+        ModelCacheRepairPreviewRequest: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /** ModelCacheRepairPreviewResponse */
+        ModelCacheRepairPreviewResponse: {
+            /** Artifact Count */
+            artifact_count: number;
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /**
+             * Current State
+             * @enum {string}
+             */
+            current_state: "incomplete" | "downloading" | "verifying" | "cached" | "needs-repair" | "failed";
+            /** Expected Bytes */
+            expected_bytes: number;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source Policy
+             * @default nas-first
+             * @constant
+             */
+            source_policy: "nas-first";
+            /** Verified Bytes */
+            verified_bytes: number;
+        };
+        /** ModelCacheRepairRequest */
+        ModelCacheRepairRequest: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source Policy
+             * @default nas-first
+             * @constant
+             */
+            source_policy: "nas-first";
+        };
+        /** ModelCacheUpdateResponse */
+        ModelCacheUpdateResponse: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Latest Model Version Sha256 */
+            latest_model_version_sha256: string | null;
+            /** Latest Recipe Revision Sha256 */
+            latest_recipe_revision_sha256: string | null;
+            /** Model Update Available */
+            model_update_available: boolean;
+            /** Model Version Sha256 */
+            model_version_sha256: string | null;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256: string | null;
+            /** Recipe Update Available */
+            recipe_update_available: boolean;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** ModelCacheUpdatesResponse */
+        ModelCacheUpdatesResponse: {
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source Policy
+             * @default nas-first
+             * @constant
+             */
+            source_policy: "nas-first";
+            /** Total */
+            total: number;
+            /** Updates */
+            updates: components["schemas"]["ModelCacheUpdateResponse"][];
+        };
         /** ModelDeletionInstallationImpactResponse */
         ModelDeletionInstallationImpactResponse: {
             /** Installation Id */
@@ -3403,6 +4965,123 @@ export interface components {
              */
             stale: boolean;
         };
+        /** OperationDetailResponse */
+        OperationDetailResponse: {
+            /** Attempt */
+            attempt: number;
+            /** Created At */
+            created_at: string;
+            evidence_download?: components["schemas"]["OperationEvidenceDownload"] | null;
+            failure?: components["schemas"]["OperationFailureEvidence"] | null;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Node Ids */
+            node_ids: string[];
+            /** Parent Id */
+            parent_id?: string | null;
+            progress?: components["schemas"]["JobOperationProgress"] | null;
+            provenance?: components["schemas"]["OperationEvidenceProvenance"] | null;
+            recovery?: components["schemas"]["OperationRecovery"] | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** State */
+            state: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** OperationEvidenceDownload */
+        OperationEvidenceDownload: {
+            /** Href */
+            href: string;
+            /** Media Type */
+            media_type: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** OperationEvidenceProvenance */
+        OperationEvidenceProvenance: {
+            /** Authority Revision */
+            authority_revision?: string | null;
+            /** Collected At */
+            collected_at?: string | null;
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /** Source */
+            source: string;
+        };
+        /**
+         * OperationFailureEvidence
+         * @description Small, sanitized operator evidence safe to expose in status responses.
+         */
+        OperationFailureEvidence: {
+            /** Detail */
+            detail?: string | null;
+            /** Error Code */
+            error_code: string;
+            /**
+             * Retryable
+             * @default false
+             */
+            retryable: boolean;
+            /** Summary */
+            summary: string;
+            /**
+             * Uncertain
+             * @default false
+             */
+            uncertain: boolean;
+        };
+        /**
+         * OperationMemberProgress
+         * @description Progress for one node, rank, shard, or other operation member.
+         */
+        OperationMemberProgress: {
+            /** Bytes Per Second */
+            bytes_per_second?: number | null;
+            /**
+             * Completed Bytes
+             * @default 0
+             */
+            completed_bytes: number;
+            /** Eta Seconds */
+            eta_seconds?: number | null;
+            /** Member Id */
+            member_id: string;
+            /** Phase */
+            phase: string;
+            /**
+             * State
+             * @default running
+             */
+            state: string;
+            /** Total Bytes */
+            total_bytes?: number | null;
+        };
+        /** OperationRecovery */
+        OperationRecovery: {
+            /** Actions */
+            actions?: components["schemas"]["OperationRecoveryAction"][];
+            /** Explanation */
+            explanation?: string | null;
+            /**
+             * Uncertain
+             * @default false
+             */
+            uncertain: boolean;
+        };
+        /**
+         * OperationRecoveryAction
+         * @enum {string}
+         */
+        OperationRecoveryAction: "retry" | "resume" | "cancel" | "inspect";
         /** OperationResponse */
         OperationResponse: {
             /** Id */
@@ -3518,6 +5197,21 @@ export interface components {
             mappings: components["schemas"]["OperationalMapping"][];
             /** Runs */
             runs: components["schemas"]["OperationalRun"][];
+        };
+        /** OperationsResponse */
+        OperationsResponse: {
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Operations */
+            operations: components["schemas"]["OperationDetailResponse"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Total */
+            total: number;
         };
         /** OutputLimits */
         OutputLimits: {
@@ -3723,6 +5417,20 @@ export interface components {
             code: string;
             /** Detail */
             detail: string;
+        };
+        /** PreparationReason */
+        PreparationReason: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Node Ids */
+            node_ids?: string[];
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "blocker" | "warning" | "info";
         };
         /** PreviewRequest */
         PreviewRequest: {
@@ -4067,6 +5775,31 @@ export interface components {
             /** Publisher */
             publisher: string;
         };
+        /** RecipeBuildEvidence */
+        RecipeBuildEvidence: {
+            /** Build Id */
+            build_id: string | null;
+            /** Build Input Sha256 */
+            build_input_sha256?: string | null;
+            /** Builder Node Id */
+            builder_node_id?: string | null;
+            compatibility: components["schemas"]["BuildCompatibilityEvidence"];
+            /** Detail */
+            detail?: string | null;
+            /** Image Bytes */
+            image_bytes?: number | null;
+            /** Image Digest */
+            image_digest: string | null;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256?: string | null;
+            runtime: components["schemas"]["RuntimeImageStorageImpact"];
+            source: components["schemas"]["BuildSourceEvidence"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "planned" | "building" | "failed" | "missing" | "incompatible" | "unknown";
+        };
         /** RecipeDiskRequirements */
         RecipeDiskRequirements: {
             /** Artifact Bytes */
@@ -4374,6 +6107,32 @@ export interface components {
             /** Expected Revision */
             expected_revision: number;
         };
+        /**
+         * RolloutPreparation
+         * @description Normalized preparation identity shared by profiles, Run, web and CLI.
+         */
+        RolloutPreparation: {
+            /** Controller Ready */
+            controller_ready: boolean;
+            /** Exceptions */
+            exceptions?: components["schemas"]["CompatibilityPreparation"][];
+            model: components["schemas"]["ModelArtifactPreparation"];
+            /** Ready */
+            ready: boolean;
+            /** Reasons */
+            reasons?: components["schemas"]["PreparationReason"][];
+            runtime_image: components["schemas"]["RuntimeImagePreparation"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Target Node Ids */
+            target_node_ids: string[];
+            /** Targets Ready */
+            targets_ready: boolean;
+        };
         /** RunNodePlanResponse */
         RunNodePlanResponse: {
             /** Active Reserved Bytes */
@@ -4552,6 +6311,386 @@ export interface components {
             /** State */
             state: string;
         };
+        /** RunSwitchApplyRequest */
+        RunSwitchApplyRequest: {
+            /**
+             * Action
+             * @default run
+             * @enum {string}
+             */
+            action: "run" | "switch";
+            /** Alias */
+            alias: string;
+            invocation?: components["schemas"]["InvocationMetadata"];
+            /** Model Version Sha256 */
+            model_version_sha256: string;
+            /** Plan Digest */
+            plan_digest?: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Request Key */
+            request_key?: string | null;
+            /**
+             * Retention
+             * @default retain-cached
+             * @enum {string}
+             */
+            retention: "retain-cached" | "reclaim-unreferenced";
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            spark_group: components["schemas"]["SparkGroup"];
+        };
+        /** RunSwitchMemberProgress */
+        RunSwitchMemberProgress: {
+            /**
+             * Completed Bytes
+             * @default 0
+             */
+            completed_bytes: number;
+            /** Error */
+            error?: string | null;
+            /** Node Id */
+            node_id: string;
+            /** Phase */
+            phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "running" | "succeeded" | "failed" | "unknown";
+            /** Total Bytes */
+            total_bytes?: number | null;
+        };
+        /** RunSwitchOperation */
+        RunSwitchOperation: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "run" | "switch" | "stop";
+            /** Completed Phases */
+            completed_phases: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify")[];
+            /** Current Phase */
+            current_phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "recipe.run-switch.v2" | "recipe.stop.v2";
+            /** Node Ids */
+            node_ids: string[];
+            /** Operation Id */
+            operation_id: string;
+            /** Plan Digest */
+            plan_digest: string;
+            progress: components["schemas"]["RunSwitchProgress"];
+            /** Request Key */
+            request_key: string;
+            /** Result */
+            result?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** State */
+            state: string;
+            /** Status Reason */
+            status_reason?: string | null;
+        };
+        /** RunSwitchPhase */
+        RunSwitchPhase: {
+            /** Detail */
+            detail: string;
+            /** Index */
+            index: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify";
+            /** Node Ids */
+            node_ids?: string[];
+            /** Operation Digest */
+            operation_digest?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "retained" | "skipped" | "blocked";
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "target-copy" | "runtime-install") | null;
+        };
+        /** RunSwitchPlan */
+        RunSwitchPlan: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "run" | "switch" | "stop";
+            /** Alias */
+            alias: string | null;
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers: components["schemas"]["RunSwitchReason"][];
+            build: components["schemas"]["RecipeBuildEvidence"];
+            /** Conflicts */
+            conflicts: components["schemas"]["RunSwitchReason"][];
+            fit: components["schemas"]["SparkFit"];
+            fit_after_stop: components["schemas"]["SparkFit"] | null;
+            fit_current: components["schemas"]["SparkFit"];
+            /** Freshness */
+            freshness: components["schemas"]["FreshnessEvidence"][];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Image Digest */
+            image_digest: string | null;
+            /** Installation Id */
+            installation_id: string | null;
+            /** Installation State */
+            installation_state: string | null;
+            invocation: components["schemas"]["InvocationMetadata"];
+            mapping: components["schemas"]["MappingSelection"] | null;
+            /** Model Capabilities */
+            model_capabilities: components["schemas"]["CapabilityEvidence"][];
+            /** Model Version Sha256 */
+            model_version_sha256: string | null;
+            /** Phases */
+            phases: components["schemas"]["RunSwitchPhase"][];
+            /** Plan Digest */
+            plan_digest: string;
+            preparation?: components["schemas"]["RolloutPreparation"] | null;
+            /** Recipe Build Id */
+            recipe_build_id: string | null;
+            /** Recipe Capabilities */
+            recipe_capabilities: components["schemas"]["CapabilityEvidence"][];
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string | null;
+            /** Recipe Revision Id */
+            recipe_revision_id: string | null;
+            /** Reclaimed Bytes */
+            reclaimed_bytes: number;
+            /** Run Id */
+            run_id: string | null;
+            runtime_storage: components["schemas"]["RuntimeImageStorageImpact"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            spark_group: components["schemas"]["SparkGroup"];
+            /** Start Plan Digest */
+            start_plan_digest: string | null;
+            /**
+             * Stop Before Prepare
+             * @default false
+             */
+            stop_before_prepare: boolean;
+            /**
+             * Stop Before Transfer
+             * @default false
+             */
+            stop_before_transfer: boolean;
+            /** Stops */
+            stops: components["schemas"]["StopImpact"][];
+            storage: components["schemas"]["ArtifactStorageImpact"];
+            /** Warnings */
+            warnings: components["schemas"]["RunSwitchReason"][];
+        };
+        /** RunSwitchPreviewRequest */
+        RunSwitchPreviewRequest: {
+            /**
+             * Action
+             * @default run
+             * @enum {string}
+             */
+            action: "run" | "switch";
+            /** Alias */
+            alias: string;
+            invocation?: components["schemas"]["InvocationMetadata"];
+            /** Model Version Sha256 */
+            model_version_sha256: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /**
+             * Retention
+             * @default retain-cached
+             * @enum {string}
+             */
+            retention: "retain-cached" | "reclaim-unreferenced";
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            spark_group: components["schemas"]["SparkGroup"];
+        };
+        /** RunSwitchProgress */
+        RunSwitchProgress: {
+            /**
+             * Completed Bytes
+             * @default 0
+             */
+            completed_bytes: number;
+            /** Members */
+            members: components["schemas"]["RunSwitchMemberProgress"][];
+            /** Phase */
+            phase: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
+            /** Phase Count */
+            phase_count: number;
+            /** Phase Index */
+            phase_index: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "succeeded" | "failed" | "unknown";
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "target-copy" | "runtime-install") | null;
+            /** Total Bytes */
+            total_bytes?: number | null;
+            /** Total Bytes Known */
+            total_bytes_known: boolean;
+        };
+        /** RunSwitchReason */
+        RunSwitchReason: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Node Ids */
+            node_ids?: string[];
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "model" | "recipe" | "mapping" | "group" | "node" | "artifact" | "freshness" | "conflict" | "operation";
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "blocker" | "warning" | "info";
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+        };
+        /** RunSwitchStopApplyRequest */
+        RunSwitchStopApplyRequest: {
+            invocation?: components["schemas"]["InvocationMetadata"];
+            /** Plan Digest */
+            plan_digest?: string | null;
+            /** Request Key */
+            request_key?: string | null;
+            /** Run Id */
+            run_id: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /** RunSwitchStopPreviewRequest */
+        RunSwitchStopPreviewRequest: {
+            invocation?: components["schemas"]["InvocationMetadata"];
+            /** Run Id */
+            run_id: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * RuntimeImagePreparation
+         * @description Exact executable OCI image kept separate from model payloads.
+         */
+        RuntimeImagePreparation: {
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Build Id */
+            build_id?: string | null;
+            controller: components["schemas"]["ControllerAssetState"];
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256: string;
+            /** Runtime Interface */
+            runtime_interface: string;
+            /** Targets */
+            targets: components["schemas"]["TargetAssetState"][];
+        };
+        /** RuntimeImageStorageImpact */
+        RuntimeImageStorageImpact: {
+            /** Build Id */
+            build_id: string | null;
+            /**
+             * Copied Bytes
+             * @default 0
+             */
+            copied_bytes: number;
+            /** Image Bytes */
+            image_bytes?: number | null;
+            /** Image Digest */
+            image_digest: string | null;
+            /** Missing Image Distribution Bytes */
+            missing_image_distribution_bytes?: number | null;
+            /** Missing Nas Bytes */
+            missing_nas_bytes?: number | null;
+            /** Missing Spark Bytes */
+            missing_spark_bytes?: number | null;
+            /**
+             * Nas Coverage
+             * @enum {string}
+             */
+            nas_coverage: "complete" | "partial" | "unknown";
+            /**
+             * Reclaimable Bytes
+             * @default 0
+             */
+            reclaimable_bytes: number;
+            /** Reclaimable Digests */
+            reclaimable_digests?: string[];
+            /** Required Bytes */
+            required_bytes?: number | null;
+            /**
+             * Reused Bytes
+             * @default 0
+             */
+            reused_bytes: number;
+            /**
+             * Running Coverage
+             * @default unknown
+             * @enum {string}
+             */
+            running_coverage: "complete" | "partial" | "unknown";
+            /**
+             * Spark Coverage
+             * @enum {string}
+             */
+            spark_coverage: "complete" | "partial" | "unknown";
+        };
         /** SourceBundleResponse */
         SourceBundleResponse: {
             /** Archive Bytes */
@@ -4591,6 +6730,81 @@ export interface components {
             passed: boolean;
             /** Source Bundle Sha256 */
             source_bundle_sha256: string;
+        };
+        /** SparkFit */
+        SparkFit: {
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers?: components["schemas"]["RunSwitchReason"][];
+            /** Nodes */
+            nodes: components["schemas"]["SparkFitNode"][];
+            /** Warnings */
+            warnings?: components["schemas"]["RunSwitchReason"][];
+        };
+        /** SparkFitNode */
+        SparkFitNode: {
+            /** Allowed */
+            allowed: boolean;
+            /** Blockers */
+            blockers?: components["schemas"]["RunSwitchReason"][];
+            /** Disk Free After Bytes */
+            disk_free_after_bytes?: number | null;
+            /** Disk Free Bytes */
+            disk_free_bytes?: number | null;
+            /** Disk Required Bytes */
+            disk_required_bytes?: number | null;
+            /** Memory Available Bytes */
+            memory_available_bytes?: number | null;
+            /** Memory Free After Bytes */
+            memory_free_after_bytes?: number | null;
+            /** Memory Required Bytes */
+            memory_required_bytes?: number | null;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+            /** Warnings */
+            warnings?: components["schemas"]["RunSwitchReason"][];
+        };
+        /**
+         * SparkGroup
+         * @description A complete, rank-labelled Spark group selected by the operator.
+         */
+        SparkGroup: {
+            /** Nodes */
+            nodes: components["schemas"]["SparkGroupNode"][];
+        };
+        /** SparkGroupNode */
+        SparkGroupNode: {
+            /**
+             * Endpoint Owner
+             * @default false
+             */
+            endpoint_owner: boolean;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+        };
+        /** StopImpact */
+        StopImpact: {
+            /** Alias */
+            alias: string;
+            /** Node Ids */
+            node_ids: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Reserved Bytes */
+            reserved_bytes: number;
+            /** Run Id */
+            run_id: string;
+            /** State */
+            state: string;
         };
         /** StopNodeImpactResponse */
         StopNodeImpactResponse: {
@@ -4654,12 +6868,184 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
+        /**
+         * TargetAssetState
+         * @description Staging and verification state for one immutable asset on one Spark.
+         */
+        TargetAssetState: {
+            /** Expected Bytes */
+            expected_bytes?: number | null;
+            /** Imported Image Digest */
+            imported_image_digest?: string | null;
+            /** Missing Bytes */
+            missing_bytes?: number | null;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Present Bytes
+             * @default 0
+             */
+            present_bytes: number;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "unknown" | "missing" | "preparing" | "verifying" | "ready" | "failed" | "unsupported";
+            /** Verified At */
+            verified_at?: string | null;
+            /** Verified Sha256 */
+            verified_sha256?: string | null;
+        };
+        /** TelemetryCapabilitiesResponse */
+        TelemetryCapabilitiesResponse: {
+            /** Capabilities */
+            capabilities: components["schemas"]["TelemetryCapability"][];
+            /**
+             * Freshness
+             * @enum {string}
+             */
+            freshness: "live" | "delayed" | "stale";
+            /** Node Id */
+            node_id: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * TelemetryCapability
+         * @description Capability inventory, including explicitly unsupported sensors.
+         */
+        TelemetryCapability: {
+            /** Device Id */
+            device_id?: string | null;
+            /** Freshness Threshold Seconds */
+            freshness_threshold_seconds: number;
+            /** Interface Name */
+            interface_name?: string | null;
+            /** Key */
+            key: string;
+            /**
+             * Measurement Kind
+             * @enum {string}
+             */
+            measurement_kind: "measured" | "derived" | "estimated" | "configured";
+            /** Node Id */
+            node_id?: string | null;
+            /** Process Id */
+            process_id?: number | null;
+            /** Process Name */
+            process_name?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Run Id */
+            run_id?: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "node" | "accelerator" | "memory" | "storage" | "network" | "runtime" | "workload" | "service" | "benchmark";
+            /** Source */
+            source: string;
+            /** Supported */
+            supported: boolean;
+            /** Unit */
+            unit: string;
+        };
+        /**
+         * TelemetryCurrentResponse
+         * @description Versioned current telemetry response with an explicit rich payload.
+         */
+        TelemetryCurrentResponse: {
+            /**
+             * Freshness
+             * @enum {string}
+             */
+            freshness: "live" | "delayed" | "stale";
+            /** Node Id */
+            node_id: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            sample: components["schemas"]["TelemetryPoint"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
         /** TelemetryDetails */
         TelemetryDetails: {
             /** Accelerator Name */
             accelerator_name?: string | null;
             /** Accelerator Performance State */
             accelerator_performance_state?: string | null;
+        };
+        /**
+         * TelemetryHistoryMetadata
+         * @description Coverage and downsampling facts for a history/export response.
+         */
+        TelemetryHistoryMetadata: {
+            /** Actual End */
+            actual_end?: string | null;
+            /**
+             * Actual Resolution
+             * @enum {string}
+             */
+            actual_resolution: "raw" | "minute" | "fifteen-minute" | "daily";
+            /** Actual Start */
+            actual_start?: string | null;
+            /** Coverage Seconds */
+            coverage_seconds: number;
+            /** Downsampled */
+            downsampled: boolean;
+            /** Gap Samples */
+            gap_samples: number;
+            /** Point Count */
+            point_count: number;
+            /**
+             * Requested End
+             * Format: date-time
+             */
+            requested_end: string;
+            /**
+             * Requested Resolution
+             * @enum {string}
+             */
+            requested_resolution: "raw" | "minute" | "fifteen-minute" | "daily";
+            /**
+             * Requested Start
+             * Format: date-time
+             */
+            requested_start: string;
+            /**
+             * Timezone
+             * @default UTC
+             * @constant
+             */
+            timezone: "UTC";
         };
         /** TelemetryHistoryResponse */
         TelemetryHistoryResponse: {
@@ -4670,6 +7056,7 @@ export interface components {
             end: string;
             /** Maximum Points */
             maximum_points: number;
+            metadata?: components["schemas"]["TelemetryHistoryMetadata"] | null;
             /** Node Id */
             node_id: string;
             /** Points */
@@ -4678,7 +7065,7 @@ export interface components {
              * Resolution
              * @enum {string}
              */
-            resolution: "raw" | "minute" | "fifteen-minute";
+            resolution: "raw" | "minute" | "fifteen-minute" | "daily";
             /**
              * Schema Version
              * @default 1
@@ -4693,14 +7080,69 @@ export interface components {
         };
         /** TelemetryMetricSummary */
         TelemetryMetricSummary: {
+            /**
+             * Aggregation
+             * @default mean
+             */
+            aggregation: string;
             /** Count */
             count: number;
+            /** Device Id */
+            device_id?: string | null;
+            /** Interface Name */
+            interface_name?: string | null;
+            /** Key */
+            key?: string | null;
             /** Maximum */
             maximum: number;
             /** Mean */
             mean: number;
+            /**
+             * Measurement Kind
+             * @default measured
+             */
+            measurement_kind: string;
             /** Minimum */
             minimum: number;
+            /** Process Id */
+            process_id?: number | null;
+            /** Process Name */
+            process_name?: string | null;
+            /** Run Id */
+            run_id?: string | null;
+            /** Scope */
+            scope?: string | null;
+            /**
+             * Source
+             * @default legacy
+             */
+            source: string;
+            /**
+             * Unit
+             * @default unknown
+             */
+            unit: string;
+        };
+        /**
+         * TelemetryMetrics
+         * @description Rich per-sample metrics kept alongside legacy scalar columns.
+         */
+        TelemetryMetrics: {
+            /** Capabilities */
+            capabilities: components["schemas"]["TelemetryCapability"][];
+            provenance: components["schemas"]["TelemetryProvenance"];
+            /** Runtimes */
+            runtimes: components["schemas"]["TelemetryRuntime"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Series */
+            series: components["schemas"]["TelemetrySeries"][];
+            /** Workloads */
+            workloads: components["schemas"]["TelemetryWorkload"][];
         };
         /** TelemetryPoint */
         TelemetryPoint: {
@@ -4729,6 +7171,7 @@ export interface components {
             memory_available_bytes?: number | null;
             /** Memory Total Bytes */
             memory_total_bytes?: number | null;
+            metrics?: components["schemas"]["TelemetryMetrics"] | null;
             /** Network Receive Bytes Per Second */
             network_receive_bytes_per_second?: number | null;
             /** Network Transmit Bytes Per Second */
@@ -4751,6 +7194,17 @@ export interface components {
             sequence: number;
             /** Temperature C */
             temperature_c?: number | null;
+        };
+        /** TelemetryProvenance */
+        TelemetryProvenance: {
+            /** Collector */
+            collector: string;
+            /** Collector Version */
+            collector_version: string;
+            /** Host Uptime Seconds */
+            host_uptime_seconds?: number | null;
+            /** Source Observed At */
+            source_observed_at?: string | null;
         };
         /** TelemetryRollupPoint */
         TelemetryRollupPoint: {
@@ -4776,9 +7230,112 @@ export interface components {
              * Resolution
              * @enum {string}
              */
-            resolution: "minute" | "fifteen-minute";
+            resolution: "minute" | "fifteen-minute" | "daily";
             /** Source Sample Count */
             source_sample_count: number;
+        };
+        /**
+         * TelemetryRuntime
+         * @description Controller-owned runtime identity and adapter support summary.
+         */
+        TelemetryRuntime: {
+            /** Adapter */
+            adapter: string;
+            /** Adapter Reason */
+            adapter_reason?: string | null;
+            /** Adapter Supported */
+            adapter_supported: boolean;
+            /** Adapter Version */
+            adapter_version?: string | null;
+            /** Backend */
+            backend: string;
+            /** Context Limit Tokens */
+            context_limit_tokens?: number | null;
+            /** Endpoint */
+            endpoint?: string | null;
+            /** Engine Id */
+            engine_id: string;
+            /** Error */
+            error?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Model Version */
+            model_version?: string | null;
+            /** Ranks */
+            ranks: number[];
+            /**
+             * Readiness
+             * @enum {string}
+             */
+            readiness: "starting" | "ready" | "running" | "queued" | "stopped" | "failed" | "unknown";
+            /** Recipe Revision */
+            recipe_revision?: string | null;
+            /** Run Id */
+            run_id: string;
+            /** Serving Node Ids */
+            serving_node_ids: string[];
+            /** Version */
+            version?: string | null;
+        };
+        /**
+         * TelemetrySeries
+         * @description One sampled or configured metric in canonical units.
+         */
+        TelemetrySeries: {
+            /** Aggregation */
+            aggregation: string;
+            /** Device Id */
+            device_id?: string | null;
+            /**
+             * Freshness
+             * @default fresh
+             * @enum {string}
+             */
+            freshness: "fresh" | "delayed" | "stale";
+            /** Freshness Threshold Seconds */
+            freshness_threshold_seconds: number;
+            /** Interface Name */
+            interface_name?: string | null;
+            /** Key */
+            key: string;
+            /**
+             * Measurement Kind
+             * @enum {string}
+             */
+            measurement_kind: "measured" | "derived" | "estimated" | "configured";
+            /** Node Id */
+            node_id?: string | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Process Id */
+            process_id?: number | null;
+            /** Process Name */
+            process_name?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Received At */
+            received_at?: string | null;
+            /** Run Id */
+            run_id?: string | null;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "node" | "accelerator" | "memory" | "storage" | "network" | "runtime" | "workload" | "service" | "benchmark";
+            /** Source */
+            source: string;
+            /**
+             * Support Status
+             * @enum {string}
+             */
+            support_status: "available" | "unsupported" | "unavailable" | "stale";
+            /** Unit */
+            unit: string;
+            /** Value */
+            value: number | string | boolean | null;
         };
         /** TelemetryState */
         TelemetryState: {
@@ -4790,6 +7347,87 @@ export interface components {
              */
             freshness: "live" | "delayed" | "stale";
             sample: components["schemas"]["TelemetryPoint"];
+        };
+        /**
+         * TelemetryWorkload
+         * @description Sanitized request/job correlation to the actual serving placement.
+         */
+        TelemetryWorkload: {
+            /** Created At */
+            created_at?: string | null;
+            /** Elapsed Seconds */
+            elapsed_seconds?: number | null;
+            /** Ended At */
+            ended_at?: string | null;
+            /** Engine Id */
+            engine_id: string;
+            /** Eta Seconds */
+            eta_seconds?: number | null;
+            /** Eta Source */
+            eta_source?: string | null;
+            /** Executor Node Ids */
+            executor_node_ids: string[];
+            /** Failure */
+            failure?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Origin Node Id */
+            origin_node_id?: string | null;
+            /** Progress Max */
+            progress_max?: number | null;
+            /** Progress Value */
+            progress_value?: number | null;
+            /** Recipe Revision */
+            recipe_revision?: string | null;
+            /** Request Id */
+            request_id?: string | null;
+            /** Run Id */
+            run_id: string;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "completed" | "failed" | "cancelled" | "unknown";
+            /** Title */
+            title?: string | null;
+        };
+        /** TelemetryWorkloadsResponse */
+        TelemetryWorkloadsResponse: {
+            /**
+             * Freshness
+             * @enum {string}
+             */
+            freshness: "live" | "delayed" | "stale";
+            /** Node Id */
+            node_id: string;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Run Id */
+            run_id?: string | null;
+            /** Runtimes */
+            runtimes: components["schemas"]["TelemetryRuntime"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** State */
+            state?: string | null;
+            /** Workloads */
+            workloads: components["schemas"]["TelemetryWorkload"][];
         };
         /** TestReportRequest */
         TestReportRequest: {
@@ -7493,6 +10131,75 @@ export interface operations {
             };
         };
     };
+    captureCurrentFleetProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetProfileCaptureInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     getFleetProfile: {
         parameters: {
             query?: never;
@@ -7785,6 +10492,246 @@ export interface operations {
             };
         };
     };
+    duplicateFleetProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetProfileDuplicateInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    prepareFleetProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetProfilePrepareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileApplicationView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    previewFleetProfilePreparation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetProfilePreparePreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfilePreview"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     previewFleetProfile: {
         parameters: {
             query?: never;
@@ -7807,6 +10754,144 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FleetProfilePreview"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getFleetProfileStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileStatusView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    switchFleetProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetProfileApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileApplicationView"];
                 };
             };
             /** @description Unauthorized */
@@ -8647,6 +11732,732 @@ export interface operations {
             };
         };
     };
+    getModelCacheInventory: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheInventoryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    downloadModelCache: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCacheDownloadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheOperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    previewModelCacheDownload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCacheDownloadPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheDownloadPreviewResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getModelCacheEntry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_set_sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheEntryResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    evictModelCache: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCacheEvictRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheOperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    previewModelCacheEviction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCacheEvictionPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheEvictionPreviewResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    listModelCacheOperations: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheOperationsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getModelCacheOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheOperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    repairModelCache: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCacheRepairRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheOperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    previewModelCacheRepair: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCacheRepairPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheRepairPreviewResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getModelCacheUpdates: {
+        parameters: {
+            query?: {
+                artifact_set_sha256?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheUpdatesResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     getNodeStatuses: {
         parameters: {
             query?: never;
@@ -8752,8 +12563,12 @@ export interface operations {
             query: {
                 start: string;
                 end: string;
-                resolution: "raw" | "minute" | "fifteen-minute";
+                resolution: "raw" | "minute" | "fifteen-minute" | "daily";
                 maximum_points?: number;
+                key?: string | null;
+                device_id?: string | null;
+                interface_name?: string | null;
+                run_id?: string | null;
             };
             header?: never;
             path: {
@@ -8797,6 +12612,303 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getNodeTelemetryCapabilities: {
+        parameters: {
+            query?: {
+                key?: string | null;
+                device_id?: string | null;
+                interface_name?: string | null;
+                run_id?: string | null;
+            };
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetryCapabilitiesResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getNodeTelemetryCurrent: {
+        parameters: {
+            query?: {
+                key?: string | null;
+                device_id?: string | null;
+                interface_name?: string | null;
+                run_id?: string | null;
+            };
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetryCurrentResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    listNodeTelemetryWorkloads: {
+        parameters: {
+            query?: {
+                run_id?: string | null;
+                state?: string | null;
+            };
+            header?: never;
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetryWorkloadsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    listOperations: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+                state?: string | null;
+                node_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationDetailResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Service Unavailable */
@@ -9272,6 +13384,376 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    previewRecipeRunSwitch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSwitchPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchPlan"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    applyRecipeRunSwitchStop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSwitchStopApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchOperation"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    previewRecipeRunSwitchStop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSwitchStopPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchPlan"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    applyRecipeRunSwitch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSwitchApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchOperation"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    getRecipeRunSwitchOperation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSwitchOperation"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
         };

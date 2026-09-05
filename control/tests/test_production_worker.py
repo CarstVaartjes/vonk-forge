@@ -143,6 +143,8 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
         artifact_job_retention_seconds=7 * 24 * 60 * 60,
         artifact_job_reconcile_interval_seconds=3600,
         artifact_job_reconcile_batch_limit=1000,
+        model_cache=object(),
+        agent_artifact_root=tmp_path / "agent-artifacts",
     )
 
     assert not hasattr(worker, "_updates")
@@ -169,6 +171,7 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
     assert maintenance_state["last_success_at"] == current.isoformat()
     assert worker._recipes._fleet_profiles is not None
     assert worker._recipes._fleet_profiles._recipe_operations is not None
+    assert worker._recipes._run_switches._artifact_phase_executor is not None
 
 
 def test_production_worker_settings_load_only_worker_authority_secrets(
