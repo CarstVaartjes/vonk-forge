@@ -15671,12 +15671,764 @@
         "title": "TelemetryCurrentResponse",
         "type": "object"
       },
+      "TelemetryDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "accelerator_name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accelerator Name"
+          },
+          "accelerator_performance_state": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accelerator Performance State"
+          }
+        },
+        "title": "TelemetryDetails",
+        "type": "object"
+      },
+      "TelemetryHistoryMetadata": {
+        "additionalProperties": false,
+        "description": "Coverage and downsampling facts for a history/export response.",
+        "properties": {
+          "actual_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual End"
+          },
+          "actual_resolution": {
+            "enum": [
+              "raw",
+              "minute",
+              "fifteen-minute",
+              "daily"
+            ],
+            "title": "Actual Resolution",
+            "type": "string"
+          },
+          "actual_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actual Start"
+          },
+          "coverage_seconds": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Coverage Seconds",
+            "type": "number"
+          },
+          "downsampled": {
+            "title": "Downsampled",
+            "type": "boolean"
+          },
+          "gap_samples": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Gap Samples",
+            "type": "integer"
+          },
+          "point_count": {
+            "maximum": 3000.0,
+            "minimum": 0.0,
+            "title": "Point Count",
+            "type": "integer"
+          },
+          "requested_end": {
+            "format": "date-time",
+            "title": "Requested End",
+            "type": "string"
+          },
+          "requested_resolution": {
+            "enum": [
+              "raw",
+              "minute",
+              "fifteen-minute",
+              "daily"
+            ],
+            "title": "Requested Resolution",
+            "type": "string"
+          },
+          "requested_start": {
+            "format": "date-time",
+            "title": "Requested Start",
+            "type": "string"
+          },
+          "timezone": {
+            "const": "UTC",
+            "default": "UTC",
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requested_start",
+          "requested_end",
+          "requested_resolution",
+          "actual_resolution",
+          "point_count",
+          "coverage_seconds",
+          "gap_samples",
+          "downsampled"
+        ],
+        "title": "TelemetryHistoryMetadata",
+        "type": "object"
+      },
       "TelemetryHistoryResponse": {
-        "additionalProperties": true,
+        "additionalProperties": false,
+        "properties": {
+          "end": {
+            "format": "date-time",
+            "title": "End",
+            "type": "string"
+          },
+          "maximum_points": {
+            "maximum": 3000.0,
+            "minimum": 1.0,
+            "title": "Maximum Points",
+            "type": "integer"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TelemetryHistoryMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TelemetryPoint"
+                },
+                {
+                  "$ref": "#/components/schemas/TelemetryRollupPoint"
+                }
+              ]
+            },
+            "maxItems": 3000,
+            "title": "Points",
+            "type": "array"
+          },
+          "resolution": {
+            "enum": [
+              "raw",
+              "minute",
+              "fifteen-minute",
+              "daily"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "start": {
+            "format": "date-time",
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "start",
+          "end",
+          "resolution",
+          "maximum_points",
+          "points"
+        ],
+        "title": "TelemetryHistoryResponse",
+        "type": "object"
+      },
+      "TelemetryMetricSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "aggregation": {
+            "default": "mean",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Aggregation",
+            "type": "string"
+          },
+          "count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 1.0,
+            "title": "Count",
+            "type": "integer"
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
+          "interface_name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interface Name"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "maximum": {
+            "title": "Maximum",
+            "type": "number"
+          },
+          "mean": {
+            "title": "Mean",
+            "type": "number"
+          },
+          "measurement_kind": {
+            "default": "measured",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Measurement Kind",
+            "type": "string"
+          },
+          "minimum": {
+            "title": "Minimum",
+            "type": "number"
+          },
+          "process_id": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Id"
+          },
+          "process_name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Name"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "source": {
+            "default": "legacy",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "unit": {
+            "default": "unknown",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "minimum",
+          "mean",
+          "maximum"
+        ],
+        "title": "TelemetryMetricSummary",
+        "type": "object"
+      },
+      "TelemetryMetrics": {
+        "additionalProperties": false,
+        "description": "Rich per-sample metrics kept alongside legacy scalar columns.",
+        "properties": {
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryCapability"
+            },
+            "maxItems": 128,
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/TelemetryProvenance"
+          },
+          "runtimes": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryRuntime"
+            },
+            "maxItems": 32,
+            "title": "Runtimes",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetrySeries"
+            },
+            "maxItems": 512,
+            "title": "Series",
+            "type": "array"
+          },
+          "workloads": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryWorkload"
+            },
+            "maxItems": 128,
+            "title": "Workloads",
+            "type": "array"
+          }
+        },
+        "required": [
+          "series",
+          "capabilities",
+          "runtimes",
+          "workloads",
+          "provenance"
+        ],
+        "title": "TelemetryMetrics",
         "type": "object"
       },
       "TelemetryPoint": {
-        "additionalProperties": true,
+        "additionalProperties": false,
+        "properties": {
+          "boot_id": {
+            "pattern": "^(?!00000000-0000-0000-0000-000000000000$)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "title": "Boot Id",
+            "type": "string"
+          },
+          "cpu_utilization_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Utilization Percent"
+          },
+          "details": {
+            "$ref": "#/components/schemas/TelemetryDetails"
+          },
+          "disk_free_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Free Bytes"
+          },
+          "disk_total_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Total Bytes"
+          },
+          "gap_samples": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Gap Samples",
+            "type": "integer"
+          },
+          "gpu_memory_free_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Memory Free Bytes"
+          },
+          "gpu_memory_total_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Memory Total Bytes"
+          },
+          "gpu_utilization_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gpu Utilization Percent"
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "load_average_1m": {
+            "anyOf": [
+              {
+                "maximum": 1000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load Average 1M"
+          },
+          "memory_available_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Available Bytes"
+          },
+          "memory_total_bytes": {
+            "anyOf": [
+              {
+                "maximum": 17592186044416.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Total Bytes"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TelemetryMetrics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "network_receive_bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Receive Bytes Per Second"
+          },
+          "network_transmit_bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Transmit Bytes Per Second"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "power_watts": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Watts"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "sequence": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "temperature_c": {
+            "anyOf": [
+              {
+                "maximum": 300.0,
+                "minimum": -100.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperature C"
+          }
+        },
+        "required": [
+          "id",
+          "node_id",
+          "boot_id",
+          "sequence",
+          "observed_at",
+          "received_at",
+          "gap_samples",
+          "details"
+        ],
+        "title": "TelemetryPoint",
+        "type": "object"
+      },
+      "TelemetryProvenance": {
+        "additionalProperties": false,
+        "properties": {
+          "collector": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Collector",
+            "type": "string"
+          },
+          "collector_version": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Collector Version",
+            "type": "string"
+          },
+          "host_uptime_seconds": {
+            "anyOf": [
+              {
+                "maximum": 9.223372036854776e+18,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Uptime Seconds"
+          },
+          "source_observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Observed At"
+          }
+        },
+        "required": [
+          "collector",
+          "collector_version"
+        ],
+        "title": "TelemetryProvenance",
+        "type": "object"
+      },
+      "TelemetryRollupPoint": {
+        "additionalProperties": false,
+        "properties": {
+          "bucket_end": {
+            "format": "date-time",
+            "title": "Bucket End",
+            "type": "string"
+          },
+          "bucket_start": {
+            "format": "date-time",
+            "title": "Bucket Start",
+            "type": "string"
+          },
+          "gap_samples": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Gap Samples",
+            "type": "integer"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TelemetryMetricSummary"
+            },
+            "maxProperties": 512,
+            "title": "Metrics",
+            "type": "object"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "resolution": {
+            "enum": [
+              "minute",
+              "fifteen-minute",
+              "daily"
+            ],
+            "title": "Resolution",
+            "type": "string"
+          },
+          "source_sample_count": {
+            "maximum": 9.223372036854776e+18,
+            "minimum": 0.0,
+            "title": "Source Sample Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "resolution",
+          "bucket_start",
+          "bucket_end",
+          "source_sample_count",
+          "gap_samples",
+          "metrics"
+        ],
+        "title": "TelemetryRollupPoint",
         "type": "object"
       },
       "TelemetryRuntime": {
@@ -15871,6 +16623,229 @@
           "adapter_supported"
         ],
         "title": "TelemetryRuntime",
+        "type": "object"
+      },
+      "TelemetrySeries": {
+        "additionalProperties": false,
+        "description": "One sampled or configured metric in canonical units.",
+        "properties": {
+          "aggregation": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Aggregation",
+            "type": "string"
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id"
+          },
+          "freshness": {
+            "default": "fresh",
+            "enum": [
+              "fresh",
+              "delayed",
+              "stale"
+            ],
+            "title": "Freshness",
+            "type": "string"
+          },
+          "freshness_threshold_seconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 86400.0,
+            "title": "Freshness Threshold Seconds",
+            "type": "number"
+          },
+          "interface_name": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interface Name"
+          },
+          "key": {
+            "maxLength": 96,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "measurement_kind": {
+            "enum": [
+              "measured",
+              "derived",
+              "estimated",
+              "configured"
+            ],
+            "title": "Measurement Kind",
+            "type": "string"
+          },
+          "node_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Id"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "process_id": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Id"
+          },
+          "process_name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Name"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "scope": {
+            "enum": [
+              "node",
+              "accelerator",
+              "memory",
+              "storage",
+              "network",
+              "runtime",
+              "workload",
+              "service",
+              "benchmark"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "support_status": {
+            "enum": [
+              "available",
+              "unsupported",
+              "unavailable",
+              "stale"
+            ],
+            "title": "Support Status",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "scope",
+          "value",
+          "unit",
+          "source",
+          "measurement_kind",
+          "observed_at",
+          "freshness_threshold_seconds",
+          "support_status",
+          "aggregation"
+        ],
+        "title": "TelemetrySeries",
         "type": "object"
       },
       "TelemetryState": {

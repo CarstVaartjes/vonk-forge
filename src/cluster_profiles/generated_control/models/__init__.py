@@ -453,10 +453,26 @@ from .telemetry_capability_measurement_kind import TelemetryCapabilityMeasuremen
 from .telemetry_capability_scope import TelemetryCapabilityScope
 from .telemetry_current_response import TelemetryCurrentResponse
 from .telemetry_current_response_freshness import TelemetryCurrentResponseFreshness
+from .telemetry_details import TelemetryDetails
+from .telemetry_history_metadata import TelemetryHistoryMetadata
+from .telemetry_history_metadata_actual_resolution import TelemetryHistoryMetadataActualResolution
+from .telemetry_history_metadata_requested_resolution import TelemetryHistoryMetadataRequestedResolution
 from .telemetry_history_response import TelemetryHistoryResponse
+from .telemetry_history_response_resolution import TelemetryHistoryResponseResolution
+from .telemetry_metric_summary import TelemetryMetricSummary
+from .telemetry_metrics import TelemetryMetrics
 from .telemetry_point import TelemetryPoint
+from .telemetry_provenance import TelemetryProvenance
+from .telemetry_rollup_point import TelemetryRollupPoint
+from .telemetry_rollup_point_metrics import TelemetryRollupPointMetrics
+from .telemetry_rollup_point_resolution import TelemetryRollupPointResolution
 from .telemetry_runtime import TelemetryRuntime
 from .telemetry_runtime_readiness import TelemetryRuntimeReadiness
+from .telemetry_series import TelemetrySeries
+from .telemetry_series_freshness import TelemetrySeriesFreshness
+from .telemetry_series_measurement_kind import TelemetrySeriesMeasurementKind
+from .telemetry_series_scope import TelemetrySeriesScope
+from .telemetry_series_support_status import TelemetrySeriesSupportStatus
 from .telemetry_state import TelemetryState
 from .telemetry_state_freshness import TelemetryStateFreshness
 from .telemetry_workload import TelemetryWorkload
@@ -961,10 +977,26 @@ __all__ = (
     "TelemetryCapabilityScope",
     "TelemetryCurrentResponse",
     "TelemetryCurrentResponseFreshness",
+    "TelemetryDetails",
+    "TelemetryHistoryMetadata",
+    "TelemetryHistoryMetadataActualResolution",
+    "TelemetryHistoryMetadataRequestedResolution",
     "TelemetryHistoryResponse",
+    "TelemetryHistoryResponseResolution",
+    "TelemetryMetrics",
+    "TelemetryMetricSummary",
     "TelemetryPoint",
+    "TelemetryProvenance",
+    "TelemetryRollupPoint",
+    "TelemetryRollupPointMetrics",
+    "TelemetryRollupPointResolution",
     "TelemetryRuntime",
     "TelemetryRuntimeReadiness",
+    "TelemetrySeries",
+    "TelemetrySeriesFreshness",
+    "TelemetrySeriesMeasurementKind",
+    "TelemetrySeriesScope",
+    "TelemetrySeriesSupportStatus",
     "TelemetryState",
     "TelemetryStateFreshness",
     "TelemetryWorkload",
