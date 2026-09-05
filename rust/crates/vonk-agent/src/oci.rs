@@ -2100,7 +2100,7 @@ fn materialize_compiled_models(
 
     let scoped_root = distribution_root
         .join("models")
-        .join(&plan.model_artifact_set_sha256);
+        .join(&plan.identity.model_artifact_set_sha256);
     let mut materialized = Vec::with_capacity(plan.artifacts.len());
     for artifact in &plan.artifacts {
         let source = scoped_root
@@ -2112,7 +2112,7 @@ fn materialize_compiled_models(
         let source_metadata = fs::symlink_metadata(&source)?;
         if !source_metadata.file_type().is_file()
             || source_metadata.file_type().is_symlink()
-            || source_metadata.len() != artifact.bytes
+            || source_metadata.len() != artifact.size_bytes
             || sha256_file(&source)? != artifact.sha256
         {
             return Err(OciError::Artifact);
@@ -2132,7 +2132,7 @@ fn materialize_compiled_models(
             let metadata = fs::symlink_metadata(&destination)?;
             if metadata.file_type().is_symlink()
                 || !metadata.file_type().is_file()
-                || metadata.len() != artifact.bytes
+                || metadata.len() != artifact.size_bytes
                 || sha256_file(&destination)? != artifact.sha256
             {
                 return Err(OciError::Artifact);
@@ -2150,7 +2150,7 @@ fn materialize_compiled_models(
             let metadata = fs::symlink_metadata(&temporary)?;
             if metadata.file_type().is_symlink()
                 || !metadata.file_type().is_file()
-                || metadata.len() != artifact.bytes
+                || metadata.len() != artifact.size_bytes
                 || sha256_file(&temporary)? != artifact.sha256
             {
                 let _ = fs::remove_file(&temporary);
@@ -2313,35 +2313,51 @@ mod tests {
         let secondary = digest(b"secondary");
         json!({
             "schema_version": 2,
-            "recipe_revision_sha256": "a".repeat(64),
-            "harness_sha256": "b".repeat(64),
-            "execution_sha256": "c".repeat(64),
-            "model_artifact_set_sha256": "d".repeat(64),
-            "model_artifact_set_bytes": 15,
+            "identity": {
+                "recipe_revision_sha256": "a".repeat(64),
+                "execution_sha256": "b".repeat(64),
+                "harness_sha256": "c".repeat(64),
+                "build_input_sha256": null,
+                "model_artifact_set_sha256": "d".repeat(64),
+                "model_artifact_bytes": 15
+            },
+            "runtime": {
+                "executable": "/opt/vonk/bin/vllm",
+                "argv": ["serve", "/models"],
+                "env": [],
+                "image_digest": format!("sha256:{}", "1".repeat(64)),
+                "placement": {
+                    "endpoint_address": null,
+                    "rank": 0,
+                    "role": "entrypoint",
+                    "world_size": 1,
+                    "local_address": null,
+                    "master_address": null,
+                    "master_port": null,
+                    "port": 8000,
+                    "reserved_memory_bytes": 4096
+                }
+            },
             "artifacts": [
                 {
-                    "id": "primary-config",
                     "selection_id": "primary",
                     "file_id": "config-primary",
                     "path": "config.json",
                     "sha256": primary,
-                    "bytes": 7,
+                    "size_bytes": 7,
                     "roles": ["entrypoint"],
-                    "mount": {"source": "/run/vonk/models/primary", "target": "/models", "read_only": true},
-                    "materialized_path": "/run/vonk/models/primary/config.json",
+                    "mount": {"target": "/models", "read_only": true},
                     "model": {"publisher": "vonk-forge", "slug": "primary-model", "content_sha256": "e".repeat(64)},
                     "distribution_object": {"name": "config.json", "sha256": primary, "bytes": 7, "kind": "model"}
                 },
                 {
-                    "id": "secondary-config",
                     "selection_id": "secondary",
                     "file_id": "config-secondary",
                     "path": "config.json",
                     "sha256": secondary,
-                    "bytes": 8,
+                    "size_bytes": 8,
                     "roles": ["entrypoint"],
-                    "mount": {"source": "/run/vonk/models/secondary", "target": "/models", "read_only": true},
-                    "materialized_path": "/run/vonk/models/secondary/config.json",
+                    "mount": {"target": "/models", "read_only": true},
                     "model": {"publisher": "vonk-forge", "slug": "secondary-model", "content_sha256": "f".repeat(64)},
                     "distribution_object": {"name": "config.json", "sha256": secondary, "bytes": 8, "kind": "model"}
                 }
@@ -2355,7 +2371,26 @@ mod tests {
                 "source": "published",
                 "build_id": null,
                 "distribution_object": {"name": "image.oci.tar", "sha256": "2".repeat(64), "bytes": 4096, "kind": "oci-archive"}
-            }
+            },
+            "security": {
+                "devices": [], "capabilities": [], "host_network": false,
+                "privileged": false, "user": "10001:10001",
+                "mounts": [
+                    {"source": "model", "target": "/models", "read_only": true},
+                    {"source": "outputs", "target": "/outputs", "read_only": false}
+                ],
+                "read_only_root": true, "no_new_privileges": true
+            },
+            "topology": {
+                "name": "solo", "mode": "single", "backend": "local",
+                "node_count": 1, "world_size": 1, "rank": 0, "role": "entrypoint"
+            },
+            "lifecycle": {"pre_start": [], "post_stop": [], "stop_timeout_seconds": 30},
+            "endpoint": {
+                "protocol": "openai", "port": 8000,
+                "model_aliases": ["primary"], "health_path": "/v1/models"
+            },
+            "job": null
         })
     }
 
@@ -2398,7 +2433,7 @@ mod tests {
         let root = distribution
             .path()
             .join("models")
-            .join(&plan.model_artifact_set_sha256);
+            .join(&plan.identity.model_artifact_set_sha256);
         fs::create_dir_all(root.join("primary")).unwrap();
         fs::create_dir_all(root.join("secondary")).unwrap();
         fs::write(root.join("primary/config.json"), b"primary").unwrap();
@@ -2431,16 +2466,14 @@ mod tests {
     #[test]
     fn compiled_models_materialize_valid_empty_support_files() {
         let mut value = compiled_plan();
-        value["model_artifact_set_bytes"] = json!(0);
+        value["identity"]["model_artifact_bytes"] = json!(0);
         let artifact = &mut value["artifacts"][0];
-        artifact["id"] = json!("tokenizer-config");
         artifact["selection_id"] = json!("primary");
         artifact["file_id"] = json!("tokenizer-config");
         artifact["path"] = json!("tokenizer_config.json");
         artifact["sha256"] = json!(crate::workloads::EMPTY_SHA256);
-        artifact["bytes"] = json!(0);
+        artifact["size_bytes"] = json!(0);
         artifact["roles"] = json!(["tokenizer"]);
-        artifact["materialized_path"] = json!("/run/vonk/models/primary/tokenizer_config.json");
         artifact["distribution_object"] = json!({
             "name": "tokenizer_config.json",
             "sha256": crate::workloads::EMPTY_SHA256,
@@ -2454,7 +2487,7 @@ mod tests {
         let source = distribution
             .path()
             .join("models")
-            .join(&plan.model_artifact_set_sha256)
+            .join(&plan.identity.model_artifact_set_sha256)
             .join("primary");
         fs::create_dir_all(&source).unwrap();
         fs::write(source.join("tokenizer_config.json"), &[]).unwrap();
