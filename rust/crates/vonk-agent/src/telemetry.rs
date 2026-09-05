@@ -679,95 +679,79 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                 .and_then(|value| value.trim().parse::<u64>().ok())
                 .and_then(|value| value.checked_mul(1_000_000));
             capabilities.push(capability(
-                "network.receive_bytes_per_second",
-                "network",
-                None,
-                Some(name),
-                "bytes/s",
-                "derived",
+                metric_identity(
+                    "network.receive_bytes_per_second",
+                    "network",
+                    None,
+                    Some(name),
+                    None,
+                ),
+                capability_context("bytes/s", "derived"),
                 true,
                 None,
             ));
             capabilities.push(capability(
-                "network.transmit_bytes_per_second",
-                "network",
-                None,
-                Some(name),
-                "bytes/s",
-                "derived",
+                metric_identity(
+                    "network.transmit_bytes_per_second",
+                    "network",
+                    None,
+                    Some(name),
+                    None,
+                ),
+                capability_context("bytes/s", "derived"),
                 true,
                 None,
             ));
             capabilities.push(capability(
-                "network.link_speed",
-                "network",
-                None,
-                Some(name),
-                "bps",
-                "measured",
+                metric_identity("network.link_speed", "network", None, Some(name), None),
+                capability_context("bps", "measured"),
                 link_speed.is_some(),
                 (!link_speed.is_some()).then_some("link speed unavailable"),
             ));
             capabilities.push(capability(
-                "network.operstate",
-                "network",
-                None,
-                Some(name),
-                "state",
-                "measured",
+                metric_identity("network.operstate", "network", None, Some(name), None),
+                capability_context("state", "measured"),
                 operstate.is_some(),
                 (!operstate.is_some()).then_some("interface state unavailable"),
             ));
             if let Some(value) = receive {
                 series.push(series_number(
-                    "network.receive_bytes_per_second",
-                    "network",
-                    None,
-                    Some(name),
+                    metric_identity(
+                        "network.receive_bytes_per_second",
+                        "network",
+                        None,
+                        Some(name),
+                        None,
+                    ),
                     value,
-                    "bytes/s",
-                    "derived",
-                    "counter_rate",
-                    observed_at,
+                    series_context("bytes/s", "derived", "counter_rate", observed_at),
                 ));
             }
             if let Some(value) = transmit {
                 series.push(series_number(
-                    "network.transmit_bytes_per_second",
-                    "network",
-                    None,
-                    Some(name),
+                    metric_identity(
+                        "network.transmit_bytes_per_second",
+                        "network",
+                        None,
+                        Some(name),
+                        None,
+                    ),
                     value,
-                    "bytes/s",
-                    "derived",
-                    "counter_rate",
-                    observed_at,
+                    series_context("bytes/s", "derived", "counter_rate", observed_at),
                 ));
             }
             if let Some(value) = link_speed {
                 series.push(series_number(
-                    "network.link_speed",
-                    "network",
-                    None,
-                    Some(name),
+                    metric_identity("network.link_speed", "network", None, Some(name), None),
                     value as f64,
-                    "bps",
-                    "measured",
-                    "last",
-                    observed_at,
+                    series_context("bps", "measured", "last", observed_at),
                 ));
             }
             if let Some(value) = operstate {
                 series.push(series_text(
-                    "network.operstate",
-                    "network",
-                    None,
-                    Some(name),
+                    metric_identity("network.operstate", "network", None, Some(name), None),
                     value,
-                    "state",
-                    "measured",
-                    "last",
-                    observed_at,
+                    series_context("state", "measured", "last", observed_at),
                 ));
             }
         }
@@ -797,22 +781,26 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                 elapsed,
             );
             capabilities.push(capability(
-                "storage.read_bytes_per_second",
-                "storage",
-                Some(name),
-                None,
-                "bytes/s",
-                "derived",
+                metric_identity(
+                    "storage.read_bytes_per_second",
+                    "storage",
+                    Some(name),
+                    None,
+                    None,
+                ),
+                capability_context("bytes/s", "derived"),
                 true,
                 None,
             ));
             capabilities.push(capability(
-                "storage.write_bytes_per_second",
-                "storage",
-                Some(name),
-                None,
-                "bytes/s",
-                "derived",
+                metric_identity(
+                    "storage.write_bytes_per_second",
+                    "storage",
+                    Some(name),
+                    None,
+                    None,
+                ),
+                capability_context("bytes/s", "derived"),
                 true,
                 None,
             ));
@@ -821,28 +809,28 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                 .saturating_add(i64::from(write_gap));
             if let Some(value) = read {
                 series.push(series_number(
-                    "storage.read_bytes_per_second",
-                    "storage",
-                    Some(name),
-                    None,
+                    metric_identity(
+                        "storage.read_bytes_per_second",
+                        "storage",
+                        Some(name),
+                        None,
+                        None,
+                    ),
                     value,
-                    "bytes/s",
-                    "derived",
-                    "counter_rate",
-                    observed_at,
+                    series_context("bytes/s", "derived", "counter_rate", observed_at),
                 ));
             }
             if let Some(value) = write {
                 series.push(series_number(
-                    "storage.write_bytes_per_second",
-                    "storage",
-                    Some(name),
-                    None,
+                    metric_identity(
+                        "storage.write_bytes_per_second",
+                        "storage",
+                        Some(name),
+                        None,
+                        None,
+                    ),
                     value,
-                    "bytes/s",
-                    "derived",
-                    "counter_rate",
-                    observed_at,
+                    series_context("bytes/s", "derived", "counter_rate", observed_at),
                 ));
             }
         }
@@ -1184,21 +1172,79 @@ struct RuntimeMetricReading {
     counter_key: Option<&'static str>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct TelemetryMetricIdentity<'a> {
+    key: &'a str,
+    scope: &'a str,
+    device_id: Option<&'a str>,
+    interface_name: Option<&'a str>,
+    run_id: Option<&'a str>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TelemetrySeriesContext<'a> {
+    unit: &'a str,
+    measurement_kind: &'a str,
+    aggregation: &'a str,
+    observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TelemetryCapabilityContext<'a> {
+    unit: &'a str,
+    measurement_kind: &'a str,
+}
+
+fn metric_identity<'a>(
+    key: &'a str,
+    scope: &'a str,
+    device_id: Option<&'a str>,
+    interface_name: Option<&'a str>,
+    run_id: Option<&'a str>,
+) -> TelemetryMetricIdentity<'a> {
+    TelemetryMetricIdentity {
+        key,
+        scope,
+        device_id,
+        interface_name,
+        run_id,
+    }
+}
+
+fn series_context<'a>(
+    unit: &'a str,
+    measurement_kind: &'a str,
+    aggregation: &'a str,
+    observed_at: DateTime<Utc>,
+) -> TelemetrySeriesContext<'a> {
+    TelemetrySeriesContext {
+        unit,
+        measurement_kind,
+        aggregation,
+        observed_at,
+    }
+}
+
+fn capability_context<'a>(
+    unit: &'a str,
+    measurement_kind: &'a str,
+) -> TelemetryCapabilityContext<'a> {
+    TelemetryCapabilityContext {
+        unit,
+        measurement_kind,
+    }
+}
+
 fn runtime_capabilities_for_run(run_id: &str, reason: Option<&str>) -> Vec<TelemetryCapability> {
     runtime_metric_capabilities()
         .into_iter()
         .map(|(key, unit, kind)| {
             let mut item = capability(
-                key,
-                "runtime",
-                None,
-                None,
-                unit,
-                kind,
+                metric_identity(key, "runtime", None, None, Some(run_id)),
+                capability_context(unit, kind),
                 reason.is_none(),
                 reason,
             );
-            item.run_id = Some(run_id.to_owned());
             item.source = "runtime-adapter:managed-local".to_owned();
             item
         })
@@ -1211,24 +1257,14 @@ fn add_runtime_number(
     rank: u32,
     key: &str,
     value: f64,
-    unit: &str,
-    measurement_kind: &str,
-    aggregation: &str,
-    observed_at: DateTime<Utc>,
+    context: TelemetrySeriesContext<'_>,
 ) {
     let rank_id = format!("rank-{rank}");
     let mut item = series_number(
-        key,
-        "runtime",
-        Some(&rank_id),
-        None,
+        metric_identity(key, "runtime", Some(&rank_id), None, Some(run_id)),
         value,
-        unit,
-        measurement_kind,
-        aggregation,
-        observed_at,
+        context,
     );
-    item.run_id = Some(run_id.to_owned());
     item.source = "runtime-adapter:managed-local".to_owned();
     series.push(item);
 }
@@ -1243,16 +1279,11 @@ fn add_runtime_capability(
     reason: Option<&str>,
 ) {
     let mut item = capability(
-        key,
-        "runtime",
-        None,
-        None,
-        unit,
-        measurement_kind,
+        metric_identity(key, "runtime", None, None, Some(run_id)),
+        capability_context(unit, measurement_kind),
         supported,
         reason,
     );
-    item.run_id = Some(run_id.to_owned());
     item.source = "runtime-adapter:managed-local".to_owned();
     capabilities.push(item);
 }
@@ -1532,10 +1563,12 @@ fn parse_prometheus_runtime(
                 rank,
                 key,
                 metric,
-                reading.unit,
-                reading.measurement_kind,
-                reading.aggregation,
-                observed_at,
+                series_context(
+                    reading.unit,
+                    reading.measurement_kind,
+                    reading.aggregation,
+                    observed_at,
+                ),
             );
         }
     }
@@ -1605,10 +1638,7 @@ fn parse_comfy_runtime(
                 rank,
                 key,
                 value,
-                "requests",
-                "measured",
-                "last",
-                observed_at,
+                series_context("requests", "measured", "last", observed_at),
             );
         }
     }
@@ -2252,131 +2282,75 @@ fn read_cpu_energy(path: &Path) -> Option<EnergyCounter> {
 }
 
 fn series_base(
-    key: &str,
-    scope: &str,
-    device_id: Option<&str>,
-    interface_name: Option<&str>,
+    identity: TelemetryMetricIdentity<'_>,
     value: serde_json::Value,
-    unit: &str,
-    measurement_kind: &str,
-    aggregation: &str,
-    observed_at: DateTime<Utc>,
+    context: TelemetrySeriesContext<'_>,
 ) -> TelemetrySeries {
     TelemetrySeries {
         node_id: None,
-        key: key.to_owned(),
-        scope: scope.to_owned(),
-        device_id: device_id.map(str::to_owned),
+        key: identity.key.to_owned(),
+        scope: identity.scope.to_owned(),
+        device_id: identity.device_id.map(str::to_owned),
         process_id: None,
         process_name: None,
-        interface_name: interface_name.map(str::to_owned),
-        run_id: None,
+        interface_name: identity.interface_name.map(str::to_owned),
+        run_id: identity.run_id.map(str::to_owned),
         value,
-        unit: unit.to_owned(),
-        source: metric_source(key, scope).to_owned(),
-        measurement_kind: measurement_kind.to_owned(),
-        observed_at,
+        unit: context.unit.to_owned(),
+        source: metric_source(identity.key, identity.scope).to_owned(),
+        measurement_kind: context.measurement_kind.to_owned(),
+        observed_at: context.observed_at,
         received_at: None,
         freshness: "fresh".to_owned(),
         freshness_threshold_seconds: 6.0,
         support_status: "available".to_owned(),
         reason: None,
-        aggregation: aggregation.to_owned(),
+        aggregation: context.aggregation.to_owned(),
     }
 }
 
 fn series_number(
-    key: &str,
-    scope: &str,
-    device_id: Option<&str>,
-    interface_name: Option<&str>,
+    identity: TelemetryMetricIdentity<'_>,
     value: f64,
-    unit: &str,
-    measurement_kind: &str,
-    aggregation: &str,
-    observed_at: DateTime<Utc>,
+    context: TelemetrySeriesContext<'_>,
 ) -> TelemetrySeries {
-    series_base(
-        key,
-        scope,
-        device_id,
-        interface_name,
-        serde_json::json!(value),
-        unit,
-        measurement_kind,
-        aggregation,
-        observed_at,
-    )
+    series_base(identity, serde_json::json!(value), context)
 }
 
 fn series_text(
-    key: &str,
-    scope: &str,
-    device_id: Option<&str>,
-    interface_name: Option<&str>,
+    identity: TelemetryMetricIdentity<'_>,
     value: String,
-    unit: &str,
-    measurement_kind: &str,
-    aggregation: &str,
-    observed_at: DateTime<Utc>,
+    context: TelemetrySeriesContext<'_>,
 ) -> TelemetrySeries {
-    series_base(
-        key,
-        scope,
-        device_id,
-        interface_name,
-        serde_json::json!(value),
-        unit,
-        measurement_kind,
-        aggregation,
-        observed_at,
-    )
+    series_base(identity, serde_json::json!(value), context)
 }
 
 fn series_bool(
-    key: &str,
-    scope: &str,
-    device_id: Option<&str>,
+    identity: TelemetryMetricIdentity<'_>,
     value: bool,
-    measurement_kind: &str,
-    aggregation: &str,
-    observed_at: DateTime<Utc>,
+    context: TelemetrySeriesContext<'_>,
 ) -> TelemetrySeries {
-    series_base(
-        key,
-        scope,
-        device_id,
-        None,
-        serde_json::json!(value),
-        "boolean",
-        measurement_kind,
-        aggregation,
-        observed_at,
-    )
+    series_base(identity, serde_json::json!(value), context)
 }
 
 fn capability(
-    key: &str,
-    scope: &str,
-    device_id: Option<&str>,
-    interface_name: Option<&str>,
-    unit: &str,
-    measurement_kind: &str,
+    identity: TelemetryMetricIdentity<'_>,
+    context: TelemetryCapabilityContext<'_>,
     supported: bool,
     reason: Option<&str>,
 ) -> TelemetryCapability {
     TelemetryCapability {
         node_id: None,
-        key: key.to_owned(),
-        scope: scope.to_owned(),
-        device_id: device_id.map(str::to_owned),
+        key: identity.key.to_owned(),
+        scope: identity.scope.to_owned(),
+        device_id: identity.device_id.map(str::to_owned),
         process_id: None,
         process_name: None,
-        interface_name: interface_name.map(str::to_owned),
-        run_id: None,
-        unit: unit.to_owned(),
-        source: metric_source(key, scope).to_owned(),
-        measurement_kind: measurement_kind.to_owned(),
+        interface_name: identity.interface_name.map(str::to_owned),
+        run_id: identity.run_id.map(str::to_owned),
+        unit: context.unit.to_owned(),
+        source: metric_source(identity.key, identity.scope).to_owned(),
+        measurement_kind: context.measurement_kind.to_owned(),
         supported,
         freshness_threshold_seconds: 6.0,
         reason: reason.map(str::to_owned),
@@ -2503,36 +2477,17 @@ struct GpuProcessReading {
 fn add_optional_series(
     series: &mut Vec<TelemetrySeries>,
     capabilities: &mut Vec<TelemetryCapability>,
-    key: &str,
-    scope: &str,
-    device_id: Option<&str>,
+    identity: TelemetryMetricIdentity<'_>,
     value: Option<f64>,
-    unit: &str,
-    measurement_kind: &str,
-    aggregation: &str,
-    observed_at: DateTime<Utc>,
+    context: TelemetrySeriesContext<'_>,
 ) {
     let supported = value.is_some();
     if let Some(value) = value {
-        series.push(series_number(
-            key,
-            scope,
-            device_id,
-            None,
-            value,
-            unit,
-            measurement_kind,
-            aggregation,
-            observed_at,
-        ));
+        series.push(series_number(identity, value, context));
     }
     capabilities.push(capability(
-        key,
-        scope,
-        device_id,
-        None,
-        unit,
-        measurement_kind,
+        identity,
+        capability_context(context.unit, context.measurement_kind),
         supported,
         (!supported).then_some("sensor unavailable from native interface"),
     ));
@@ -2541,34 +2496,17 @@ fn add_optional_series(
 fn add_optional_text_series(
     series: &mut Vec<TelemetrySeries>,
     capabilities: &mut Vec<TelemetryCapability>,
-    key: &str,
-    scope: &str,
-    device_id: Option<&str>,
+    identity: TelemetryMetricIdentity<'_>,
     value: Option<String>,
-    unit: &str,
-    observed_at: DateTime<Utc>,
+    context: TelemetrySeriesContext<'_>,
 ) {
     let supported = value.is_some();
     if let Some(value) = value {
-        series.push(series_text(
-            key,
-            scope,
-            device_id,
-            None,
-            value,
-            unit,
-            "measured",
-            "last",
-            observed_at,
-        ));
+        series.push(series_text(identity, value, context));
     }
     capabilities.push(capability(
-        key,
-        scope,
-        device_id,
-        None,
-        unit,
-        "measured",
+        identity,
+        capability_context(context.unit, context.measurement_kind),
         supported,
         (!supported).then_some("sensor unavailable from native interface"),
     ));
@@ -2733,86 +2671,57 @@ fn build_metrics(
     add_optional_series(
         &mut series,
         &mut capabilities,
-        "cpu.utilization_percent",
-        "node",
-        cpu_id,
+        metric_identity("cpu.utilization_percent", "node", cpu_id, None, None),
         cpu_utilization,
-        "%",
-        "derived",
-        "last",
-        observed_at,
+        series_context("%", "derived", "last", observed_at),
     );
     add_optional_series(
         &mut series,
         &mut capabilities,
-        "cpu.load_average_1m",
-        "node",
-        cpu_id,
+        metric_identity("cpu.load_average_1m", "node", cpu_id, None, None),
         load_average_1m,
-        "load",
-        "measured",
-        "last",
-        observed_at,
+        series_context("load", "measured", "last", observed_at),
     );
     add_optional_series(
         &mut series,
         &mut capabilities,
-        "cpu.load_average_5m",
-        "node",
-        cpu_id,
+        metric_identity("cpu.load_average_5m", "node", cpu_id, None, None),
         load_average_5m,
-        "load",
-        "measured",
-        "last",
-        observed_at,
+        series_context("load", "measured", "last", observed_at),
     );
     add_optional_series(
         &mut series,
         &mut capabilities,
-        "cpu.load_average_15m",
-        "node",
-        cpu_id,
+        metric_identity("cpu.load_average_15m", "node", cpu_id, None, None),
         load_average_15m,
-        "load",
-        "measured",
-        "last",
-        observed_at,
+        series_context("load", "measured", "last", observed_at),
     );
     add_optional_series(
         &mut series,
         &mut capabilities,
-        "cpu.temperature_c",
-        "node",
-        cpu_id,
+        metric_identity("cpu.temperature_c", "node", cpu_id, None, None),
         cpu_temperature,
-        "degC",
-        "measured",
-        "last",
-        observed_at,
+        series_context("degC", "measured", "last", observed_at),
     );
     add_optional_series(
         &mut series,
         &mut capabilities,
-        "cpu.power_watts",
-        "node",
-        cpu_id,
+        metric_identity("cpu.power_watts", "node", cpu_id, None, None),
         cpu_power,
-        "W",
-        "measured",
-        "last",
-        observed_at,
+        series_context("W", "measured", "last", observed_at),
     );
     add_optional_series(
         &mut series,
         &mut capabilities,
-        "memory.bandwidth_bytes_per_second",
-        "memory",
-        None,
+        metric_identity(
+            "memory.bandwidth_bytes_per_second",
+            "memory",
+            None,
+            None,
+            None,
+        ),
         memory_bandwidth,
-        "bytes/s",
-        "measured",
-        "last",
-        observed_at,
+        series_context("bytes/s", "measured", "last", observed_at),
     );
     let shared_unified_pool = accelerators
         .iter()
@@ -2829,87 +2738,56 @@ fn build_metrics(
         add_optional_series(
             &mut series,
             &mut capabilities,
-            "memory.total_bytes",
-            "memory",
-            None,
+            metric_identity("memory.total_bytes", "memory", None, None, None),
             Some(total),
-            "bytes",
-            "measured",
-            "last",
-            observed_at,
+            series_context("bytes", "measured", "last", observed_at),
         );
         add_optional_series(
             &mut series,
             &mut capabilities,
-            "memory.available_bytes",
-            "memory",
-            None,
+            metric_identity("memory.available_bytes", "memory", None, None, None),
             Some(available),
-            "bytes",
-            "measured",
-            "last",
-            observed_at,
+            series_context("bytes", "measured", "last", observed_at),
         );
         add_optional_series(
             &mut series,
             &mut capabilities,
-            "memory.used_bytes",
-            "memory",
-            None,
+            metric_identity("memory.used_bytes", "memory", None, None, None),
             Some(used),
-            "bytes",
-            "derived",
-            "last",
-            observed_at,
+            series_context("bytes", "derived", "last", observed_at),
         );
         add_optional_series(
             &mut series,
             &mut capabilities,
-            "memory.used_percent",
-            "memory",
-            None,
+            metric_identity("memory.used_percent", "memory", None, None, None),
             (total > 0.0).then_some(used * 100.0 / total),
-            "%",
-            "derived",
-            "last",
-            observed_at,
+            series_context("%", "derived", "last", observed_at),
         );
         add_optional_text_series(
             &mut series,
             &mut capabilities,
-            "memory.pool",
-            "memory",
-            Some(pool_id),
+            metric_identity("memory.pool", "memory", Some(pool_id), None, None),
             Some(if shared_unified_pool {
                 "shared-unified".to_owned()
             } else {
                 "physical".to_owned()
             }),
-            "kind",
-            observed_at,
+            series_context("kind", "measured", "last", observed_at),
         );
         add_optional_text_series(
             &mut series,
             &mut capabilities,
-            "memory.pool_id",
-            "memory",
-            Some(pool_id),
+            metric_identity("memory.pool_id", "memory", Some(pool_id), None, None),
             Some(pool_id.to_owned()),
-            "identity",
-            observed_at,
+            series_context("identity", "configured", "last", observed_at),
         );
         let pressure = (total > 0.0).then_some(used * 100.0 / total);
         add_optional_series(
             &mut series,
             &mut capabilities,
-            "memory.oom_pressure_percent",
-            "memory",
-            None,
+            metric_identity("memory.oom_pressure_percent", "memory", None, None, None),
             pressure,
-            "%",
-            "derived",
-            "last",
-            observed_at,
+            series_context("%", "derived", "last", observed_at),
         );
     } else {
         for (key, unit, kind) in [
@@ -2920,33 +2798,21 @@ fn build_metrics(
             ("memory.oom_pressure_percent", "%", "derived"),
         ] {
             capabilities.push(capability(
-                key,
-                "memory",
-                None,
-                None,
-                unit,
-                kind,
+                metric_identity(key, "memory", None, None, None),
+                capability_context(unit, kind),
                 false,
                 Some("memory counters unavailable"),
             ));
         }
         capabilities.push(capability(
-            "memory.pool",
-            "memory",
-            Some(pool_id),
-            None,
-            "kind",
-            "measured",
+            metric_identity("memory.pool", "memory", Some(pool_id), None, None),
+            capability_context("kind", "measured"),
             false,
             Some("memory counters unavailable"),
         ));
         capabilities.push(capability(
-            "memory.pool_id",
-            "memory",
-            Some(pool_id),
-            None,
-            "identity",
-            "configured",
+            metric_identity("memory.pool_id", "memory", Some(pool_id), None, None),
+            capability_context("identity", "configured"),
             false,
             Some("memory counters unavailable"),
         ));
@@ -2955,26 +2821,22 @@ fn build_metrics(
     add_optional_series(
         &mut series,
         &mut capabilities,
-        "network.receive_bytes_per_second",
-        "node",
-        None,
+        metric_identity("network.receive_bytes_per_second", "node", None, None, None),
         network_receive,
-        "bytes/s",
-        "derived",
-        "counter_rate",
-        observed_at,
+        series_context("bytes/s", "derived", "counter_rate", observed_at),
     );
     add_optional_series(
         &mut series,
         &mut capabilities,
-        "network.transmit_bytes_per_second",
-        "node",
-        None,
+        metric_identity(
+            "network.transmit_bytes_per_second",
+            "node",
+            None,
+            None,
+            None,
+        ),
         network_transmit,
-        "bytes/s",
-        "derived",
-        "counter_rate",
-        observed_at,
+        series_context("bytes/s", "derived", "counter_rate", observed_at),
     );
     series.extend(interface_series.iter().cloned());
     series.extend(disk_series.iter().cloned());
@@ -2998,27 +2860,23 @@ fn build_metrics(
             add_optional_series(
                 &mut series,
                 &mut capabilities,
-                key,
-                "storage",
-                Some("configured-store"),
+                metric_identity(key, "storage", Some("configured-store"), None, None),
                 Some(value),
-                unit,
-                kind,
-                "last",
-                observed_at,
+                series_context(unit, kind, "last", observed_at),
             );
         }
         add_optional_series(
             &mut series,
             &mut capabilities,
-            "storage.used_percent",
-            "storage",
-            Some("configured-store"),
+            metric_identity(
+                "storage.used_percent",
+                "storage",
+                Some("configured-store"),
+                None,
+                None,
+            ),
             (total > 0.0).then_some((total - free).max(0.0) * 100.0 / total),
-            "%",
-            "derived",
-            "last",
-            observed_at,
+            series_context("%", "derived", "last", observed_at),
         );
     } else {
         for (key, unit, kind) in [
@@ -3028,12 +2886,8 @@ fn build_metrics(
             ("storage.used_percent", "%", "derived"),
         ] {
             capabilities.push(capability(
-                key,
-                "storage",
-                Some("configured-store"),
-                None,
-                unit,
-                kind,
+                metric_identity(key, "storage", Some("configured-store"), None, None),
+                capability_context(unit, kind),
                 false,
                 Some("filesystem capacity unavailable"),
             ));
@@ -3043,12 +2897,8 @@ fn build_metrics(
     if accelerators.is_empty() {
         for (key, unit, kind) in gpu_metric_capabilities() {
             capabilities.push(capability(
-                key,
-                "accelerator",
-                Some("unknown"),
-                None,
-                unit,
-                kind,
+                metric_identity(key, "accelerator", Some("unknown"), None, None),
+                capability_context(unit, kind),
                 false,
                 Some("NVIDIA native interface unavailable"),
             ));
@@ -3129,14 +2979,9 @@ fn build_metrics(
             add_optional_series(
                 &mut series,
                 &mut capabilities,
-                key,
-                "accelerator",
-                Some(&device_id),
+                metric_identity(key, "accelerator", Some(&device_id), None, None),
                 value,
-                unit,
-                kind,
-                aggregation,
-                observed_at,
+                series_context(unit, kind, aggregation, observed_at),
             );
         }
         let memory_percent = accelerator
@@ -3146,34 +2991,35 @@ fn build_metrics(
         add_optional_series(
             &mut series,
             &mut capabilities,
-            "gpu.memory_used_percent",
-            "accelerator",
-            Some(&device_id),
+            metric_identity(
+                "gpu.memory_used_percent",
+                "accelerator",
+                Some(&device_id),
+                None,
+                None,
+            ),
             memory_percent,
-            "%",
-            "derived",
-            "last",
-            observed_at,
+            series_context("%", "derived", "last", observed_at),
         );
         add_optional_text_series(
             &mut series,
             &mut capabilities,
-            "gpu.name",
-            "accelerator",
-            Some(&device_id),
+            metric_identity("gpu.name", "accelerator", Some(&device_id), None, None),
             accelerator.name.clone(),
-            "name",
-            observed_at,
+            series_context("name", "measured", "last", observed_at),
         );
         add_optional_text_series(
             &mut series,
             &mut capabilities,
-            "gpu.performance_state",
-            "accelerator",
-            Some(&device_id),
+            metric_identity(
+                "gpu.performance_state",
+                "accelerator",
+                Some(&device_id),
+                None,
+                None,
+            ),
             accelerator.performance_state.clone(),
-            "state",
-            observed_at,
+            series_context("state", "measured", "last", observed_at),
         );
         for (key, value) in [
             ("gpu.throttle_thermal", accelerator.throttle_thermal),
@@ -3183,22 +3029,14 @@ fn build_metrics(
         ] {
             if let Some(value) = value {
                 series.push(series_bool(
-                    key,
-                    "accelerator",
-                    Some(&device_id),
+                    metric_identity(key, "accelerator", Some(&device_id), None, None),
                     value,
-                    "measured",
-                    "last",
-                    observed_at,
+                    series_context("boolean", "measured", "last", observed_at),
                 ));
             }
             capabilities.push(capability(
-                key,
-                "accelerator",
-                Some(&device_id),
-                None,
-                "boolean",
-                "measured",
+                metric_identity(key, "accelerator", Some(&device_id), None, None),
+                capability_context("boolean", "measured"),
                 value.is_some(),
                 (!value.is_some()).then_some("throttle reason unavailable"),
             ));
@@ -3213,36 +3051,40 @@ fn build_metrics(
         .flatten()
         .any(|value| value);
         series.push(series_bool(
-            "gpu.throttle_active",
-            "accelerator",
-            Some(&device_id),
+            metric_identity(
+                "gpu.throttle_active",
+                "accelerator",
+                Some(&device_id),
+                None,
+                None,
+            ),
             active_throttle,
-            "derived",
-            "last",
-            observed_at,
+            series_context("boolean", "derived", "last", observed_at),
         ));
         capabilities.push(capability(
-            "gpu.throttle_active",
-            "accelerator",
-            Some(&device_id),
-            None,
-            "boolean",
-            "derived",
+            metric_identity(
+                "gpu.throttle_active",
+                "accelerator",
+                Some(&device_id),
+                None,
+                None,
+            ),
+            capability_context("boolean", "derived"),
             true,
             None,
         ));
     }
     for process in processes.iter().take(MAX_GPU_PROCESSES) {
         let mut item = series_number(
-            "gpu.process_memory_bytes",
-            "accelerator",
-            Some(&process.device_id),
-            None,
+            metric_identity(
+                "gpu.process_memory_bytes",
+                "accelerator",
+                Some(&process.device_id),
+                None,
+                None,
+            ),
             process.memory_bytes as f64,
-            "bytes",
-            "measured",
-            "last",
-            observed_at,
+            series_context("bytes", "measured", "last", observed_at),
         );
         item.process_id = Some(process.pid);
         item.process_name = Some(process.name.clone());
@@ -3250,12 +3092,14 @@ fn build_metrics(
     }
     if processes.is_empty() {
         capabilities.push(capability(
-            "gpu.process_memory_bytes",
-            "accelerator",
-            Some("unknown"),
-            None,
-            "bytes",
-            "measured",
+            metric_identity(
+                "gpu.process_memory_bytes",
+                "accelerator",
+                Some("unknown"),
+                None,
+                None,
+            ),
+            capability_context("bytes", "measured"),
             false,
             Some("no GPU compute process data available"),
         ));
