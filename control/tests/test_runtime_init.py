@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -128,12 +130,57 @@ def test_optional_huggingface_secret_is_normalized_only_when_present(
 
 
 def test_optional_huggingface_secret_treats_dev_null_as_absent(tmp_path: Path) -> None:
+    if not runtime_init._is_null_device(Path("/dev/null")):
+        pytest.skip("host null-device identity is not the Linux /dev/null device")
     destination = tmp_path / "normalized" / "hf-token"
     destination.parent.mkdir(parents=True)
     destination.write_text("stale token")
 
     runtime_init._stage_optional_private_key(Path("/dev/null"), destination)
 
+    assert not destination.exists()
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_ORBSTACK_CONTAINER_TESTS") != "1",
+    reason="OrbStack container checks are opt-in",
+)
+def test_optional_huggingface_secret_handles_bind_mounted_dev_null_in_container(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is unavailable")
+    source_module = Path(runtime_init.__file__).resolve()
+    destination = tmp_path / "normalized" / "hf-token"
+    command = (
+        "import sys; sys.path.insert(0, '/tmp/module'); "
+        "from pathlib import Path; "
+        "from vonk_control.runtime_init import _stage_optional_private_key; "
+        "destination = Path('/tmp/normalized/hf-token'); destination.parent.mkdir(parents=True, exist_ok=True); "
+        "destination.write_text('stale token'); "
+        "_stage_optional_private_key(Path('/run/secrets/hf-token'), destination); "
+        "assert not destination.exists()"
+    )
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            "/dev/null:/run/secrets/hf-token:ro",
+            "-v",
+            f"{source_module.parent.parent}:/tmp/module:ro",
+            "-v",
+            f"{tmp_path}:/tmp/normalized",
+            "python:3.12-bookworm",
+            "python",
+            "-c",
+            command,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     assert not destination.exists()
 
 
