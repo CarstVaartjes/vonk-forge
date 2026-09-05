@@ -1033,7 +1033,7 @@
             "type": "integer"
           },
           "expected_bytes": {
-            "exclusiveMinimum": 0.0,
+            "minimum": 0.0,
             "title": "Expected Bytes",
             "type": "integer"
           },
@@ -1133,7 +1133,7 @@
             "type": "string"
           },
           "expected_bytes": {
-            "exclusiveMinimum": 0.0,
+            "minimum": 0.0,
             "title": "Expected Bytes",
             "type": "integer"
           },
@@ -1455,142 +1455,6 @@
         "title": "CapacityReservations",
         "type": "object"
       },
-      "CatalogEntityListResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "entities": {
-            "items": {
-              "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
-            },
-            "maxItems": 100,
-            "title": "Entities",
-            "type": "array"
-          },
-          "next_cursor": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          }
-        },
-        "required": [
-          "entities"
-        ],
-        "title": "CatalogEntityListResponse",
-        "type": "object"
-      },
-      "CatalogEntityRevisionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "content_sha256": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content Sha256"
-          },
-          "created_at": {
-            "title": "Created At",
-            "type": "string"
-          },
-          "created_by": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Created By",
-            "type": "string"
-          },
-          "document": {
-            "additionalProperties": true,
-            "title": "Document",
-            "type": "object"
-          },
-          "entity_id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Entity Id",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "model-group",
-              "model",
-              "model-version",
-              "execution-harness",
-              "runtime-distribution",
-              "patch-bundle"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "lifecycle": {
-            "enum": [
-              "draft",
-              "blocked",
-              "resolved",
-              "deprecated"
-            ],
-            "title": "Lifecycle",
-            "type": "string"
-          },
-          "publisher": {
-            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-            "title": "Publisher",
-            "type": "string"
-          },
-          "revision_id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Revision Id",
-            "type": "string"
-          },
-          "revision_number": {
-            "minimum": 1.0,
-            "title": "Revision Number",
-            "type": "integer"
-          },
-          "schema_version": {
-            "const": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "slug": {
-            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-            "title": "Slug",
-            "type": "string"
-          },
-          "title": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "entity_id",
-          "kind",
-          "publisher",
-          "slug",
-          "title",
-          "revision_id",
-          "revision_number",
-          "lifecycle",
-          "schema_version",
-          "document",
-          "created_by",
-          "created_at"
-        ],
-        "title": "CatalogEntityRevisionResponse",
-        "type": "object"
-      },
       "CatalogProblem": {
         "additionalProperties": false,
         "properties": {
@@ -1874,42 +1738,6 @@
           "source"
         ],
         "title": "ControllerAssetState",
-        "type": "object"
-      },
-      "CreateCatalogEntityRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "document": {
-            "additionalProperties": true,
-            "title": "Document",
-            "type": "object"
-          }
-        },
-        "required": [
-          "document"
-        ],
-        "title": "CreateCatalogEntityRequest",
-        "type": "object"
-      },
-      "CreateRecipeRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "document": {
-            "additionalProperties": true,
-            "title": "Document",
-            "type": "object"
-          },
-          "slug": {
-            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-            "title": "Slug",
-            "type": "string"
-          }
-        },
-        "required": [
-          "slug",
-          "document"
-        ],
-        "title": "CreateRecipeRequest",
         "type": "object"
       },
       "EndpointResponse": {
@@ -3548,27 +3376,6 @@
         "title": "FleetStatusResponse",
         "type": "object"
       },
-      "ForkRecipeRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "revision": {
-            "minimum": 1.0,
-            "title": "Revision",
-            "type": "integer"
-          },
-          "slug": {
-            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-            "title": "Slug",
-            "type": "string"
-          }
-        },
-        "required": [
-          "revision",
-          "slug"
-        ],
-        "title": "ForkRecipeRequest",
-        "type": "object"
-      },
       "FreshnessEvidence": {
         "additionalProperties": false,
         "properties": {
@@ -3670,102 +3477,6 @@
           }
         },
         "title": "FreshnessPolicy",
-        "type": "object"
-      },
-      "GlobalImportPreviewRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "uri": {
-            "maxLength": 256,
-            "minLength": 100,
-            "title": "Uri",
-            "type": "string"
-          }
-        },
-        "required": [
-          "uri"
-        ],
-        "title": "GlobalImportPreviewRequest",
-        "type": "object"
-      },
-      "GlobalImportRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "expected_content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Expected Content Sha256",
-            "type": "string"
-          },
-          "uri": {
-            "maxLength": 256,
-            "minLength": 100,
-            "title": "Uri",
-            "type": "string"
-          }
-        },
-        "required": [
-          "uri",
-          "expected_content_sha256"
-        ],
-        "title": "GlobalImportRequest",
-        "type": "object"
-      },
-      "GlobalRevisionResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Content Sha256",
-            "type": "string"
-          },
-          "document": {
-            "additionalProperties": true,
-            "title": "Document",
-            "type": "object"
-          },
-          "published_at": {
-            "title": "Published At",
-            "type": "string"
-          },
-          "publisher": {
-            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-            "title": "Publisher",
-            "type": "string"
-          },
-          "recipe_id": {
-            "maxLength": 36,
-            "minLength": 32,
-            "title": "Recipe Id",
-            "type": "string"
-          },
-          "revision_id": {
-            "maxLength": 36,
-            "minLength": 32,
-            "title": "Revision Id",
-            "type": "string"
-          },
-          "revision_number": {
-            "minimum": 1.0,
-            "title": "Revision Number",
-            "type": "integer"
-          },
-          "slug": {
-            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-            "title": "Slug",
-            "type": "string"
-          }
-        },
-        "required": [
-          "publisher",
-          "slug",
-          "recipe_id",
-          "revision_number",
-          "revision_id",
-          "content_sha256",
-          "published_at",
-          "document"
-        ],
-        "title": "GlobalRevisionResponse",
         "type": "object"
       },
       "GrantRequest": {
@@ -5274,7 +4985,6 @@
               "$ref": "#/components/schemas/LibraryRecipeSummary"
             },
             "maxItems": 100,
-            "minItems": 1,
             "title": "Recipes",
             "type": "array"
           }
@@ -6645,6 +6355,54 @@
         "title": "LibraryRecipeIdentity",
         "type": "object"
       },
+      "LibraryRecipeList": {
+        "additionalProperties": false,
+        "description": "Read-only overview of active canonical Recipe revisions.",
+        "properties": {
+          "freshness_policy": {
+            "$ref": "#/components/schemas/FreshnessPolicy"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "recipes": {
+            "items": {
+              "$ref": "#/components/schemas/LibraryRecipeSummary"
+            },
+            "maxItems": 100,
+            "title": "Recipes",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "recipes",
+          "next_cursor",
+          "freshness_policy"
+        ],
+        "title": "LibraryRecipeList",
+        "type": "object"
+      },
       "LibraryRecipeSummary": {
         "additionalProperties": false,
         "properties": {
@@ -7755,7 +7513,7 @@
             "type": "array"
           },
           "expected_bytes": {
-            "exclusiveMinimum": 0.0,
+            "minimum": 0.0,
             "title": "Expected Bytes",
             "type": "integer"
           },
@@ -10895,7 +10653,6 @@
             "type": "string"
           },
           "artifact_count": {
-            "maximum": 32.0,
             "minimum": 0.0,
             "title": "Artifact Count",
             "type": "integer"
@@ -10904,7 +10661,6 @@
             "items": {
               "$ref": "#/components/schemas/PublicRecipeArtifactIdentity"
             },
-            "maxItems": 32,
             "title": "Artifact Identities",
             "type": "array"
           },
@@ -11114,9 +10870,16 @@
             "type": "string"
           },
           "source_bundle_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Source Bundle Sha256",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Bundle Sha256"
           },
           "source_owner": {
             "anyOf": [
@@ -11216,7 +10979,6 @@
           "quantizations",
           "execution_harness",
           "runtime_distribution",
-          "source_bundle_sha256",
           "artifact_count",
           "artifact_identities",
           "topology_name",
@@ -11350,7 +11112,6 @@
             "type": "string"
           },
           "artifact_count": {
-            "maximum": 32.0,
             "minimum": 0.0,
             "title": "Artifact Count",
             "type": "integer"
@@ -11359,7 +11120,6 @@
             "items": {
               "$ref": "#/components/schemas/PublicRecipeArtifactIdentity"
             },
-            "maxItems": 32,
             "title": "Artifact Identities",
             "type": "array"
           },
@@ -11585,9 +11345,16 @@
             "type": "string"
           },
           "source_bundle_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Source Bundle Sha256",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Bundle Sha256"
           },
           "source_owner": {
             "anyOf": [
@@ -11687,7 +11454,6 @@
           "quantizations",
           "execution_harness",
           "runtime_distribution",
-          "source_bundle_sha256",
           "artifact_count",
           "artifact_identities",
           "topology_name",
@@ -12018,6 +11784,15 @@
             "title": "Library Commit",
             "type": "string"
           },
+          "model_documents": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 92,
+            "title": "Model Documents",
+            "type": "array"
+          },
           "source_path": {
             "pattern": "^recipes/[a-z0-9][a-z0-9-]{1,62}\\.json$",
             "title": "Source Path",
@@ -12031,36 +11806,6 @@
           "document"
         ],
         "title": "RecipeLibraryImportRequest",
-        "type": "object"
-      },
-      "RecipeListResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "next_cursor": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Cursor"
-          },
-          "recipes": {
-            "items": {
-              "$ref": "#/components/schemas/RecipeSummaryResponse"
-            },
-            "maxItems": 100,
-            "title": "Recipes",
-            "type": "array"
-          }
-        },
-        "required": [
-          "recipes"
-        ],
-        "title": "RecipeListResponse",
         "type": "object"
       },
       "RecipeMemoryRequirements": {
@@ -12393,7 +12138,7 @@
             "type": "string"
           },
           "schema_version": {
-            "const": 1,
+            "const": 2,
             "title": "Schema Version",
             "type": "integer"
           },
@@ -12403,9 +12148,16 @@
             "type": "string"
           },
           "source_bundle_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Source Bundle Sha256",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Bundle Sha256"
           },
           "title": {
             "maxLength": 120,
@@ -12435,7 +12187,6 @@
           "lifecycle",
           "execution_harness",
           "runtime_distribution",
-          "source_bundle_sha256",
           "artifact_count",
           "expected_download_bytes",
           "topology_name",
@@ -12558,137 +12309,6 @@
         "title": "RecipeRole",
         "type": "object"
       },
-      "RecipeSummaryResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "artifact_count": {
-            "maximum": 32.0,
-            "minimum": 0.0,
-            "title": "Artifact Count",
-            "type": "integer"
-          },
-          "content_sha256": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content Sha256"
-          },
-          "execution_harness": {
-            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-            "title": "Execution Harness",
-            "type": "string"
-          },
-          "expected_download_bytes": {
-            "minimum": 1.0,
-            "title": "Expected Download Bytes",
-            "type": "integer"
-          },
-          "lifecycle": {
-            "enum": [
-              "draft",
-              "blocked",
-              "resolved",
-              "deprecated"
-            ],
-            "title": "Lifecycle",
-            "type": "string"
-          },
-          "maximum_installed_bytes_per_node": {
-            "minimum": 1.0,
-            "title": "Maximum Installed Bytes Per Node",
-            "type": "integer"
-          },
-          "maximum_runtime_memory_bytes_per_node": {
-            "minimum": 1.0,
-            "title": "Maximum Runtime Memory Bytes Per Node",
-            "type": "integer"
-          },
-          "node_count": {
-            "minimum": 1.0,
-            "title": "Node Count",
-            "type": "integer"
-          },
-          "origin": {
-            "enum": [
-              "local",
-              "workload_run",
-              "global",
-              "recipe_library"
-            ],
-            "title": "Origin",
-            "type": "string"
-          },
-          "recipe_id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Recipe Id",
-            "type": "string"
-          },
-          "revision_number": {
-            "minimum": 1.0,
-            "title": "Revision Number",
-            "type": "integer"
-          },
-          "runtime_distribution": {
-            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-            "title": "Runtime Distribution",
-            "type": "string"
-          },
-          "slug": {
-            "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-            "title": "Slug",
-            "type": "string"
-          },
-          "source_bundle_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Source Bundle Sha256",
-            "type": "string"
-          },
-          "title": {
-            "maxLength": 120,
-            "minLength": 1,
-            "title": "Title",
-            "type": "string"
-          },
-          "topology_mode": {
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Topology Mode",
-            "type": "string"
-          },
-          "topology_name": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Topology Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "recipe_id",
-          "slug",
-          "title",
-          "origin",
-          "revision_number",
-          "lifecycle",
-          "execution_harness",
-          "runtime_distribution",
-          "source_bundle_sha256",
-          "artifact_count",
-          "expected_download_bytes",
-          "topology_name",
-          "topology_mode",
-          "node_count",
-          "maximum_installed_bytes_per_node",
-          "maximum_runtime_memory_bytes_per_node"
-        ],
-        "title": "RecipeSummaryResponse",
-        "type": "object"
-      },
       "RecipeTopology": {
         "additionalProperties": false,
         "properties": {
@@ -12799,21 +12419,6 @@
         "title": "RequestKey",
         "type": "object"
       },
-      "ResolveCatalogEntityRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "expected_revision": {
-            "minimum": 1.0,
-            "title": "Expected Revision",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "expected_revision"
-        ],
-        "title": "ResolveCatalogEntityRequest",
-        "type": "object"
-      },
       "ResolveImportRequest": {
         "additionalProperties": false,
         "properties": {
@@ -12833,42 +12438,6 @@
           "overlays"
         ],
         "title": "ResolveImportRequest",
-        "type": "object"
-      },
-      "ResolveRecipeRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "expected_revision": {
-            "minimum": 1.0,
-            "title": "Expected Revision",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "expected_revision"
-        ],
-        "title": "ResolveRecipeRequest",
-        "type": "object"
-      },
-      "ReviseCatalogEntityRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "document": {
-            "additionalProperties": true,
-            "title": "Document",
-            "type": "object"
-          },
-          "expected_revision": {
-            "minimum": 1.0,
-            "title": "Expected Revision",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "document",
-          "expected_revision"
-        ],
-        "title": "ReviseCatalogEntityRequest",
         "type": "object"
       },
       "RolloutPreparation": {
@@ -17675,27 +17244,6 @@
         "title": "UninstallRequest",
         "type": "object"
       },
-      "UpdateRecipeDraftRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "document": {
-            "additionalProperties": true,
-            "title": "Document",
-            "type": "object"
-          },
-          "expected_revision": {
-            "minimum": 1.0,
-            "title": "Expected Revision",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "expected_revision",
-          "document"
-        ],
-        "title": "UpdateRecipeDraftRequest",
-        "type": "object"
-      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -20147,526 +19695,6 @@
         "summary": "Authority View"
       }
     },
-    "/api/v1/catalog/entities": {
-      "get": {
-        "operationId": "listCatalogEntities",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "kind",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 32,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Kind"
-            }
-          },
-          {
-            "in": "query",
-            "name": "publisher",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Publisher"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 512,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogEntityListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "List Entities"
-      },
-      "post": {
-        "operationId": "createCatalogEntityDraft",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateCatalogEntityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Create Entity"
-      }
-    },
-    "/api/v1/catalog/entities/{entity_id}": {
-      "get": {
-        "operationId": "getCatalogEntity",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "entity_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-              "title": "Entity Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Get Entity"
-      }
-    },
-    "/api/v1/catalog/entities/{entity_id}/draft": {
-      "put": {
-        "operationId": "reviseCatalogEntity",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "entity_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-              "title": "Entity Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviseCatalogEntityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Revise Entity"
-      }
-    },
-    "/api/v1/catalog/entities/{entity_id}/resolve": {
-      "post": {
-        "operationId": "resolveCatalogEntity",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "entity_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-              "title": "Entity Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveCatalogEntityRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogEntityRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Resolve Entity"
-      }
-    },
-    "/api/v1/catalog/imports/global": {
-      "post": {
-        "operationId": "importGlobalRecipe",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GlobalImportRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecipeRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Import Global Recipe"
-      }
-    },
-    "/api/v1/catalog/imports/global/preview": {
-      "post": {
-        "operationId": "previewGlobalRecipeImport",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GlobalImportPreviewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GlobalRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Preview Global Import"
-      }
-    },
     "/api/v1/catalog/imports/public": {
       "post": {
         "operationId": "importPublicRecipe",
@@ -20717,7 +19745,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GlobalImportPreviewRequest"
+                "$ref": "#/components/schemas/PublicImportRequest"
               }
             }
           },
@@ -21047,406 +20075,6 @@
         "summary": "List Public Recipes"
       }
     },
-    "/api/v1/catalog/recipes": {
-      "get": {
-        "operationId": "listLocalRecipes",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 64,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Cursor"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 20,
-              "maximum": 100,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecipeListResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "List Recipes"
-      },
-      "post": {
-        "operationId": "createLocalRecipe",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateRecipeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecipeRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Create Recipe"
-      }
-    },
-    "/api/v1/catalog/recipes/{recipe_id}": {
-      "get": {
-        "operationId": "getLocalRecipe",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "recipe_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-              "title": "Recipe Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecipeRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Get Recipe"
-      }
-    },
-    "/api/v1/catalog/recipes/{recipe_id}/draft": {
-      "put": {
-        "operationId": "updateLocalRecipeDraft",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "recipe_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-              "title": "Recipe Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateRecipeDraftRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecipeRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Update Draft"
-      }
-    },
-    "/api/v1/catalog/recipes/{recipe_id}/fork": {
-      "post": {
-        "operationId": "forkLocalRecipe",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "recipe_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-              "title": "Recipe Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ForkRecipeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecipeRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Fork Recipe"
-      }
-    },
     "/api/v1/catalog/recipes/{recipe_id}/publication-export": {
       "post": {
         "operationId": "exportRecipeForPublication",
@@ -21553,101 +20181,6 @@
         "summary": "Attach Publication Report"
       }
     },
-    "/api/v1/catalog/recipes/{recipe_id}/resolve": {
-      "post": {
-        "operationId": "resolveLocalRecipe",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "recipe_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-              "title": "Recipe Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveRecipeRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RecipeRevisionResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Forbidden"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Not Found"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Conflict"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogProblem"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Resolve Recipe"
-      }
-    },
     "/api/v1/catalog/recipes/{recipe_id}/resolve-import": {
       "post": {
         "operationId": "resolveWorkloadRunImport",
@@ -21702,7 +20235,7 @@
     },
     "/api/v1/catalog/source-bundles/{sha256}": {
       "get": {
-        "operationId": "downloadLocalRecipeSourceBundle",
+        "operationId": "downloadRecipeSourceBundle",
         "parameters": [
           {
             "in": "path",
@@ -21769,7 +20302,7 @@
         "summary": "Download Source Bundle"
       },
       "put": {
-        "operationId": "uploadLocalRecipeSourceBundle",
+        "operationId": "uploadRecipeSourceBundle",
         "parameters": [
           {
             "in": "path",
@@ -24302,6 +22835,90 @@
           }
         ],
         "summary": "Get Placement"
+      }
+    },
+    "/api/v1/library/recipes": {
+      "get": {
+        "operationId": "listLibraryRecipes",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRecipeList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Library Recipes"
       }
     },
     "/api/v1/library/recipes/{recipe_id}": {

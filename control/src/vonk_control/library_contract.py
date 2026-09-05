@@ -283,6 +283,16 @@ class LibrarySnapshot(_StrictModel):
     freshness_policy: FreshnessPolicy
 
 
+class LibraryRecipeList(_StrictModel):
+    """Read-only overview of active canonical Recipe revisions."""
+
+    schema_version: Literal[1] = 1
+    generated_at: datetime
+    recipes: list[LibraryRecipeSummary] = Field(max_length=100)
+    next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
+    freshness_policy: FreshnessPolicy
+
+
 class VisualIdentity(_StrictModel):
     publisher: Text128
     slug: Text128
