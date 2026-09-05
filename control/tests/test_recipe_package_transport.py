@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 import gzip
 import hashlib
 import io
+import json
 import os
 import tarfile
 from copy import deepcopy
@@ -11,14 +11,13 @@ from pathlib import Path
 
 import httpx
 import pytest
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
-
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     PACKAGE_REPOSITORY,
     RecipePackageClient,
     RecipePackageError,
 )
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
 def _canonical(value: object) -> bytes:
@@ -245,6 +244,13 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], dict[str, ob
         "repository": PACKAGE_REPOSITORY,
         "source_commit": "a" * 40,
         "package_contract": {"schema_version": 2, "media_type": PACKAGE_MEDIA_TYPE},
+        "catalog_entities": [
+            {
+                "source_path": "models/tiny-model.json",
+                "document": model_document,
+                "content_sha256": model_digest,
+            }
+        ],
         "recipes": [row],
     }
     return _canonical(index) + b"\n", row, package
