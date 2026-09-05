@@ -1,6 +1,7 @@
 import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {ControlApi, RichTelemetryPoint, TelemetryCapabilitiesResponse, TelemetryCurrentResponse, TelemetryHistory, TelemetryWorkloadsResponse, VisualFleetNode} from "../api/types";
+import type {ControlApi, RichTelemetryPoint, TelemetryCapabilitiesResponse, TelemetryCurrentResponse, TelemetryHistory, TelemetryMetrics, TelemetryWorkloadsResponse, VisualFleetNode} from "../api/types";
+import {sparklinePath} from "./sparkline";
 import {NodeDetail} from "./node-detail";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
@@ -14,6 +15,37 @@ function node(): VisualFleetNode {
     installed: [], loaded: [],
     reservations: {disk_bytes: 0, unified_memory_bytes: 0, host_memory_bytes: 0, gpu_memory_bytes: 0, port_count: 0},
     warnings: [{code: "telemetry.delayed", detail: "Telemetry delivery is delayed.", severity: "warning"}],
+  };
+}
+
+function richHistoryMetrics(observedAt: string, values: {gpu: number; cpuTemperature: number; cpuUtilization: number | null; memory: number; power: number; storageRead: number; storageWrite: number; networkReceive: number | null; networkTransmit: number; decode: number; prefill: number; queue: number; ttft: number; e2e: number; itl: number}): TelemetryMetrics {
+  type Scope = TelemetryMetrics["series"][number]["scope"];
+  const sample = (key: string, scope: Scope, value: number | null, unit: string, context: Partial<TelemetryMetrics["series"][number]> = {}) => ({
+    key, scope, value, unit, source: "spark-agent.fixture", measurement_kind: "measured" as const, observed_at: observedAt, received_at: observedAt,
+    freshness: "fresh" as const, freshness_threshold_seconds: 6, support_status: value === null ? "unavailable" as const : "available" as const, reason: value === null ? "No sample was reported." : null, aggregation: "latest", ...context,
+  });
+  return {
+    schema_version: 2,
+    series: [
+      sample("gpu.utilization_percent", "accelerator", values.gpu, "%", {device_id: "0"}),
+      sample("gpu.power_watts", "accelerator", values.power, "W", {device_id: "0"}),
+      sample("cpu.temperature_c", "node", values.cpuTemperature, "degC"),
+      sample("cpu.utilization_percent", "node", values.cpuUtilization, "%"),
+      sample("memory.available_bytes", "memory", values.memory, "bytes"),
+      sample("memory.bandwidth_bytes_per_second", "memory", (300 + values.gpu) * 1024 ** 3, "bytes/s"),
+      sample("storage.read_bytes_per_second", "storage", values.storageRead * 1024 ** 2, "bytes/s", {device_id: "nvme0n1"}),
+      sample("storage.write_bytes_per_second", "storage", values.storageWrite * 1024 ** 2, "bytes/s", {device_id: "nvme0n1"}),
+      sample("network.receive_bytes_per_second", "network", values.networkReceive, "bytes/s", {interface_name: "eth0"}),
+      sample("network.transmit_bytes_per_second", "network", values.networkTransmit, "bytes/s", {interface_name: "eth0"}),
+      sample("runtime.decode_tokens_per_second", "runtime", values.decode, "tokens/s", {run_id: "run-chat"}),
+      sample("runtime.prefill_tokens_per_second", "runtime", values.prefill, "tokens/s", {run_id: "run-chat"}),
+      sample("runtime.requests_waiting", "runtime", values.queue, "requests", {run_id: "run-chat"}),
+      sample("runtime.ttft_p95_ms", "runtime", values.ttft, "ms", {run_id: "run-chat"}),
+      sample("runtime.e2e_p95_ms", "runtime", values.e2e, "ms", {run_id: "run-chat"}),
+      sample("runtime.itl_p95_ms", "runtime", values.itl, "ms", {run_id: "run-chat"}),
+    ],
+    capabilities: [], runtimes: [], workloads: [],
+    provenance: {collector: "spark-agent", collector_version: "fixture-2", host_uptime_seconds: 7200, source_observed_at: observedAt},
   };
 }
 
@@ -35,6 +67,7 @@ function history(start = "2026-08-15T11:00:00.000Z", end = "2026-08-15T12:00:00.
       temperature_c: 40, power_watts: 18,
       network_receive_bytes_per_second: 1000, network_transmit_bytes_per_second: 500,
       gap_samples: 0, details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"},
+      metrics: richHistoryMetrics("2026-08-15T11:30:00Z", {gpu: 20, cpuTemperature: 40, cpuUtilization: 10, memory: 80, power: 18, storageRead: 40, storageWrite: 8, networkReceive: 1000, networkTransmit: 500, decode: 100, prefill: 800, queue: 1, ttft: 200, e2e: 900, itl: 20}),
     }, {
       id: "sample-2", node_id: node().id, boot_id: "00000000-0000-0000-0000-000000000001", sequence: 2,
       observed_at: "2026-08-15T11:45:00Z", received_at: "2026-08-15T11:45:01Z",
@@ -45,6 +78,7 @@ function history(start = "2026-08-15T11:00:00.000Z", end = "2026-08-15T12:00:00.
       temperature_c: 42, power_watts: null,
       network_receive_bytes_per_second: null, network_transmit_bytes_per_second: null,
       gap_samples: 1, details: {accelerator_name: null, accelerator_performance_state: null},
+      metrics: richHistoryMetrics("2026-08-15T11:45:00Z", {gpu: 30, cpuTemperature: 42, cpuUtilization: null, memory: 75, power: 19, storageRead: 44, storageWrite: 9, networkReceive: null, networkTransmit: 520, decode: 110, prefill: 820, queue: 2, ttft: 210, e2e: 920, itl: 21}),
     }],
   };
 }
@@ -61,13 +95,13 @@ test("loads bounded history ranges and renders accessible summaries", async () =
 
   expect(screen.getByRole("button", {name: "Close Spark One details"})).toHaveFocus();
   expect(await screen.findByRole("img", {name: "Spark One GPU utilization history"})).toHaveAccessibleDescription("Mean 25%; latest mean 30%; reported range 20% to 30%; 2 reported samples.");
-  expect(screen.getByRole("img", {name: "Spark One available memory history"})).toHaveAccessibleDescription(/75 B/);
-  expect(screen.getByRole("img", {name: "Spark One temperature history"})).toHaveAccessibleDescription(/42 °C/);
+  expect(screen.getByRole("img", {name: "Spark One Available memory history"})).toHaveAccessibleDescription(/75 B/);
+  expect(screen.getByRole("img", {name: "Spark One CPU temperature history"})).toHaveAccessibleDescription(/42 °C/);
   expect(screen.getByText("GPU utilization")).toBeVisible();
   expect(screen.getByText("Available memory")).toBeVisible();
-  expect(screen.getByText("Temperature")).toBeVisible();
-  expect(screen.getByText("Scale 0%–100%")).toBeVisible();
-  expect(screen.getByText("Scale 0 B–100 B")).toBeVisible();
+  expect(screen.getByText("CPU temperature")).toBeVisible();
+  expect(screen.getAllByText("Scale 0%–100%")[0]).toBeVisible();
+  expect(screen.getByText("Scale 0 B–80 B")).toBeVisible();
   expect(screen.getByText("Scale 0 °C–100 °C")).toBeVisible();
   expect(screen.getAllByText(/Mean 25%/).length).toBeGreaterThan(0);
   expect(calls[0]).toMatchObject({
@@ -320,10 +354,10 @@ test("surfaces rich telemetry by scope with workload placement and unsupported e
   sample.metrics = {
     schema_version: 2,
     series: [
-      {key: "gpu.clock_mhz", scope: "accelerator", device_id: "GB10-0", value: 1420, unit: "MHz", source: "nvidia-smi", measurement_kind: "measured", observed_at: sample.observed_at, received_at: sample.received_at, freshness: "fresh", freshness_threshold_seconds: 6, support_status: "available", reason: null, aggregation: "latest"},
-      {key: "network.rx_bytes_per_second", scope: "network", interface_name: "eth0", value: 2400, unit: "bytes/s", source: "procfs", measurement_kind: "measured", observed_at: sample.observed_at, received_at: sample.received_at, freshness: "fresh", freshness_threshold_seconds: 20, support_status: "available", reason: null, aggregation: "latest"},
+      {key: "gpu.clock_sm_mhz", scope: "accelerator", device_id: "0", value: 1420, unit: "MHz", source: "nvidia-smi", measurement_kind: "measured", observed_at: sample.observed_at, received_at: sample.received_at, freshness: "fresh", freshness_threshold_seconds: 6, support_status: "available", reason: null, aggregation: "latest"},
+      {key: "network.receive_bytes_per_second", scope: "network", interface_name: "eth0", value: 2400, unit: "bytes/s", source: "procfs", measurement_kind: "derived", observed_at: sample.observed_at, received_at: sample.received_at, freshness: "fresh", freshness_threshold_seconds: 20, support_status: "available", reason: null, aggregation: "counter_rate"},
     ],
-    capabilities: [{key: "gpu.throttle_reason", scope: "accelerator", device_id: "GB10-0", unit: "reason", source: "nvidia-smi", measurement_kind: "measured", supported: false, freshness_threshold_seconds: 6, reason: "The collector cannot read throttle reasons on this driver."}],
+    capabilities: [{key: "gpu.throttle_active", scope: "accelerator", device_id: "0", unit: "boolean", source: "nvidia-smi", measurement_kind: "derived", supported: false, freshness_threshold_seconds: 6, reason: "The collector cannot read throttle state on this driver."}],
     runtimes: [],
     workloads: [],
     provenance: {collector: "spark-agent", collector_version: "2.1.0", host_uptime_seconds: 7200, source_observed_at: sample.observed_at},
@@ -343,9 +377,9 @@ test("surfaces rich telemetry by scope with workload placement and unsupported e
   render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
 
   await user.click(screen.getByRole("tab", {name: "Metrics"}));
-  expect((await screen.findAllByText("Gpu · Clock Mhz"))[0]).toBeVisible();
-  expect(screen.getAllByText("GB10-0").length).toBeGreaterThan(0);
-  expect((await screen.findAllByText("Network · Rx Bytes Per Second"))[0]).toBeVisible();
+  expect((await screen.findAllByText("Gpu · Clock Sm Mhz"))[0]).toBeVisible();
+  expect(screen.getAllByText("GPU 0").length).toBeGreaterThan(0);
+  expect((await screen.findAllByText("Network · Receive Bytes Per Second"))[0]).toBeVisible();
   expect((await screen.findAllByText("Unsupported"))[0]).toBeVisible();
   expect(screen.getByText(/spark-agent 2.1.0/)).toBeVisible();
   expect(currentEndpoint).toHaveBeenCalledWith(node().id, expect.any(AbortSignal));
@@ -361,4 +395,66 @@ test("surfaces rich telemetry by scope with workload placement and unsupported e
   expect(await screen.findByText("openai-chat")).toBeVisible();
   await user.click(screen.getByRole("tab", {name: "Events"}));
   expect(await screen.findByText(/Telemetry: Live/)).toBeVisible();
+});
+
+test("matches typed history identities and renders runtime history absent from current", async () => {
+  const typedHistory = history();
+  typedHistory.points.forEach((point, index) => {
+    if ("temperature_c" in point) point.temperature_c = 90 + index;
+  });
+  const source = typedHistory.points[1] as RichTelemetryPoint;
+  const currentPoint: RichTelemetryPoint = {
+    ...source,
+    metrics: {
+      ...source.metrics!,
+      series: source.metrics!.series.filter(series => series.key !== "runtime.itl_p95_ms"),
+    },
+  };
+  const current: TelemetryCurrentResponse = {schema_version: 2, node_id: node().id, observed_at: currentPoint.observed_at, received_at: currentPoint.received_at, freshness: "live", sample: currentPoint};
+  const capabilities: TelemetryCapabilitiesResponse = {schema_version: 2, node_id: node().id, observed_at: currentPoint.observed_at, received_at: currentPoint.received_at, freshness: "live", capabilities: []};
+  const currentEndpoint = vi.fn(async () => current);
+  const capabilitiesEndpoint = vi.fn(async () => capabilities);
+  const control = {
+    nodeTelemetryHistory: async () => typedHistory,
+    nodeTelemetryCurrent: currentEndpoint,
+    nodeTelemetryCapabilities: capabilitiesEndpoint,
+  } as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
+
+  await user.click(screen.getByRole("tab", {name: "Metrics"}));
+  const cpuChart = await screen.findByRole("img", {name: /Cpu · Temperature C Node aggregate history for 1 hour/});
+  expect(cpuChart.querySelector("path")).toHaveAttribute("d", sparklinePath([40, 42], 100, 32, [0, 100]));
+  expect(cpuChart.querySelector("path")?.getAttribute("d")).not.toBe(sparklinePath([90, 91], 100, 32, [0, 100]));
+
+  expect(await screen.findByRole("img", {name: /Runtime · Requests Waiting Run run-chat history for 1 hour/})).toBeVisible();
+  expect(await screen.findByRole("img", {name: /Runtime · Ttft P95 Ms Run run-chat history for 1 hour/})).toBeVisible();
+  expect(await screen.findByRole("img", {name: /Runtime · Decode Tokens Per Second Run run-chat history for 1 hour/})).toBeVisible();
+  expect(await screen.findByRole("img", {name: /Runtime · Itl P95 Ms Run run-chat history for 1 hour/})).toBeVisible();
+
+  let exportedBlob: Blob | undefined;
+  vi.stubGlobal("URL", {
+    createObjectURL: (blob: Blob) => { exportedBlob = blob; return "blob:telemetry-fixture"; },
+    revokeObjectURL: () => undefined,
+  });
+  const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  try {
+    await user.click(screen.getByRole("button", {name: "Export JSON"}));
+    expect(exportedBlob).toBeDefined();
+    const exported = JSON.parse(await exportedBlob!.text()) as {history: TelemetryHistory | null};
+    expect(exported.history).toMatchObject({resolution: "raw", points: expect.arrayContaining([
+      expect.objectContaining({metrics: expect.objectContaining({series: expect.arrayContaining([
+        expect.objectContaining({key: "runtime.itl_p95_ms", scope: "runtime", run_id: "run-chat", unit: "ms"}),
+      ])})}),
+    ])});
+  } finally {
+    anchorClick.mockRestore();
+    vi.unstubAllGlobals();
+  }
+
+  const unavailableCpu = await screen.findByRole("img", {name: /Cpu · Utilization Percent Node aggregate history for 1 hour unavailable/});
+  expect(unavailableCpu).toHaveTextContent("No adjacent historical samples");
+  expect(unavailableCpu.querySelector("svg")).toBeNull();
+  expect(currentEndpoint).toHaveBeenCalledWith(node().id, expect.any(AbortSignal));
+  expect(capabilitiesEndpoint).toHaveBeenCalledWith(node().id, expect.any(AbortSignal));
 });

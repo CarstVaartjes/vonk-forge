@@ -13,6 +13,7 @@ import {
 import {Meter} from "./meter";
 import {sparklinePath} from "./sparkline";
 import {StatusPill} from "./status-pill";
+import {hasContiguousHistory, historyPointTimestamp} from "../lib/telemetry-history";
 
 function statusLabel(state: ReturnType<typeof nodeOperationalState>): string {
   return state.charAt(0).toUpperCase() + state.slice(1);
@@ -57,36 +58,44 @@ function isRollupPoint(point: TelemetryHistoryPoint): point is TelemetryRollupPo
 
 function CardTrend({
   current,
+  currentObservedAt,
   domain,
   format,
   history,
   historyLabel,
   label,
   metric,
+  now,
 }: {
   current: number | null;
+  currentObservedAt?: string;
   domain?: readonly [number, number];
   format(value: number): string;
   history?: TelemetryHistory;
   historyLabel: string;
   label: string;
   metric: TrendMetric;
+  now: Date;
 }) {
   const values = (history?.points ?? []).map(point => pointValue(point, metric));
   if (current !== null && values.at(-1) !== current) values.push(current);
   const finiteValues = values.filter((value): value is number => value !== null && Number.isFinite(value));
-  const plotted = values.length === 1 ? [values[0], values[0]] : values;
-  const path = sparklinePath(plotted, 100, 30, domain);
+  const path = hasContiguousHistory(values) ? sparklinePath(values, 100, 30, domain) : "";
   const minimum = finiteValues.length > 0 ? Math.min(...finiteValues) : undefined;
   const maximum = finiteValues.length > 0 ? Math.max(...finiteValues) : undefined;
-  const description = current === null || minimum === undefined || maximum === undefined
+  const lastHistoricalPoint = [...(history?.points ?? [])].reverse().find(point => pointValue(point, metric) !== null);
+  const lastObservedAt = current === null ? (lastHistoricalPoint ? historyPointTimestamp(lastHistoricalPoint) : undefined) : currentObservedAt;
+  const lastObserved = lastObservedAt ? timestampPresentation(lastObservedAt, now, "Last observed") : undefined;
+  const description = minimum === undefined || maximum === undefined
     ? "No reported samples."
-    : `Latest ${format(current)}; range ${format(minimum)} to ${format(maximum)}; ${finiteValues.length} reported points.`;
+    : current === null
+      ? `Current reading unavailable; last observed ${lastObserved?.exact ?? "time unavailable"}; range ${format(minimum)} to ${format(maximum)}; ${finiteValues.length} reported points.`
+      : `Latest ${format(current)}; range ${format(minimum)} to ${format(maximum)}; ${finiteValues.length} reported points.`;
   const unavailable = finiteValues.length === 0;
   return <figure className={`node-card-trend${unavailable ? " is-unavailable" : ""}`}>
-    <figcaption><span>{label}</span><strong>{current === null ? "Not reported" : format(current)}</strong></figcaption>
-    {unavailable
-      ? <div className="node-card-trend-unavailable" role="img" aria-label={`${label} ${historyLabel} trend unavailable`}>Unavailable</div>
+    <figcaption><span>{label}</span><strong>{current === null ? "Not reported" : format(current)}</strong>{current === null && lastObserved && <small>Last observed <time dateTime={lastObserved.dateTime} title={lastObserved.exact}>{lastObserved.relative}</time></small>}</figcaption>
+    {!path
+      ? <div className="node-card-trend-unavailable" role="img" aria-label={`${label} ${historyLabel} trend ${unavailable ? "unavailable" : "has only one reported sample"}`}>{unavailable ? "Unavailable" : "Current sample only"}</div>
       : <svg role="img" aria-label={`${label} ${historyLabel} trend`} aria-description={description} viewBox="0 0 100 30" preserveAspectRatio="none">
         {path && <path aria-hidden="true" d={path} vectorEffect="non-scaling-stroke"/>}
       </svg>}
@@ -169,9 +178,9 @@ export function NodeCard({
     <section className="node-card-trends" aria-label={`${name} ${historyLabel} telemetry`}>
       <div className="node-card-trends-heading"><strong>{historyLabel} trend</strong>{historyLoading ? <span role="status">Loading history…</span> : historyError ? <span title={historyError}>Latest sample only</span> : <span>{history?.resolution === "fifteen-minute" ? "15-minute" : "Minute"} history</span>}</div>
       <div className="node-card-trend-grid">
-        <CardTrend label="GPU" historyLabel={historyLabel} metric="gpu_utilization_percent" current={finite(sample?.gpu_utilization_percent)} history={history} domain={[0, 100]} format={value => `${Number(value.toFixed(1))}%`}/>
-        <CardTrend label="Memory free" historyLabel={historyLabel} metric="memory_available_bytes" current={finite(sample?.memory_available_bytes)} history={history} format={formatBytes}/>
-        <CardTrend label="Temperature" historyLabel={historyLabel} metric="temperature_c" current={finite(sample?.temperature_c)} history={history} domain={[0, 100]} format={value => `${Number(value.toFixed(1))} °C`}/>
+        <CardTrend label="GPU" historyLabel={historyLabel} metric="gpu_utilization_percent" current={state === "offline" ? null : finite(sample?.gpu_utilization_percent)} currentObservedAt={observedAt} history={history} now={now} domain={[0, 100]} format={value => `${Number(value.toFixed(1))}%`}/>
+        <CardTrend label="Memory free" historyLabel={historyLabel} metric="memory_available_bytes" current={state === "offline" ? null : finite(sample?.memory_available_bytes)} currentObservedAt={observedAt} history={history} now={now} format={formatBytes}/>
+        <CardTrend label="Temperature" historyLabel={historyLabel} metric="temperature_c" current={state === "offline" ? null : finite(sample?.temperature_c)} currentObservedAt={observedAt} history={history} now={now} domain={[0, 100]} format={value => `${Number(value.toFixed(1))} °C`}/>
       </div>
     </section>
 
