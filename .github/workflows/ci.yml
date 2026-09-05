@@ -18,6 +18,67 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Select CI ownership areas
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.areas.outputs.rust }}
+      repository: ${{ steps.areas.outputs.repository }}
+      control: ${{ steps.areas.outputs.control }}
+      web: ${{ steps.areas.outputs.web }}
+      compose: ${{ steps.areas.outputs.compose }}
+      generated: ${{ steps.areas.outputs.generated }}
+      repository_timings: ${{ steps.timings.outputs.repository }}
+      control_timings: ${{ steps.timings.outputs.control }}
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select coarse ownership areas
+        id: areas
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            git diff --name-only --diff-filter=ACMRD "$BASE_SHA" "$GITHUB_SHA" |
+              scripts/select-ci-areas --event pull_request --github-output \
+                >> "$GITHUB_OUTPUT"
+          else
+            scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" \
+              --github-output </dev/null >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore measured pytest durations
+        id: timings
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY_SELECTED: ${{ steps.areas.outputs.repository }}
+          CONTROL_SELECTED: ${{ steps.areas.outputs.control }}
+        run: |
+          set -euo pipefail
+          for suite in repository control; do
+            selected_name="${suite^^}_SELECTED"
+            timing_file="$RUNNER_TEMP/$suite-durations.json"
+            if [[ "${!selected_name}" == true ]]; then
+              scripts/restore-pytest-file-durations \
+                --repo "$GITHUB_REPOSITORY" --suite "$suite" \
+                --current-run-id "$GITHUB_RUN_ID" --output "$timing_file"
+            else
+              printf '{}\n' > "$timing_file"
+            fi
+            compact=$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "$timing_file")
+            printf '%s=%s\n' "$suite" "$compact" >> "$GITHUB_OUTPUT"
+          done
+
   installer-setups:
     name: Build accepted installer setup programs
     if: github.event_name == 'push' && github.ref_type == 'tag'
@@ -60,6 +121,8 @@ jobs:
 
   rust-quality:
     name: Rust workspace lint
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -83,6 +146,8 @@ jobs:
 
   rust-tests:
     name: Rust workspace tests (${{ matrix.shard.label }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -130,21 +195,29 @@ jobs:
 
   rust-quality-gate:
     name: Rust workspace quality
-    needs: [rust-quality, rust-tests]
+    needs: [changes, rust-quality, rust-tests]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require Rust lint and every workspace test shard
         env:
+          SELECTED: ${{ needs.changes.outputs.rust }}
           LINT_RESULT: ${{ needs.rust-quality.result }}
           TEST_RESULT: ${{ needs.rust-tests.result }}
         run: |
-          test "$LINT_RESULT" = success
-          test "$TEST_RESULT" = success
+          if [[ "$SELECTED" == true ]]; then
+            test "$LINT_RESULT" = success
+            test "$TEST_RESULT" = success
+          else
+            test "$LINT_RESULT" = skipped
+            test "$TEST_RESULT" = skipped
+          fi
 
   rust-platform:
     name: Rust platform integration
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -174,7 +247,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            aptly fuse-overlayfs podman uidmap
+            aptly crun fuse-overlayfs podman uidmap
       - parallel:
           - name: Test bounded aptly state compaction
             run: >-
@@ -210,47 +283,85 @@ jobs:
 
   rust:
     name: Rust agent contracts
-    needs: [rust-quality-gate, rust-platform]
+    needs: [changes, rust-quality-gate, rust-platform]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require Rust quality, tests, and platform integration
         env:
+          SELECTED: ${{ needs.changes.outputs.rust }}
           QUALITY_RESULT: ${{ needs.rust-quality-gate.result }}
           PLATFORM_RESULT: ${{ needs.rust-platform.result }}
         run: |
           test "$QUALITY_RESULT" = success
-          test "$PLATFORM_RESULT" = success
+          if [[ "$SELECTED" == true ]]; then
+            test "$PLATFORM_RESULT" = success
+          else
+            test "$PLATFORM_RESULT" = skipped
+          fi
 
   generated-clients:
     name: Generated control clients
+    needs: changes
+    if: needs.changes.outputs.generated == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install pinned Node.js with generator dependency cache
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: tools/openapi-client/package-lock.json
+          fetch-depth: 0
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.12.1"
           python-version: "3.12"
           enable-cache: true
+      - name: Generate the OpenAPI schema without Node tooling
+        id: generation
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          scripts/generate-control-clients --schema-only
+          run_full=false
+          if ! git diff --quiet -- control/openapi.json; then
+            run_full=true
+          elif [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            run_full=true
+          elif ! git diff --quiet "$PR_BASE_SHA" "$GITHUB_SHA" -- \
+            scripts/generate-control-clients \
+            control/openapi-python-client.yaml \
+            tools/openapi-client \
+            src/cluster_profiles/generated_control \
+            control/web/src/api/generated.d.ts; then
+            run_full=true
+          fi
+          echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Node.js with generator dependency cache
+        if: steps.generation.outputs.run_full == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tools/openapi-client/package-lock.json
       - name: Install pinned TypeScript generator
+        if: steps.generation.outputs.run_full == 'true'
         run: npm ci --prefix tools/openapi-client
-      - name: Verify generated OpenAPI and clients
-        run: uv run --project control --frozen --with-editable . pytest tests/control/test_openapi_clients.py -v
+      - name: Generate language clients once when their contract changed
+        if: steps.generation.outputs.run_full == 'true'
+        run: scripts/generate-control-clients
+      - name: Verify generated client behavior
+        run: uv run --project control --frozen --with-editable . pytest tests/control/test_openapi_clients.py -q
       - name: Reject generated drift
         run: git diff --exit-code -- control/openapi.json src/cluster_profiles/generated_control control/web/src/api/generated.d.ts
 
-  test:
-    name: PR contract smoke
+  compose-integration:
+    name: Compose integration
+    needs: changes
+    if: needs.changes.outputs.compose == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -266,12 +377,11 @@ jobs:
         run: >-
           docker pull
           postgres:18.6@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941
-      - name: Run required fresh PostgreSQL integration contracts
+      - name: Run fresh PostgreSQL initialization contract
         env:
           CI: "true"
         run: >-
           uv run --project control --frozen --with-editable . pytest -q
-          control/tests/test_database_authority_postgres.py
           deploy/compose/tests/test_postgres_init_databases.py
       - parallel:
           - name: Run canonical runtime readiness model contracts
@@ -293,36 +403,21 @@ jobs:
             run: >-
               uv run --project control --frozen --with-editable . pytest -q
               -p no:cacheprovider
-              control/tests/test_step_ca.py::test_pinned_step_ca_issues_tracked_leaf_profile_and_serves_fresh_crl
               deploy/compose/tests/test_pki_tls_integration.py
-          - name: Run focused repository contracts
-            run: >-
-              uv run --python 3.12 --project control --frozen --with-editable .
-              --with pytest==9.1.1 pytest -q -p no:cacheprovider
-              tests/test_ci_platform_boundaries.py
-              tests/test_container_release_workflow.py
-          - name: Run focused control cleanup contracts
-            run: >-
-              uv run --project control --frozen --with-editable . pytest -q
-              -p no:cacheprovider
-              control/tests/test_api.py
-              control/tests/test_migrations.py
-              control/tests/test_production_worker.py
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard.label }})
+    needs: changes
+    if: needs.changes.outputs.repository == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         shard:
-          - {index: 0, label: 1-of-6}
-          - {index: 1, label: 2-of-6}
-          - {index: 2, label: 3-of-6}
-          - {index: 3, label: 4-of-6}
-          - {index: 4, label: 5-of-6}
-          - {index: 5, label: 6-of-6}
+          - {index: 0, label: 1-of-3}
+          - {index: 1, label: 2-of-3}
+          - {index: 2, label: 3-of-3}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -336,45 +431,61 @@ jobs:
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 6
+          SHARD_TOTAL: 3
+          TIMING_DATA: ${{ needs.changes.outputs.repository_timings }}
         run: |
           set -euo pipefail
+          timing_file="$RUNNER_TEMP/pytest-durations.json"
+          printf '%s\n' "$TIMING_DATA" > "$timing_file"
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
             pytest --collect-only -q > "$collection"
-          mapfile -t repository_tests < <(
+          mapfile -t shard_files < <(
             awk '
               /^tests\/.*::/ &&
               $0 !~ /^tests\/control\/test_openapi_clients\.py::/
-            ' "$collection"
+            ' "$collection" |
+              scripts/select-pytest-shard-files \
+                --durations "$timing_file" --max-duration-age-hours 720 \
+                --index "$SHARD_INDEX" --total "$SHARD_TOTAL"
           )
-          ((${#repository_tests[@]} >= SHARD_TOTAL))
-          shard_tests=()
-          for position in "${!repository_tests[@]}"; do
-            if ((position % SHARD_TOTAL == SHARD_INDEX)); then
-              shard_tests+=("${repository_tests[$position]}")
-            fi
-          done
-          ((${#shard_tests[@]} > 0))
+          ((${#shard_files[@]} > 0))
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
-            pytest -q --basetemp="$RUNNER_TEMP/repository-pytest" \
-            "${shard_tests[@]}"
+            pytest -q -o junit_family=xunit1 \
+            --junitxml="$RUNNER_TEMP/repository-junit.xml" --basetemp="$RUNNER_TEMP/repository-pytest" \
+            "${shard_files[@]}"
+
+      - name: Collect measured file durations
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/repository-junit.xml" ]]; then
+            scripts/collect-pytest-file-durations "$RUNNER_TEMP/repository-junit.xml" \
+              --root . --output "$RUNNER_TEMP/repository-durations.json"
+          fi
+      - name: Upload measured file durations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pytest-file-durations-repository-${{ matrix.shard.index }}
+          path: ${{ runner.temp }}/repository-durations.json
+          retention-days: 30
+          if-no-files-found: ignore
 
   control-suite:
     name: Complete control suite (${{ matrix.shard.label }})
+    needs: changes
+    if: needs.changes.outputs.control == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         shard:
-          - {index: 0, label: 1-of-6}
-          - {index: 1, label: 2-of-6}
-          - {index: 2, label: 3-of-6}
-          - {index: 3, label: 4-of-6}
-          - {index: 4, label: 5-of-6}
-          - {index: 5, label: 6-of-6}
+          - {index: 0, label: 1-of-3}
+          - {index: 1, label: 2-of-3}
+          - {index: 2, label: 3-of-3}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -388,30 +499,50 @@ jobs:
         shell: bash
         env:
           SHARD_INDEX: ${{ matrix.shard.index }}
-          SHARD_TOTAL: 6
+          SHARD_TOTAL: 3
+          TIMING_DATA: ${{ needs.changes.outputs.control_timings }}
         run: |
           set -euo pipefail
+          timing_file="$RUNNER_TEMP/pytest-durations.json"
+          printf '%s\n' "$TIMING_DATA" > "$timing_file"
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --project control --frozen --with-editable . \
             pytest --collect-only -q control/tests > "$collection"
-          mapfile -t control_tests < <(
-            awk '/^tests\/.*::/' "$collection"
+          mapfile -t shard_files < <(
+            awk '/^tests\/.*::/' "$collection" |
+              scripts/select-pytest-shard-files \
+                --durations "$timing_file" --max-duration-age-hours 720 \
+                --index "$SHARD_INDEX" --total "$SHARD_TOTAL" \
+                --prefix control/
           )
-          ((${#control_tests[@]} >= SHARD_TOTAL))
-          shard_tests=()
-          for position in "${!control_tests[@]}"; do
-            if ((position % SHARD_TOTAL == SHARD_INDEX)); then
-              shard_tests+=("control/${control_tests[$position]}")
-            fi
-          done
-          ((${#shard_tests[@]} > 0))
+          ((${#shard_files[@]} > 0))
           uv run --python 3.12 --project control --frozen --with-editable . \
-            --with pytest-xdist==3.8.0 pytest -q -n auto --dist loadfile \
-            "${shard_tests[@]}"
+            --with pytest-xdist==3.8.0 pytest -q -n 4 --dist loadfile \
+            -o junit_family=xunit1 --junitxml="$RUNNER_TEMP/control-junit.xml" \
+            "${shard_files[@]}"
+
+      - name: Collect measured file durations
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f "$RUNNER_TEMP/control-junit.xml" ]]; then
+            scripts/collect-pytest-file-durations "$RUNNER_TEMP/control-junit.xml" \
+              --root control --output "$RUNNER_TEMP/control-durations.json"
+          fi
+      - name: Upload measured file durations
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pytest-file-durations-control-${{ matrix.shard.index }}
+          path: ${{ runner.temp }}/control-durations.json
+          retention-days: 30
+          if-no-files-found: ignore
 
   web-suite:
-    name: Complete admin web suite
+    name: Admin web behavior
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -429,22 +560,6 @@ jobs:
         run: npm test --prefix control/web -- --run
       - name: Build admin web application
         run: npm run build --prefix control/web
-
-  web-browser-acceptance:
-    name: Admin web browser acceptance
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install pinned Node.js with admin web dependency cache
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: control/web/package-lock.json
-      - name: Install locked admin web dependencies
-        run: npm ci --prefix control/web
       - name: Install pinned Chromium browser
         run: npm exec --prefix control/web -- playwright install --with-deps chromium
       - name: Run fixture-backed browser acceptance
@@ -462,22 +577,86 @@ jobs:
 
   catalog-runtime:
     name: Catalog and service suites
-    needs: [repository-suite, control-suite, web-suite, web-browser-acceptance]
+    needs: [changes, repository-suite, control-suite, web-suite]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every complete service suite
         env:
+          REPOSITORY_SELECTED: ${{ needs.changes.outputs.repository }}
+          CONTROL_SELECTED: ${{ needs.changes.outputs.control }}
+          WEB_SELECTED: ${{ needs.changes.outputs.web }}
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           WEB_RESULT: ${{ needs.web-suite.result }}
-          BROWSER_RESULT: ${{ needs.web-browser-acceptance.result }}
         run: |
-          test "$REPOSITORY_RESULT" = success
-          test "$CONTROL_RESULT" = success
-          test "$WEB_RESULT" = success
-          test "$BROWSER_RESULT" = success
+          require_selected_result() {
+            local selected="$1"
+            local result="$2"
+            if [[ "$selected" == true ]]; then
+              test "$result" = success
+            else
+              test "$result" = skipped
+            fi
+          }
+          require_selected_result "$REPOSITORY_SELECTED" "$REPOSITORY_RESULT"
+          require_selected_result "$CONTROL_SELECTED" "$CONTROL_RESULT"
+          require_selected_result "$WEB_SELECTED" "$WEB_RESULT"
+
+  ci-gate:
+    name: CI gate
+    needs: [changes, lint, rust, rust-quality-gate, rust-tests, rust-platform, generated-clients, compose-integration, repository-suite, control-suite, web-suite, catalog-runtime]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require selector and selected jobs
+        shell: bash
+        env:
+          SELECTOR_RESULT: ${{ needs.changes.result }}
+          SELECTED_RUST: ${{ needs.changes.outputs.rust }}
+          SELECTED_REPOSITORY: ${{ needs.changes.outputs.repository }}
+          SELECTED_CONTROL: ${{ needs.changes.outputs.control }}
+          SELECTED_WEB: ${{ needs.changes.outputs.web }}
+          SELECTED_GENERATED: ${{ needs.changes.outputs.generated }}
+          SELECTED_COMPOSE: ${{ needs.changes.outputs.compose }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          RUST_UMBRELLA_RESULT: ${{ needs.rust.result }}
+          RUST_QUALITY_RESULT: ${{ needs.rust-quality-gate.result }}
+          RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
+          RUST_PLATFORM_RESULT: ${{ needs.rust-platform.result }}
+          REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
+          CONTROL_RESULT: ${{ needs.control-suite.result }}
+          WEB_RESULT: ${{ needs.web-suite.result }}
+          GENERATED_RESULT: ${{ needs.generated-clients.result }}
+          COMPOSE_RESULT: ${{ needs.compose-integration.result }}
+          CATALOG_RESULT: ${{ needs.catalog-runtime.result }}
+        run: |
+          set -euo pipefail
+          scripts/verify-ci-gate \
+            --selector-result "$SELECTOR_RESULT" \
+            --selected "rust=$SELECTED_RUST" \
+            --selected "repository=$SELECTED_REPOSITORY" \
+            --selected "control=$SELECTED_CONTROL" \
+            --selected "web=$SELECTED_WEB" \
+            --selected "generated=$SELECTED_GENERATED" \
+            --selected "compose=$SELECTED_COMPOSE" \
+            --result "lint=$LINT_RESULT" \
+            --result "rust-umbrella=$RUST_UMBRELLA_RESULT" \
+            --result "rust-quality-gate=$RUST_QUALITY_RESULT" \
+            --result "rust-tests=$RUST_TESTS_RESULT" \
+            --result "rust-platform=$RUST_PLATFORM_RESULT" \
+            --result "repository=$REPOSITORY_RESULT" \
+            --result "control=$CONTROL_RESULT" \
+            --result "web=$WEB_RESULT" \
+            --result "generated=$GENERATED_RESULT" \
+            --result "compose=$COMPOSE_RESULT" \
+            --result "catalog-runtime=$CATALOG_RESULT"
 
   release-metadata:
     name: Validate container release tag
@@ -485,14 +664,14 @@ jobs:
       needs.lint.result == 'success' &&
       needs.rust.result == 'success' &&
       needs.generated-clients.result == 'success' &&
-      needs.test.result == 'success' &&
+      needs.compose-integration.result == 'success' &&
       needs.catalog-runtime.result == 'success' &&
       vars.VONK_CONTAINER_RELEASES_ENABLED == 'true' &&
       vars.VONK_PLATFORM_RELEASES_ENABLED == 'true' &&
       github.event_name == 'push' &&
       github.ref_type == 'tag' &&
       startsWith(github.ref_name, 'v')
-    needs: [lint, rust, generated-clients, test, catalog-runtime]
+    needs: [lint, rust, generated-clients, compose-integration, catalog-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -501,9 +680,7 @@ jobs:
       next_version: ${{ steps.release.outputs.next_version }}
       baseline_version: ${{ steps.release.outputs.baseline_version }}
       arm64_package: ${{ steps.release.outputs.arm64_package }}
-      amd64_package: ${{ steps.release.outputs.amd64_package }}
       arm64_baseline_package: ${{ steps.release.outputs.arm64_baseline_package }}
-      amd64_baseline_package: ${{ steps.release.outputs.amd64_baseline_package }}
       artifact_name: ${{ steps.release.outputs.artifact_name }}
       baseline_artifact_name: ${{ steps.release.outputs.baseline_artifact_name }}
       channel: ${{ steps.release.outputs.channel }}
@@ -516,6 +693,8 @@ jobs:
       api_dev_source: ${{ steps.release.outputs.api_dev_source }}
       worker_dev_source: ${{ steps.release.outputs.worker_dev_source }}
       hermes_image: ${{ steps.release.outputs.hermes_image }}
+      litellm_image: ${{ steps.release.outputs.litellm_image }}
+      litellm_dev_source: ${{ steps.release.outputs.litellm_dev_source }}
       tag_oid: ${{ steps.authority.outputs.tag_oid }}
     steps:
       - name: Check out tagged commit
@@ -560,7 +739,7 @@ jobs:
             >> "$GITHUB_OUTPUT"
 
   build-agent-package:
-    name: Build and attest AMD64 and ARM64; lifecycle-test ARM64
+    name: Build, attest, and lifecycle-test ARM64 Spark agent
     if: needs.release-metadata.result == 'success'
     needs: [release-metadata]
     runs-on: ubuntu-24.04-arm
@@ -574,11 +753,9 @@ jobs:
     outputs:
       version: ${{ steps.package.outputs.version }}
       arm64_package: ${{ steps.package.outputs.arm64_package }}
-      amd64_package: ${{ steps.package.outputs.amd64_package }}
       artifact_name: ${{ steps.package.outputs.artifact_name }}
       baseline_version: ${{ steps.package.outputs.baseline_version }}
       arm64_baseline_package: ${{ steps.package.outputs.arm64_baseline_package }}
-      amd64_baseline_package: ${{ steps.package.outputs.amd64_baseline_package }}
       baseline_artifact_name: ${{ steps.package.outputs.baseline_artifact_name }}
     steps:
       - name: Check out exact package source
@@ -586,7 +763,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Build and attest AMD64 and ARM64 release agent packages
+      - name: Build and attest ARM64 release agent package
         id: package
         uses: ./.github/actions/agent-package-build
         with:
@@ -596,9 +773,7 @@ jobs:
           next_version: ${{ needs.release-metadata.outputs.next_version }}
           baseline_version: ${{ needs.release-metadata.outputs.baseline_version }}
           arm64_package: ${{ needs.release-metadata.outputs.arm64_package }}
-          amd64_package: ${{ needs.release-metadata.outputs.amd64_package }}
           arm64_baseline_package: ${{ needs.release-metadata.outputs.arm64_baseline_package }}
-          amd64_baseline_package: ${{ needs.release-metadata.outputs.amd64_baseline_package }}
           artifact_name: ${{ needs.release-metadata.outputs.artifact_name }}
           baseline_artifact_name: ${{ needs.release-metadata.outputs.baseline_artifact_name }}
           environment: agent-release
@@ -611,43 +786,9 @@ jobs:
           binary_source_mode: compile
           lifecycle_gate_mode: inline
 
-  native-amd64-agent-lifecycle:
-    name: Lifecycle-test accepted AMD64 release package on AMD64
-    needs: [release-metadata, build-agent-package]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Check out exact package acceptance source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Download accepted dual-architecture package set
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ needs.build-agent-package.outputs.artifact_name }}
-          path: accepted
-      - name: Exercise accepted AMD64 package natively
-        shell: bash
-        env:
-          AMD64_PACKAGE: ${{ needs.build-agent-package.outputs.amd64_package }}
-        run: |
-          set -euo pipefail
-          test "$(uname -m)" = x86_64
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
-            acl iproute2 iptables podman shellcheck slirp4netns uidmap
-          package="accepted/$AMD64_PACKAGE"
-          scripts/verify-agent-deb --json "$package"
-          sudo env SYSTEMD_OFFLINE=1 dpkg -i "$package"
-          test "$(/usr/lib/vonk-forge/vonk-agent --version)" = \
-            "vonk-agent $(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
-          sudo env SYSTEMD_OFFLINE=1 dpkg --remove vonk-forge-agent
-
   validate-release-images:
     name: Validate accepted release images
-    needs: [lint, generated-clients, test, release-metadata, build-agent-package, native-amd64-agent-lifecycle]
+    needs: [lint, generated-clients, compose-integration, release-metadata, build-agent-package]
     runs-on: ubuntu-latest
     permissions:
       attestations: read
@@ -655,6 +796,7 @@ jobs:
     outputs:
       api_digest: ${{ steps.api.outputs.digest }}
       worker_digest: ${{ steps.worker.outputs.digest }}
+      litellm_digest: ${{ steps.litellm.outputs.digest }}
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -783,6 +925,62 @@ jobs:
           fi
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
 
+      - name: Validate accepted LiteLLM image
+        id: litellm
+        shell: bash
+        env:
+          DEV_SOURCE: ${{ needs.release-metadata.outputs.litellm_dev_source }}
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}
+        run: |
+          set -euo pipefail
+          digest=$(skopeo inspect --format '{{.Digest}}' "docker://$DEV_SOURCE")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          gh attestation verify "oci://$LITELLM_IMAGE@$digest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
+            --signer-digest "$GITHUB_SHA" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners \
+            --format json > "$RUNNER_TEMP/litellm-attestation.json"
+          skopeo inspect --config "docker://$LITELLM_IMAGE@$digest" \
+            | jq -e --arg revision "$GITHUB_SHA" \
+              --arg source "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+              '(.config.Labels["org.opencontainers.image.revision"] == $revision)
+               and (.config.Labels["org.opencontainers.image.source"] == $source)' \
+              >/dev/null
+          docker buildx imagetools inspect "$LITELLM_IMAGE@$digest" \
+            --format '{{ json .Provenance }}' \
+            | jq -e --arg revision "$GITHUB_SHA" \
+              '([.. | objects | select(
+                  ((.predicateType? // "") | startswith("https://slsa.dev/provenance/"))
+                  or (((.SLSA?.buildType? // "") | length) > 0)
+                  or (((.buildDefinition?.buildType? // "") | length) > 0)
+                )] | length > 0)
+               and ([.. | strings | select(. == $revision)] | length > 0)' \
+              >/dev/null
+          docker buildx imagetools inspect "$LITELLM_IMAGE@$digest" \
+            --format '{{ json .SBOM }}' \
+            | jq -e '[.. | objects | select(
+                .SPDXID? == "SPDXRef-DOCUMENT"
+                and ((.spdxVersion? // "") | startswith("SPDX-"))
+              )] | length > 0' >/dev/null
+          inspect_error="$RUNNER_TEMP/litellm-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$digest" ]] || {
+              echo "refusing to overwrite immutable LiteLLM release tag" >&2
+              exit 1
+            }
+          elif ! grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            echo "LiteLLM release tag lookup failed" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+
   publish-images:
     name: Publish public container images
     needs: [validate-release-images, release-metadata]
@@ -791,6 +989,7 @@ jobs:
     concurrency:
       group: vonk-forge-container-publication-${{ needs.release-metadata.outputs.version }}
       cancel-in-progress: false
+      queue: max
     permissions:
       attestations: write
       contents: read
@@ -800,6 +999,7 @@ jobs:
       api_digest: ${{ steps.api.outputs.digest }}
       worker_digest: ${{ steps.worker.outputs.digest }}
       hermes_digest: ${{ steps.hermes.outputs.digest }}
+      litellm_digest: ${{ steps.litellm.outputs.digest }}
     steps:
       - name: Check out tagged commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -919,6 +1119,45 @@ jobs:
           [[ $(skopeo inspect --format '{{.Digest}}' \
             "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
           printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Revalidate release authority before LiteLLM publication
+        shell: bash
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          TAG_NAME: ${{ github.ref_name }}
+          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
+        run: |
+          set -euo pipefail
+          scripts/verify-release-tag-authority \
+            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
+
+      - name: Promote accepted LiteLLM image
+        id: litellm
+        shell: bash
+        env:
+          DIGEST: ${{ needs.validate-release-images.outputs.litellm_digest }}
+          IMAGE_VERSION_TAG: ${{ needs.release-metadata.outputs.image_version_tag }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          inspect_error="$RUNNER_TEMP/litellm-version-inspect-error"
+          if observed=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
+            [[ "$observed" == "$DIGEST" ]] || {
+              echo "refusing to overwrite immutable LiteLLM release tag" >&2
+              exit 1
+            }
+          elif grep -Eiq 'manifest unknown|name unknown|not found' \
+            "$inspect_error"; then
+            docker buildx imagetools create \
+              --tag "$LITELLM_IMAGE:$IMAGE_VERSION_TAG" "$LITELLM_IMAGE@$DIGEST"
+          else
+            echo "LiteLLM release tag lookup failed" >&2
+            exit 1
+          fi
+          [[ $(skopeo inspect --format '{{.Digest}}' \
+            "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
+          printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
       - name: Reconcile existing Hermes release image
         id: existing-hermes
         shell: bash
@@ -989,7 +1228,8 @@ jobs:
             printf '%s\n' \
               "CONTROL_API_IMAGE=${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
               "CONTROL_WORKER_IMAGE=${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
-              "HERMES_AGENT_IMAGE=${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}"
+              "HERMES_AGENT_IMAGE=${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
+              "LITELLM_IMAGE=${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Render canonical production Compose
@@ -1001,18 +1241,27 @@ jobs:
             --output release-output/docker-compose.production.yml \
             --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
             --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
-            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}"
+            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
+            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
+          scripts/render-production-compose --channel pinned \
+            --output release-output/docker-compose.pinned.yml \
+            --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
+            --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
+            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
+            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
       - name: Upload production Compose
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: platform-build-${{ needs.release-metadata.outputs.version }}
           retention-days: 1
           if-no-files-found: error
-          path: release-output/docker-compose.production.yml
+          path: |
+            release-output/docker-compose.production.yml
+            release-output/docker-compose.pinned.yml
 
   release-manifest:
     name: Publish container release manifest
-    needs: [release-metadata, publish-images, build-agent-package, native-amd64-agent-lifecycle]
+    needs: [release-metadata, publish-images, build-agent-package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1036,15 +1285,18 @@ jobs:
           CONTROL_API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
           CONTROL_WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
           HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}
+          LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
           CONTROL_API_DIGEST: ${{ needs.publish-images.outputs.api_digest }}
           CONTROL_WORKER_DIGEST: ${{ needs.publish-images.outputs.worker_digest }}
           HERMES_AGENT_DIGEST: ${{ needs.publish-images.outputs.hermes_digest }}
+          LITELLM_DIGEST: ${{ needs.publish-images.outputs.litellm_digest }}
         run: |
           scripts/validate-container-release-digests
           printf '%s\n' \
             "CONTROL_API_IMAGE=$CONTROL_API_IMAGE@$CONTROL_API_DIGEST" \
             "CONTROL_WORKER_IMAGE=$CONTROL_WORKER_IMAGE@$CONTROL_WORKER_DIGEST" \
             "HERMES_AGENT_IMAGE=$HERMES_AGENT_IMAGE@$HERMES_AGENT_DIGEST" \
+            "LITELLM_IMAGE=$LITELLM_IMAGE@$LITELLM_DIGEST" \
             > vonk-forge-images.env
           sha256sum vonk-forge-images.env > vonk-forge-images.env.sha256
       - name: Revalidate release authority before GitHub Release
@@ -1063,19 +1315,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARM64_PACKAGE: ${{ needs.build-agent-package.outputs.arm64_package }}
-          AMD64_PACKAGE: ${{ needs.build-agent-package.outputs.amd64_package }}
           SOURCE_SHA: ${{ github.sha }}
           VERSION: ${{ needs.build-agent-package.outputs.version }}
         run: |
           set -euo pipefail
           [[ "$ARM64_PACKAGE" == "vonk-forge-agent_${VERSION}_arm64.deb" ]]
-          [[ "$AMD64_PACKAGE" == "vonk-forge-agent_${VERSION}_amd64.deb" ]]
           release_assets=(
             "release-output/agent-package/$ARM64_PACKAGE"
-            "release-output/agent-package/$AMD64_PACKAGE"
             "release-output/agent-package/vonk-forge-systemd-security.json"
           )
-          for package in "$ARM64_PACKAGE" "$AMD64_PACKAGE"; do
+          for package in "$ARM64_PACKAGE"; do
             architecture=${package%.deb}
             architecture=${architecture##*_}
             release_assets+=(
@@ -1108,290 +1357,12 @@ jobs:
             "Vonk Forge $VERSION" \
             vonk-forge-images.env vonk-forge-images.env.sha256 \
             release-output/docker-compose.production.yml \
+            release-output/docker-compose.pinned.yml \
             "${release_assets[@]}"
 
-  advance-production-aliases:
-    name: Advance accepted production channels
-    needs: [release-metadata, release-manifest]
-    if: needs.release-manifest.result == 'success'
-    runs-on: ubuntu-latest
-    environment: platform-release
-    # Every queued run reconciles the globally newest completed release. A
-    # replacement pending run therefore preserves convergence while this
-    # shared group prevents concurrent rollback races between release refs.
-    concurrency:
-      group: vonk-forge-production-alias-reconciliation
-      cancel-in-progress: false
-    permissions:
-      attestations: read
-      contents: read
-      id-token: write
-      packages: write
-    steps:
-      - name: Check out accepted alias tooling
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-      - name: Install Skopeo from Ubuntu
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends skopeo
-      - name: Select newest completed signed release
-        id: target
-        shell: bash
-        run: |
-          set -euo pipefail
-          releases_json="$RUNNER_TEMP/completed-releases.json"
-          printf '[]\n' > "$releases_json"
-          for page in $(seq 1 10); do
-            page_json="$RUNNER_TEMP/completed-releases-$page.json"
-            merged_json="$RUNNER_TEMP/completed-releases-merged.json"
-            curl --fail --silent --show-error --location \
-              --proto '=https' --proto-redir '=https' --tlsv1.2 \
-              --header 'Accept: application/vnd.github+json' \
-              --header 'X-GitHub-Api-Version: 2022-11-28' \
-              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/releases?per_page=100&page=$page" \
-              > "$page_json"
-            jq -e 'type == "array"' "$page_json" >/dev/null
-            jq -s '.[0] + .[1]' "$releases_json" "$page_json" \
-              > "$merged_json"
-            mv "$merged_json" "$releases_json"
-            [[ $(jq 'length' "$page_json") -eq 100 ]] || break
-          done
-          git fetch --force --no-tags origin \
-            +refs/heads/main:refs/remotes/origin/main
-          git fetch --force --tags origin
-          mapfile -t release_tags < <(
-            jq -r '.[] | select(
-              (.draft | not) and (.prerelease | not) and
-              (.immutable == true)
-            ) | .tag_name' "$releases_json" \
-              | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-              | sort -Vr
-          )
-          target_tag=
-          for candidate in "${release_tags[@]}"; do
-            if git rev-parse --verify "refs/tags/$candidate^{commit}" \
-              >/dev/null 2>&1; then
-              target_tag=$candidate
-              break
-            fi
-          done
-          test -n "$target_tag"
-          tag_ref="refs/tags/$target_tag"
-          [[ $(git cat-file -t "$tag_ref") == tag ]]
-          allowed_signers="$RUNNER_TEMP/release-allowed-signers"
-          git show refs/remotes/origin/main:.github/release-allowed-signers \
-            > "$allowed_signers"
-          test -s "$allowed_signers"
-          git -c gpg.format=ssh \
-            -c gpg.ssh.allowedSignersFile="$allowed_signers" \
-            verify-tag "$tag_ref"
-          target_tag_oid=$(git rev-parse --verify "$tag_ref")
-          target_commit=$(git rev-parse --verify "$tag_ref^{commit}")
-          [[ "$target_tag_oid" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$target_commit" =~ ^[0-9a-f]{40}$ ]]
-          git merge-base --is-ancestor \
-            "$target_commit" refs/remotes/origin/main
-          scripts/verify-release-tag-authority \
-            "$target_tag" "$target_tag_oid" "$target_commit"
-
-          evidence_dir="$RUNNER_TEMP/vonk-production-alias-evidence"
-          test ! -e "$evidence_dir"
-          install -d -m 0700 "$evidence_dir"
-          for asset in \
-            vonk-forge-images.env \
-            vonk-forge-images.env.sha256; do
-            mapfile -t asset_urls < <(
-              jq -r --arg tag "$target_tag" --arg asset "$asset" '
-                [.[] | select(
-                  .tag_name == $tag and .immutable == true
-                )] as $releases
-                | if ($releases | length) == 1 then
-                    $releases[0].assets[] | select(.name == $asset)
-                    | .browser_download_url
-                  else empty end
-              ' "$releases_json"
-            )
-            [[ "${#asset_urls[@]}" -eq 1 ]]
-            curl --fail --silent --show-error --location \
-              --proto '=https' --proto-redir '=https' --tlsv1.2 \
-              "${asset_urls[0]}" --output "$evidence_dir/$asset"
-          done
-          printf '%s\n' \
-            "target_tag=$target_tag" \
-            "target_tag_oid=$target_tag_oid" \
-            "target_commit=$target_commit" \
-            >> "$GITHUB_OUTPUT"
-
-      - name: Revalidate selected authority before evidence credentials
-        shell: bash
-        env:
-          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
-          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
-          TARGET_TAG_OID: ${{ steps.target.outputs.target_tag_oid }}
-        run: |
-          set -euo pipefail
-          scripts/verify-release-tag-authority \
-            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
-
-      - name: Bind release digests to selected source revision and evidence
-        id: evidence
-        shell: bash
-        env:
-          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
-          EVIDENCE_DIR: ${{ runner.temp }}/vonk-production-alias-evidence
-          GH_TOKEN: ${{ github.token }}
-          HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
-          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
-          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
-          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
-        run: |
-          set -euo pipefail
-          gh release verify "$TARGET_TAG" \
-            --repo "$GITHUB_REPOSITORY" >/dev/null
-          for asset in \
-            vonk-forge-images.env \
-            vonk-forge-images.env.sha256; do
-            test -f "$EVIDENCE_DIR/$asset" && test ! -L "$EVIDENCE_DIR/$asset"
-            gh release verify-asset "$TARGET_TAG" \
-              "$EVIDENCE_DIR/$asset" \
-              --repo "$GITHUB_REPOSITORY" >/dev/null
-          done
-
-          mapfile -t checksum_lines \
-            < "$EVIDENCE_DIR/vonk-forge-images.env.sha256"
-          [[ "${#checksum_lines[@]}" -eq 1 ]]
-          read -r expected_hash expected_name <<<"${checksum_lines[0]}"
-          [[ "$expected_hash" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$expected_name" == vonk-forge-images.env ]]
-          actual_hash=$(sha256sum "$EVIDENCE_DIR/vonk-forge-images.env")
-          [[ "${actual_hash%% *}" == "$expected_hash" ]]
-          declare -A release_images=()
-          while IFS='=' read -r key value; do
-            [[ -n "$key" && -n "$value" ]]
-            [[ -z "${release_images[$key]+present}" ]]
-            case "$key" in
-              CONTROL_API_IMAGE|CONTROL_WORKER_IMAGE|HERMES_AGENT_IMAGE)
-                release_images["$key"]=$value
-                ;;
-              *)
-                exit 1
-                ;;
-            esac
-          done < "$EVIDENCE_DIR/vonk-forge-images.env"
-          [[ "${#release_images[@]}" -eq 3 ]]
-          target_version=${TARGET_TAG#v}
-          api_reference=${release_images[CONTROL_API_IMAGE]}
-          worker_reference=${release_images[CONTROL_WORKER_IMAGE]}
-          hermes_reference=${release_images[HERMES_AGENT_IMAGE]}
-          [[ "$api_reference" == "$API_IMAGE:$TARGET_TAG@"sha256:* ]]
-          [[ "$worker_reference" == "$WORKER_IMAGE:$TARGET_TAG@"sha256:* ]]
-          [[ "$hermes_reference" == "$HERMES_IMAGE:$target_version@"sha256:* ]]
-          api_digest=${api_reference##*@}
-          worker_digest=${worker_reference##*@}
-          hermes_digest=${hermes_reference##*@}
-          [[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$worker_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-
-          for role in api worker hermes; do
-            case "$role" in
-              api)
-                image=$API_IMAGE; digest=$api_digest; tag=$TARGET_TAG
-                ;;
-              worker)
-                image=$WORKER_IMAGE; digest=$worker_digest; tag=$TARGET_TAG
-                ;;
-              hermes)
-                image=$HERMES_IMAGE; digest=$hermes_digest; tag=$target_version
-                ;;
-            esac
-            [[ $(skopeo inspect --format '{{.Digest}}' \
-              "docker://$image:$tag") == "$digest" ]]
-            skopeo inspect --config "docker://$image@$digest" \
-              | jq -e --arg revision "$TARGET_COMMIT" \
-                '.config.Labels["org.opencontainers.image.revision"] == $revision' \
-                >/dev/null
-            docker buildx imagetools inspect "$image@$digest" \
-              --format '{{ json .Provenance }}' \
-              | jq -e --arg revision "$TARGET_COMMIT" \
-                '([.. | strings | select(. == $revision)] | length > 0)' \
-                >/dev/null
-            if [[ "$role" != hermes ]]; then
-              gh attestation verify "oci://$image@$digest" \
-                --repo "$GITHUB_REPOSITORY" \
-                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/dev-images.yml" \
-                --signer-digest "$TARGET_COMMIT" \
-                --source-digest "$TARGET_COMMIT" \
-                --source-ref refs/heads/main \
-                --deny-self-hosted-runners >/dev/null
-            fi
-          done
-          printf '%s\n' \
-            "target_version=$target_version" \
-            "api_digest=$api_digest" \
-            "worker_digest=$worker_digest" \
-            "hermes_digest=$hermes_digest" \
-            >> "$GITHUB_OUTPUT"
-
-      - name: Revalidate selected authority before registry authentication
-        shell: bash
-        env:
-          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
-          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
-          TARGET_TAG_OID: ${{ steps.target.outputs.target_tag_oid }}
-        run: |
-          set -euo pipefail
-          scripts/verify-release-tag-authority \
-            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
-
-      - name: Log in to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Reconcile the newest completed production release
-        shell: bash
-        env:
-          API_DIGEST: ${{ steps.evidence.outputs.api_digest }}
-          API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}
-          HERMES_DIGEST: ${{ steps.evidence.outputs.hermes_digest }}
-          HERMES_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
-          LATEST_ALIAS: ${{ needs.release-metadata.outputs.latest_alias }}
-          TARGET_COMMIT: ${{ steps.target.outputs.target_commit }}
-          TARGET_TAG: ${{ steps.target.outputs.target_tag }}
-          TARGET_TAG_OID: ${{ steps.target.outputs.target_tag_oid }}
-          TARGET_VERSION: ${{ steps.evidence.outputs.target_version }}
-          WORKER_DIGEST: ${{ steps.evidence.outputs.worker_digest }}
-          WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}
-        run: |
-          set -euo pipefail
-          scripts/verify-release-tag-authority \
-            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
-          [[ $(skopeo inspect --format '{{.Digest}}' \
-            "docker://$API_IMAGE:$TARGET_TAG") == "$API_DIGEST" ]]
-          [[ $(skopeo inspect --format '{{.Digest}}' \
-            "docker://$WORKER_IMAGE:$TARGET_TAG") == "$WORKER_DIGEST" ]]
-          [[ $(skopeo inspect --format '{{.Digest}}' \
-            "docker://$HERMES_IMAGE:$TARGET_VERSION") == "$HERMES_DIGEST" ]]
-          scripts/promote-image-aliases \
-            "$API_IMAGE" "$API_DIGEST" \
-            "$WORKER_IMAGE" "$WORKER_DIGEST" "$LATEST_ALIAS" \
-            "$HERMES_IMAGE" "$HERMES_DIGEST" \
-            --postcondition scripts/verify-production-alias-postconditions \
-            "$TARGET_TAG" "$TARGET_TAG_OID" "$TARGET_COMMIT"
-
   publish-apt:
-    name: Publish verified AMD64 and ARM64 agent packages to apt
-    needs: [release-metadata, build-agent-package, native-amd64-agent-lifecycle, release-manifest]
+    name: Publish verified ARM64 Spark agent package to apt
+    needs: [release-metadata, build-agent-package, release-manifest]
     if: needs.release-manifest.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1399,6 +1370,7 @@ jobs:
     concurrency:
       group: vonk-forge-agent-apt-stable
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:
@@ -1407,13 +1379,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Publish verified AMD64 and ARM64 agent packages
+      - name: Publish verified ARM64 Spark agent package
         uses: ./.github/actions/agent-apt-publish
         with:
           channel: stable
           version: ${{ needs.build-agent-package.outputs.version }}
           arm64_package: ${{ needs.build-agent-package.outputs.arm64_package }}
-          amd64_package: ${{ needs.build-agent-package.outputs.amd64_package }}
           artifact_name: ${{ needs.build-agent-package.outputs.artifact_name }}
           environment: apt-release
           source_sha: ${{ github.sha }}

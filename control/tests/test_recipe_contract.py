@@ -80,7 +80,10 @@ def test_recipe_has_one_topology_and_exact_bindings() -> None:
     }
 
 
-def test_recipe_build_options_are_closed_and_unsafe_podman_args_are_absent() -> None:
+@pytest.mark.parametrize("capability", ["SYS_ADMIN", "SYS_CHROOT", "SYS_PTRACE"])
+def test_recipe_build_options_are_closed_and_unsafe_podman_args_are_absent(
+    capability: str,
+) -> None:
     document = recipe_document()
     document["build"]["options"]["device"] = "/dev/nvidia0"
 
@@ -88,7 +91,7 @@ def test_recipe_build_options_are_closed_and_unsafe_podman_args_are_absent() -> 
         validate_recipe(document)
 
     document = recipe_document()
-    document["build"]["security"]["capabilities"] = ["SYS_ADMIN"]
+    document["build"]["security"]["capabilities"] = [capability]
 
     with pytest.raises(RecipeContractError):
         validate_recipe(document)

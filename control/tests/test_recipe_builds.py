@@ -82,6 +82,11 @@ class RecordingQueue:
         pass
 
 
+def test_build_disk_reserve_scales_to_the_spark_cap() -> None:
+    assert recipe_builds_module._build_disk_reserve(100 * 1024**3) == 4 * 1024**3
+    assert recipe_builds_module._build_disk_reserve(4 * 1024**4) == 64 * 1024**3
+
+
 def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
     engine = create_engine(f"sqlite:///{tmp_path / 'build.sqlite'}")
     Base.metadata.create_all(engine)
@@ -148,8 +153,8 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
         InventorySnapshotInput(
             node_id,
             now,
-            8 * 1024 * 1024 * 1024,
-            7 * 1024 * 1024 * 1024,
+            2 * 1024**4,
+            1 * 1024**4,
             100_000,
             80_000,
             100_000,
@@ -293,7 +298,7 @@ def test_build_plan_passes_the_installed_agent_claim_boundary(tmp_path: Path) ->
         fence="00000000-0000-4000-8000-000000000003",
         node_id=node_id,
         operation=ProtocolOperation.RECIPE_BUILD,
-        authority_revision="a"  * 64,
+        authority_revision="a" * 64,
         payload_digest=payload_digest,
         payload=plan.agent_payload,
         deadline=now,
@@ -339,10 +344,12 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
     assert [(item.kind, item.amount_bytes) for item in reservations] == [
         (
             "disk",
-            plan.agent_payload["limits"]["temporary_bytes"]
-            + plan.agent_payload["source_bundle_bytes"]
-            + plan.agent_payload["limits"]["output_bytes"]
-            + plan.agent_payload["base_image_storage_bytes"],
+            max(
+                plan.agent_payload["limits"]["temporary_bytes"],
+                plan.agent_payload["source_bundle_bytes"]
+                + plan.agent_payload["limits"]["output_bytes"]
+                + plan.agent_payload["base_image_storage_bytes"],
+            ),
         ),
         ("host-memory", plan.agent_payload["limits"]["memory_bytes"]),
     ]
@@ -580,16 +587,21 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
         role["resources"]["disk"]["image_bytes"]
         for role in revision.document["topology"]["roles"]
     )
-    peak_bytes = temporary_bytes + source_bytes + output_bytes
-    # This inventory has enough capacity for staging + source, but not for the
-    # simultaneous OCI export that the builder retains before promotion.
+    base_image_bytes = revision.document["build"]["resources"]["download_bytes"]
+    peak_bytes = max(temporary_bytes, base_image_bytes + source_bytes + output_bytes)
+    disk_total_bytes = 2 * 1024**4
+    required_bytes = peak_bytes + recipe_builds_module._build_disk_reserve(
+        disk_total_bytes
+    )
+    # The envelope itself fits, but accepting it would violate the filesystem
+    # reserve retained for the Spark host.
     newer = now + timedelta(seconds=1)
     InventoryRepository(sessions, clock=lambda: newer).record(
         InventorySnapshotInput(
             node_id,
             newer,
-            peak_bytes,
-            peak_bytes - 1,
+            disk_total_bytes,
+            required_bytes - 1,
             100_000,
             80_000,
             100_000,
@@ -642,8 +654,8 @@ def test_public_build_rejects_stale_inventory_without_egress_capability(
         InventorySnapshotInput(
             node_id,
             newer,
-            8 * 1024 * 1024 * 1024,
-            7 * 1024 * 1024 * 1024,
+            2 * 1024**4,
+            1 * 1024**4,
             100_000,
             80_000,
             100_000,

@@ -1346,27 +1346,28 @@ fn validate_build(value: &RecipeBuildRequest) -> bool {
             .arguments
             .iter()
             .all(|argument| valid_name(&argument.name) && valid_scalar(&argument.value))
-        && value.capabilities.len() <= 12
+        && value.capabilities.len() <= 11
         && value
             .capabilities
             .iter()
             .enumerate()
             .all(|(index, capability)| {
-                matches!(
-                    capability.as_str(),
-                    "CHOWN"
-                        | "DAC_OVERRIDE"
-                        | "FOWNER"
-                        | "FSETID"
-                        | "KILL"
-                        | "MKNOD"
-                        | "NET_BIND_SERVICE"
-                        | "SETFCAP"
-                        | "SETGID"
-                        | "SETPCAP"
-                        | "SETUID"
-                        | "SYS_CHROOT"
-                ) && !value.capabilities[..index].contains(capability)
+                !capability.starts_with("SYS_")
+                    && matches!(
+                        capability.as_str(),
+                        "CHOWN"
+                            | "DAC_OVERRIDE"
+                            | "FOWNER"
+                            | "FSETID"
+                            | "KILL"
+                            | "MKNOD"
+                            | "NET_BIND_SERVICE"
+                            | "SETFCAP"
+                            | "SETGID"
+                            | "SETPCAP"
+                            | "SETUID"
+                    )
+                    && !value.capabilities[..index].contains(capability)
             })
         && value.base_images.len() <= 8
         && value.base_images.iter().enumerate().all(|(index, image)| {

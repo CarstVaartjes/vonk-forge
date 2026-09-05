@@ -20,6 +20,7 @@ from vonk_control.catalog_api import (
     PublicRecipeDiskRequirements,
     PublicRecipeTopologyRole,
     _canonical_source_repository,
+    _public_recipe_alignment,
     _public_recipe_execution_readiness,
     _public_recipe_qualification,
     install_catalog_routes,
@@ -76,6 +77,14 @@ def test_public_recipe_topology_role_matches_canonical_recipe_name_and_count(
 
     assert role.name == name
     assert role.count == count
+
+
+def test_public_recipe_alignment_is_owned_by_the_recipe() -> None:
+    assert _public_recipe_alignment({"metadata": {}}) == "unspecified"
+    assert (
+        _public_recipe_alignment({"metadata": {"alignment": "abliterated"}})
+        == "abliterated"
+    )
 
 
 def _catalog_app(

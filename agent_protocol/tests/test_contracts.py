@@ -378,6 +378,17 @@ def test_recipe_build_claim_matches_shared_cross_language_vectors() -> None:
                 AgentClaim.parse(raw)
 
 
+@pytest.mark.parametrize("capability", ["SYS_ADMIN", "SYS_CHROOT", "SYS_PTRACE"])
+def test_recipe_build_claim_rejects_every_sys_capability(capability: str) -> None:
+    vectors = recipe_build_vectors()
+    payload = deepcopy(vectors["base_payload"])
+    assert isinstance(payload, dict)
+    payload["capabilities"] = [capability]
+
+    with pytest.raises(AgentProtocolError, match="capabilities are not allowed"):
+        AgentClaim.parse(claim_for_operation("recipe.build.v1", payload))
+
+
 @pytest.mark.parametrize(
     "payload",
     [

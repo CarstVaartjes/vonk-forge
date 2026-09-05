@@ -9,7 +9,7 @@ use std::{
         fs::{MetadataExt, PermissionsExt},
     },
     path::Path,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::Serialize;
@@ -22,11 +22,14 @@ use vonk_agent_protocol::RecipeBuildRequest;
 use crate::{
     base_images::{BaseImageError, BaseImageStore},
     build_source::{BuildSourceError, materialize_source_bundle},
-    process::{ProcessError, ProcessInputBounds, ProcessOutputBounds, ProcessRunner, Program},
+    inventory::available_disk_bytes,
+    process::{ProcessDiskReserve, ProcessError, ProcessRunner, Program},
     source_policy::{SourcePolicyReport, dockerfile_base_images, inspect_build_source},
 };
 
 const MAX_EGRESS_BINARY_BYTES: u64 = 16 * 1024 * 1024;
+const MINIMUM_BUILD_DISK_RESERVE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MAXIMUM_BUILD_DISK_RESERVE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum RecipeBuildError {
@@ -50,8 +53,8 @@ pub enum RecipeBuildError {
     BaseImageImport { diagnostic: PodmanImportDiagnostic },
     #[error("Podman imported base image evidence is invalid")]
     BaseImageInspect,
-    #[error("Podman recipe image build failed")]
-    ImageBuild,
+    #[error("Podman recipe image build failed ({diagnostic})")]
+    ImageBuild { diagnostic: PodmanBuildDiagnostic },
     #[error("built recipe image evidence is invalid")]
     ImageInspect,
     #[error("Podman could not export the built recipe image")]
@@ -82,6 +85,37 @@ pub enum PodmanImportDiagnostic {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PodmanBuildDiagnostic {
+    TemporaryStorageExhausted,
+    SubordinateIdMappingUnavailable,
+    UserNamespaceDenied,
+    ProcMountDenied,
+    PermissionDenied,
+    MemoryLimitExceeded,
+    StorageDriverFailure,
+    SystemdScopeFailure,
+    NonzeroWithoutOutput,
+    Unknown,
+}
+
+impl fmt::Display for PodmanBuildDiagnostic {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::TemporaryStorageExhausted => "temporary-storage-exhausted",
+            Self::SubordinateIdMappingUnavailable => "subordinate-id-mapping-unavailable",
+            Self::UserNamespaceDenied => "user-namespace-denied",
+            Self::ProcMountDenied => "proc-mount-denied",
+            Self::PermissionDenied => "permission-denied",
+            Self::MemoryLimitExceeded => "memory-limit-exceeded",
+            Self::StorageDriverFailure => "storage-driver-failure",
+            Self::SystemdScopeFailure => "systemd-scope-failure",
+            Self::NonzeroWithoutOutput => "nonzero-without-output",
+            Self::Unknown => "unclassified-podman-build-failure",
+        })
+    }
+}
+
 impl fmt::Display for PodmanImportDiagnostic {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
@@ -101,13 +135,33 @@ impl fmt::Display for PodmanImportDiagnostic {
 impl RecipeBuildError {
     pub(crate) fn failure_evidence(&self) -> serde_json::Value {
         match self {
+            Self::Process(error) => serde_json::json!({
+                "diagnostic": process_error_diagnostic(error),
+                "reason": self.to_string(),
+                "stage": "bounded-build-process",
+            }),
             Self::BaseImageImport { diagnostic } => serde_json::json!({
                 "diagnostic": diagnostic.to_string(),
                 "reason": self.to_string(),
                 "stage": "base-image-import",
             }),
+            Self::ImageBuild { diagnostic } => serde_json::json!({
+                "diagnostic": diagnostic.to_string(),
+                "reason": self.to_string(),
+                "stage": "image-build",
+            }),
             _ => serde_json::json!({"reason": self.to_string()}),
         }
+    }
+}
+
+fn process_error_diagnostic(error: &ProcessError) -> &'static str {
+    match error {
+        ProcessError::Io(_) => "subprocess-unavailable",
+        ProcessError::Timeout => "deadline-exceeded",
+        ProcessError::OutputLimit => "diagnostic-output-limit-exceeded",
+        ProcessError::StorageLimit => "declared-storage-limit-exceeded",
+        ProcessError::Cancelled => "controller-cancelled",
     }
 }
 
@@ -179,6 +233,9 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         if cancelled() {
             return Err(ProcessError::Cancelled.into());
         }
+        let deadline =
+            Instant::now() + Duration::from_secs(u64::from(request.limits.timeout_seconds));
+        let minimum_free_disk_bytes = ensure_build_disk_available(self.data_root, request)?;
         // `slirp4netns` only isolates the host network namespace; it does not
         // enforce a destination allowlist.  Never silently widen a declared
         // host policy into unrestricted egress. Public builds therefore get
@@ -216,6 +273,8 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         }
         fs::create_dir_all(&storage)?;
         fs::create_dir(&podman_image_tmp)?;
+        let podman_runtime = runroot.path().join("xdg");
+        fs::create_dir(&podman_runtime)?;
         let source = materialize_source_bundle(archive, &request.source_bundle_sha256, &context)?;
         let policy = inspect_build_source(&source.files, &request.dockerfile);
         if !policy.passed {
@@ -232,7 +291,14 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         {
             return Err(RecipeBuildError::Evidence);
         }
-        self.import_base_images(request, &storage, runroot.path(), cancelled)?;
+        self.import_base_images(
+            request,
+            &storage,
+            runroot.path(),
+            minimum_free_disk_bytes,
+            deadline,
+            cancelled,
+        )?;
         let egress = match network {
             BuildNetwork::None => None,
             BuildNetwork::Public => Some(BuildEgress::start(
@@ -244,19 +310,23 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
                     binary: self.egress_binary,
                     operation_id,
                     hosts: &request.network.hosts,
-                    staging_limit: build_staging_limit(request)?,
+                    minimum_free_disk_bytes,
+                    deadline,
                     cancelled,
                 },
             )?),
         };
         let tag = format!("localhost/vonk/recipe-build-{}", request.build_id);
-        // Rootless Podman 4.9 cannot reliably create a user-manager scope when
-        // invoked by the agent's system service. Start the build itself in a
-        // transient user scope, then let cgroupfs children inherit that
-        // scope's resource envelope.
+        // Start the build as a transient user service rather than a scope.
+        // A scope inherits this agent service's mount namespace, whose
+        // ProtectKernelTunables/ProtectKernelLogs procfs overmounts prevent a
+        // rootless OCI runtime from mounting the build container's /proc. The
+        // user manager starts a service from its clean mount namespace while
+        // cgroupfs children still inherit this resource envelope.
         let mut podman_arguments =
             podman_storage_arguments_with_cgroup_manager(&storage, runroot.path(), "cgroupfs");
         podman_arguments.extend([
+            "--runtime=/usr/bin/crun".to_owned(),
             "build".to_owned(),
             "--no-cache".to_owned(),
             "--pull=never".to_owned(),
@@ -367,34 +437,46 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         podman_arguments.push(context.display().to_string());
         let mut arguments = vec![
             "--user".to_owned(),
-            "--scope".to_owned(),
+            "--wait".to_owned(),
+            "--pipe".to_owned(),
             "--collect".to_owned(),
             "--quiet".to_owned(),
+            "--service-type=exec".to_owned(),
+            format!("--unit=vonk-recipe-build-{operation_id}"),
+            "--setenv=HOME=/var/lib/vonk-forge-agent".to_owned(),
+            "--setenv=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config".to_owned(),
+            "--setenv=XDG_DATA_HOME=/var/lib/vonk-forge-agent".to_owned(),
+            format!("--setenv=XDG_RUNTIME_DIR={}", podman_runtime.display()),
+            format!("--setenv=TMPDIR={}", podman_image_tmp.display()),
+            "--setenv=CONTAINERS_STORAGE_CONF=/etc/vonk-forge-agent/containers-storage.conf"
+                .to_owned(),
             format!("--property=MemoryMax={}", request.limits.memory_bytes),
             format!(
                 "--property=CPUQuota={}%",
                 u64::from(request.limits.cpu_cores) * 100
             ),
             format!("--property=TasksMax={}", request.limits.processes),
+            format!(
+                "--property=RuntimeMaxSec={}s",
+                request.limits.timeout_seconds
+            ),
+            "--property=TimeoutStopSec=5s".to_owned(),
+            "--property=KillMode=control-group".to_owned(),
             "/usr/bin/podman".to_owned(),
         ];
         arguments.extend(podman_arguments);
-        let timeout = Duration::from_secs(request.limits.timeout_seconds.into());
-        let output = self
-            .runner
-            .run_bounded_directory_with_output_limit_cancellable(
-                Program::SystemdRun,
-                &arguments,
-                timeout,
-                ProcessOutputBounds::new(
-                    staging.path(),
-                    build_staging_limit(request)?,
-                    request.limits.output_bytes,
-                ),
-                cancelled,
-            )?;
+        let timeout = remaining_build_time(deadline)?;
+        let output = self.runner.run_with_disk_reserve_cancellable(
+            Program::SystemdRun,
+            &arguments,
+            timeout,
+            ProcessDiskReserve::new(staging.path(), minimum_free_disk_bytes),
+            cancelled,
+        )?;
         if !output.success {
-            return Err(RecipeBuildError::ImageBuild);
+            return Err(RecipeBuildError::ImageBuild {
+                diagnostic: podman_build_diagnostic(&output),
+            });
         }
         let mut inspect_arguments = podman_storage_arguments(&storage, runroot.path());
         inspect_arguments.extend([
@@ -428,19 +510,13 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             // load path without exposing the daemon to the rootless builder.
             format!("docker-archive:{}", layout.display()),
         ]);
-        let saved = self
-            .runner
-            .run_bounded_directory_with_output_limit_cancellable(
-                Program::Podman,
-                &push_arguments,
-                Duration::from_secs(600),
-                ProcessOutputBounds::new(
-                    &operation_root,
-                    request.limits.temporary_bytes,
-                    request.limits.output_bytes,
-                ),
-                cancelled,
-            )?;
+        let saved = self.runner.run_with_disk_reserve_cancellable(
+            Program::Podman,
+            &push_arguments,
+            remaining_build_time(deadline)?,
+            ProcessDiskReserve::new(&operation_root, minimum_free_disk_bytes),
+            cancelled,
+        )?;
         if !saved.success {
             return Err(RecipeBuildError::ImageExport);
         }
@@ -453,15 +529,16 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         }) {
             return Err(RecipeBuildError::Evidence);
         }
-        let image_bytes = fs::metadata(&layout)?.len();
+        let image_metadata = fs::symlink_metadata(&layout)?;
+        if !image_metadata.is_file() || image_metadata.file_type().is_symlink() {
+            return Err(RecipeBuildError::Evidence);
+        }
+        let image_bytes = image_metadata.len();
         if image_bytes == 0 {
             return Err(RecipeBuildError::Evidence);
         }
         if image_bytes > request.limits.output_bytes {
             return Err(RecipeBuildError::OutputLimit);
-        }
-        if image_bytes > request.limits.temporary_bytes {
-            return Err(RecipeBuildError::Process(ProcessError::StorageLimit));
         }
         let oci_layout_sha256 = sha256_file(&layout)?;
         let mut remove_arguments = podman_storage_arguments(&storage, runroot.path());
@@ -485,6 +562,8 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
         request: &RecipeBuildRequest,
         storage: &Path,
         runroot: &Path,
+        minimum_free_disk_bytes: u64,
+        deadline: Instant,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<(), RecipeBuildError> {
         if request.base_images.is_empty() {
@@ -517,14 +596,14 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             load_arguments.extend(["load".to_owned(), "--quiet".to_owned()]);
             let loaded = self
                 .runner
-                .run_bounded_directory_with_input_cancellable(
+                .run_with_input_disk_reserve_cancellable(
                     Program::Podman,
                     &load_arguments,
-                    Duration::from_secs(600),
-                    ProcessInputBounds::new(
-                        &archive.file,
+                    remaining_build_time(deadline)?,
+                    &archive.file,
+                    ProcessDiskReserve::new(
                         storage.parent().ok_or(RecipeBuildError::Evidence)?,
-                        build_staging_limit(request)?,
+                        minimum_free_disk_bytes,
                     ),
                     cancelled,
                 )
@@ -552,12 +631,72 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
     }
 }
 
-fn build_staging_limit(request: &RecipeBuildRequest) -> Result<u64, RecipeBuildError> {
-    request
+fn build_disk_envelope(request: &RecipeBuildRequest) -> Result<u64, RecipeBuildError> {
+    let retained_inputs_and_output = request
         .base_image_storage_bytes
-        .checked_add(request.limits.temporary_bytes)
-        .and_then(|bytes| bytes.checked_add(request.source_bundle_bytes))
+        .checked_add(request.source_bundle_bytes)
+        .and_then(|bytes| bytes.checked_add(request.limits.output_bytes))
+        .ok_or(RecipeBuildError::Evidence)?;
+    Ok(request
+        .limits
+        .temporary_bytes
+        .max(retained_inputs_and_output))
+}
+
+fn required_build_disk(
+    request: &RecipeBuildRequest,
+    minimum_free_disk_bytes: u64,
+) -> Result<u64, RecipeBuildError> {
+    build_disk_envelope(request)?
+        .checked_add(minimum_free_disk_bytes)
         .ok_or(RecipeBuildError::Evidence)
+}
+
+fn ensure_build_disk_available(
+    data_root: &Path,
+    request: &RecipeBuildRequest,
+) -> Result<u64, RecipeBuildError> {
+    let minimum_free_disk_bytes = build_disk_reserve(data_root)?;
+    let available = available_disk_bytes(data_root).map_err(|_| {
+        RecipeBuildError::Process(ProcessError::Io(std::io::Error::other(
+            "filesystem capacity is unavailable",
+        )))
+    })?;
+    if available < required_build_disk(request, minimum_free_disk_bytes)? {
+        return Err(ProcessError::StorageLimit.into());
+    }
+    Ok(minimum_free_disk_bytes)
+}
+
+fn build_disk_reserve(data_root: &Path) -> Result<u64, RecipeBuildError> {
+    let filesystem = rustix::fs::statvfs(data_root).map_err(|_| {
+        RecipeBuildError::Process(ProcessError::Io(std::io::Error::other(
+            "filesystem capacity is unavailable",
+        )))
+    })?;
+    let total = filesystem
+        .f_blocks
+        .checked_mul(filesystem.f_frsize)
+        .ok_or(RecipeBuildError::Evidence)?;
+    // Two percent reaches the 64 GiB cap on the Sparks while scaling down for
+    // disposable development filesystems and future smaller builders.
+    Ok((total / 50)
+        .clamp(
+            MINIMUM_BUILD_DISK_RESERVE_BYTES,
+            MAXIMUM_BUILD_DISK_RESERVE_BYTES,
+        )
+        .min(total / 4))
+}
+
+fn remaining_build_time(deadline: Instant) -> Result<Duration, RecipeBuildError> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(|| ProcessError::Timeout.into())
+}
+
+fn phase_time(deadline: Instant, maximum: Duration) -> Result<Duration, RecipeBuildError> {
+    Ok(remaining_build_time(deadline)?.min(maximum))
 }
 
 fn podman_import_diagnostic(output: &crate::process::ProcessOutput) -> PodmanImportDiagnostic {
@@ -588,6 +727,66 @@ fn podman_import_diagnostic(output: &crate::process::ProcessOutput) -> PodmanImp
         PodmanImportDiagnostic::ArchiveFormatRejected
     } else {
         PodmanImportDiagnostic::Unknown
+    }
+}
+
+fn podman_build_diagnostic(output: &crate::process::ProcessOutput) -> PodmanBuildDiagnostic {
+    let mut evidence = Vec::with_capacity(output.stdout.len() + output.stderr.len() + 1);
+    evidence.extend_from_slice(&output.stdout);
+    evidence.push(b'\n');
+    evidence.extend_from_slice(&output.stderr);
+    let evidence = String::from_utf8_lossy(&evidence).to_ascii_lowercase();
+    if output.stdout.is_empty() && output.stderr.is_empty() {
+        PodmanBuildDiagnostic::NonzeroWithoutOutput
+    } else if evidence.contains("no space left on device")
+        || evidence.contains("disk quota exceeded")
+    {
+        PodmanBuildDiagnostic::TemporaryStorageExhausted
+    } else if evidence.contains("insufficient uids or gids")
+        || evidence.contains("subuid")
+        || evidence.contains("subgid")
+        || evidence.contains("newuidmap")
+        || evidence.contains("newgidmap")
+        || evidence.contains("lchown")
+    {
+        PodmanBuildDiagnostic::SubordinateIdMappingUnavailable
+    } else if (evidence.contains("apparmor") && evidence.contains("denied"))
+        || evidence.contains("user namespace is not enabled")
+        || evidence.contains("user namespaces are not enabled")
+        || evidence.contains("cannot clone: operation not permitted")
+    {
+        PodmanBuildDiagnostic::UserNamespaceDenied
+    } else if (evidence.contains("mount `proc`")
+        || evidence.contains("mount 'proc'")
+        || evidence.contains("mount \"proc\"")
+        || evidence.contains("mount proc to proc"))
+        && (evidence.contains("permission denied") || evidence.contains("operation not permitted"))
+    {
+        PodmanBuildDiagnostic::ProcMountDenied
+    } else if evidence.contains("permission denied") || evidence.contains("operation not permitted")
+    {
+        PodmanBuildDiagnostic::PermissionDenied
+    } else if evidence.contains("out of memory")
+        || evidence.contains("memory limit")
+        || evidence.contains("oom-kill")
+        || evidence.contains("signal: killed")
+    {
+        PodmanBuildDiagnostic::MemoryLimitExceeded
+    } else if evidence.contains("fuse-overlayfs")
+        || evidence.contains("overlay mount")
+        || evidence.contains("error committing")
+        || evidence.contains("writing blob")
+        || evidence.contains("storage driver")
+    {
+        PodmanBuildDiagnostic::StorageDriverFailure
+    } else if evidence.contains("transient scope")
+        || evidence.contains("scope unit")
+        || evidence.contains("systemd-run")
+        || evidence.contains("failed with result")
+    {
+        PodmanBuildDiagnostic::SystemdScopeFailure
+    } else {
+        PodmanBuildDiagnostic::Unknown
     }
 }
 
@@ -668,7 +867,8 @@ struct BuildEgressStart<'a> {
     binary: &'a Path,
     operation_id: Uuid,
     hosts: &'a [String],
-    staging_limit: u64,
+    minimum_free_disk_bytes: u64,
+    deadline: Instant,
     cancelled: &'a dyn Fn() -> bool,
 }
 
@@ -701,8 +901,8 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             ],
             &rootfs,
             context.staging,
-            context.staging_limit,
-            Duration::from_secs(120),
+            context.minimum_free_disk_bytes,
+            phase_time(context.deadline, Duration::from_secs(120))?,
             context.cancelled,
         )?;
         if !imported.success {
@@ -721,8 +921,11 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
                 result.outbound_network.clone(),
             ],
         ] {
-            let output =
-                result.run_cancellable(&arguments, Duration::from_secs(30), context.cancelled)?;
+            let output = result.run_cancellable(
+                &arguments,
+                phase_time(context.deadline, Duration::from_secs(30))?,
+                context.cancelled,
+            )?;
             if !output.success {
                 return Err(RecipeBuildError::NetworkPolicy);
             }
@@ -748,8 +951,11 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
             arguments.push("--allow-host".to_owned());
             arguments.push(host.clone());
         }
-        let started =
-            result.run_cancellable(&arguments, Duration::from_secs(30), context.cancelled)?;
+        let started = result.run_cancellable(
+            &arguments,
+            phase_time(context.deadline, Duration::from_secs(30))?,
+            context.cancelled,
+        )?;
         if !started.success {
             return Err(RecipeBuildError::NetworkPolicy);
         }
@@ -760,7 +966,7 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
                 "/vonk-build-egress".to_owned(),
                 "--probe".to_owned(),
             ],
-            Duration::from_secs(10),
+            phase_time(context.deadline, Duration::from_secs(10))?,
             context.cancelled,
         )?;
         if !probed.success {
@@ -799,19 +1005,20 @@ impl<'a, R: ProcessRunner> BuildEgress<'a, R> {
         &self,
         extra: &[&str],
         path: &Path,
-        monitored_directory: &Path,
-        maximum_bytes: u64,
+        filesystem: &Path,
+        minimum_free_bytes: u64,
         timeout: Duration,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<crate::process::ProcessOutput, ProcessError> {
         let mut arguments = self.arguments();
         arguments.extend(extra.iter().map(|value| (*value).to_owned()));
         let file = File::open(path)?;
-        self.runner.run_bounded_directory_with_input_cancellable(
+        self.runner.run_with_input_disk_reserve_cancellable(
             Program::Podman,
             &arguments,
             timeout,
-            ProcessInputBounds::new(&file, monitored_directory, maximum_bytes),
+            &file,
+            ProcessDiskReserve::new(filesystem, minimum_free_bytes),
             cancelled,
         )
     }
@@ -972,8 +1179,63 @@ fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RecipeBuildError, podman_import_process_error};
-    use crate::process::ProcessError;
+    use super::{RecipeBuildError, podman_build_diagnostic, podman_import_process_error};
+    use crate::process::{ProcessError, ProcessOutput};
+
+    #[test]
+    fn podman_build_failures_have_stable_secret_free_diagnostics() {
+        for (stdout, stderr, diagnostic) in [
+            (b"".as_slice(), b"".as_slice(), "nonzero-without-output"),
+            (
+                b"".as_slice(),
+                b"write /private/secret: no space left on device".as_slice(),
+                "temporary-storage-exhausted",
+            ),
+            (
+                b"".as_slice(),
+                b"fuse-overlayfs: operation failed for /private/secret".as_slice(),
+                "storage-driver-failure",
+            ),
+            (
+                b"".as_slice(),
+                b"Failed to start transient scope unit".as_slice(),
+                "systemd-scope-failure",
+            ),
+            (
+                b"".as_slice(),
+                b"apparmor=\"DENIED\" operation=\"userns_create\" profile=\"podman\"".as_slice(),
+                "user-namespace-denied",
+            ),
+            (
+                b"".as_slice(),
+                b"mount `proc` to `proc`: Operation not permitted".as_slice(),
+                "proc-mount-denied",
+            ),
+            (
+                b"".as_slice(),
+                b"open /private/secret: permission denied".as_slice(),
+                "permission-denied",
+            ),
+            (
+                b"opaque /private/secret".as_slice(),
+                b"".as_slice(),
+                "unclassified-podman-build-failure",
+            ),
+        ] {
+            let classified = podman_build_diagnostic(&ProcessOutput {
+                success: false,
+                stdout: stdout.to_vec(),
+                stderr: stderr.to_vec(),
+            });
+            let error = RecipeBuildError::ImageBuild {
+                diagnostic: classified,
+            };
+            assert_eq!(error.failure_evidence()["stage"], "image-build");
+            assert_eq!(error.failure_evidence()["diagnostic"], diagnostic);
+            assert!(!error.failure_evidence().to_string().contains("private"));
+            assert!(!error.failure_evidence().to_string().contains("secret"));
+        }
+    }
 
     #[test]
     fn podman_import_process_failures_have_stable_secret_free_evidence() {
@@ -998,6 +1260,32 @@ mod tests {
             assert_eq!(error.failure_evidence()["diagnostic"], diagnostic);
             assert!(!error.failure_evidence().to_string().contains("private"));
             assert!(!error.failure_evidence().to_string().contains("secret"));
+        }
+    }
+
+    #[test]
+    fn bounded_build_process_failures_have_stable_secret_free_evidence() {
+        for (error, diagnostic) in [
+            (
+                ProcessError::StorageLimit,
+                "declared-storage-limit-exceeded",
+            ),
+            (ProcessError::Timeout, "deadline-exceeded"),
+            (
+                ProcessError::OutputLimit,
+                "diagnostic-output-limit-exceeded",
+            ),
+            (
+                ProcessError::Io(std::io::Error::other("/private/secret")),
+                "subprocess-unavailable",
+            ),
+            (ProcessError::Cancelled, "controller-cancelled"),
+        ] {
+            let evidence = RecipeBuildError::Process(error).failure_evidence();
+            assert_eq!(evidence["stage"], "bounded-build-process");
+            assert_eq!(evidence["diagnostic"], diagnostic);
+            assert!(!evidence.to_string().contains("private"));
+            assert!(!evidence.to_string().contains("secret"));
         }
     }
 }

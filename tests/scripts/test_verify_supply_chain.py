@@ -2,6 +2,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ def _copy(tmp_path: Path) -> Path:
     target = tmp_path / "repo"
     for path in (
         ".github/workflows/ci.yml",
+        "scripts/select-ci-areas",
         ".github/workflows/agent-apt-development.yml",
         ".github/workflows/agent-release.yml",
         ".github/actions/agent-package-build/action.yml",
@@ -21,6 +23,7 @@ def _copy(tmp_path: Path) -> Path:
         ".github/actions/agent-package-security/action.yml",
         ".github/actions/agent-apt-publish/action.yml",
         ".github/workflows/dev-images.yml",
+        ".github/workflows/installer-publication-source.yml",
         ".github/workflows/installer-publication.yml",
         ".github/workflows/installer-setups.yml",
         ".github/workflows/workload-artifacts.yml",
@@ -69,6 +72,7 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/hermes-agent/compose.yaml",
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
+        "deploy/compose/litellm/Dockerfile",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/config_supervisor.py",
         "deploy/compose/litellm/entrypoint.sh",
@@ -106,6 +110,8 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/verify-agent-binaries",
         "scripts/verify-agent-systemd",
         "scripts/verify-supply-chain",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/accept-recipe",
         "scripts/run-development-slices",
         "scripts/qualify-recipe",
@@ -224,6 +230,8 @@ def test_supply_chain_manifest_binds_installer_publication_contract(
     (
         ".github/workflows/workload-artifacts.yml",
         "schemas/workload-artifact-build.schema.json",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/workload-artifact-metadata",
     ),
 )
@@ -235,6 +243,8 @@ def test_supply_chain_manifest_binds_workload_artifact_publication_contract(
     for required in (
         ".github/workflows/workload-artifacts.yml",
         "schemas/workload-artifact-build.schema.json",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/workload-artifact-metadata",
     ):
         candidate = repository / required
@@ -360,7 +370,7 @@ def test_verifier_does_not_require_cluster_profiles_to_be_installed(
     repository = _copy(tmp_path)
 
     result = subprocess.run(
-        ["/usr/bin/python3", SCRIPT, "--root", repository, "--json"],
+        [sys.executable, "-I", SCRIPT, "--root", repository, "--json"],
         capture_output=True,
         text=True,
         check=False,
@@ -461,10 +471,15 @@ def test_image_lock_contains_the_pinned_hermes_build_base() -> None:
         "f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a"
     )
     assert "hermes-agent" not in lock["images"]
+    assert lock["build_bases"]["litellm"] == (
+        "ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:"
+        "f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2"
+    )
+    assert "litellm" not in lock["images"]
     assert not any("ai-devbox" in name for name in lock["build_bases"])
 
 
-def test_image_lock_declares_all_three_release_artifacts() -> None:
+def test_image_lock_declares_all_four_release_artifacts() -> None:
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
 
     assert lock["release_images"] == [
@@ -491,6 +506,14 @@ def test_image_lock_declares_all_three_release_artifacts() -> None:
             "package": "vonk-forge-hermes",
             "required": True,
             "target": "managed",
+        },
+        {
+            "context": "deploy/compose/litellm",
+            "dockerfile": "deploy/compose/litellm/Dockerfile",
+            "environment": "LITELLM_IMAGE",
+            "package": "vonk-forge-litellm",
+            "required": True,
+            "target": "runtime",
         },
     ]
 

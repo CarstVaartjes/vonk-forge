@@ -49,10 +49,6 @@ def _publication_graph() -> dict[str, object]:
         "generation": GENERATION,
         "images_sha256": "c" * 64,
         "packages": {
-            "linux-amd64": {
-                "baseline_sha256": "1" * 64,
-                "candidate_sha256": "2" * 64,
-            },
             "linux-arm64": {
                 "baseline_sha256": "3" * 64,
                 "candidate_sha256": "4" * 64,
@@ -61,7 +57,7 @@ def _publication_graph() -> dict[str, object]:
         "platform": "linux-arm64",
         "schema_version": 1,
         "source_sha": SOURCE_SHA,
-        "verified_platforms": ["linux-amd64", "linux-arm64"],
+        "verified_platforms": ["linux-arm64"],
     }
 
 
@@ -125,6 +121,30 @@ def _arm64_proof() -> dict[str, object]:
     }
 
 
+def test_arm64_requires_the_spark_lifecycle_boundary() -> None:
+    value = {"completed_phases": ARM64_PHASES, "proof": _arm64_proof()}
+
+    spark_lifecycle_contract.validate_lifecycle(
+        value,
+        platform="linux-arm64",
+        channel="dev",
+        version="1.2.3",
+        source_sha=SOURCE_SHA,
+        generation=GENERATION,
+    )
+
+    del value["proof"]["canary"]
+    with pytest.raises(spark_lifecycle_contract.ContractError):
+        spark_lifecycle_contract.validate_lifecycle(
+            value,
+            platform="linux-arm64",
+            channel="dev",
+            version="1.2.3",
+            source_sha=SOURCE_SHA,
+            generation=GENERATION,
+        )
+
+
 def _record(root: Path, relative: str, content: bytes) -> dict[str, object]:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,7 +164,7 @@ def _write_canonical(path: Path, document: object) -> None:
 def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
     objects = tmp_path / "objects"
     candidate_artifacts: dict[str, dict[str, object]] = {}
-    for platform in ("linux-amd64", "linux-arm64"):
+    for platform in ("linux-arm64",):
         package_path = (
             f"artifacts/dev/releases/{GENERATION}/spark/current/{platform}/"
             "vonk-forge-agent.deb"
@@ -171,7 +191,7 @@ def _graph_inputs(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, object]]:
             f"artifacts/dev/releases/{GENERATION}/acceptance-baseline/spark/current/{platform}/vonk-forge-agent.deb",
             f"baseline-{platform}".encode(),
         )
-        for platform in ("linux-amd64", "linux-arm64")
+        for platform in ("linux-arm64",)
     }
     common = {
         "channel": "dev",
@@ -230,14 +250,14 @@ def _graph_command(objects: Path, candidate: Path, baseline: Path) -> list[objec
         "--generation",
         GENERATION,
         "--platform",
-        "linux-amd64",
+        "linux-arm64",
     ]
 
 
-def test_publication_graph_binds_both_native_candidate_and_baseline_packages(
+def test_publication_graph_binds_arm64_candidate_and_baseline_packages(
     tmp_path: Path,
 ) -> None:
-    """Dropping either architecture from either immutable graph must break the gate."""
+    """Dropping ARM64 from either immutable graph must break the gate."""
     objects, candidate, baseline, common = _graph_inputs(tmp_path)
 
     result = subprocess.run(
@@ -249,10 +269,10 @@ def test_publication_graph_binds_both_native_candidate_and_baseline_packages(
 
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {
-        "baseline_package_sha256": hashlib.sha256(b"baseline-linux-amd64").hexdigest(),
+        "baseline_package_sha256": hashlib.sha256(b"baseline-linux-arm64").hexdigest(),
         "baseline_version": "1.2.2~acceptance.1+gbbbbbbbbbbbb",
         "candidate_package_sha256": hashlib.sha256(
-            b"candidate-linux-amd64"
+            b"candidate-linux-arm64"
         ).hexdigest(),
         "candidate_version": "1.2.3",
         "channel": "dev",
@@ -262,12 +282,6 @@ def test_publication_graph_binds_both_native_candidate_and_baseline_packages(
             + b"\n"
         ).hexdigest(),
         "packages": {
-            "linux-amd64": {
-                "baseline_sha256": hashlib.sha256(b"baseline-linux-amd64").hexdigest(),
-                "candidate_sha256": hashlib.sha256(
-                    b"candidate-linux-amd64"
-                ).hexdigest(),
-            },
             "linux-arm64": {
                 "baseline_sha256": hashlib.sha256(b"baseline-linux-arm64").hexdigest(),
                 "candidate_sha256": hashlib.sha256(
@@ -275,10 +289,10 @@ def test_publication_graph_binds_both_native_candidate_and_baseline_packages(
                 ).hexdigest(),
             },
         },
-        "platform": "linux-amd64",
+        "platform": "linux-arm64",
         "schema_version": 1,
         "source_sha": SOURCE_SHA,
-        "verified_platforms": ["linux-amd64", "linux-arm64"],
+        "verified_platforms": ["linux-arm64"],
     }
 
 
@@ -304,7 +318,7 @@ def test_publication_graph_rejects_symlinked_artifact_file(tmp_path: Path) -> No
     objects, candidate, baseline, _ = _graph_inputs(tmp_path)
     artifact = (
         objects
-        / f"artifacts/dev/releases/{GENERATION}/spark/current/linux-amd64/vonk-forge-agent.deb"
+        / f"artifacts/dev/releases/{GENERATION}/spark/current/linux-arm64/vonk-forge-agent.deb"
     )
     target = artifact.with_name("candidate-real.deb")
     artifact.rename(target)
@@ -325,7 +339,7 @@ def test_publication_graph_rejects_hardlinked_artifact_file(tmp_path: Path) -> N
     objects, candidate, baseline, _ = _graph_inputs(tmp_path)
     artifact = (
         objects
-        / f"artifacts/dev/releases/{GENERATION}/spark/current/linux-amd64/vonk-forge-agent.deb"
+        / f"artifacts/dev/releases/{GENERATION}/spark/current/linux-arm64/vonk-forge-agent.deb"
     )
     os.link(artifact, artifact.with_name("ambiguous-link.deb"))
 
@@ -341,7 +355,7 @@ def test_publication_graph_rejects_hardlinked_artifact_file(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize("release_name", ["candidate", "baseline"])
-@pytest.mark.parametrize("platform", ["linux-amd64", "linux-arm64"])
+@pytest.mark.parametrize("platform", ["linux-arm64"])
 def test_publication_graph_rejects_any_missing_native_package_record(
     tmp_path: Path, release_name: str, platform: str
 ) -> None:
@@ -368,11 +382,11 @@ def test_verified_artifact_hashes_open_descriptor_during_path_substitution(
     objects, candidate_path, baseline_path, _ = _graph_inputs(tmp_path)
     expected_path = (
         f"artifacts/dev/releases/{GENERATION}/spark/current/"
-        "linux-amd64/vonk-forge-agent.deb"
+        "linux-arm64/vonk-forge-agent.deb"
     )
     artifact = objects / expected_path
     replacement = artifact.with_name("replacement.deb")
-    replacement.write_bytes(b"substitute-linux-amd64")
+    replacement.write_bytes(b"substitute-linux-arm64")
     original_read = os.read
     substituted = False
 
@@ -458,7 +472,7 @@ def test_report_is_emitted_only_from_complete_generation_bound_evidence(
     assert result.stdout == ""
     assert json.loads(report.read_text()) == {
         "channel": "dev",
-        "gates": ["spark_arm64", "spark_job", "spark_renewal"],
+        "gates": ["spark_arm64", "spark_job", "spark_pairing", "spark_renewal"],
         "generation": GENERATION,
         "lifecycle": {
             "completed_phases": ARM64_PHASES,

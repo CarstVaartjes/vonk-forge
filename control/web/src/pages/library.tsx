@@ -10,6 +10,7 @@ import "./library.css";
 
 const LIBRARY_MODEL_WINDOW = 40;
 const LIBRARY_RECIPE_WINDOW = 50;
+const LIBRARY_REPOSITORY_REFRESH_MS = 60_000;
 
 type RouteParent =
   | {kind: "model"; model: Omit<LibraryModel, "recipes">; recipe: LibraryRecipeSummary}
@@ -17,7 +18,6 @@ type RouteParent =
 
 type ManagedCatalogSyncApi = {
   managedRecipeCatalogSyncStatus?(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
-  syncManagedRecipeCatalog?(input?: {expected_commit?: string; request_key?: string}, signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
 };
 
 function boundedItems<T>(items: T[], limit: number, key: (item: T) => string, pinnedKey?: string): {items: T[]; truncated: boolean} {
@@ -144,10 +144,8 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState("");
   const [catalogAttempt, setCatalogAttempt] = useState(0);
-  const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
   const [syncSummary, setSyncSummary] = useState<ManagedCatalogSyncSummary>();
-  const syncRequestKey = useRef("");
   const loadMoreController = useRef<AbortController | undefined>(undefined);
   const routeParents = useRef(new Map<string, RouteParent>());
   const heading = useRef<HTMLHeadingElement>(null);
@@ -156,7 +154,7 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const preferredNodeId = parsedPath.searchParams.get("spark") ?? undefined;
   const preferredNodeName = preferredNodeId ? nodeDisplayNames[preferredNodeId] ?? preferredNodeId : undefined;
   const contextualNavigate = useCallback((event: MouseEvent<HTMLAnchorElement>, nextPath: string) => {
-    if (!preferredNodeId || !nextPath.startsWith("/library") || nextPath.startsWith("/library/import") || nextPath.startsWith("/library/create")) {
+    if (!preferredNodeId || !nextPath.startsWith("/library") || nextPath.startsWith("/library/create")) {
       onNavigate(event, nextPath);
       return;
     }
@@ -223,36 +221,24 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
     return () => controller.abort();
   }, [api, catalogAttempt]);
 
-  const managedSyncApi = api as LibraryApi & ManagedCatalogSyncApi;
-  const syncAvailable = typeof managedSyncApi.syncManagedRecipeCatalog === "function";
-  const syncStatusAvailable = typeof managedSyncApi.managedRecipeCatalogSyncStatus === "function";
-  const syncManagedCatalog = useCallback(async () => {
-    if (!managedSyncApi.syncManagedRecipeCatalog || syncing) return;
-    const controller = new AbortController();
-    setSyncing(true);
-    setSyncError("");
-    try {
-      syncRequestKey.current ||= crypto.randomUUID();
-      setSyncSummary(await managedSyncApi.syncManagedRecipeCatalog({
-        ...(catalogCommit ? {expected_commit: catalogCommit} : {}),
-        request_key: syncRequestKey.current,
-      }, controller.signal));
-      syncRequestKey.current = "";
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
       setCatalogAttempt(value => value + 1);
       setSnapshotAttempt(value => value + 1);
-    } catch (value) {
-      const detail = value instanceof Error ? value.message.slice(0, 256) : "Managed recipe synchronization failed";
-      if (/returned 409|sync_preview_changed|preview changed/i.test(detail)) {
-        syncRequestKey.current = "";
-        setCatalogAttempt(current => current + 1);
-        setSyncError("The Vonk Forge remote changed during review. Catalog state is refreshing; start the update again when it is ready.");
-      } else {
-        setSyncError(detail);
-      }
-    } finally {
-      setSyncing(false);
-    }
-  }, [catalogCommit, managedSyncApi, syncing]);
+    };
+    const timer = window.setInterval(refreshWhenVisible, LIBRARY_REPOSITORY_REFRESH_MS);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", refreshWhenVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("focus", refreshWhenVisible);
+    };
+  }, []);
+
+  const managedSyncApi = api as LibraryApi & ManagedCatalogSyncApi;
+  const syncStatusAvailable = typeof managedSyncApi.managedRecipeCatalogSyncStatus === "function";
   useEffect(() => {
     if (!syncStatusAvailable || !managedSyncApi.managedRecipeCatalogSyncStatus) return;
     const controller = new AbortController();
@@ -377,7 +363,6 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
   const linkedRecipeCount = snapshot?.models.reduce((total, model) => total + model.recipes.length, 0) ?? 0;
   const unlinkedRecipeCount = snapshot?.unlinked_recipes.length ?? 0;
   const recipeCount = linkedRecipeCount + unlinkedRecipeCount;
-  const updateCount = new Set(publicRecipes.flatMap(recipe => recipe.local.status === "update-available" && recipe.local.recipe_id ? [recipe.local.recipe_id] : [])).size;
   const catalogLinkedCount = new Set(publicRecipes.flatMap(recipe => recipe.local.recipe_id ? [recipe.local.recipe_id] : [])).size;
 
   return <div className="library-page">
@@ -387,7 +372,6 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         <p>Exact models, installable recipes, placement, and release state in one command surface.</p>
       </div>
       <nav className="library-toolbar-actions" aria-label="Recipe authoring">
-        <a href="/library/import" className="button" onClick={event => onNavigate(event, "/library/import")}>Browse catalog</a>
         <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom</a>
       </nav>
     </header>
@@ -402,29 +386,28 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
           <div className="library-stat" role="group" aria-label={`${recipeCount} recipes`}><strong>{recipeCount}</strong><span>{paginationWindowed ? "recipes shown" : "recipes"}</span></div>
           <div className="library-stat" role="group" aria-label={`${linkedRecipeCount} linked`}><strong>{linkedRecipeCount}</strong><span>linked</span></div>
           <div className={`library-stat${unlinkedRecipeCount > 0 ? " library-stat-warning" : ""}`} role="group" aria-label={`${unlinkedRecipeCount} needs a model version`}><strong>{unlinkedRecipeCount}</strong><span>unlinked</span></div>
-          {catalogSupported && <div className={`library-stat${updateCount > 0 ? " library-stat-update" : ""}`} role="group" aria-label={catalogLoading ? "Checking catalog updates" : catalogError ? "Catalog update check unavailable" : `${updateCount} catalog update${updateCount === 1 ? "" : "s"} available`} title={catalogLoading ? "Checking immutable releases" : catalogError ? "Catalog check unavailable" : catalogLinkedCount > 0 ? `${catalogLinkedCount} local recipe links checked` : "No local catalog links"}><strong>{catalogLoading ? "…" : catalogError ? "—" : updateCount}</strong><span>updates</span></div>}
+          {catalogSupported && <div className="library-stat" role="group" aria-label={catalogLoading ? "Refreshing repository recipes" : catalogError ? "Repository unavailable" : `${publicRecipes.length} repository recipes`} title={catalogLoading ? "Refreshing repository recipes" : catalogError ? "Repository unavailable" : `${catalogLinkedCount} recipes available locally`}><strong>{catalogLoading ? "…" : catalogError ? "—" : publicRecipes.length}</strong><span>repository</span></div>}
         </div>
         <label className="library-search">
           <span className="visually-hidden">Find a model or recipe</span>
           <input type="search" aria-label="Search Library" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search names, slugs, capabilities…" />
         </label>
         <div className="library-search-meta" aria-live="polite">
-          {query.trim() ? <><span>Filtering loaded rows</span><button type="button" className="button secondary" onClick={() => setQuery("")}>Clear Library search</button></> : <span>{recipeCount} local recipe{recipeCount === 1 ? "" : "s"} ready to inspect</span>}
+          {query.trim() ? <><span>Filtering recipe rows</span><button type="button" className="button secondary" onClick={() => setQuery("")}>Clear Library search</button></> : <span>{publicRecipes.length || recipeCount} recipe{(publicRecipes.length || recipeCount) === 1 ? "" : "s"} ready to inspect</span>}
         </div>
       </section>
     </>}
     {error && <section className="fleet-error" role="alert"><h3>Library unavailable</h3><p>{error}</p><button type="button" onClick={() => setSnapshotAttempt(value => value + 1)}>Retry Library</button></section>}
     {!error && !snapshot && <section className="fleet-loading" role="status" aria-label="Loading Library"><span className="loading-orb" aria-hidden="true"/><div><h3>Opening Library</h3><p>Loading model, recipe, and placement authority…</p></div></section>}
-    {snapshot && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty library-empty" aria-label="Empty Library">
+    {snapshot && !catalogLoading && publicRecipes.length === 0 && snapshot.models.length === 0 && snapshot.unlinked_recipes.length === 0 && <section className="fleet-empty library-empty" aria-label="Empty Library">
       <div className="library-empty-visual" aria-hidden="true"><span/><span/><span/></div>
-      <h3>Bring your first recipe into the Library</h3>
-      <p>Start with a reviewed public recipe, or create a custom runtime when your model needs a bespoke setup.</p>
+      <h3>No recipes available</h3>
+      <p>The repository does not currently expose a recipe. You can still create a custom runtime for a bespoke setup.</p>
       <div className="button-row">
-        <a href="/library/import" className="button" onClick={event => onNavigate(event, "/library/import")}>Browse public recipes</a>
         <a href="/library/create" className="button secondary" onClick={event => onNavigate(event, "/library/create")}>Create custom recipe</a>
       </div>
     </section>}
-    {browserSnapshot && (browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryNodeNamesProvider names={nodeDisplayNames}><LibraryBrowser
+    {browserSnapshot && (catalogLoading || publicRecipes.length > 0 || browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryNodeNamesProvider names={nodeDisplayNames}><LibraryBrowser
         api={api}
         detail={detail}
         detailError={detailError}
@@ -435,22 +418,18 @@ export function LibraryPage({api, path, onBusyChange, onNavigate}: {
         catalogCommit={catalogCommit}
         fleet={fleet}
         fleetError={fleetError}
-        onClearSearch={() => setQuery("")}
         onNavigate={contextualNavigate}
         onBusyChange={onBusyChange}
         onRefresh={refreshLibraryAuthority}
         onRetryDetail={() => setDetailAttempt(value => value + 1)}
         onRetryCatalog={() => setCatalogAttempt(value => value + 1)}
         onRetryFleet={() => setFleetAttempt(value => value + 1)}
-        onSyncNow={() => void syncManagedCatalog()}
         publicRecipes={publicRecipes}
         preferredNodeId={preferredNodeId}
         query={query}
         route={route}
         snapshot={browserSnapshot}
-        syncAvailable={syncAvailable}
         syncError={syncError}
-        syncing={syncing}
         syncSummary={syncSummary}
         windowed={paginationWindowed}
       /></LibraryNodeNamesProvider>}

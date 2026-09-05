@@ -1,5 +1,5 @@
 name: Isolated agent apt publication
-description: Verify and publish accepted AMD64 and ARM64 agent packages to an isolated apt channel
+description: Verify and publish the accepted ARM64 Spark agent package to an isolated apt channel
 
 inputs:
   channel:
@@ -10,9 +10,6 @@ inputs:
     required: true
   arm64_package:
     description: Exact accepted ARM64 Debian package filename
-    required: true
-  amd64_package:
-    description: Exact accepted AMD64 Debian package filename
     required: true
   artifact_name:
     description: Immutable accepted package artifact name
@@ -89,7 +86,6 @@ runs:
       env:
         CHANNEL: ${{ inputs.channel }}
         ARM64_PACKAGE: ${{ inputs.arm64_package }}
-        AMD64_PACKAGE: ${{ inputs.amd64_package }}
         PACKAGE_ENVIRONMENT: ${{ inputs.environment }}
         SOURCE_SHA: ${{ inputs.source_sha }}
         VERSION: ${{ inputs.version }}
@@ -105,7 +101,6 @@ runs:
         esac
         [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
         test "$ARM64_PACKAGE" = "vonk-forge-agent_${VERSION}_arm64.deb"
-        test "$AMD64_PACKAGE" = "vonk-forge-agent_${VERSION}_amd64.deb"
         metadata=$(scripts/agent-apt-metadata "$CHANNEL" "$VERSION")
         while IFS='=' read -r name value; do
           case "$name" in
@@ -119,11 +114,8 @@ runs:
           esac
         done <<< "$metadata"
         packages_json='{}'
-        for architecture in arm64 amd64; do
-          case "$architecture" in
-            arm64) package=$ARM64_PACKAGE ;;
-            amd64) package=$AMD64_PACKAGE ;;
-          esac
+        for architecture in arm64; do
+          package=$ARM64_PACKAGE
           test -f "dist/$package" && test ! -L "dist/$package"
           test -f "dist/${package}.sha256" && test ! -L "dist/${package}.sha256"
           verification=$(scripts/verify-agent-deb --json "dist/$package")
@@ -152,7 +144,7 @@ runs:
             '. + {($architecture): {filename:$filename, sha256:$sha256}}' \
             <<< "$packages_json")
         done
-        test "$(jq 'length' <<< "$packages_json")" = 2
+        test "$(jq 'length' <<< "$packages_json")" = 1
         printf 'packages_json=%s\n' "$packages_json" >> "$GITHUB_OUTPUT"
 
     - name: Install apt repository tooling
@@ -292,7 +284,6 @@ runs:
         KEYRING: ${{ steps.package.outputs.keyring }}
         PACKAGES_JSON: ${{ steps.package.outputs.packages_json }}
         ARM64_PACKAGE: ${{ inputs.arm64_package }}
-        AMD64_PACKAGE: ${{ inputs.amd64_package }}
         REPOSITORY: ${{ steps.package.outputs.repository }}
         RESTORED: ${{ steps.state.outputs.restored }}
         SNAPSHOT: ${{ steps.package.outputs.snapshot }}
@@ -307,7 +298,7 @@ runs:
         jq -n \
           --arg root "$work/aptly" \
           --arg publish "$work/public" \
-          '{rootDir:$root, architectures:["amd64","arm64"],
+          '{rootDir:$root, architectures:["arm64"],
             dependencyFollowSuggests:false, dependencyFollowRecommends:false,
             FileSystemPublishEndpoints:{r2:{rootDir:$publish,linkMethod:"copy"}}}' \
           > "$config"
@@ -336,7 +327,7 @@ runs:
             "$DISTRIBUTION" filesystem:r2: "$SNAPSHOT"
         else
           aptly -config="$config" publish snapshot "${common[@]}" \
-            -acquire-by-hash -architectures=amd64,arm64 -distribution="$DISTRIBUTION" \
+            -acquire-by-hash -architectures=arm64 -distribution="$DISTRIBUTION" \
             -component=main \
             "$SNAPSHOT" filesystem:r2:
         fi
@@ -381,7 +372,7 @@ runs:
           done <<< "$index_entries"
         fi
         test "$checked_indexes" -gt 0
-        for architecture in amd64 arm64; do
+        for architecture in arm64; do
           test -s "$distribution_root/main/binary-$architecture/Packages"
         done
         scripts/agent-apt-state compact \

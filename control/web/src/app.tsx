@@ -8,13 +8,11 @@ import {CustomRecipeBuilderPage, discardStoredCustomRecipeDraft} from "./pages/c
 import {ActivityPage} from "./pages/activity";
 import {FleetPage} from "./pages/fleet";
 import {LibraryPage} from "./pages/library";
-import {PublicRecipeImportPage} from "./pages/public-recipe-import";
 
 const pages: AppRoute[] = ["fleet", "library", "activity"];
 type PendingNavigation = {destination: string; perform(): void; restoreFocus?: HTMLElement | null};
 
 function pageTitle(pathname: string): string {
-  if (pathname === "/library/import") return "Import public recipe · Vonk Forge";
   if (pathname === "/library/create") return "Create custom recipe · Vonk Forge";
   if (/^\/library\/recipes\//.test(pathname)) return "Recipe · Library · Vonk Forge";
   if (/^\/library(?:\/|$)/.test(pathname)) return "Library · Vonk Forge";
@@ -137,9 +135,7 @@ export function App({api}: {api: ControlApi}) {
   }
   const content = page ? {
     fleet: <FleetPage api={api} onBusyChange={setNavigationLocked}/>,
-    library: pathname === "/library/import"
-      ? <PublicRecipeImportPage api={api as ControlApi & CatalogApi} url={url} onNavigate={navigateUrl} onBusyChange={setNavigationBusy}/>
-      : pathname === "/library/create"
+    library: pathname === "/library/create"
         ? <CustomRecipeBuilderPage api={api as ControlApi & CatalogApi} onNavigate={navigateUrl} onBusyChange={setNavigationBusy} onDirtyChange={setDraftDirty}/>
       : <LibraryPage api={api} path={url} onNavigate={navigatePath} onBusyChange={setNavigationBusy}/>,
     activity: <ActivityPage api={api}/>,

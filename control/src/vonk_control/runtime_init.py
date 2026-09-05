@@ -20,6 +20,7 @@ class RuntimeSecretError(RuntimeError):
 class SharedRuntimePaths:
     """Shared named-volume roots initialized by the control API pre-exec."""
 
+    agent_artifacts: Path = Path("/state/agent-artifacts")
     routes: Path = Path("/routes")
     supervisor: Path = Path("/supervisor")
     workload_publication: Path = Path("/workload-tuf")
@@ -315,6 +316,7 @@ def prepare_shared_volumes(paths: SharedRuntimePaths | None = None) -> None:
     """Apply the existing per-consumer ownership contract to shared volumes."""
     paths = SharedRuntimePaths() if paths is None else paths
     _directory(paths.state, 10001, 10001, 0o750)
+    _directory(paths.agent_artifacts, 10001, 10001, 0o750)
     routes = _directory(paths.routes, 10001, 10001, 0o750)
     _directory(routes / "generations", 10001, 10001, 0o750)
     _directory(paths.supervisor, 10002, 10001, 0o750)

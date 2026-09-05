@@ -364,7 +364,7 @@ def _exact_repair_script_fixture(
     control_template = (
         b"Package: vonk-forge-agent\nVersion: @VERSION@\n"
         b"Architecture: @ARCHITECTURE@\n"
-        b"Depends: acl, iproute2, iptables, podman, uidmap\n"
+        b"Depends: acl, apparmor, crun, iproute2, iptables, podman, uidmap\n"
     )
     prerm = (
         b"#!/bin/sh\n# helper-upgrade.pending helper-upgrade.receipt\n"
@@ -540,7 +540,7 @@ def _elf_fixture(path: Path, marker: bytes, architecture: str = "linux-arm64") -
     raw[64 : 64 + len(marker)] = marker
     identity_marker = f"VONK_AGENT_BUILD_DIGEST={BUILD_DIGEST}".encode()
     raw[128 : 128 + len(identity_marker)] = identity_marker
-    semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.0"
+    semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.1"
     raw[256 : 256 + len(semantic_marker)] = semantic_marker
     if path.name == "vonk-build-egress":
         struct.pack_into("<Q", raw, 32, 320)
@@ -583,7 +583,7 @@ def _build(
     output: Path,
     binaries: Path,
     key: Path,
-    version: str = "0.1.0",
+    version: str = "0.1.1",
     architecture: str = "linux-arm64",
     acceptance_baseline: bool = False,
 ) -> subprocess.CompletedProcess[str]:
@@ -1638,6 +1638,17 @@ def test_postinst_creates_stable_root_owned_native_machine_evidence() -> None:
     assert "ssh_host_" not in postinst
 
 
+def test_agent_uses_package_managed_private_temp_directory() -> None:
+    postinst = POSTINST.read_text()
+    repair_postinst = (ROOT / "packaging/debian/postinst-repair").read_text()
+    unit = (ROOT / "packaging/systemd/vonk-forge-agent.service").read_text()
+
+    for lifecycle in (postinst, repair_postinst):
+        assert "install -d -o vonk-agent -g vonk-agent -m 0700 \\" in lifecycle
+        assert "/var/lib/vonk-forge-agent/tmp" in lifecycle
+    assert "Environment=TMPDIR=/var/lib/vonk-forge-agent/tmp" in unit
+
+
 @pytest.mark.parametrize(
     ("package_version", "expected_semantic"),
     (
@@ -2259,7 +2270,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
 
     assert first_result.returncode == 0, first_result.stderr
     assert second_result.returncode == 0, second_result.stderr
-    package_name = "vonk-forge-agent_0.1.0_arm64.deb"
+    package_name = "vonk-forge-agent_0.1.1_arm64.deb"
     first_deb = first / package_name
     second_deb = second / package_name
     assert first_deb.read_bytes() == second_deb.read_bytes()
@@ -2327,7 +2338,7 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "python" not in postinst
     assert "curl" not in postinst
     assert "wget" not in postinst
-    assert "target_version='0.1.0'" in preinst
+    assert "target_version='0.1.1'" in preinst
     assert os.access(control / "preinst", os.X_OK)
     fields = subprocess.run(
         ["/usr/bin/dpkg-deb", "--field", first_deb, "Depends"],
@@ -2336,6 +2347,8 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
         check=True,
     ).stdout
     assert "curl" in fields
+    assert "apparmor" in fields
+    assert "crun" in fields
     assert "podman" in fields
     assert "util-linux" in fields
     assert "uidmap" in fields
@@ -2388,9 +2401,10 @@ def test_builder_produces_reproducible_verified_arm64_deb(tmp_path: Path) -> Non
     assert "slot" not in unit
     assert "activation-challenge" not in unit
     assert "Environment=HOME=/var/lib/vonk-forge-agent" in unit
+    assert "Environment=XDG_CONFIG_HOME=/var/lib/vonk-forge-agent/.config" in unit
     assert "Environment=XDG_RUNTIME_DIR=/run/vonk-forge-agent" in unit
     assert "ProtectControlGroups=yes" in unit
-    # Rootless runc must set the hostname inside each build's private UTS
+    # The rootless OCI runtime must set the hostname inside each build's private UTS
     # namespace. The dedicated service user still has no ambient host
     # capability, so ProtectHostname would only break container creation.
     assert "ProtectHostname=no" in unit
@@ -2498,7 +2512,7 @@ def test_builder_and_verifier_make_each_architecture_a_real_package_output(
     built = _build(output, binaries, key, architecture=architecture)
 
     assert built.returncode == 0, built.stderr
-    package = output / f"vonk-forge-agent_0.1.0_{debian_architecture}.deb"
+    package = output / f"vonk-forge-agent_0.1.1_{debian_architecture}.deb"
     assert package.is_file()
     verified = subprocess.run(
         [VERIFY, "--json", package],
@@ -2555,14 +2569,14 @@ def test_builder_allows_only_an_explicit_lower_acceptance_baseline(
     agent.chmod(0o755)
     agent.write_bytes(
         agent.read_bytes().replace(
+            b"VONK_AGENT_SEMANTIC_VERSION=0.1.1",
             b"VONK_AGENT_SEMANTIC_VERSION=0.1.0",
-            b"VONK_AGENT_SEMANTIC_VERSION=0.0.0",
         )
     )
     agent.chmod(0o555)
     key = tmp_path / "release.pem"
     _release_key(key)
-    version = "0.0.0~acceptance.1+g0123456789ab"
+    version = "0.1.0~acceptance.1+g0123456789ab"
 
     result = _build(
         tmp_path / "dist",
@@ -2615,7 +2629,7 @@ def test_builder_rejects_a_build_digest_that_is_not_embedded_in_the_agent(
         [
             BUILD,
             "--version",
-            "0.1.0",
+            "0.1.1",
             "--architecture",
             "linux-arm64",
             "--build-digest",
@@ -2650,7 +2664,7 @@ def test_builder_rejects_an_agent_with_a_different_embedded_semantic_version(
     agent.chmod(0o755)
     agent.write_bytes(
         agent.read_bytes().replace(
-            b"VONK_AGENT_SEMANTIC_VERSION=0.1.0",
+            b"VONK_AGENT_SEMANTIC_VERSION=0.1.1",
             b"VONK_AGENT_SEMANTIC_VERSION=9.9.9",
         )
     )
@@ -2738,7 +2752,7 @@ def test_verifier_rejects_tampered_release_sidecar(tmp_path: Path) -> None:
     output = tmp_path / "dist"
     result = _build(output, binaries, key)
     assert result.returncode == 0, result.stderr
-    deb = output / "vonk-forge-agent_0.1.0_arm64.deb"
+    deb = output / "vonk-forge-agent_0.1.1_arm64.deb"
     (output / f"{deb.name}.sha256").write_text(f"{'0' * 64}  {deb.name}\n")
 
     verified = subprocess.run(
@@ -2763,7 +2777,7 @@ def test_verifier_rejects_tampered_host_package_signature(tmp_path: Path) -> Non
     output = tmp_path / "dist"
     result = _build(output, binaries, key)
     assert result.returncode == 0, result.stderr
-    deb = output / "vonk-forge-agent_0.1.0_arm64.deb"
+    deb = output / "vonk-forge-agent_0.1.1_arm64.deb"
     (output / f"{deb.name}.host.sig").write_text(f"{'0' * 128}\n")
 
     verified = subprocess.run(
@@ -2819,7 +2833,7 @@ def test_builder_accepts_exact_derived_development_version(tmp_path: Path) -> No
         _aarch64_fixture(binaries / name, name.encode())
     key = tmp_path / "release.pem"
     _release_key(key)
-    version = "0.1.0~dev.1786300000+g0123456789ab"
+    version = "0.1.1~dev.1786300000+g0123456789ab"
 
     result = _build(tmp_path / "dist", binaries, key, version)
 

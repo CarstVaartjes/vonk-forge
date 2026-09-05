@@ -33,7 +33,7 @@ fn payload() -> CanonicalTemplatePayload {
     CanonicalTemplatePayload::from_json(
         br#"{
           "schema_version": 2,
-          "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api@sha256:abc\n",
+          "docker_compose_yaml": "services:\n  api:\n    image: example.invalid/api:latest\n",
           "preflight": ["Complete the Tailscale prerequisites."],
           "required_values": [
             {"env": "VONK_PUBLIC_HOST", "prompt": "Public hostname"}
@@ -83,7 +83,7 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
     assert_eq!(entries, [".env", "docker-compose.yaml", "secrets"]);
     assert_eq!(
         std::fs::read_to_string(result.root.join("docker-compose.yaml")).expect("compose"),
-        "services:\n  api:\n    image: example.invalid/api@sha256:abc\n"
+        "services:\n  api:\n    image: example.invalid/api:latest\n"
     );
     assert_eq!(
         std::fs::read_to_string(result.root.join(".env")).expect("environment"),
@@ -178,6 +178,48 @@ fn fresh_install_prints_preflight_before_the_first_prompt() {
     assert!(preflight < oauth);
     assert!(output.contains("  [ ] Enable MagicDNS and HTTPS certificates."));
     assert!(output.contains("  [ ] Define only the unsuffixed production Services."));
+}
+
+#[test]
+fn service_hostnames_default_to_the_control_tailnet() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "required_values": [
+            {"env": "VONK_CONTROL_HOSTNAME", "prompt": "Control hostname", "validation": "hostname"},
+            {"env": "VONK_AGENT_ENROLL_HOSTNAME", "prompt": "Enrollment hostname", "validation": "hostname"},
+            {"env": "VONK_AGENT_HOSTNAME", "prompt": "Agent hostname", "validation": "hostname"},
+            {"env": "VONK_REGISTRY_HOSTNAME", "prompt": "Registry hostname", "validation": "hostname"}
+          ],
+          "secrets": []
+        }"#,
+    )
+    .expect("valid hostname payload");
+    let temporary = tempdir().expect("temporary directory");
+    let input = Cursor::new(b"vonk-forge.example-tailnet.ts.net\n\n\n\n".to_vec());
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(input, &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("derived hostnames accepted");
+
+    assert_eq!(
+        std::fs::read_to_string(result.root.join(".env")).expect("environment"),
+        "VONK_CONTROL_HOSTNAME=vonk-forge.example-tailnet.ts.net\n\
+VONK_AGENT_ENROLL_HOSTNAME=enroll.example-tailnet.ts.net\n\
+VONK_AGENT_HOSTNAME=agents.example-tailnet.ts.net\n\
+VONK_REGISTRY_HOSTNAME=registry.example-tailnet.ts.net\n"
+    );
+    let output = String::from_utf8(output).expect("UTF-8 prompts");
+    assert!(output.contains("Enrollment hostname [enroll.example-tailnet.ts.net]: "));
+    assert!(output.contains("Agent hostname [agents.example-tailnet.ts.net]: "));
+    assert!(output.contains("Registry hostname [registry.example-tailnet.ts.net]: "));
 }
 
 #[test]
@@ -308,6 +350,11 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
     let temporary = tempdir().expect("temporary directory");
     write_existing_bundle(temporary.path());
     let bundle = temporary.path().join("vonk-forge");
+    std::fs::write(
+        bundle.join("docker-compose.yaml"),
+        "services:\n  api:\n    image: example.invalid/api@sha256:old\n",
+    )
+    .expect("old pinned compose");
     #[cfg(unix)]
     let old_inode = {
         use std::os::unix::fs::MetadataExt;
@@ -328,7 +375,7 @@ fn explicit_upgrade_atomically_replaces_only_compose() {
 
     assert_eq!(
         std::fs::read_to_string(bundle.join("docker-compose.yaml")).expect("compose"),
-        "services:\n  api:\n    image: example.invalid/api@sha256:abc\n"
+        "services:\n  api:\n    image: example.invalid/api:latest\n"
     );
     assert_eq!(
         std::fs::read_to_string(bundle.join(".env")).expect("environment"),

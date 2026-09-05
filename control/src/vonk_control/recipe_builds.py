@@ -37,6 +37,26 @@ from .source_policy import (
 _OCI_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 BUILD_ARTIFACT_FORMAT = "docker-archive-v1"
+MINIMUM_BUILD_DISK_RESERVE_BYTES = 4 * 1024**3
+MAXIMUM_BUILD_DISK_RESERVE_BYTES = 64 * 1024**3
+
+
+def _build_disk_envelope(
+    *, base_image_bytes: int, temporary_bytes: int, source_bytes: int, output_bytes: int
+) -> int:
+    """Peak working-space admission envelope, excluding the host reserve."""
+    return max(temporary_bytes, base_image_bytes + source_bytes + output_bytes)
+
+
+def _build_disk_reserve(disk_total_bytes: int) -> int:
+    """Leave two percent free, capped at 64 GiB on Spark-sized disks."""
+    return min(
+        disk_total_bytes // 4,
+        max(
+            MINIMUM_BUILD_DISK_RESERVE_BYTES,
+            min(MAXIMUM_BUILD_DISK_RESERVE_BYTES, disk_total_bytes // 50),
+        ),
+    )
 
 
 class RecipeBuildError(ValueError):
@@ -148,7 +168,10 @@ class RecipeBuildService:
             context = build.get("context") if isinstance(build, dict) else None
             source_sha256 = context.get("sha256") if isinstance(context, dict) else None
             public_network = _public_build_network(build)
-            if public_network and "recipe.build.egress-proxy.v1" not in node.capabilities:
+            if (
+                public_network
+                and "recipe.build.egress-proxy.v1" not in node.capabilities
+            ):
                 raise RecipeBuildError(
                     "build.network_capability_missing",
                     "builder does not advertise the hostname-aware build egress boundary",
@@ -174,7 +197,9 @@ class RecipeBuildService:
             raise RecipeBuildError(finding.code, finding.detail) from error
         dockerfile_path = build.get("dockerfile") if isinstance(build, dict) else None
         dockerfile_payload = (
-            bundle.files.get(dockerfile_path) if isinstance(dockerfile_path, str) else None
+            bundle.files.get(dockerfile_path)
+            if isinstance(dockerfile_path, str)
+            else None
         )
         if dockerfile_payload is None:
             raise RecipeBuildError(
@@ -198,7 +223,10 @@ class RecipeBuildService:
                 "build.capability_missing",
                 "builder does not support typed recipe builds",
             )
-        if public_network and "recipe.build.egress-proxy.v1" not in snapshot.capabilities:
+        if (
+            public_network
+            and "recipe.build.egress-proxy.v1" not in snapshot.capabilities
+        ):
             raise RecipeBuildError(
                 "build.network_capability_missing",
                 "fresh builder inventory does not prove the hostname-aware build egress boundary",
@@ -224,17 +252,24 @@ class RecipeBuildService:
         with self._sessions() as session:
             disk_reserved = _reserved(session, builder_node_id, "disk")
             memory_reserved = _reserved(session, builder_node_id, "host-memory")
-        # The rootless builder retains its source/staging data while exporting
-        # the OCI layout.  Reserve the concurrent peak, not just the inputs.
-        # The OCI export is the build output. Bind it to the largest declared
-        # per-node image envelope across the selected recipe topology;
-        # CUDA/vLLM images routinely exceed 64 MiB.
+        # The rootless builder retains inputs while exporting the image. Treat
+        # recipe storage as a generous peak envelope, not an exact quota over
+        # Podman's implementation-specific graph. Preserve a separate host
+        # reserve so an admitted build cannot crowd out the Spark itself.
         output_bytes = _declared_image_bytes(document)
-        base_image_storage_bytes = int(resources["download_bytes"]) if base_images else 0
-        required_disk = (
-            base_image_storage_bytes + temporary_bytes + len(bundle.archive) + output_bytes
+        base_image_storage_bytes = (
+            int(resources["download_bytes"]) if base_images else 0
         )
-        if snapshot.disk_free_bytes - disk_reserved < required_disk:
+        disk_envelope = _build_disk_envelope(
+            base_image_bytes=base_image_storage_bytes,
+            temporary_bytes=temporary_bytes,
+            source_bytes=len(bundle.archive),
+            output_bytes=output_bytes,
+        )
+        if (
+            snapshot.disk_free_bytes - disk_reserved
+            < disk_envelope + _build_disk_reserve(snapshot.disk_total_bytes)
+        ):
             raise RecipeBuildError(
                 "build.insufficient_disk", "builder lacks temporary disk capacity"
             )
@@ -463,14 +498,15 @@ class RecipeBuildService:
             or not isinstance(base_image_storage_bytes, int)
         ):
             raise RecipeBuildError("build.plan_invalid", "build plan is invalid")
-        # Staging and the OCI export coexist until the build is committed.
-        disk_bytes = (
-            base_image_storage_bytes + temporary_bytes + source_bytes + output_bytes
+        disk_bytes = _build_disk_envelope(
+            base_image_bytes=base_image_storage_bytes,
+            temporary_bytes=temporary_bytes,
+            source_bytes=source_bytes,
+            output_bytes=output_bytes,
         )
-        if (
-            snapshot.disk_free_bytes - _reserved(session, plan.builder_node_id, "disk")
-            < disk_bytes
-        ):
+        if snapshot.disk_free_bytes - _reserved(
+            session, plan.builder_node_id, "disk"
+        ) < disk_bytes + _build_disk_reserve(snapshot.disk_total_bytes):
             raise RecipeBuildError(
                 "build.insufficient_disk", "builder disk capacity changed"
             )

@@ -52,12 +52,13 @@ from tests.acceptance.test_fresh_nas_install import (
     command_environment,
     generate_bundle,
     host_command_environment,
+    is_channel_image,
     is_immutable_image,
     nas_responses,
     tailscale_service_hostname,
 )
 
-PLATFORMS = ("linux-amd64", "linux-arm64")
+PLATFORMS = ("linux-arm64",)
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 SOURCE_SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -68,7 +69,7 @@ VERSION = re.compile(
 SAFE_HTTPS_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
-PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-(?:amd64|arm64)\Z")
+PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-arm64\Z")
 # Exercise the production-supported lower bound.  The agent renews at two thirds
 # of a certificate lifetime and checks renewal on its 60-second inventory tick,
 # so 90 seconds preserves a real scheduled rotation while avoiding three idle
@@ -85,6 +86,7 @@ COMPOSE_IMAGE_ROLES = {
     "api": "control-api",
     "worker": "control-worker",
     "hermes": "hermes-agent",
+    "litellm": "litellm",
 }
 
 ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
@@ -586,10 +588,7 @@ class SparkLifecycle:
         if self.origin != "https://install.vonkforge.ai":
             raise LifecycleError("installer public origin is invalid")
         self.machine = platform.machine()
-        expected_machine = {
-            "linux-amd64": {"x86_64", "amd64"},
-            "linux-arm64": {"aarch64", "arm64"},
-        }[arguments.platform]
+        expected_machine = {"aarch64", "arm64"}
         if self.machine not in expected_machine or os.geteuid() == 0:
             raise LifecycleError(
                 "Spark lifecycle is not running natively as an ordinary user"
@@ -630,11 +629,14 @@ class SparkLifecycle:
         self._cleanup()
 
     def _compose(self, *arguments: str) -> list[str]:
+        overlay = os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+        files = ["-f", "docker-compose.yaml", "-f", overlay] if overlay else []
         return [
             "docker",
             "compose",
             "--project-name",
             self.project,
+            *files,
             *arguments,
         ]
 
@@ -850,12 +852,9 @@ class SparkLifecycle:
     def _controller_response_replacements(self) -> dict[str, str]:
         return {
             "Trusted Spark management CIDRs: ": "172.16.0.0/12",
-            "Direct GPU fabric CIDRs []: ": (
+            "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ": (
                 f"198.19.{self.synthetic_fabric_octet}.0/24"
             ),
-            "Agent enrollment hostname: ": ENROLLMENT_HOST,
-            "Agent controller hostname: ": AGENT_HOST,
-            "Registry hostname: ": REGISTRY_HOST,
         }
 
     def _start_controller(self) -> None:
@@ -874,6 +873,9 @@ class SparkLifecycle:
             hermes=False,
             control_service=self.tailnet_services["control"],
             hermes_dashboard_service=self.tailnet_services["hermes_dashboard"],
+            enrollment_hostname=ENROLLMENT_HOST,
+            agent_hostname=AGENT_HOST,
+            registry_hostname=REGISTRY_HOST,
         )
         replacements = self._controller_response_replacements()
         responses = [
@@ -916,6 +918,9 @@ class SparkLifecycle:
             raise LifecycleError(
                 "candidate controller services are not healthy"
             ) from error
+        self._assert_running_publication_images()
+        # Both package lanes need deterministic NVIDIA discovery so the agent
+        # can start on a GPU-less CI runner. Only ARM64 consumes it in a recipe.
         self.synthetic_fixture_sha256 = self._materialize_synthetic_device()
         self._prepare_synthetic_firewall_environment()
         boundary = LocalBrowserController(
@@ -997,16 +1002,104 @@ class SparkLifecycle:
             raise LifecycleError("Compose image graph is invalid") from error
         if not isinstance(services, dict):
             raise LifecycleError("Compose image graph is invalid")
+        base = self._run_command(
+            [
+                "docker",
+                "compose",
+                "--project-name",
+                self.project,
+                "--profile",
+                "hermes",
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=self.bundle,
+        )
+        try:
+            base_services = json.loads(base.stdout)["services"]
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            raise LifecycleError("base Compose image graph is invalid") from error
+        if not isinstance(base_services, dict):
+            raise LifecycleError("base Compose image graph is invalid")
+        for service in base_services.values():
+            image = service.get("image") if isinstance(service, dict) else None
+            if not isinstance(image, str) or not is_channel_image(
+                image, self.arguments.channel
+            ):
+                raise LifecycleError("base Compose image does not follow its channel")
         for role, service in COMPOSE_IMAGE_ROLES.items():
             configured_service = services.get(service)
-            if not isinstance(configured_service, dict) or configured_service.get(
-                "image"
-            ) != images.get(role):
+            expected_image = str(images.get(role)).split("@", 1)[0].rsplit(":", 1)[
+                0
+            ] + (":dev" if self.arguments.channel == "dev" else ":latest")
+            if os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+                expected_image = str(images.get(role))
+            if (
+                not isinstance(configured_service, dict)
+                or configured_service.get("image") != expected_image
+            ):
                 raise LifecycleError("Compose image graph differs from publication")
+        provisioner = services.get("hermes-litellm-key-provisioner")
+        provisioner_expected = str(images["litellm"])
+        if not os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+            provisioner_expected = provisioner_expected.split("@", 1)[0].rsplit(":", 1)[
+                0
+            ] + (":dev" if self.arguments.channel == "dev" else ":latest")
+        if (
+            not isinstance(provisioner, dict)
+            or provisioner.get("image") != provisioner_expected
+        ):
+            raise LifecycleError("Compose image graph differs from publication")
         for service in services.values():
             image = service.get("image") if isinstance(service, dict) else None
-            if not isinstance(image, str) or not is_immutable_image(image):
-                raise LifecycleError("Compose contains a mutable image")
+            if (
+                not isinstance(image, str)
+                or (
+                    image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+                    and os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+                    and not is_immutable_image(image)
+                )
+                or (
+                    (
+                        not os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+                        or not image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+                    )
+                    and not is_channel_image(image, self.arguments.channel)
+                )
+            ):
+                raise LifecycleError("Compose image does not follow its channel")
+
+    def _assert_running_publication_images(self) -> None:
+        """A moving alias must still resolve to the candidate being qualified."""
+        assert self.bundle is not None
+        candidate = _read_canonical_document(
+            self.arguments.candidate_release, "candidate release object"
+        )
+        images = _object(candidate.get("images"), "candidate image graph")
+        for role, service in COMPOSE_IMAGE_ROLES.items():
+            if service not in LOCAL_CONTROLLER_SERVICES:
+                continue
+            container = self._run_command(
+                self._compose("ps", "-q", service), cwd=self.bundle
+            ).stdout.strip()
+            observed = self._run_command(
+                ["docker", "inspect", "--format", "{{.Image}}", container],
+                cwd=self.bundle,
+            ).stdout.strip()
+            expected = self._run_command(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{.Id}}",
+                    str(images[role]),
+                ],
+                cwd=self.bundle,
+            ).stdout.strip()
+            if not observed or observed != expected:
+                raise LifecycleError("running channel image differs from publication")
 
     def _read_secret(self, relative: str) -> str:
         assert self.bundle is not None
@@ -1337,27 +1430,21 @@ class SparkLifecycle:
         finally:
             del pairing_token
         self.agent_installed = True
+        self._prepare_podman_apparmor_profile()
         candidate = self._wait_for_agent_identity(
             package_version=str(self.graph["candidate_version"]), timeout=180
         )
         use_count = self._pairing_grant_use_count(grant_id)
-        direct_health = self._direct_agent_health()
         node_id = str(candidate["node_id"])
-        if self.arguments.platform == "linux-amd64":
-            return {
-                "controller_generation": self.arguments.generation,
-                "direct_agent_health": direct_health,
-                "installation": {
-                    "architecture": "amd64",
-                    "package_sha256": self.graph["candidate_package_sha256"],
-                    "version": self.graph["candidate_version"],
-                },
-                "node_id": node_id,
-                "pairing_grant_use_count": use_count,
-                "publication_graph": self.graph,
-            }
-
         canary = self._run_synthetic_canary(node_id)
+        synthetic_device = {
+            "architecture": self.arguments.platform,
+            "cdi_name": "nvidia.com/gpu=all",
+            "fixture_sha256": self.synthetic_fixture_sha256,
+            "physical_gpu": False,
+            "provenance": "ci-only-synthetic-cdi",
+            "synthetic": True,
+        }
         renewal = self._observe_renewal(node_id, str(candidate["serial"]))
         return {
             "canary": canary,
@@ -1372,15 +1459,43 @@ class SparkLifecycle:
             "pairing_grant_use_count": use_count,
             "publication_graph": self.graph,
             "renewal": renewal["proof"],
-            "synthetic_device": {
-                "architecture": "linux-arm64",
-                "cdi_name": "nvidia.com/gpu=all",
-                "fixture_sha256": self.synthetic_fixture_sha256,
-                "physical_gpu": False,
-                "provenance": "ci-only-synthetic-cdi",
-                "synthetic": True,
-            },
+            "synthetic_device": synthetic_device,
         }
+
+    def _prepare_podman_apparmor_profile(self) -> None:
+        enabled = Path("/sys/module/apparmor/parameters/enabled")
+        if not enabled.exists() or enabled.read_text(encoding="ascii").strip() != "Y":
+            return
+        profile = Path("/etc/apparmor.d/podman")
+        try:
+            metadata = profile.lstat()
+        except OSError as error:
+            raise LifecycleError("Podman AppArmor profile is unavailable") from error
+        if (
+            profile.is_symlink()
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_gid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o644
+            or metadata.st_nlink != 1
+        ):
+            raise LifecycleError("Podman AppArmor profile is invalid")
+        self._run_command(
+            ["sudo", "/usr/sbin/apparmor_parser", "--replace", os.fspath(profile)],
+            cwd=Path("/"),
+            timeout=30,
+        )
+        self._run_command(
+            [
+                "sudo",
+                "/usr/bin/grep",
+                "-Fx",
+                "podman (unconfined)",
+                "/sys/kernel/security/apparmor/profiles",
+            ],
+            cwd=Path("/"),
+            timeout=30,
+        )
 
     def _create_grant(self) -> tuple[str, str, str, str]:
         assert self.control is not None
@@ -1496,6 +1611,7 @@ class SparkLifecycle:
         if NODE_ID.fullmatch(node_id) is None:
             raise LifecycleError("synthetic canary node identity is invalid")
         module = _load_development_runner()
+        recipe, catalog, source_context = self._synthetic_canary_inputs(module)
         evidence = self.temporary_root / "synthetic-canary.json"
         arguments = argparse.Namespace(
             phase="synthetic",
@@ -1504,13 +1620,13 @@ class SparkLifecycle:
             admin_token_file=None,
             inference_token_file=None,
             timeout_seconds=300.0,
-            recipe=None,
-            catalog=None,
+            recipe=recipe,
+            catalog=catalog,
             library_root=REPOSITORY_ROOT,
             builder_node=node_id,
             target_node=[node_id],
             failure_node=None,
-            source_context=None,
+            source_context=source_context,
             qualification_file=None,
             evidence_file=evidence,
             poll_seconds=1.0,
@@ -1540,6 +1656,85 @@ class SparkLifecycle:
             "completed_states": completed,
             "deterministic_response_sha256": response_digest,
         }
+
+    def _synthetic_canary_inputs(self, module: object) -> tuple[Path, Path, Path]:
+        assert self.temporary_root is not None
+        # Do not manufacture an AMD64 recipe: the production recipe, catalog,
+        # harness, Controller, and agent workload contracts are Spark/ARM64-only.
+        if self.arguments.platform != "linux-arm64":
+            raise LifecycleError("synthetic canary platform is invalid")
+        architecture = "arm64"
+        image_digest = (
+            "9bb659dc6d5218917236f3711e866a5634bb4c2f208de9d4533aa4863f57c1d3"
+        )
+        image = f"docker.io/library/python:3.12.11-slim-bookworm@sha256:{image_digest}"
+        fixture = REPOSITORY_ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
+        generated = self.temporary_root / "synthetic-canary-inputs"
+        catalog = generated / "entities"
+        source_context = generated / "context"
+        catalog.mkdir(mode=0o700, parents=True, exist_ok=True)
+        source_context.mkdir(mode=0o700, exist_ok=True)
+        try:
+            recipe = json.loads((fixture / "recipe.json").read_text(encoding="utf-8"))
+            runtime_path = fixture / "entities/05-runtime-distribution.json"
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+            expected = (fixture / "expected.json").read_bytes()
+            dockerfile = (fixture / "context/Dockerfile").read_text(encoding="utf-8")
+            dockerfile = re.sub(
+                r"docker\.io/library/python:3\.12\.11-slim-bookworm@sha256:[0-9a-f]{64}",
+                image,
+                dockerfile,
+                count=1,
+            )
+            if dockerfile.count(image) != 1:
+                raise ValueError("synthetic Dockerfile base image is invalid")
+            (source_context / "Dockerfile").write_text(dockerfile, encoding="utf-8")
+            shutil.copyfile(fixture / "context/server.py", source_context / "server.py")
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise LifecycleError("synthetic canary fixture is invalid") from error
+        except ValueError as error:
+            raise LifecycleError("synthetic canary fixture is invalid") from error
+        if not isinstance(recipe, dict) or not isinstance(runtime, dict):
+            raise LifecycleError("synthetic canary fixture is invalid")
+        try:
+            runtime["identity"]["slug"] = f"development-vllm-shim-{architecture}"
+            runtime["image"] = image
+            runtime["platform"] = f"linux/{architecture}"
+            recipe["build"]["platform"] = f"linux/{architecture}"
+            archive, context_sha256, _ = module._source_bundle(source_context)
+            recipe["build"]["context"]["sha256"] = context_sha256
+            recipe["build"]["context"]["expected_bytes"] = len(archive)
+            distribution = recipe["runtime"]["distribution"]
+            distribution["slug"] = runtime["identity"]["slug"]
+            distribution["content_sha256"] = module._recipe_content_digest(runtime)
+        except (AttributeError, KeyError, TypeError) as error:
+            raise LifecycleError("synthetic canary fixture is invalid") from error
+
+        def write_json(path: Path, document: dict[str, object]) -> None:
+            path.write_text(
+                json.dumps(
+                    document,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+        try:
+            write_json(generated / "recipe.json", recipe)
+            (generated / "expected.json").write_bytes(expected)
+            for source in sorted((fixture / "entities").glob("*.json")):
+                target = catalog / source.name
+                if source == runtime_path:
+                    write_json(target, runtime)
+                else:
+                    shutil.copyfile(source, target)
+        except OSError as error:
+            raise LifecycleError("synthetic canary fixture is unavailable") from error
+        return generated / "recipe.json", catalog, source_context
 
     @staticmethod
     def _serial_proof(serial: str) -> str:
@@ -1796,10 +1991,7 @@ class SparkLifecycle:
                 agent = matching[0]
                 node_id = agent.get("node_id")
                 agent_mismatches = []
-                if (
-                    not isinstance(node_id, str)
-                    or NODE_ID.fullmatch(node_id) is None
-                ):
+                if not isinstance(node_id, str) or NODE_ID.fullmatch(node_id) is None:
                     agent_mismatches.append("node_id")
                 if agent.get("state") != "active":
                     agent_mismatches.append("state")

@@ -65,7 +65,7 @@ def test_repair_native_harness_covers_every_durable_phase() -> None:
     assert 'repair_probe_binary=$(realpath -e -- "$REPAIR_PROBE_BINARY")' in harness
     assert "0:0:755:1" in harness
     assert "binary_revision=$packaging_revision" in harness
-    assert "source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}" in harness
+    assert "source_version=0.1.1~dev.1788260440+g${binary_revision:0:12}" in harness
     assert '"$test_root/target-dist" "$repo_root" "$binary_revision"' in harness
     assert "source_capsule_unit_file=$repo_root/packaging/systemd/" in harness
 
@@ -92,7 +92,7 @@ def _assert_frozen_schema2_runtime() -> None:
             "81d7d1ba132485368bcf10aeab1634dbda5910e1f38692cfc376bc06b00a1ca0"
         ),
         ROOT / "packaging/debian/postinst-repair": (
-            "145569b465dd6766a0f82082fd53570e6cc8888dd8326870f83d0eb6d447845a"
+            "f22422eab5c7408f1295780dc297ceec7a09f1d24f219571614691021517b677"
         ),
         ROOT / "scripts/build-agent-deb": (
             "fec5fba5b5c285565bc370acd3b3e07f10671c34665d5755ac85ea1bf7f0c084"
@@ -179,8 +179,8 @@ def test_repair_native_harness_binds_live_versions_and_helper_mediation() -> Non
 
     _assert_frozen_schema2_runtime()
 
-    assert "0.1.0~dev.335+g2eaaf4d9b2b5" in harness
-    assert "source_version=0.1.0~dev.1788260440+g${binary_revision:0:12}" in harness
+    assert "0.1.1~dev.335+g2eaaf4d9b2b5" in harness
+    assert "source_version=0.1.1~dev.1788260440+g${binary_revision:0:12}" in harness
     assert "binary_revision=$packaging_revision" in harness
     assert 'rev-parse HEAD)"' in harness
     assert "spk_2818d189042b4c77aefa7796f4befd23" in harness

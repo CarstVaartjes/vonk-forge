@@ -282,6 +282,112 @@ def test_stale_and_read_only_inventory_are_blocking(tmp_path) -> None:
     )
 
 
+def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None:
+    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    service = InstallAdmissionService(
+        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+    )
+    original = service.plan_install(mapping, build, now=now)
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            node,
+            now + timedelta(seconds=1),
+            1000,
+            199,
+            1000,
+            800,
+            1000,
+            800,
+            1,
+            False,
+            ("runtime.vonk.v1",),
+        )
+    )
+
+    refreshed = service.plan_install(
+        mapping, build, now=now + timedelta(seconds=1)
+    )
+
+    assert refreshed.allowed is True
+    assert refreshed.nodes[0].inventory_observed_at != (
+        original.nodes[0].inventory_observed_at
+    )
+    assert refreshed.nodes[0].free_bytes != original.nodes[0].free_bytes
+    assert refreshed.plan_digest == original.plan_digest
+
+
+def test_apply_revalidates_but_tolerates_nonblocking_reservation_noise(
+    tmp_path,
+) -> None:
+    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    service = InstallAdmissionService(
+        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+    )
+    plan = service.plan_install(mapping, build, now=now)
+    with sessions.begin() as session:
+        session.add(
+            ResourceReservation(
+                node_id=node,
+                kind="disk",
+                resource_key="harmless-concurrent-reservation",
+                amount_bytes=1,
+                owner_kind="installation",
+                owner_id="2" * 36,
+                state="active",
+                plan_digest="a" * 64,
+                created_at=now,
+            )
+        )
+
+    installation_id = service.accept_install(plan, actor="admin", now=now)
+
+    assert installation_id
+
+
+def test_install_topology_uses_authenticated_inventory_capabilities(tmp_path) -> None:
+    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    with sessions.begin() as session:
+        registered = session.get(AgentNode, node)
+        assert registered is not None
+        registered.capabilities = []
+
+    plan = InstallAdmissionService(
+        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+    ).plan_install(mapping, build, now=now)
+
+    assert plan.allowed is True
+
+
+def test_install_topology_capability_loss_is_a_plan_blocker(tmp_path) -> None:
+    sessions, now, node, mapping, build, sizes = setup(tmp_path, free=200)
+    with sessions.begin() as session:
+        registered = session.get(AgentNode, node)
+        assert registered is not None
+        registered.capabilities = []
+    InventoryRepository(sessions, clock=lambda: now).record(
+        InventorySnapshotInput(
+            node,
+            now + timedelta(seconds=1),
+            1000,
+            200,
+            1000,
+            800,
+            1000,
+            800,
+            1,
+            False,
+            (),
+        )
+    )
+
+    plan = InstallAdmissionService(
+        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+    ).plan_install(mapping, build, now=now + timedelta(seconds=1))
+
+    assert plan.allowed is False
+    assert plan.nodes[0].blockers[0].code == "topology.runtime_capability_missing"
+
+
 def test_database_rejects_mutable_built_image_identity(tmp_path) -> None:
     sessions, _now, _node, _mapping, build, _sizes = setup(tmp_path, free=200)
     with pytest.raises(IntegrityError), sessions.begin() as session:

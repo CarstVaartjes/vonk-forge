@@ -4,7 +4,7 @@ Section: admin
 Priority: optional
 Architecture: @ARCHITECTURE@
 Maintainer: Vonk Forge <release@vonkforge.ai>
-Depends: acl, adduser, ca-certificates, curl, fuse-overlayfs, init-system-helpers, iproute2, iptables, openssl, podman (>= 4.9), slirp4netns, systemd, uidmap, util-linux
+Depends: acl, adduser, apparmor, ca-certificates, crun, curl, fuse-overlayfs, init-system-helpers, iproute2, iptables, openssl, podman (>= 4.9), slirp4netns, systemd, uidmap, util-linux
 Homepage: https://vonkforge.ai
 Description: Secure outbound agent for GPU clusters
  Rust agent and narrow privileged helper used by a local Vonk Forge controller

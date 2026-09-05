@@ -36,7 +36,7 @@ STARTUP_ATTEMPTS = 10
 STARTUP_RETRY_SECONDS = 1
 HEALTH_TIMEOUT_SECONDS = 3
 MAXIMUM_LEASE = timedelta(seconds=300)
-_PRISMA_CACHE_ROOT = Path("/root")
+_PRISMA_CACHE_ROOT = Path("/opt/vonk-litellm/prisma")
 _PRISMA_QUERY_ENGINE_ENV = "PRISMA_QUERY_ENGINE_BINARY"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _DIRECTORY = re.compile(r"[0-9]{8}-[0-9a-f]{64}\Z")
@@ -109,12 +109,22 @@ def _prepare_query_engine() -> None:
         resolved = path.resolve(strict=True)
     except OSError as error:
         raise RuntimeError("Prisma query engine was not populated") from error
+    # The immutable runtime layer is assembled as root, then executed as the
+    # dedicated LiteLLM uid.  A root-owned, non-writable binary is therefore
+    # the expected production shape; a first-run Prisma binary may instead be
+    # owned by the runtime uid.  Neither shape permits group/other writes or
+    # privilege-bearing mode bits.
+    trusted_owner = metadata.st_uid in {0, os.geteuid()}
+    unsafe_mode = metadata.st_mode & (
+        stat.S_IWGRP | stat.S_IWOTH | stat.S_ISUID | stat.S_ISGID
+    )
     if (
         resolved != path
         or not stat.S_ISREG(metadata.st_mode)
         or stat.S_ISLNK(metadata.st_mode)
         or metadata.st_nlink != 1
-        or metadata.st_uid != os.geteuid()
+        or not trusted_owner
+        or unsafe_mode
         or not 0 < metadata.st_size <= 128 * 1024 * 1024
         or not os.access(path, os.X_OK)
     ):

@@ -5,6 +5,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "identity", "metadata", "model", "execution", "build", "parameters", "artifacts", "runtime", "topology", "interfaces", "validation", "provenance"],
+  "allOf": [{"description":"Build containers never receive SYS capabilities; every SYS_* request is rejected.","properties":{"build":{"properties":{"security":{"properties":{"capabilities":{"items":{"not":{"pattern":"^SYS_"}}}}}}}}}],
   "properties": {
     "schema_version": {"const": 1},
     "identity": {"$ref": "#/$defs/identity"},

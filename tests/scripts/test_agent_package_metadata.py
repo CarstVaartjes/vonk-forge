@@ -41,36 +41,32 @@ def test_development_metadata_emits_canonical_debian_outputs() -> None:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "version=0.1.0~dev.417+g0123456789ab",
-        "next_version=0.1.0~dev.418+g0123456789ab",
-        "baseline_version=0.0.0~acceptance.1+g0123456789ab",
-        "arm64_package=vonk-forge-agent_0.1.0~dev.417+g0123456789ab_arm64.deb",
-        "amd64_package=vonk-forge-agent_0.1.0~dev.417+g0123456789ab_amd64.deb",
-        "arm64_baseline_package=vonk-forge-agent_0.0.0~acceptance.1+g0123456789ab_arm64.deb",
-        "amd64_baseline_package=vonk-forge-agent_0.0.0~acceptance.1+g0123456789ab_amd64.deb",
+        "version=0.1.1~dev.417+g0123456789ab",
+        "next_version=0.1.1~dev.418+g0123456789ab",
+        "baseline_version=0.1.0~acceptance.1+g0123456789ab",
+        "arm64_package=vonk-forge-agent_0.1.1~dev.417+g0123456789ab_arm64.deb",
+        "arm64_baseline_package=vonk-forge-agent_0.1.0~acceptance.1+g0123456789ab_arm64.deb",
         f"artifact_name=vonk-agent-development-{SHA}",
         f"baseline_artifact_name=vonk-agent-development-{SHA}-acceptance-baseline",
         "channel=dev",
-        "snapshot=dev-0.1.0~dev.417+g0123456789ab",
+        "snapshot=dev-0.1.1~dev.417+g0123456789ab",
     ]
 
 
 def test_production_metadata_emits_canonical_stable_outputs() -> None:
-    result = run_metadata("production", "tag", "v0.1.0", SHA, "0")
+    result = run_metadata("production", "tag", "v0.1.1", SHA, "0")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "version=0.1.0",
-        "next_version=0.1.0+lifecycle.1",
-        "baseline_version=0.0.0~acceptance.1+g0123456789ab",
-        "arm64_package=vonk-forge-agent_0.1.0_arm64.deb",
-        "amd64_package=vonk-forge-agent_0.1.0_amd64.deb",
-        "arm64_baseline_package=vonk-forge-agent_0.0.0~acceptance.1+g0123456789ab_arm64.deb",
-        "amd64_baseline_package=vonk-forge-agent_0.0.0~acceptance.1+g0123456789ab_amd64.deb",
+        "version=0.1.1",
+        "next_version=0.1.1+lifecycle.1",
+        "baseline_version=0.1.0~acceptance.1+g0123456789ab",
+        "arm64_package=vonk-forge-agent_0.1.1_arm64.deb",
+        "arm64_baseline_package=vonk-forge-agent_0.1.0~acceptance.1+g0123456789ab_arm64.deb",
         f"artifact_name=vonk-agent-production-{SHA}",
         f"baseline_artifact_name=vonk-agent-production-{SHA}-acceptance-baseline",
         "channel=stable",
-        "snapshot=stable-0.1.0",
+        "snapshot=stable-0.1.1",
     ]
 
 
@@ -81,7 +77,7 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
         ("development", "branch", "release", SHA, "417"),
         ("production", "branch", "v0.1.0", SHA, "0"),
         ("production", "tag", "0.1.0", SHA, "0"),
-        ("production", "tag", "v0.1.1", SHA, "0"),
+        ("production", "tag", "v0.1.2", SHA, "0"),
         ("development", "branch", "main", SHA.upper(), "417"),
         ("development", "branch", "main", SHA[:-1], "417"),
         ("development", "branch", "main", SHA, "0"),
@@ -90,7 +86,7 @@ def test_production_metadata_emits_canonical_stable_outputs() -> None:
         ("development", "branch", "main", SHA, "not-a-sequence"),
         ("development", "branch", "main", SHA, "9999999999999999999"),
         ("development", "branch", "main", SHA, "10000000000000000000"),
-        ("production", "tag", "v0.1.0", SHA, "417"),
+        ("production", "tag", "v0.1.1", SHA, "417"),
     ),
 )
 def test_metadata_rejects_noncanonical_release_inputs(
@@ -107,11 +103,11 @@ def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
     workspace = metadata_workspace(tmp_path)
     control_project = workspace / "control/pyproject.toml"
     control_project.write_text(
-        control_project.read_text().replace('version = "0.1.0"', 'version = "0.1.1"')
+        control_project.read_text().replace('version = "0.1.1"', 'version = "0.1.2"')
     )
 
     result = run_metadata(
-        "production", "tag", "v0.1.0", SHA, "0", root=workspace
+        "production", "tag", "v0.1.1", SHA, "0", root=workspace
     )
 
     assert result.returncode == 64
@@ -120,16 +116,16 @@ def test_metadata_rejects_mismatched_workspace_versions(tmp_path: Path) -> None:
 
 
 def test_debian_ordering_promotes_development_to_final() -> None:
-    current = "0.1.0~dev.417+g0123456789ab"
+    current = "0.1.1~dev.417+g0123456789ab"
 
     lower = subprocess.run(
-        ["/usr/bin/dpkg", "--compare-versions", current, "lt", "0.1.0"],
+        ["/usr/bin/dpkg", "--compare-versions", current, "lt", "0.1.1"],
         check=False,
         capture_output=True,
         text=True,
     )
     higher = subprocess.run(
-        ["/usr/bin/dpkg", "--compare-versions", "0.1.0", "gt", current],
+        ["/usr/bin/dpkg", "--compare-versions", "0.1.1", "gt", current],
         check=False,
         capture_output=True,
         text=True,
@@ -137,6 +133,21 @@ def test_debian_ordering_promotes_development_to_final() -> None:
 
     assert lower.returncode == 0, lower.stderr
     assert higher.returncode == 0, higher.stderr
+
+
+def test_current_development_line_is_newer_than_last_stable() -> None:
+    result = run_metadata("development", "branch", "main", SHA, "417")
+
+    assert result.returncode == 0, result.stderr
+    current = result.stdout.splitlines()[0].removeprefix("version=")
+    ordered = subprocess.run(
+        ["/usr/bin/dpkg", "--compare-versions", current, "gt", "0.1.0"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert ordered.returncode == 0, ordered.stderr
 
 
 def test_debian_ordering_uses_publication_sequence_before_sha() -> None:

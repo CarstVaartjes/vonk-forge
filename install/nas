@@ -10,21 +10,27 @@ fail() {
     exit 1
 }
 
-hermes_option=
-case "$#" in
-    0) ;;
-    1)
+validate_arguments() {
+    hermes_option=
+    answers_file=
+    while [ "$#" -gt 0 ]; do
         case "$1" in
-            --enable-hermes|--disable-hermes) hermes_option=$1 ;;
-            *) fail "this installer accepts only --enable-hermes or --disable-hermes" ;;
+            --enable-hermes|--disable-hermes)
+                [ -z "$hermes_option" ] || fail "the Hermes mode may be selected only once"
+                hermes_option=$1
+                shift
+                ;;
+            --answers-file)
+                [ -z "$answers_file" ] || fail "the answers file may be selected only once"
+                [ "$#" -ge 2 ] && [ -n "$2" ] || fail "--answers-file requires a path"
+                answers_file=$2
+                shift 2
+                ;;
+            *) fail "this installer accepts only a Hermes mode and --answers-file PATH" ;;
         esac
-        ;;
-    *) fail "this installer accepts only --enable-hermes or --disable-hermes" ;;
-esac
-set --
-if [ -n "$hermes_option" ]; then
-    set -- "$hermes_option"
-fi
+    done
+}
+validate_arguments "$@"
 
 case $(uname -s) in
     Linux) platform=linux ;;
@@ -46,6 +52,8 @@ case "$platform-$architecture" in
 esac
 [ "${#expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
 case "$expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
+# The verified payload installs channel-following Compose images (:dev/:latest).
+# This checksum authenticates the installer payload; it does not pin runtime images.
 payload_expected='@NAS_PAYLOAD_SHA256@'
 [ "${#payload_expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
 case "$payload_expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
@@ -62,6 +70,12 @@ sha256() {
     fi
 }
 
+download() {
+    curl -fsSL --proto '=https' --tlsv1.2 \
+        --retry 10 --retry-all-errors --retry-delay 2 --retry-max-time 45 \
+        --connect-timeout 10 --max-time 60 "$1" -o "$2"
+}
+
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/vonk-${kind}.XXXXXX") || fail "cannot create a temporary directory"
 cleanup() {
     rm -rf -- "$temporary"
@@ -73,8 +87,8 @@ payload="$temporary/payload.json"
 url="$base_url/$kind/current/$platform-$architecture/vonk-${kind}-setup"
 payload_url="$base_url/$kind/current/payload.json"
 
-curl -fsSL --proto '=https' --tlsv1.2 "$url" -o "$artifact" || fail "cannot download the setup program"
-curl -fsSL --proto '=https' --tlsv1.2 "$payload_url" -o "$payload" || fail "cannot download the release payload"
+download "$url" "$artifact" || fail "cannot download the setup program"
+download "$payload_url" "$payload" || fail "cannot download the release payload"
 
 [ "$(sha256 "$payload")" = "$payload_expected" ] || fail "the release payload failed checksum verification"
 actual=$(sha256 "$artifact")

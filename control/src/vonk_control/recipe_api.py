@@ -638,9 +638,17 @@ def install_recipe_operation_routes(
         response_model=InstallPlanResponse,
         operation_id="previewRecipeInstall",
     )
-    def preview_install(body: InstallPreviewRequest, actor: Actor = authenticated):
+    def preview_install(
+        body: InstallPreviewRequest,
+        request: Request,
+        actor: Actor = authenticated,
+    ):
         administrator(actor)
-        return asdict(recipes().preview_install(body.mapping_id, body.recipe_build_id))
+        try:
+            plan = recipes().preview_install(body.mapping_id, body.recipe_build_id)
+        except (KeyError, ValueError) as error:
+            return conflict(request, error)
+        return asdict(plan)
 
     @app.post(
         "/api/v1/recipes/installations",

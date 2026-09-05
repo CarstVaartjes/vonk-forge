@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""Collect measured pytest file durations from a JUnit XML report."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+from datetime import UTC, datetime
+from pathlib import Path
+
+
+def collect(report: str | Path, *, root: str | Path = ".") -> dict[str, float]:
+    root_path = Path(root).resolve()
+    durations: defaultdict[str, float] = defaultdict(float)
+    for case in ET.parse(report).getroot().iter("testcase"):
+        file_name = case.attrib.get("file")
+        if not file_name:
+            continue
+        file_path = Path(file_name)
+        if file_path.is_absolute():
+            try:
+                file_name = file_path.resolve().relative_to(root_path).as_posix()
+            except ValueError:
+                continue
+        else:
+            file_name = file_path.as_posix()
+        try:
+            seconds = float(case.attrib.get("time", "0"))
+        except ValueError:
+            continue
+        if math.isfinite(seconds) and seconds >= 0:
+            durations[file_name] += seconds
+    return dict(durations)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("report", help="pytest JUnit XML report")
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--root", default=".")
+    args = parser.parse_args()
+    payload = {
+        "schema_version": 1,
+        "generated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "source": "pytest-junitxml",
+        "files": collect(args.report, root=args.root),
+    }
+    Path(args.output).write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + os.linesep, encoding="utf-8"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

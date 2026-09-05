@@ -29,6 +29,20 @@ def test_bootstrap_command_forwards_only_explicit_installer_arguments() -> None:
     assert '/bin/sh "$bootstrap" "$@"' in command[2]
 
 
+def test_interactive_timeout_identifies_the_pending_prompt(tmp_path: Path) -> None:
+    with pytest.raises(
+        AcceptanceError,
+        match="interactive command timed out waiting for 'Expected prompt: '",
+    ):
+        run_interactive(
+            ["/bin/sleep", "2"],
+            cwd=tmp_path,
+            environment={"PATH": "/usr/bin:/bin"},
+            responses=[("Expected prompt: ", "answer")],
+            timeout=1,
+        )
+
+
 def test_interactive_runner_drives_a_real_tty_without_exporting_answers(
     tmp_path: Path,
 ) -> None:

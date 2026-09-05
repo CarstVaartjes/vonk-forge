@@ -2,6 +2,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Write};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
@@ -29,6 +30,9 @@ struct Cli {
     /// Explicitly disable Hermes while preserving its configuration for reuse.
     #[arg(long)]
     disable_hermes: bool,
+    /// Read newline-delimited answers from a private regular file instead of a TTY.
+    #[arg(long)]
+    answers_file: Option<PathBuf>,
 }
 
 fn main() {
@@ -40,12 +44,22 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    prepare_bundle(cli, Path::new("/dev/tty"), &mut io::stdout())
+    if let Some(path) = cli.answers_file.clone() {
+        let answers = open_private_answers(&path)?;
+        let reader = BufReader::new(answers);
+        let mut prompt = PromptIo::new(reader, io::sink());
+        prepare_bundle(cli, &mut prompt, &mut io::stdout())
+    } else {
+        let reader = BufReader::new(LazyTty::new(Path::new("/dev/tty")));
+        let mut writer = LazyTty::new(Path::new("/dev/tty"));
+        let mut prompt = PromptIo::with_secret_input(reader, &mut writer, HiddenSecretInput);
+        prepare_bundle(cli, &mut prompt, &mut io::stdout())
+    }
 }
 
-fn prepare_bundle(
+fn prepare_bundle<R: io::BufRead, W: Write, S: vonk_nas_setup::SecretInput<R, W>>(
     cli: Cli,
-    tty_path: &Path,
+    prompt: &mut PromptIo<R, W, S>,
     status: &mut dyn Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let metadata = fs::metadata(&cli.template)?;
@@ -54,12 +68,6 @@ fn prepare_bundle(
     }
     let payload = CanonicalTemplatePayload::from_json(&fs::read(&cli.template)?)?;
 
-    // Upgrades of complete bundles do not prompt. Delay opening the controlling
-    // terminal until PromptIo actually needs interactive input so that the
-    // supported installer can perform those upgrades from a pipe or exec job.
-    let reader = BufReader::new(LazyTty::new(tty_path));
-    let mut writer = LazyTty::new(tty_path);
-    let mut prompt = PromptIo::with_secret_input(reader, &mut writer, HiddenSecretInput);
     let request = if cli.upgrade {
         SetupRequest::upgrade(&cli.output)
     } else {
@@ -72,9 +80,27 @@ fn prepare_bundle(
     } else {
         request
     };
-    let outcome = prepare(&payload, request, &mut prompt, &OsSecretGenerator)?;
+    let outcome = prepare(&payload, request, prompt, &OsSecretGenerator)?;
     writeln!(status, "Bundle ready at {}", outcome.root.display())?;
     Ok(())
+}
+
+fn open_private_answers(path: &Path) -> Result<File, Box<dyn std::error::Error>> {
+    let before = fs::symlink_metadata(path)?;
+    if !before.is_file()
+        || before.file_type().is_symlink()
+        || before.nlink() != 1
+        || before.len() > 256 * 1024
+        || before.mode() & 0o077 != 0
+    {
+        return Err("answers file must be a private, singly linked regular file".into());
+    }
+    let file = File::open(path)?;
+    let after = file.metadata()?;
+    if before.dev() != after.dev() || before.ino() != after.ino() {
+        return Err("answers file changed while it was opened".into());
+    }
+    Ok(file)
 }
 
 #[derive(Debug)]
@@ -131,6 +157,7 @@ impl Write for LazyTty {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
 
     #[test]
@@ -142,6 +169,7 @@ mod tests {
         assert!(!cli.upgrade);
         assert!(!cli.enable_hermes);
         assert!(!cli.disable_hermes);
+        assert!(cli.answers_file.is_none());
     }
 
     #[test]
@@ -178,5 +206,37 @@ mod tests {
             error.to_string().contains("interactive input requires"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn answers_file_is_an_explicit_supported_input() {
+        let cli = Cli::try_parse_from([
+            "vonk-nas-setup",
+            "--template",
+            "payload.json",
+            "--answers-file",
+            "answers.txt",
+            "--disable-hermes",
+        ])
+        .expect("answers file accepted");
+
+        assert_eq!(cli.answers_file, Some(PathBuf::from("answers.txt")));
+        assert!(cli.disable_hermes);
+    }
+
+    #[test]
+    fn answers_file_must_be_private() {
+        let temporary = tempdir().expect("temporary directory");
+        let path = temporary.path().join("answers.txt");
+        fs::write(&path, "answer\n").expect("write answers");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644))
+            .expect("set public permissions");
+
+        let error = open_private_answers(&path).expect_err("public answers rejected");
+        assert!(error.to_string().contains("must be a private"));
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .expect("set private permissions");
+        open_private_answers(&path).expect("private answers accepted");
     }
 }

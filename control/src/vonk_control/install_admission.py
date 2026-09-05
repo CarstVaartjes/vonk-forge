@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .artifact_sizes import ArtifactSizeError, ArtifactSizeResolver
-from .inventory_repository import InventoryRepository
+from .inventory_repository import InventoryRepository, InventorySnapshotView
 from .legal_admission import operator_jurisdiction as validate_operator_jurisdiction
 from .legal_admission import territorial_admission
 from .models import (
@@ -142,6 +142,17 @@ class InstallAdmissionService:
                     )
                 )
             )
+            inventory_by_node: dict[str, InventorySnapshotView | None] = {}
+            for mapping_node in mapping_nodes:
+                try:
+                    inventory_by_node[mapping_node.node_id] = self._inventory.latest(
+                        mapping_node.node_id,
+                        now=now,
+                        maximum_age=self._inventory_max_age,
+                        _session=session,
+                    )
+                except KeyError:
+                    inventory_by_node[mapping_node.node_id] = None
             document = revision.document
             try:
                 resolved_entities = resolve_recipe_entities(session, document)
@@ -158,6 +169,7 @@ class InstallAdmissionService:
                 self._operator_jurisdiction,
                 operation="install",
             )
+            topology_reason: AdmissionReason | None = None
             try:
                 validate_topology(
                     document,
@@ -170,10 +182,26 @@ class InstallAdmissionService:
                         )
                         for mapping_node in mapping_nodes
                     ),
-                    {node.node_id: tuple(node.capabilities) for node in nodes},
+                    {
+                        node.node_id: tuple(
+                            sorted(
+                                {
+                                    capability
+                                    for capability in node.capabilities
+                                    if not capability.startswith("fabric.")
+                                }
+                                | set(
+                                    inventory_by_node[node.node_id].capabilities
+                                    if inventory_by_node.get(node.node_id) is not None
+                                    else ()
+                                )
+                            )
+                        )
+                        for node in nodes
+                    },
                 )
             except TopologyError as error:
-                raise ValueError("mapping topology is invalid") from error
+                topology_reason = AdmissionReason(error.code, str(error))
             recipe_digest = revision.content_sha256
             mapping_generation = mapping.generation
             image_digest = build.image_digest
@@ -202,6 +230,8 @@ class InstallAdmissionService:
         for mapping_node in mapping_nodes:
             blockers: list[AdmissionReason] = []
             warnings: list[AdmissionReason] = []
+            if topology_reason is not None:
+                blockers.append(topology_reason)
             if legal_admission.blocker is not None:
                 blockers.append(AdmissionReason(*legal_admission.blocker))
             if legal_admission.warning is not None:
@@ -244,15 +274,8 @@ class InstallAdmissionService:
                         "External artifacts are larger than this role declares.",
                     )
                 )
-            try:
-                snapshot = self._inventory.latest(
-                    mapping_node.node_id,
-                    now=now,
-                    maximum_age=self._inventory_max_age,
-                    _session=_session,
-                )
-            except KeyError:
-                snapshot = None
+            snapshot = inventory_by_node.get(mapping_node.node_id)
+            if snapshot is None:
                 blockers.append(
                     AdmissionReason(
                         "install.inventory_missing",
@@ -368,7 +391,7 @@ class InstallAdmissionService:
             "image_digest": image_digest,
             "recipe_revision_id": revision.id,
             "recipe_content_sha256": recipe_digest,
-            "nodes": [_node_document(item) for item in plans],
+            "nodes": [_node_digest_document(item) for item in plans],
         }
         digest = hashlib.sha256(
             json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
@@ -459,24 +482,6 @@ class InstallAdmissionService:
             resolve_recipe_entities(session, revision.document)
         except RecipeRuntimeSpecError as error:
             raise InstallPlanConflict("install.dependencies_stale") from error
-        nodes = tuple(
-            session.scalars(
-                select(AgentNode)
-                .where(AgentNode.node_id.in_([node.node_id for node in mapping_nodes]))
-                .with_for_update()
-            )
-        )
-        try:
-            validate_topology(
-                revision.document,
-                tuple(
-                    Placement(node.node_id, node.rank, node.role, node.endpoint_owner)
-                    for node in mapping_nodes
-                ),
-                {node.node_id: tuple(node.capabilities) for node in nodes},
-            )
-        except TopologyError as error:
-            raise InstallPlanConflict("install.topology_stale") from error
         installation = RecipeInstallation(
             recipe_revision_id=plan.recipe_revision_id,
             model_version_sha256=_primary_model_sha256(revision.document),
@@ -580,4 +585,18 @@ def _node_document(node: InstallNodePlan) -> dict[str, object]:
             if node.inventory_observed_at
             else None
         ),
+    }
+
+
+def _node_digest_document(node: InstallNodePlan) -> dict[str, object]:
+    """Bind install work and safety envelopes, not transient observations."""
+
+    return {
+        "node_id": node.node_id,
+        "rank": node.rank,
+        "role": node.role,
+        "reused_bytes": node.reused_bytes,
+        "required_download_bytes": node.required_download_bytes,
+        "required_bytes": node.required_bytes,
+        "disk_floor_bytes": node.disk_floor_bytes,
     }

@@ -17,7 +17,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/agent-apt-state"
 SHA = "0123456789abcdef0123456789abcdef01234567"
-PACKAGE_BYTES = {"amd64": b"amd64 package bytes", "arm64": b"arm64 package bytes"}
+PACKAGE_BYTES = {"arm64": b"arm64 package bytes"}
 
 
 def load_state_module() -> ModuleType:
@@ -157,7 +157,7 @@ class ConcurrentPublicR2(FakeR2):
 
     def write(self, key: str, data: bytes) -> None:
         if key in {
-            "dists/dev/main/binary-amd64/Packages",
+            "dists/dev/main/binary-arm64/Packages",
             "vonk-forge-dev-archive-keyring.gpg",
         }:
             self.ordinary_barrier.wait(timeout=2)
@@ -183,17 +183,13 @@ def receipt(version: str = "0.1.0~dev.1786300000+g0123456789ab") -> dict[str, ob
     }
 
 
-def test_publication_receipt_binds_both_architecture_packages() -> None:
+def test_publication_receipt_binds_the_arm64_package() -> None:
     state = load_state_module()
     version = "0.1.0~dev.1786300000+g0123456789ab"
     publication = {
         "channel": "dev",
         "distribution": "dev",
         "packages": {
-            "amd64": {
-                "filename": f"vonk-forge-agent_{version}_amd64.deb",
-                "sha256": "a" * 64,
-            },
             "arm64": {
                 "filename": f"vonk-forge-agent_{version}_arm64.deb",
                 "sha256": "b" * 64,
@@ -384,7 +380,7 @@ def write_public_tree(
     distribution: str = "dev",
 ) -> Path:
     public = tmp_path / "public"
-    for architecture in ("amd64", "arm64"):
+    for architecture in ("arm64",):
         paragraphs: list[str] = []
         for package, version, record_architecture, digest in sorted(records):
             if record_architecture != architecture:
@@ -482,14 +478,14 @@ def test_development_compaction_workflow_retry_restores_prior_committed_state(
     monkeypatch.setattr(state, "_compare_versions", compare_test_versions)
     failures = 0
 
-    def fail_second_add(arguments: tuple[str, ...]) -> bool:
+    def fail_first_add(arguments: tuple[str, ...]) -> bool:
         nonlocal failures
         if arguments[:3] == ("repo", "add", "vonk-forge-dev"):
             failures += 1
-            return failures == 2
+            return failures == 1
         return False
 
-    aptly.fail = fail_second_add
+    aptly.fail = fail_first_add
     with pytest.raises(RuntimeError, match="injected aptly interruption"):
         state.compact_aptly_state(
             publication,
@@ -591,7 +587,7 @@ def test_stable_compaction_retains_current_and_two_complete_predecessors(
         "prepare",
     )
     assert {record[1] for record in aptly.repo} == {"1.9.0", "1.10.0", "1.11.0"}
-    assert {record[2] for record in aptly.repo} == {"amd64", "arm64"}
+    assert {record[2] for record in aptly.repo} == {"arm64"}
     aptly.snapshots[publication["snapshot"]] = set(aptly.repo)
     public = write_public_tree(tmp_path, aptly.repo, "stable")
     state.compact_aptly_state(
@@ -629,7 +625,7 @@ def test_stable_compaction_rejects_rollback_before_mutation(
     assert not any(operation[:2] == ("repo", "remove") for operation in aptly.operations)
 
 
-def test_repository_version_requires_exactly_one_package_per_architecture() -> None:
+def test_repository_version_rejects_an_extra_architecture() -> None:
     state = load_state_module()
     publication = stable_receipt("1.2.3")
     records = package_records(publication)
@@ -641,15 +637,13 @@ def test_repository_version_requires_exactly_one_package_per_architecture() -> N
 
 def test_repository_version_rejects_incomplete_and_unexpected_packages() -> None:
     state = load_state_module()
-    publication = stable_receipt("1.2.3")
-    records = package_records(publication)
-    records = {record for record in records if record[2] == "amd64"}
+    records = {("vonk-forge-agent", "1.2.3", "amd64", "a" * 64)}
     with pytest.raises(state.StateError, match="incomplete package version"):
         state._group_complete_versions(records, "stable")
 
     with pytest.raises(state.StateError, match="package identity"):
         state._group_complete_versions(
-            {("another-package", "1.2.3", "amd64", "a" * 64)}, "stable"
+            {("another-package", "1.2.3", "arm64", "a" * 64)}, "stable"
         )
 
 
@@ -1207,10 +1201,10 @@ def test_immutable_public_conflict_preserves_all_public_bytes_and_latest(
     second_root.mkdir()
     first_state, first_public = bundles(first_root, first)
     second_state, _ = bundles(second_root, second)
-    first_package = first["packages"]["amd64"]
+    first_package = first["packages"]["arm64"]
     assert isinstance(first_package, dict)
     predecessor = second_root / "public/pool/main/v/vonk-forge-agent"
-    (predecessor / first_package["filename"]).write_bytes(PACKAGE_BYTES["amd64"])
+    (predecessor / first_package["filename"]).write_bytes(PACKAGE_BYTES["arm64"])
     second_public = state.build_bundle(second_root / "public", "public", second)
     state.commit_candidate(private, first, first_state, first_public)
     state.publish_committed(private, public, first)

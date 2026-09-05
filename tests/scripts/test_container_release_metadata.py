@@ -21,16 +21,18 @@ def run(*arguments: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_stable_tag_emits_exact_public_package_metadata() -> None:
-    result = run("tag", "v0.1.0", SHA)
+    result = run("tag", "v0.1.1", SHA)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == [
-        "version=0.1.0",
-        "image_version_tag=v0.1.0",
+        "version=0.1.1",
+        "image_version_tag=v0.1.1",
         f"commit_tag=sha-{SHA}",
         f"dev_tag=dev-sha-{SHA}",
         "latest_alias=latest",
         "api_image=ghcr.io/carstvaartjes/vonk-forge-api",
         "worker_image=ghcr.io/carstvaartjes/vonk-forge-worker",
+        "hermes_image=ghcr.io/carstvaartjes/vonk-forge-hermes",
+        "litellm_image=ghcr.io/carstvaartjes/vonk-forge-litellm",
         (
             "api_dev_source=ghcr.io/carstvaartjes/vonk-forge-api:"
             f"dev-sha-{SHA}"
@@ -39,7 +41,10 @@ def test_stable_tag_emits_exact_public_package_metadata() -> None:
             "worker_dev_source=ghcr.io/carstvaartjes/vonk-forge-worker:"
             f"dev-sha-{SHA}"
         ),
-        "hermes_image=ghcr.io/carstvaartjes/vonk-forge-hermes",
+        (
+            "litellm_dev_source=ghcr.io/carstvaartjes/vonk-forge-litellm:"
+            f"dev-sha-{SHA}"
+        ),
     ]
 
 

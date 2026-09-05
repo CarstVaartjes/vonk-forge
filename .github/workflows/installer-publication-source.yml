@@ -1,0 +1,83 @@
+name: Installer publication source
+
+on:
+  push:
+    branches: [main]
+    # One cheap fan-in anchor for the union of every development producer.
+    # Unrelated main changes must not launch installer acceptance.
+    paths:
+      - .dockerignore
+      - .github/actions/agent-package-build/**
+      - .github/actions/agent-package-compile/**
+      - .github/actions/agent-package-security/**
+      - .github/workflows/agent-release.yml
+      - .github/workflows/dev-images.yml
+      - .github/workflows/installer-publication-source.yml
+      - .github/workflows/installer-publication.yml
+      - .github/workflows/installer-setups.yml
+      - Cargo.lock
+      - Cargo.toml
+      - config/execution-harnesses/**
+      - control/**
+      - deploy/compose/**
+      - inventory/wheels/**
+      - install/**
+      - packaging/**
+      - pyproject.toml
+      - uv.lock
+      - rust/crates/vonk-agent-helper/**
+      - rust/crates/vonk-agent-protocol/**
+      - rust/crates/vonk-agent/**
+      - rust/crates/vonk-build-egress/**
+      - rust/crates/vonk-nas-setup/**
+      - rust/crates/vonk-repair-helper-probe/**
+      - rust/crates/vonk-spark-setup/**
+      - schemas/global/**
+      - scripts/accept-development-image-archive
+      - scripts/agent-package-metadata
+      - scripts/build-agent-deb
+      - scripts/build-nas-compose-bundle
+      - scripts/dev-image-acceptance-receipt
+      - scripts/dev-image-metadata
+      - scripts/install-release-publication
+      - scripts/resolve-publication-producer
+      - scripts/materialize-agent-tools
+      - scripts/promote-image-aliases
+      - scripts/promote-accepted-channel
+      - scripts/render-accepted-compose-overlay
+      - scripts/verify-production-alias-postconditions
+      - scripts/publish-immutable-image
+      - scripts/render-dev-compose
+      - scripts/render-production-compose
+      - scripts/test-agent-package-native-lifecycle
+      - scripts/test_agent_deb.py
+      - scripts/test_docker_firewall.sh
+      - scripts/verify-agent-binaries
+      - scripts/verify-agent-deb
+      - scripts/verify-agent-systemd
+      - scripts/verify-public-image-inputs
+      - scripts/verify-published-image
+      - scripts/verify-release-tag-authority
+      - src/cluster_profiles/**
+      - tests/acceptance/test_fresh_nas_install.py
+      - tests/acceptance/test_spark_lifecycle.py
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    name: Bind changed publication and acceptance source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact publication source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify exact current main source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
