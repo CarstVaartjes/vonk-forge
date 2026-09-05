@@ -36,6 +36,7 @@ jobs:
     concurrency:
       group: vonk-forge-development-image-publication
       cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       attestations: write

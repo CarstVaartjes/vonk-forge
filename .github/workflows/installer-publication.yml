@@ -25,9 +25,10 @@ concurrency:
        github.event.workflow_run.head_sha) ||
       github.run_id
     }}
-  # Producer completions retry readiness for their source. Stable publication
-  # remains anchored to the completed CI tag.
-  cancel-in-progress: true
+  # Producer completions retry readiness for their source. Never interrupt
+  # an in-flight publication transaction when a later completion event arrives.
+  cancel-in-progress: false
+  queue: max
 
 jobs:
   authority:
@@ -251,6 +252,7 @@ jobs:
     concurrency:
       group: vonk-forge-installer-r2-${{ needs.authority.outputs.channel }}
       cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       contents: read
@@ -986,6 +988,7 @@ jobs:
     concurrency:
       group: vonk-forge-installer-r2-${{ needs.authority.outputs.channel }}
       cancel-in-progress: false
+      queue: max
     permissions:
       actions: read
       contents: read
@@ -1076,6 +1079,7 @@ jobs:
     concurrency:
       group: vonk-forge-installer-r2-${{ matrix.channel }}
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:

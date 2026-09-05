@@ -989,6 +989,7 @@ jobs:
     concurrency:
       group: vonk-forge-container-publication-${{ needs.release-metadata.outputs.version }}
       cancel-in-progress: false
+      queue: max
     permissions:
       attestations: write
       contents: read
@@ -1369,6 +1370,7 @@ jobs:
     concurrency:
       group: vonk-forge-agent-apt-stable
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
     steps:
