@@ -204,7 +204,12 @@ class RecipePackageClient:
 
     def list(self) -> RecipeLibrarySnapshot:
         try:
-            publication = self._resolve_publication_commit() if self._production else None
+            publication = (
+                self._publication_commit
+                or self._resolve_publication_commit()
+                if self._production
+                else None
+            )
             index_path = self._raw_path(publication, "catalog-index.json") if publication else PACKAGE_INDEX_PATH
             response = self._client.get(index_path)
         except (httpx.HTTPError, OSError) as error:
@@ -212,6 +217,11 @@ class RecipePackageClient:
             if persisted is not None:
                 return persisted
             raise RecipePackageError("recipe_package.unavailable", "recipe package index is unavailable") from error
+        except RecipePackageError:
+            persisted = self._read_persisted_snapshot()
+            if persisted is not None:
+                return persisted
+            raise
         media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         if response.status_code != 200 or response.is_redirect:
             persisted = self._read_persisted_snapshot()

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import httpx
+import pytest
 
 from vonk_control.recipe_packages import RecipePackageClient
 
@@ -52,3 +54,20 @@ def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_pat
     )
     assert item.package_handle is not None
     assert item.package_handle.publication_commit == publication
+
+
+def test_publication_network_smoke_at_published_commit(tmp_path: Path) -> None:
+    """Opt-in smoke for the real GitHub API/raw publication boundary."""
+    if os.environ.get("VONK_RUN_RECIPE_NETWORK_SMOKE") != "1":
+        pytest.skip("set VONK_RUN_RECIPE_NETWORK_SMOKE=1 for the public publication smoke")
+    client = RecipePackageClient(
+        None,
+        publication_commit="2001c6502bfdc66141dd7224bfde5d77734e9959",
+        cache_root=tmp_path / "packages",
+    )
+    try:
+        snapshot = client.list()
+        assert snapshot.repository == "CarstVaartjes/vonk-forge-recipes"
+        assert len(snapshot.items) == 84
+    finally:
+        client.close()
