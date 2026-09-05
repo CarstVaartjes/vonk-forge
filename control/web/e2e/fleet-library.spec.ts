@@ -127,6 +127,7 @@ function libraryRunSwitchOperation(requestKey: string, state = "queued") {
       phase_index: 0,
       phase_count: 3,
       phase: "transfer",
+      subphase: "model-download",
       state: state === "queued" ? "queued" : "running",
       completed_bytes: 0,
       total_bytes: null,
@@ -331,7 +332,7 @@ async function installLocalFleetFixture(page: Page) {
       schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
       plan_digest: body.plan_digest ?? "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
       state: "running", current_operation_id: null, current_step: 1, total_steps: 4,
-      progress: {phase: "Downloading model", message: "Downloading model", completed_bytes: 0, total_bytes: null, total_bytes_known: false, request_key: body.request_key ?? null},
+      progress: {phase: "transfer", subphase: "model-download", message: "Downloading model", completed_bytes: 0, total_bytes: null, total_bytes_known: false, request_key: body.request_key ?? null, members: [{node_id: nodeId, state: "running", completed_bytes: 0, total_bytes: null}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: null}]},
       status_reason: null, result: null,
     }});
   });
@@ -339,7 +340,7 @@ async function installLocalFleetFixture(page: Page) {
     schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
     plan_digest: "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at, state: "running",
     current_operation_id: null, current_step: 1, total_steps: 4,
-    progress: {phase: "Downloading model", message: "Downloading model", completed_bytes: 0, total_bytes: null, total_bytes_known: false},
+    progress: {phase: "transfer", subphase: "model-download", message: "Downloading model", completed_bytes: 0, total_bytes: null, total_bytes_known: false, members: [{node_id: nodeId, state: "running", completed_bytes: 0, total_bytes: null}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: null}]},
     status_reason: null, result: null,
   }}));
   await page.route("**/api/v1/nodes/*/profile", async route => {
@@ -478,12 +479,10 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
 
   await expect(page.getByRole("heading", {name: "Fleet", exact: true})).toBeVisible();
   const fleetSummary = page.getByRole("region", {name: "Fleet summary"});
-  await expect(fleetSummary).toContainText("1 loaded recipe");
   await expect(fleetSummary.getByText("Live", {exact: true})).toBeVisible();
   await expect(fleetSummary.getByText("Offline", {exact: true})).toBeVisible();
-  await expect(page.getByRole("heading", {name: "Workload map"})).toBeVisible();
-  await expect(page.getByRole("table").getByText("Qwen 3")).toBeVisible();
-  await expect(page.getByText("1 blocked", {exact: true})).toBeVisible();
+  await expect(page.getByRole("heading", {name: "Spark roster"})).toBeVisible();
+  await expect(page.getByRole("article", {name: /Aurora —/})).toBeVisible();
   const aurora = page.getByRole("article", {name: /Aurora — (Live|Delayed)/});
   await expect(aurora).toContainText("NVIDIA GB10 · P0");
   await expect(aurora.getByRole("img", {name: "GPU 24h trend"})).toBeVisible();
@@ -594,7 +593,7 @@ test("Fleet has no document overflow from phone through large desktop", async ({
   await page.setViewportSize({width: 360, height: 800});
   await expect(page.locator(".node-detail")).toHaveCSS("position", "static");
   await page.setViewportSize({width: 1920, height: 900});
-  await expect(page.locator(".node-detail")).toHaveCSS("position", "sticky");
+  await expect(page.locator(".node-detail")).toHaveCSS("position", "static");
   await page.getByRole("button", {name: "Close Aurora details"}).click();
   const columns = await page.locator(".node-grid").evaluate(element => getComputedStyle(element).gridTemplateColumns.split(" ").length);
   expect(columns).toBeGreaterThanOrEqual(2);
@@ -653,11 +652,11 @@ test("Fleet compact and topology views persist, reflow, and keep technical IDs o
   await expect(page.locator(".fleet-controls-popover")).toBeHidden();
   await expect(page.locator(".fleet-controls-menu > summary")).toBeFocused();
   await expect(page.getByRole("heading", {name: "Fleet"})).toBeVisible();
-  await expect(page.locator(".workload-matrix-scroll")).toBeHidden();
-  const mobileWorkloads = page.getByRole("list", {name: "Workloads by Spark"});
-  await expect(mobileWorkloads).toBeVisible();
-  await expect(mobileWorkloads.locator(".workload-stack-row").first()).toContainText("Aurora");
-  await expect(mobileWorkloads.locator(".workload-stack-row").first()).toContainText("Borealis");
+  await expect(page.locator(".workload-matrix-scroll")).toHaveCount(0);
+  const mobileRoster = page.getByRole("region", {name: "Fleet nodes compact table"});
+  await expect(mobileRoster).toBeVisible();
+  await expect(mobileRoster).toContainText("Aurora");
+  await expect(mobileRoster).toContainText("Borealis");
   await expectNoSeriousAccessibilityViolations(page);
   await page.screenshot({path: testInfo.outputPath("fleet-compact-mobile.png"), fullPage: true});
 });
@@ -744,149 +743,6 @@ test("Add Spark preserves an in-flight and revealed one-time grant until an expl
   await expect(page).toHaveURL(/\/library$/);
 });
 
-test.skip("Library keeps URL drill-down below 900px and three coordinated panes above it", async ({page}, testInfo) => {
-  await page.setViewportSize({width: 360, height: 800});
-  await page.goto("/library");
-
-  const models = page.getByRole("region", {name: "Models"});
-  const recipes = page.getByRole("region", {name: "Recipe inventory"});
-  const detail = page.getByRole("region", {name: "Recipe detail"});
-  await expect(models).toBeVisible();
-  await expect(recipes).toBeHidden();
-  await expect(detail).toBeHidden();
-
-  await models.getByRole("link", {name: new RegExp(qwenModelName)}).focus();
-  await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
-  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
-  await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(detail).toBeHidden();
-
-  await page.getByRole("link", {name: /Qwen Chat/}).click();
-  await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
-  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
-  await expect(models).toBeHidden();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(detail).toBeVisible();
-  await expect(page.getByRole("complementary", {name: "Sparks"})).toBeVisible();
-
-  await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`${qwenModelPath}$`));
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await page.goBack();
-  await expect(page).toHaveURL(/\/library$/);
-  await expect(models).toBeVisible();
-
-  await models.getByRole("link", {name: /Unlinked/}).click();
-  await expect(page).toHaveURL(/\/library\/models\/~unlinked$/);
-  const unlinked = page.getByRole("region", {name: "Unlinked recipes"});
-  await unlinked.getByRole("link", {name: /Custom Runtime/}).click();
-  await expect(page).toHaveURL(/\/library\/recipes\/recipe-unlinked$/);
-  const backToUnlinked = page.getByRole("link", {name: "Back to Unlinked recipes"});
-  await expect(backToUnlinked).toHaveAttribute("href", "/library/models/~unlinked");
-  await backToUnlinked.click();
-  await expect(page).toHaveURL(/\/library\/models\/~unlinked$/);
-  await expect(unlinked).toBeVisible();
-
-  await page.setViewportSize({width: 1280, height: 900});
-  await models.getByRole("link", {name: new RegExp(qwenModelName)}).click();
-  await page.getByRole("link", {name: /Qwen Chat/}).click();
-  await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(detail).toBeVisible();
-
-  for (const width of [320, 360, 768, 899, 900, 1280, 1920]) {
-    await page.setViewportSize({width, height: width < 900 ? 800 : 900});
-    await expect.poll(() => page.evaluate(() => ({
-      body: document.body.scrollWidth,
-      document: document.documentElement.scrollWidth,
-      viewport: window.innerWidth,
-    }))).toEqual({body: width, document: width, viewport: width});
-  }
-
-  await page.setViewportSize({width: 899, height: 900});
-  await expect(models).toBeHidden();
-  await expect(detail).toBeVisible();
-  await page.setViewportSize({width: 900, height: 900});
-  await expect(models).toBeVisible();
-  await expect(page.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(detail).toBeVisible();
-
-  await page.setViewportSize({width: 1280, height: 900});
-  await page.evaluate(() => {
-    const frame = document.createElement("iframe");
-    frame.title = "Fractional Library viewport";
-    frame.style.width = "899.5px";
-    frame.style.height = "800px";
-    frame.src = "/library/recipes/recipe-chat";
-    document.body.append(frame);
-  });
-  const fractionalFrame = page.frameLocator('iframe[title="Fractional Library viewport"]');
-  await expect.poll(() => page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.getBoundingClientRect().width)).toBe(899.5);
-  await fractionalFrame.locator(".library-browser-shell").waitFor();
-  await fractionalFrame.locator("html").evaluate(() => {
-    for (const sheet of Array.from(document.styleSheets)) {
-      for (const rule of Array.from(sheet.cssRules)) {
-        if (rule instanceof CSSMediaRule && /(?:899|900)px/.test(rule.conditionText)) rule.media.mediaText = "not all";
-      }
-    }
-  });
-  await expect(fractionalFrame.getByRole("region", {name: "Models"})).toBeHidden();
-  await expect(fractionalFrame.getByRole("region", {name: `Recipes for ${qwenModelName}`})).toBeVisible();
-  await expect(fractionalFrame.getByRole("region", {name: "Recipe detail"})).toBeVisible();
-  await page.locator('iframe[title="Fractional Library viewport"]').evaluate(element => element.remove());
-
-  await page.setViewportSize({width: 360, height: 800});
-  await page.evaluate(() => scrollTo(0, 0));
-  await page.screenshot({path: testInfo.outputPath("library-mobile.png")});
-});
-
-test.skip("Library view modes persist and compare friendly recipes without document overflow", async ({page}) => {
-  await page.setViewportSize({width: 1280, height: 900});
-  await page.goto("/library");
-
-  const models = page.getByRole("region", {name: "Models"});
-  const modelLink = models.getByRole("link", {name: /Qwen 3/});
-  await expect(modelLink).not.toContainText(/qwen\/3@/);
-  const modelRow = modelLink.locator("xpath=ancestor::article");
-  await modelRow.getByText("Technical details").click();
-  await expect(modelRow).toContainText("e".repeat(64));
-  await expect(modelRow.getByRole("button", {name: "Copy Model digest"})).toBeVisible();
-
-  await page.getByRole("button", {name: "Compact"}).click();
-  await expect(page.getByRole("region", {name: "Compact recipe list"})).toBeVisible();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem("vonk-forge.library.view-mode"))).toBe("compact");
-  await page.reload();
-  await expect(page.getByRole("button", {name: "Compact"})).toHaveAttribute("aria-pressed", "true");
-
-  await page.getByRole("button", {name: "Compare"}).click();
-  const picker = page.getByRole("region", {name: "Choose recipes to compare"});
-  await picker.getByRole("checkbox", {name: /Qwen Chat/}).check();
-  await picker.getByRole("checkbox", {name: /Qwen Code/}).check();
-  const comparison = page.getByRole("region", {name: "Recipe comparison"});
-  await expect(comparison.getByLabel("Startup memory: 144.0 GiB")).toHaveCount(2);
-  await expect(comparison.getByText("2 Sparks")).toHaveCount(2);
-  await expect(comparison.getByText("Ready")).toHaveCount(2);
-
-  for (const width of [320, 360, 768, 1280]) {
-    await page.setViewportSize({width, height: width < 768 ? 800 : 900});
-    await expect.poll(() => page.evaluate(() => ({
-      body: document.body.scrollWidth,
-      document: document.documentElement.scrollWidth,
-      viewport: window.innerWidth,
-    }))).toEqual({body: width, document: width, viewport: width});
-  }
-
-  await page.setViewportSize({width: 360, height: 800});
-  await page.goto("/library");
-  const kpiLayout = await page.locator(".library-overview").evaluate(element => ({
-    horizontallyScrollable: element.scrollWidth > element.clientWidth,
-    rows: new Set(Array.from(element.children).map(child => (child as HTMLElement).offsetTop)).size,
-  }));
-  expect(kpiLayout).toEqual({horizontallyScrollable: false, rows: 3});
-});
-
 test("Library mirrors the repository table with Installed on first and contained responsive scrolling", async ({page}, testInfo) => {
   const update = libraryCatalogUpdate();
   await page.unroute("**/api/v1/catalog/public-recipes");
@@ -957,115 +813,69 @@ test("Library uses the schema 2 one-click Run path when the Controller exposes r
   await expect.poll(() => state.lastRunSwitchPreviewBody).toMatchObject({schema_version: 2, model_version_sha256: "e".repeat(64), recipe_revision_id: "revision-chat", action: "run", retention: "retain-cached"});
   await expect.poll(() => state.lastRunSwitchApplyBody).toMatchObject({schema_version: 2, plan_digest: "f".repeat(64), request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   const progress = authority.getByRole("region", {name: "Qwen Chat progress"});
-  await expect(progress).toContainText("Copying model and container to node-alpha");
+  await expect(progress).toContainText("Copying model to node-alpha");
   await expect(progress).toContainText("Total bytes unavailable");
   await expect(progress.getByRole("progressbar", {name: "Run progress"})).toHaveAttribute("aria-valuetext", "Total bytes unavailable");
 });
 
-test.skip("Library fixture journey keeps visual authority primary through preview, partial retry, and Advanced recovery", async ({page}, testInfo) => {
-  await page.setViewportSize({width: 1280, height: 900});
+test("Library keeps partial Run progress visible for each Spark", async ({page}) => {
   await page.goto("/library/recipes/recipe-chat");
-
-  const models = page.getByRole("region", {name: "Models"});
-  const recipes = page.getByRole("region", {name: `Recipes for ${qwenModelName}`});
   const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
-  await expect(models.getByRole("link", {name: /Unlinked/})).toBeVisible();
-  await expect(recipes.getByRole("link", {name: /Qwen Chat/})).toBeVisible();
-  await expect(recipes.getByRole("link", {name: /Qwen Code/})).toBeVisible();
-  await expect(authority).toContainText("Immutable revision 3");
-  await expect(authority).toContainText("Bounded search is incomplete");
-  await expect(authority).toContainText("Inventory fresh · 10s");
-  await expect(authority).toContainText("Spark node + Spark node");
-  const nextAction = authority.getByRole("region", {name: "Recommended next action"});
-  await expect(nextAction).toContainText("Load and publish the model");
-  await expect(nextAction.getByRole("button", {name: "Review Load"})).toBeVisible();
-  const placementEvidence = authority.getByRole("group", {name: "Capacity and placement evidence"});
-  await expect(placementEvidence).not.toHaveAttribute("open");
-  await expect(placementEvidence.getByText("Inventory fresh · 10s")).not.toBeVisible();
-  const authorityContrast = await authority.evaluate(element => {
-    const channels = (value: string) => value.match(/[\d.]+/g)!.slice(0, 3).map(Number);
-    const luminance = (value: string) => {
-      const linear = channels(value).map(channel => {
-        const normalized = channel / 255;
-        return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
-    };
-    const foreground = luminance(getComputedStyle(element).color);
-    const pane = element.closest<HTMLElement>(".library-pane")!;
-    const background = luminance(getComputedStyle(pane).backgroundColor);
-    return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
-  });
-  expect(authorityContrast).toBeGreaterThanOrEqual(4.5);
+  const run = authority.getByRole("button", {name: "Run", exact: true}).last();
+  await run.scrollIntoViewIfNeeded();
+  await run.click({force: true});
 
-  const selector = authority.getByRole("button", {name: "Select complete group Spark node and Spark node"});
-  await expect(selector).toHaveAttribute("aria-pressed", "true");
-  const review = nextAction.getByRole("button", {name: "Review Load"});
-  await review.click();
-  let dialog = page.getByRole("dialog", {name: "Review Load"});
-  await expect(dialog).toContainText("Existing recipes remain loaded. Forge will not unload anything automatically.");
-  await expect(dialog).toContainText("Authoritative capacity evidence permits Qwen Code to coexist.");
-  await dialog.getByRole("button", {name: "Cancel"}).click();
-  await expect(dialog).toBeHidden();
-  await expect(review).toBeFocused();
-
-  await review.click();
-  dialog = page.getByRole("dialog", {name: "Review Load"});
-  await dialog.getByRole("button", {name: "Load selected installation"}).click();
-  const progress = page.getByRole("region", {name: "Load operation progress"});
-  await expect(progress).toContainText("Operation incomplete");
-  await expect(progress).toContainText("1 of 2 ranks completed · 1 failed");
   const state = libraryFixtures.get(page)!;
-  expect(state.lastApplyBody).toMatchObject({alias: "qwen-chat", installation_id: "installation-chat", plan_digest: "load-plan-digest"});
-  await progress.getByRole("button", {name: "Retry incomplete operation"}).click();
-  await expect.poll(() => state.retryCount).toBe(1);
-  await expect(progress).toContainText("Operation incomplete");
-
-  const advanced = page.getByRole("group", {name: "Advanced recipe document"});
-  await advanced.getByText("Advanced recipe document").click();
-  const editor = advanced.getByRole("textbox", {name: "Recipe JSON"});
-  const firstValid = {...fullLibraryDetail.visual_recipe!, model: {...fullLibraryDetail.visual_recipe!.model, slug: "qwen-e2e"}};
-  await editor.fill(JSON.stringify(firstValid, null, 2));
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen E 2 E");
-  const invalid = {...firstValid, model: {...firstValid.model, content_sha256: "not-a-digest"}};
-  await editor.fill(JSON.stringify(invalid, null, 2));
-  await expect(advanced.getByRole("alert")).toContainText("$.model.content_sha256 must be 64 lowercase hexadecimal characters.");
-  await expect(editor).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen E 2 E");
-
-  const upload = advanced.getByLabel("Upload recipe JSON");
-  const uploaded = {...firstValid, model: {...firstValid.model, slug: "qwen-uploaded"}};
-  await upload.focus();
-  await upload.setInputFiles({name: "recipe.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(uploaded))});
-  await expect(advanced.getByRole("alert")).toHaveCount(0);
-  await expect(upload).toBeFocused();
-  await expect(authority.getByRole("region", {name: "Recipe identity"})).toContainText("Qwen Uploaded");
-  await expect(page.getByRole("link", {name: "Source and build"})).toHaveCount(0);
-  await expect(page.getByRole("link", {name: "Cluster mapping"})).toHaveCount(0);
-  await expect(page.getByRole("link", {name: "Raw editor"})).toHaveCount(0);
-
-  await page.evaluate(() => scrollTo(0, 0));
-  await page.screenshot({path: testInfo.outputPath("library-desktop.png")});
+  await expect.poll(() => state.lastRunSwitchPreviewBody).toBeTruthy();
+  await expect.poll(() => state.lastRunSwitchApplyBody).toBeTruthy();
+  const progress = authority.getByRole("region", {name: "Qwen Chat progress"});
+  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("node-alpha");
+  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("In progress");
+  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("node-beta");
+  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("Waiting");
+  await expect(progress.getByRole("progressbar", {name: "Run progress"})).not.toHaveAttribute("aria-valuenow");
 });
 
-test.skip("Library local fixture recovers from errors and exposes an empty-state escape hatch", async ({page}) => {
+test("Library retries a failed snapshot and recipe detail request", async ({page}) => {
   const state = libraryFixtures.get(page)!;
   state.snapshotFailuresRemaining = 1;
-  await page.goto("/library");
+  await page.goto("/library?view=models");
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry Library"}).click();
   await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
 
   state.detailFailuresRemaining = 1;
-  await page.getByRole("link", {name: new RegExp(qwenModelName)}).click();
-  await page.getByRole("link", {name: /Qwen Chat/}).click();
+  await page.locator(".library-subnav").getByRole("link", {name: "Recipes", exact: true}).click();
+  await page.getByRole("link", {name: "Qwen Chat", exact: true}).click();
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry recipe detail"}).click();
   await expect(page.getByRole("region", {name: "Qwen Chat recipe authority"})).toBeVisible();
+});
 
+test("Empty Library offers a direct escape to the custom runtime builder", async ({page}) => {
+  const state = libraryFixtures.get(page)!;
   state.empty = true;
   await page.goto("/library");
-  await expect(page.getByRole("heading", {name: "Bring your first recipe into the Library"})).toBeVisible();
-  await expect(page.getByRole("region", {name: "Empty Library"}).getByRole("link", {name: "Browse public recipes"})).toBeVisible();
-  await expect(page.getByRole("link", {name: /advanced/i})).toHaveCount(0);
+  const empty = page.getByRole("region", {name: "Empty Library"});
+  await expect(empty).toBeVisible();
+  await empty.getByRole("link", {name: "Create custom runtime"}).click();
+  await expect(page).toHaveURL(/\/library\/create$/);
+  await expect(page.getByRole("heading", {name: "Create custom recipe"})).toBeVisible();
+});
+
+test("Library route changes restore heading focus and browser back state", async ({page}) => {
+  await page.goto("/library?view=models");
+  await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
+  await page.locator(".library-subnav").getByRole("link", {name: "Recipes", exact: true}).click();
+  await expect(page).toHaveURL(/\/library$/);
+  await page.getByRole("link", {name: "Qwen Chat", exact: true}).click();
+  await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
+  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/library$/);
+  await expect(page.getByRole("region", {name: "Recipe catalog"})).toBeVisible();
+  await page.locator(".library-subnav").getByRole("link", {name: "Models", exact: true}).click();
+  await expect(page).toHaveURL(/\/library\?view=models$/);
+  await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
 });

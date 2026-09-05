@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {ControlApi, LibraryRecipeDetail, LibrarySnapshot, PublicRecipe, RunSwitchOperation, RunSwitchPlan, RunSwitchPreviewRequest} from "../api/types";
-import type {LibraryApi, LibraryOperation} from "../api/types";
+import type {LibraryOperation} from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {StatusPill} from "./status-pill";
 import {LibraryPlacement, primaryPlacementRecommendation} from "./library-placement";
@@ -85,7 +85,7 @@ function runAlias(value: string): string {
 }
 
 export function LibraryRecipeAuthority({api, catalogRecipe, detail, modelVersionSha256, nodeNames = {}, onBusyChange, onRefresh, policy, preferredNodeId, runApi}: {
-  api: LibraryApi;
+  api: ControlApi;
   catalogRecipe?: PublicRecipe;
   detail: LibraryRecipeDetail;
   modelVersionSha256?: string;

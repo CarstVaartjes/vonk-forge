@@ -9,14 +9,16 @@ function errorMessage(value: unknown): string {
   return (value instanceof Error ? value.message : "The Controller did not return run progress.").slice(0, 256);
 }
 
-function phaseLabel(phase: RunSwitchPhaseKind | null, nodeName?: string): string {
-  if (phase === "transfer") return nodeName ? `Copying model and container to ${nodeName}` : "Downloading model and container";
-  if (phase === "verify") return nodeName ? `Verifying model and container on ${nodeName}` : "Verifying model and container";
-  if (phase === "prepare") return "Building container";
-  if (phase === "cleanup") return "Cleaning up retained copies";
+function phaseLabel(phase: RunSwitchPhaseKind | null, nodeName?: string, subphase?: RunSwitchOperation["progress"]["subphase"]): string {
+  if (subphase === "container-build" || phase === "prepare") return "Building container";
+  if (subphase === "model-download") return nodeName ? `Copying model to ${nodeName}` : "Downloading model";
+  if (subphase === "runtime-install") return nodeName ? `Copying container to ${nodeName}` : "Copying container to NAS";
+  if (phase === "transfer") return nodeName ? `Copying model to ${nodeName}` : "Downloading model";
+  if (phase === "verify") return nodeName ? `Copying model to ${nodeName}` : "Downloading model";
+  if (phase === "cleanup") return "Removing unreferenced copies";
   if (phase === "stop") return "Stopping the previous model";
   if (phase === "start") return "Starting";
-  if (phase === "final_verify") return "Checking model";
+  if (phase === "final_verify") return "Running";
   return "Starting";
 }
 
@@ -74,10 +76,10 @@ export function LibraryRunSwitchProgress({api, nodeNames, onChange, onRefresh, o
 
   return <section className={`library-run-switch-progress state-${operation.state}`} aria-label={`${title} progress`} aria-live="polite">
     <header>
-      <div><span>{operation.action === "switch" ? "Switch profile" : "Run"}</span><strong>{failed ? "Needs attention" : operation.state === "succeeded" ? "Running" : phaseLabel(progress.phase, activeName)}</strong></div>
+      <div><span>{operation.action === "switch" ? "Switch profile" : "Run"}</span><strong>{failed ? "Needs attention" : operation.state === "succeeded" ? "Running" : phaseLabel(progress.phase, activeName, progress.subphase)}</strong></div>
       <small>{operation.state.replaceAll("_", " ")}</small>
     </header>
-    <p className="library-run-switch-phase">{phaseLabel(progress.phase, activeName)}{progress.phase_index + 1 <= progress.phase_count ? ` · phase ${progress.phase_index + 1} of ${progress.phase_count}` : ""}</p>
+    <p className="library-run-switch-phase">{phaseLabel(progress.phase, activeName, progress.subphase)}{progress.phase_index + 1 <= progress.phase_count ? ` · phase ${progress.phase_index + 1} of ${progress.phase_count}` : ""}</p>
     {totalKnown
       ? <div className="library-run-switch-track" role="progressbar" aria-label="Run bytes transferred" aria-valuemin={0} aria-valuemax={totalBytes} aria-valuenow={progress.completed_bytes}><span style={{width: `${totalBytes === 0 ? 100 : Math.min(100, progress.completed_bytes / totalBytes * 100)}%`}}/></div>
       : <div className="library-run-switch-track is-indeterminate" role="progressbar" aria-label="Run progress" aria-valuetext="Total bytes unavailable"><span/></div>}

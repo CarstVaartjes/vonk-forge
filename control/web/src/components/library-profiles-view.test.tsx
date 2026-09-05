@@ -98,14 +98,13 @@ test("switches an in-scope dual-to-solo replacement on the first click and keeps
 
   render(<LibraryProfilesView api={api} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
 
-  expect(await screen.findByText("2 of 2 selected")).toBeVisible();
-  expect(await screen.findByText(/Expected in-scope replacement/)).toBeInTheDocument();
-  expect(screen.getByText("1 intentional idle · 2 Sparks in scope")).toBeVisible();
+  expect(await screen.findByText("Sparks in scope")).toBeVisible();
+  expect(await screen.findByText(/1 idle by choice · 2 Sparks in scope/)).toBeVisible();
   const switchButton = await screen.findByRole("button", {name: "Switch profile"});
   await user.click(switchButton);
 
   expect(applyFleetProfile).toHaveBeenCalledTimes(1);
   expect(applyFleetProfile).toHaveBeenCalledWith(profileId, {plan_digest: preview.plan_digest, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(screen.queryByRole("button", {name: "Review switch effects"})).not.toBeInTheDocument();
-  expect(screen.getByText("switch")).toBeVisible();
+  expect(screen.getByText("Switching profile")).toBeVisible();
 });

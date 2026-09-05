@@ -1,11 +1,11 @@
 import {fireEvent, render, screen, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {LibraryApi} from "../api/types";
+import type {ControlApi} from "../api/types";
 import {fullLibraryDetail, librarySnapshot} from "../test-fixtures/library";
 import {LibraryRecipeAuthority} from "./library-recipe-detail";
 
 function renderAuthority() {
-  render(<LibraryRecipeAuthority api={{} as LibraryApi} detail={fullLibraryDetail} onRefresh={async () => undefined} policy={librarySnapshot.freshness_policy}/>);
+  render(<LibraryRecipeAuthority api={{} as ControlApi} detail={fullLibraryDetail} onRefresh={async () => undefined} policy={librarySnapshot.freshness_policy}/>);
 }
 
 test("previews friendly runtime names with exact identities available on demand", async () => {

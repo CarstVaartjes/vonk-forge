@@ -57,6 +57,7 @@ function modelFamilyKey(record: LibraryRecipeRecord): string {
 
 function modelFamilyTitle(record: LibraryRecipeRecord | undefined): string {
   const title = record?.modelVersion?.family?.metadata.title?.trim()
+    || record?.modelVersion?.family?.family?.trim()
     || record?.catalog?.model_title?.trim()
     || record?.modelTitle?.trim();
   if (title) return title;
@@ -73,9 +74,9 @@ function variantKey(record: LibraryRecipeRecord): string {
 function modelVersionTitle(record: LibraryRecipeRecord | undefined): string {
   const catalog = record?.catalog;
   const facts = record?.modelVersion;
-  if (catalog?.model_version_title?.trim()) return catalog.model_version_title;
   if (facts?.metadata?.title?.trim()) return facts.metadata.title;
   if (facts?.version?.trim()) return facts.version;
+  if (catalog?.model_version_title?.trim()) return catalog.model_version_title;
   if (record?.model) return humanizeIdentifier(`${record.model.publisher}/${record.model.slug}`);
   return "Model version not reported";
 }

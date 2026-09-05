@@ -113,8 +113,8 @@ test("shows truthful cluster counts and live connection state", async () => {
     expect(within(within(summary).getByText(label).parentElement!).getByText("1")).toBeVisible();
   }
   expect(within(summary).getByText("70.0 GiB")).toBeVisible();
-  expect(within(summary).getByText("1 installed recipe")).toBeInTheDocument();
-  expect(within(summary).getByText("1 loaded recipe")).toBeInTheDocument();
+  expect(within(summary).queryByText("1 installed recipe")).not.toBeInTheDocument();
+  expect(within(summary).queryByText("1 loaded recipe")).not.toBeInTheDocument();
   expect(within(summary).getByRole("button", {name: "3 active warnings"})).toBeVisible();
   expect(screen.getAllByRole("article")).toHaveLength(4);
 
@@ -571,6 +571,7 @@ test("offers unbound re-enrollment after the controller has lost its node rows",
   render(<FleetPage api={api}/>);
   await flush();
 
+  openFleetControls();
   fireEvent.click(screen.getByRole("button", {name: "Re-enroll Spark"}));
   expect(screen.getByText(/Spark's locally held node identity/i)).toBeVisible();
   fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));

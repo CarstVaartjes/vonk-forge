@@ -1,4 +1,4 @@
-import {render, screen, waitFor, within} from "@testing-library/react";
+import {render, screen, waitFor} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {vi} from "vitest";
 import type {
@@ -104,7 +104,7 @@ const succeeded: FleetProfileApplication = {
   updated_at: NOW.toISOString(),
 };
 
-test("maps live and desired workloads across Sparks and applies the exact preview", async () => {
+test("keeps the active profile shortcut compact and applies the exact preview", async () => {
   const alpha = node(NODE_A, "Spark Alpha");
   alpha.installed = [{
     installation_id: "installation-a",
@@ -129,25 +129,18 @@ test("maps live and desired workloads across Sparks and applies the exact previe
     previewFleetProfile: async () => preview,
     applyFleetProfile,
   } as unknown as ControlApi;
-  const manage = vi.fn();
   const user = userEvent.setup();
 
-  render(<FleetOperatingBoard api={api} nodes={[alpha, beta]} now={NOW} onManageNode={manage}/>);
+  render(<FleetOperatingBoard api={api} nodes={[alpha, beta]} now={NOW}/>);
 
-  expect(await screen.findByText("Studio Ready", {selector: ".fleet-profile-current strong"})).toBeVisible();
-  const matrix = screen.getByRole("table");
-  expect(within(matrix).getByText("DeepSeek V4 Flash")).toBeVisible();
-  expect(within(matrix).getByText("Installed")).toBeVisible();
-  expect(within(matrix).getByText("Profile change")).toBeVisible();
+  expect(await screen.findByText("Studio Ready", {selector: ".fleet-profile-shortcut-copy strong"})).toBeVisible();
+  expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  expect(await screen.findByText("2 changes ready")).toBeVisible();
   const apply = await screen.findByRole("button", {name: "Switch profile"});
-  expect(screen.getByText("2 changes", {selector: ".profile-plan strong"})).toBeVisible();
 
   await user.click(apply);
   await waitFor(() => expect(applyFleetProfile).toHaveBeenCalledWith(PROFILE_ID, {plan_digest: preview.plan_digest, request_key: expect.any(String)}));
-  expect(await screen.findByText("Profile applied", {selector: ".profile-application strong"})).toBeVisible();
-
-  await user.click(screen.getByRole("button", {name: "Manage Spark Beta — stale"}));
-  expect(manage).toHaveBeenCalledWith(NODE_B);
+  expect(await screen.findByText("Profile is running")).toBeVisible();
 });
 
 test("keeps a blocked profile readable and prevents apply", async () => {
@@ -165,7 +158,7 @@ test("keeps a blocked profile readable and prevents apply", async () => {
 
   render(<FleetOperatingBoard api={api} nodes={[node(NODE_A, "Spark Alpha")]} now={NOW} onManageNode={() => undefined}/>);
 
-  expect(await screen.findByText("1 blocked")).toBeVisible();
+  expect(await screen.findByText("Needs attention")).toBeVisible();
   expect(screen.getByText("Build the selected recipe before applying this profile.")).toBeVisible();
-  expect(screen.getByRole("button", {name: "Inspect blockers"})).toBeEnabled();
+  expect(screen.getByRole("button", {name: "Switch profile"})).toBeDisabled();
 });

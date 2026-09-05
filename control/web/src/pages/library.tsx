@@ -436,6 +436,7 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
       <div className="library-empty-visual" aria-hidden="true"><span/><span/><span/></div>
       <h3>No recipes available</h3>
       <p>The repository does not currently expose a recipe. You can still create a custom runtime for a bespoke setup.</p>
+      <a className="button" href="/library/create" onClick={event => onNavigate(event, "/library/create")}>Create custom runtime</a>
     </section>}
     {browserSnapshot && (subview !== "recipes" || catalogLoading || publicRecipes.length > 0 || browserSnapshot.models.length > 0 || browserSnapshot.unlinked_recipes.length > 0) && <LibraryNodeNamesProvider names={nodeDisplayNames}><LibraryBrowser
         api={api}

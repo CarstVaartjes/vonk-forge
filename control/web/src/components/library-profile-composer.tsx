@@ -1,11 +1,8 @@
 import {useEffect, useMemo, useState} from "react";
-import type {ControlApi, FleetProfile, FleetProfileInput, LibraryApi, LibraryRecipeDetail} from "../api/types";
+import type {ControlApi, FleetProfile, FleetProfileInput, LibraryRecipeDetail} from "../api/types";
 import {useLibraryNodeName} from "./library-node-names";
 
-type ProfileApi = Pick<ControlApi, "createFleetProfile" | "fleetProfiles" | "updateFleetProfile">;
-type ScopeAwareFleetProfileInput = FleetProfileInput & {scope: {node_ids: string[]}};
-
-function profileInput(profile: FleetProfile): ScopeAwareFleetProfileInput {
+function profileInput(profile: FleetProfile): FleetProfileInput {
   return {
     name: profile.name,
     description: profile.description,
@@ -23,9 +20,9 @@ function profileInput(profile: FleetProfile): ScopeAwareFleetProfileInput {
   };
 }
 
-export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: LibraryApi; detail: LibraryRecipeDetail; preferredNodeId?: string}) {
+export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: ControlApi; detail: LibraryRecipeDetail; preferredNodeId?: string}) {
   const nodeName = useLibraryNodeName();
-  const profileApi = api as LibraryApi & ProfileApi;
+  const profileApi = api;
   const [open, setOpen] = useState(false);
   const [profiles, setProfiles] = useState<FleetProfile[]>([]);
   const [target, setTarget] = useState("new");
@@ -80,7 +77,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Lib
     const scope = {node_ids: [...new Set(assignment.nodes.map(node => node.node_id))].sort()};
     try {
       const result = target === "new"
-        ? await profileApi.createFleetProfile(({
+        ? await profileApi.createFleetProfile({
             name,
             description,
             installation_policy: "keep-cached",
@@ -88,7 +85,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Lib
             favorite: profiles.length === 0,
             scope,
             assignments: [assignment],
-          }) as ScopeAwareFleetProfileInput)
+          })
         : await (async () => {
             const existing = profiles.find(profile => profile.id === target);
             if (!existing) throw new Error("Choose a saved Fleet Profile.");

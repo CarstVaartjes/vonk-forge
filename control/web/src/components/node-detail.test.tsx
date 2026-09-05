@@ -343,10 +343,10 @@ test("surfaces rich telemetry by scope with workload placement and unsupported e
   render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
 
   await user.click(screen.getByRole("tab", {name: "Metrics"}));
-  expect(await screen.findByText("Gpu · Clock Mhz")).toBeVisible();
+  expect((await screen.findAllByText("Gpu · Clock Mhz"))[0]).toBeVisible();
   expect(screen.getAllByText("GB10-0").length).toBeGreaterThan(0);
-  expect(screen.getByText("Network · Rx Bytes Per Second")).toBeVisible();
-  expect(screen.getByText("Unsupported")).toBeVisible();
+  expect((await screen.findAllByText("Network · Rx Bytes Per Second"))[0]).toBeVisible();
+  expect((await screen.findAllByText("Unsupported"))[0]).toBeVisible();
   expect(screen.getByText(/spark-agent 2.1.0/)).toBeVisible();
   expect(currentEndpoint).toHaveBeenCalledWith(node().id, expect.any(AbortSignal));
   expect(capabilitiesEndpoint).toHaveBeenCalledWith(node().id, expect.any(AbortSignal));

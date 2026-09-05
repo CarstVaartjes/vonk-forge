@@ -113,6 +113,6 @@ test("one Run action previews and applies the exact model and selected Spark gro
   });
   expect(previewRecipeRunSwitch).toHaveBeenCalledWith(expect.objectContaining({schema_version: 2, model_version_sha256: digest, recipe_revision_id: fullLibraryDetail.selected_revision!.id, action: "run", spark_group: {nodes: [{node_id: nodeA, rank: 0, role: "leader", endpoint_owner: true}]}}));
   expect(screen.queryByRole("button", {name: "Review Load"})).not.toBeInTheDocument();
-  expect(await screen.findByText("Copying model and container to Spark One")).toBeVisible();
+  expect(await screen.findByText("Copying model to Spark One")).toBeVisible();
   expect(applyRecipeRunSwitch).toHaveBeenCalledWith(expect.objectContaining({plan_digest: digest, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)}));
 });

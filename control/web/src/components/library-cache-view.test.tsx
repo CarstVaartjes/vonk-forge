@@ -62,7 +62,7 @@ test("downloads a candidate by previewing and applying in one action", async () 
   const records = buildLibraryRecipeRecords(librarySnapshot, []);
   render(<LibraryCacheView api={api({previewModelCacheDownload, downloadModelCache})} entries={records} onNavigate={vi.fn()} />);
 
-  const row = (await screen.findAllByRole("article", {name: /Qwen 3 cache entry/}))[0]!;
+  const row = (await screen.findAllByRole("article", {name: /Qwen 3 BF16 cache entry/}))[0]!;
   await user.click(within(row).getByRole("button", {name: "Download to Library"}));
 
   expect(previewModelCacheDownload).toHaveBeenCalledWith(expect.objectContaining({schema_version: 2, recipe_revision_sha256: "a".repeat(64)}));

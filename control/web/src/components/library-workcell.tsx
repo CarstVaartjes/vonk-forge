@@ -123,6 +123,13 @@ export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot, publicRecip
   const catalogByLocalId = new Map(publicRecipes.flatMap(recipe => recipe.local.recipe_id ? [[recipe.local.recipe_id, recipe] as const] : []));
   const records: LibraryRecipeRecord[] = [];
   for (const libraryModel of snapshot.models) {
+    // The model-version projection is the authority for the exact payload.
+    // Keep the legacy-shaped `model` field only as a transport fallback; it
+    // must never let a recipe title become the model identity shown in UI.
+    const model = libraryModel.model_version?.identity ?? libraryModel.model;
+    const modelTitle = libraryModel.model_version?.metadata?.title?.trim()
+      || libraryModel.model_version?.version?.trim()
+      || friendlyModelName(model);
     for (const recipe of libraryModel.recipes) {
       const catalog = catalogByLocalId.get(recipe.recipe_id);
       records.push({
@@ -130,10 +137,10 @@ export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot, publicRecip
         custom: !catalog,
         key: recipe.recipe_id,
         managed: Boolean(catalog),
-        model: libraryModel.model,
+        model,
         modelCapabilities: libraryModel.model_capabilities,
-        modelKey: modelVersionKey(libraryModel.model),
-        modelTitle: catalog?.model_version_title ?? friendlyModelName(libraryModel.model),
+        modelKey: modelVersionKey(model),
+        modelTitle,
         modelVersion: libraryModel.model_version,
         recipe,
         title: recipe.title,
@@ -195,7 +202,12 @@ function modelFamilyTitle(value: string): string {
 }
 
 function recordModelFamily(record: LibraryRecipeRecord): string {
-  return modelFamilyTitle(record.catalog?.model_title ?? record.modelTitle);
+  return modelFamilyTitle(
+    record.modelVersion?.family?.metadata.title
+      || record.modelVersion?.family?.family
+      || record.catalog?.model_title
+      || record.modelTitle,
+  );
 }
 
 function recordIsAbliterated(record: LibraryRecipeRecord): boolean {
