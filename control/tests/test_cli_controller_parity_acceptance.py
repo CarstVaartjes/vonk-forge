@@ -646,14 +646,10 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     # inventory, and lifecycle rows used by the Controller service tests.  It
     # is imported lazily because this acceptance is run on the integrated
     # branch, while the CLI branch intentionally has no backend dependency.
-    import sys
-    from pathlib import Path
-
     from sqlalchemy import select
 
-    sys.path.insert(0, str(Path(__file__).parents[2] / "control"))
-    from tests.test_recipe_operations import NOW as fixture_now
-    from tests.test_recipe_operations import setup_services
+    from .test_recipe_operations import NOW as fixture_now
+    from .test_recipe_operations import setup_services
 
     from vonk_control.cluster_mappings import ClusterMappingService
     from vonk_control.fleet_profiles import (
