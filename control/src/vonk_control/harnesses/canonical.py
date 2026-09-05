@@ -64,8 +64,10 @@ _WRAPPERS = {
 _JOB_INTERFACES = frozenset(
     {"image-job", "audio-job", "video-job", "mesh-job", "artifact-job"}
 )
-_SAFE_TOKEN = re.compile(r"^[A-Za-z0-9_./:+@%=[\]{} ,\",<>-]{1,4096}$")
-_SAFE_ARG_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_MAX_RUNTIME_ARGUMENTS = 128
+_MAX_ARGV_TOKEN_BYTES = 65_536
+_MAX_ARGV_BYTES = 1_048_576
+_SAFE_ARG_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _SAFE_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
 _PLATFORM_ARG_NAMES = frozenset(
@@ -164,11 +166,32 @@ def _scalar(value: object, label: str) -> str:
         if type(value) is float and not isfinite(value):
             raise HarnessCompileError(f"{label} is not finite")
         rendered = str(value)
+    elif isinstance(value, (list, dict)):
+        try:
+            rendered = json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as error:
+            raise HarnessCompileError(f"{label} is not JSON serializable") from error
     else:
-        raise HarnessCompileError(f"{label} must be a scalar")
-    if not rendered or len(rendered) > 4096 or "\x00" in rendered:
+        raise HarnessCompileError(f"{label} has an unsupported value type")
+    if len(rendered.encode("utf-8")) > _MAX_ARGV_TOKEN_BYTES or "\x00" in rendered:
         raise HarnessCompileError(f"{label} exceeds the bounded argv value contract")
     return rendered
+
+
+def _validate_argv_size(command: Sequence[str]) -> None:
+    total = 0
+    for item in command:
+        if type(item) is not str or len(item.encode("utf-8")) > _MAX_ARGV_TOKEN_BYTES or "\x00" in item:
+            raise HarnessCompileError("compiled harness argv token exceeds its bound")
+        total += len(item.encode("utf-8"))
+    if total > _MAX_ARGV_BYTES:
+        raise HarnessCompileError("compiled harness argv exceeds its total bound")
 
 
 def _package_value(package: object, *names: str) -> object:
@@ -241,7 +264,8 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
     if any(type(item) is not str or not item or len(item) > 4096 or "\x00" in item for item in entrypoint):
         raise HarnessCompileError("recipe entrypoint contains invalid argv data")
     result = list(entrypoint[1:])
-    seen: set[str] = set()
+    if len(recipe.runtime.arguments) > _MAX_RUNTIME_ARGUMENTS:
+        raise HarnessCompileError("recipe has too many runtime arguments")
     for argument in recipe.runtime.arguments:
         name = argument.name[2:] if argument.name.startswith("--") else argument.name
         normalized = name.replace("_", "-")
@@ -249,15 +273,13 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
             raise HarnessCompileError(f"recipe argument is platform-owned or invalid: {argument.name}")
         # Preserve engine option spelling exactly; argv is not shell text.
         flag = f"--{name}"
-        if flag in seen:
-            raise HarnessCompileError(f"recipe argument is repeated: {argument.name}")
-        seen.add(flag)
         value = argument.value if argument.setting is None else settings[argument.setting]
         if type(value) is bool:
             if value:
                 result.append(flag)
         else:
             result.extend((flag, _scalar(value, f"recipe argument {argument.name}")))
+    _validate_argv_size(result)
     return tuple(result)
 
 
@@ -442,8 +464,7 @@ def compile_canonical_harness(
     else:
         if "--output-dir" not in command:
             command.extend(("--output-dir", "/outputs"))
-    if any(type(item) is not str or not item or len(item) > 4096 or "\x00" in item for item in command):
-        raise HarnessCompileError("compiled harness command contains invalid argv data")
+    _validate_argv_size(command)
     devices, _host_network = _harness_security(slug, topology)
     model_mounts: list[HarnessMount] = []
     for _artifact, mount in mounts:

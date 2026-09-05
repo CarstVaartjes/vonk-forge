@@ -107,8 +107,7 @@ def structured_command(value: object, *, canonical_argv: bool = False) -> tuple[
         raise HarnessCompileError("harness command size is invalid")
     if any(
         type(item) is not str
-        or not item
-        or len(item) > (4096 if canonical_argv else 2048)
+        or len(item.encode("utf-8")) > (65536 if canonical_argv else 2048)
         or "\x00" in item
         or (not canonical_argv and _SAFE_ARGUMENT.fullmatch(item) is None)
         for item in command
@@ -117,6 +116,8 @@ def structured_command(value: object, *, canonical_argv: bool = False) -> tuple[
     executable = PurePosixPath(command[0]).name.lower()
     if executable in (_SHELL_EXECUTABLES | _SHELL_LAUNCHERS) or "-c" in command:
         raise HarnessCompileError("harness command contains unsafe shell syntax")
+    if canonical_argv and sum(len(item.encode("utf-8")) for item in command) > 1_048_576:
+        raise HarnessCompileError("harness command exceeds its total argv bound")
     return command
 
 
@@ -194,8 +195,7 @@ def validate_projection(
             or type(item[0]) is not str
             or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", item[0])
             or type(item[1]) is not str
-            or not item[1]
-            or len(item[1]) > (4096 if canonical_argv else 2048)
+            or len(item[1].encode("utf-8")) > (65536 if canonical_argv else 2048)
             or "\x00" in item[1]
             or (not canonical_argv and _SAFE_ARGUMENT.fullmatch(item[1]) is None)
             for item in projection.environment
