@@ -66,6 +66,7 @@ def test_candidate_package_decodes_and_restart_only_reads_index(tmp_path: Path) 
 
     client = RecipePackageClient("http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler))
     snapshot = client.list()
+    assert len(snapshot.catalog_entities) == 92
     item = client.fetch(snapshot.items[0].uri)
     assert item.document["kind"] == "recipe"
     assert item.dependencies and item.dependencies[0]["kind"] == "model"

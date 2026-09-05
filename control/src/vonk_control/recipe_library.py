@@ -154,6 +154,7 @@ class RecipeLibrarySnapshot:
     commit: str
     items: tuple[RecipeLibraryItem, ...]
     repository: str = _REPOSITORY
+    catalog_entities: tuple[dict[str, object], ...] = ()
 
 
 def recipe_release_is_older(older: str, newer: str) -> bool:

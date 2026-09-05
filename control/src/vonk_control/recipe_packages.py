@@ -278,8 +278,9 @@ class RecipePackageClient:
         if not isinstance(index, Mapping) or index.get("schema_version") != PACKAGE_SCHEMA_VERSION or index.get("kind") != "recipe-library-index":
             raise RecipePackageError("recipe_package.schema_incompatible", "recipe package index schema is unsupported")
         repository, commit, raw_recipes = index.get("repository"), index.get("source_commit"), index.get("recipes")
+        raw_entities = index.get("catalog_entities")
         contract = index.get("package_contract")
-        if repository != PACKAGE_REPOSITORY or not isinstance(commit, str) or not _SHA1.fullmatch(commit) or not isinstance(contract, Mapping) or contract.get("schema_version") != PACKAGE_SCHEMA_VERSION or contract.get("media_type") != PACKAGE_MEDIA_TYPE or not isinstance(raw_recipes, list):
+        if repository != PACKAGE_REPOSITORY or not isinstance(commit, str) or not _SHA1.fullmatch(commit) or not isinstance(contract, Mapping) or contract.get("schema_version") != PACKAGE_SCHEMA_VERSION or contract.get("media_type") != PACKAGE_MEDIA_TYPE or not isinstance(raw_recipes, list) or not isinstance(raw_entities, list):
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index identity is invalid")
         index_publication = index.get("publication_commit")
         if index_publication is not None and (
@@ -289,6 +290,23 @@ class RecipePackageClient:
                 "recipe_package.response_invalid", "recipe publication identity is invalid"
             )
         resolved_publication = publication_commit or self._publication_commit or index_publication or commit
+        catalog_entities: list[dict[str, object]] = []
+        identities: set[tuple[str, str]] = set()
+        for entry in raw_entities:
+            if not isinstance(entry, Mapping) or not isinstance(entry.get("document"), Mapping):
+                raise RecipePackageError("recipe_package.response_invalid", "catalog model entry is invalid")
+            try:
+                model = ModelDefinition.model_validate(entry["document"])
+            except (TypeError, ValueError) as error:
+                raise RecipePackageError("recipe_package.response_invalid", "catalog model document is invalid") from error
+            digest = entry.get("content_sha256")
+            if not isinstance(digest, str) or digest != content_sha256(model):
+                raise RecipePackageError("recipe_package.response_invalid", "catalog model digest is invalid")
+            identity = (model.identity.publisher, model.identity.slug)
+            if identity in identities:
+                raise RecipePackageError("recipe_package.response_invalid", "catalog model identity is duplicated")
+            identities.add(identity)
+            catalog_entities.append(model.model_dump(mode="json"))
         raw_packages: list[Mapping[str, object]] = []
         for recipe in raw_recipes:
             if not isinstance(recipe, Mapping) or not isinstance(recipe.get("document"), Mapping) or not isinstance(recipe.get("package"), Mapping):
@@ -314,24 +332,29 @@ class RecipePackageClient:
             })
         packages: dict[str, dict[str, object]] = {}
         items: list[RecipeLibraryItem] = []
-        for raw in raw_packages:
-            if not isinstance(raw, Mapping):
+        for package_entry in raw_packages:
+            if not isinstance(package_entry, Mapping):
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package entry is invalid")
-            publisher, slug, digest = raw.get("publisher"), raw.get("slug"), raw.get("recipe_content_sha256")
-            package_digest, location, size, source_path = raw.get("package_sha256"), raw.get("location"), raw.get("size"), raw.get("source_path")
+            publisher, slug, digest = package_entry.get("publisher"), package_entry.get("slug"), package_entry.get("recipe_content_sha256")
+            package_digest, location, size, source_path = package_entry.get("package_sha256"), package_entry.get("location"), package_entry.get("size"), package_entry.get("source_path")
             location_url = urlsplit(str(location))
             if not all(isinstance(value, str) for value in (publisher, slug, digest, package_digest, location, source_path)) or source_path != f"recipes/{slug}.json" or not _SLUG.fullmatch(str(publisher)) or not _SLUG.fullmatch(str(slug)) or not _SHA256.fullmatch(str(digest)) or not _SHA256.fullmatch(str(package_digest)) or not _safe_path(str(location)) or str(location).startswith("/") or location_url.scheme or location_url.netloc or location_url.query or location_url.fragment or not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= MAX_PACKAGE_BYTES:
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package entry identity is invalid")
             key = f"{publisher}/{slug}"
             if key in packages:
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package identity is duplicated")
-            packages[key] = dict(raw)
+            packages[key] = dict(package_entry)
             packages[key]["publication_commit"] = resolved_publication
-            tags = raw.get("tags", [])
-            items.append(RecipeLibraryItem(library_commit=commit, source_path=str(source_path), publisher=str(publisher), slug=str(slug), title=str(raw.get("title", "")), description=str(raw.get("description", "")), tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (), content_sha256=str(digest), uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}", document={}))
+            tags = package_entry.get("tags", [])
+            items.append(RecipeLibraryItem(library_commit=commit, source_path=str(source_path), publisher=str(publisher), slug=str(slug), title=str(package_entry.get("title", "")), description=str(package_entry.get("description", "")), tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (), content_sha256=str(digest), uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}", document={}))
         if [(item.publisher, item.slug) for item in items] != sorted((item.publisher, item.slug) for item in items):
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index is not sorted")
-        return RecipeLibrarySnapshot(commit=commit, items=tuple(items), repository=repository), packages
+        return RecipeLibrarySnapshot(
+            commit=commit,
+            items=tuple(items),
+            repository=repository,
+            catalog_entities=tuple(catalog_entities),
+        ), packages
 
     def _persist_index(self, raw: bytes, *, publication_commit: str | None) -> None:
         payload = {"index": raw.decode("utf-8"), "publication_commit": publication_commit}
