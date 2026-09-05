@@ -428,6 +428,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
 
       <div className="fleet-command-actions">
         <a className="button" href="/library">Install model</a>
+        <a className="button secondary" href="/library/profiles">Switch profile</a>
         {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <button type="button" className="button secondary" onClick={event => { upgradeTrigger.current = event.currentTarget; setUpgradeTarget("fleet"); }}>Upgrade agents</button>}
         {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <details className="fleet-controls-menu">
           <summary>Controls{filtersActive ? <span aria-label="Filters active">•</span> : null}</summary>

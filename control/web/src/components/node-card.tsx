@@ -1,4 +1,4 @@
-import type {TelemetryHistory, TelemetryHistoryPoint, VisualFleetNode} from "../api/types";
+import type {TelemetryHistory, TelemetryHistoryPoint, TelemetryRollupPoint, VisualFleetNode} from "../api/types";
 import {
   formatBytes,
   formatMetric,
@@ -47,8 +47,12 @@ function utilizationTone(percent: number): "danger" | "healthy" | "warning" {
 type TrendMetric = "gpu_utilization_percent" | "memory_available_bytes" | "temperature_c";
 
 function pointValue(point: TelemetryHistoryPoint, metric: TrendMetric): number | null {
-  if ("resolution" in point) return point.metrics[metric]?.mean ?? null;
+  if (isRollupPoint(point)) return point.metrics[metric]?.mean ?? null;
   return finite(point[metric]);
+}
+
+function isRollupPoint(point: TelemetryHistoryPoint): point is TelemetryRollupPoint {
+  return typeof point === "object" && point !== null && "resolution" in point && typeof point.resolution === "string";
 }
 
 function CardTrend({

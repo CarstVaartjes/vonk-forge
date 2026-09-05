@@ -1,4 +1,4 @@
-import type {LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
+import type {LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
 
 const revision = {
   content_sha256: "a".repeat(64),
@@ -33,11 +33,32 @@ export const chatRecipe = libraryRecipeSummary({recipe_id: "recipe-chat", slug: 
 export const codeRecipe = libraryRecipeSummary({recipe_id: "recipe-code", slug: "qwen-code", title: "Qwen Code", capabilities: ["openai.completions"]});
 export const unlinkedRecipe = libraryRecipeSummary({recipe_id: "recipe-unlinked", slug: "custom", title: "Custom Runtime", selected_revision: null, topology_name: null, capabilities: []});
 
+const modelIdentity = {kind: "model-version" as const, publisher: "qwen", slug: "3", content_sha256: "e".repeat(64)};
+const modelFamilyIdentity = {kind: "model-group" as const, publisher: "qwen", slug: "3", content_sha256: "f".repeat(64)};
+const exactModelVersion = {
+  schema_version: 2 as const,
+  identity: modelIdentity,
+  state: "resolved" as const,
+  version: "3",
+  family: {family: "Qwen 3", identity: modelFamilyIdentity, metadata: {title: "Qwen 3", description: "Qwen 3 model family.", tags: ["text"]}},
+  metadata: {title: "Qwen 3 BF16", description: "Qwen 3 BF16 model version.", tags: ["text", "bf16"]},
+  format: {container: "safetensors" as const, precision: "BF16", quantization: "BF16"},
+  model: {kind: "model" as const, publisher: "qwen", slug: "3", content_sha256: "d".repeat(64)},
+  artifacts: [{id: "weights", kind: "huggingface.file" as const, path: "model.safetensors", repository: "Qwen/Qwen3", revision: "c".repeat(40), sha256: "a".repeat(64), download_bytes: 80 * 1024 ** 3, installed_bytes: 80 * 1024 ** 3, roles: ["leader", "worker"]}],
+  dependencies: [],
+} satisfies NonNullable<LibraryModel["model_version"]>;
+const modelCapabilities = {
+  schema_version: 2 as const,
+  state: "declared" as const,
+  facts: [{capability: "text-generation", evidence_digest: "b".repeat(64), evidence_status: "declared" as const, support: "supported" as const, provenance: {content_sha256: modelIdentity.content_sha256, evidence_digest: "b".repeat(64), path: "model/capabilities.json", publisher: "qwen", revision_id: null, slug: "3", source_kind: "model-version" as const}}],
+  provenance: {content_sha256: modelIdentity.content_sha256, evidence_digest: "b".repeat(64), path: "model/capabilities.json", publisher: "qwen", revision_id: null, slug: "3", source_kind: "model-version" as const},
+} satisfies NonNullable<LibraryModel["model_capabilities"]>;
+
 export const librarySnapshot: LibrarySnapshot = {
   schema_version: 1,
   generated_at: "2026-08-15T12:00:00Z",
   freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
-  models: [{model: {kind: "model-version", publisher: "qwen", slug: "3", content_sha256: "e".repeat(64)}, page_local: true, recipes: [chatRecipe, codeRecipe]}],
+  models: [{model: modelIdentity, model_version: exactModelVersion, model_capabilities: modelCapabilities, page_local: true, recipes: [chatRecipe, codeRecipe]}],
   unlinked_recipes: [unlinkedRecipe],
   next_cursor: null,
 };

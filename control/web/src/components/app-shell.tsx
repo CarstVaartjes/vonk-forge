@@ -98,7 +98,7 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
   const disabledLinkProps = navigationLocked ? {"aria-disabled": true as const, tabIndex: -1} : {};
   return <div className="shell">
     <a className="skip-link" href="#main-content">Skip to content</a>
-    <aside className="app-sidebar">
+    <header className="app-sidebar">
       <div className="brand">
         <span className="mark" aria-hidden="true">VF</span>
         <div><strong>Vonk Forge</strong><small>Cluster control</small></div>
@@ -130,7 +130,7 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
           <small className="authority-note">Local database authority</small>
         </div>
       </div>
-    </aside>
+    </header>
     <main ref={mainContent} id="main-content" tabIndex={-1} inert={navigationOpen || undefined} aria-hidden={navigationOpen || undefined}><div className="content-frame">{children}</div></main>
   </div>;
 }

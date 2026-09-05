@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import {expect, test, type Page} from "@playwright/test";
 import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
+import type {components} from "../src/api/generated";
 
 const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
@@ -14,6 +15,8 @@ type LibraryFixtureState = {
   detailFailuresRemaining: number;
   empty: boolean;
   lastApplyBody?: Record<string, unknown>;
+  lastRunSwitchApplyBody?: Record<string, unknown>;
+  lastRunSwitchPreviewBody?: Record<string, unknown>;
   retryCount: number;
   snapshotFailuresRemaining: number;
 };
@@ -56,11 +59,93 @@ function libraryLoadPlan() {
   };
 }
 
+function libraryRunSwitchPlan(): components["schemas"]["RunSwitchPlan"] {
+  const imageDigest = `sha256:${"d".repeat(64)}`;
+  const fitNodes = [
+    {allowed: true, node_id: "node-alpha", rank: 0, role: "leader", memory_available_bytes: 100 * GIB, memory_required_bytes: 60 * GIB, memory_free_after_bytes: 36 * GIB, disk_free_bytes: 320 * GIB, disk_required_bytes: 80 * GIB, disk_free_after_bytes: 240 * GIB},
+    {allowed: true, node_id: "node-beta", rank: 1, role: "worker", memory_available_bytes: 100 * GIB, memory_required_bytes: 60 * GIB, memory_free_after_bytes: 36 * GIB, disk_free_bytes: 320 * GIB, disk_required_bytes: 80 * GIB, disk_free_after_bytes: 240 * GIB},
+  ];
+  return {
+    schema_version: 2,
+    generated_at: "2026-09-05T00:00:00Z",
+    action: "run",
+    model_version_sha256: "e".repeat(64),
+    recipe_revision_id: "revision-chat",
+    recipe_content_sha256: "a".repeat(64),
+    alias: "qwen-chat",
+    run_id: null,
+    spark_group: {nodes: [
+      {node_id: "node-alpha", rank: 0, role: "leader", endpoint_owner: true},
+      {node_id: "node-beta", rank: 1, role: "worker", endpoint_owner: false},
+    ]},
+    mapping: {action: "reuse", mapping_id: "mapping-chat", mapping_generation: 4, nodes: [
+      {node_id: "node-alpha", rank: 0, role: "leader", endpoint_owner: true},
+      {node_id: "node-beta", rank: 1, role: "worker", endpoint_owner: false},
+    ], parameters: {}, placement_digest: "p".repeat(64), topology_name: "pair"},
+    installation_id: "installation-chat",
+    installation_state: "installed",
+    recipe_build_id: "build-chat",
+    image_digest: imageDigest,
+    start_plan_digest: null,
+    model_capabilities: [{name: "chat", declared: null, evidence: "unknown", support: "unknown", evidence_digest: null, detail: "Model capability evidence is not declared."}],
+    recipe_capabilities: [{name: "chat", declared: true, evidence: "observed", support: "supported", evidence_digest: "c".repeat(64), detail: "The selected recipe exposes chat."}],
+    freshness: [],
+    fit_current: {allowed: true, nodes: fitNodes},
+    fit_after_stop: null,
+    fit: {allowed: true, nodes: fitNodes},
+    storage: {copied_bytes: 0, missing_nas_bytes: 80 * GIB, missing_spark_bytes: 80 * GIB, nas_coverage: "complete", reclaimable_bytes: 0, reclaimed_bytes: 0, required_bytes: 80 * GIB, retention: "retain-cached", reused_bytes: 0, running_coverage: "complete", spark_coverage: "partial"},
+    runtime_storage: {build_id: "build-chat", copied_bytes: 0, image_bytes: 2 * GIB, image_digest: imageDigest, missing_image_distribution_bytes: 2 * GIB, missing_nas_bytes: 2 * GIB, missing_spark_bytes: 2 * GIB, nas_coverage: "complete", reclaimable_bytes: 0, required_bytes: 2 * GIB, reused_bytes: 0, running_coverage: "complete", spark_coverage: "partial"},
+    build: {build_id: "build-chat", build_input_sha256: "b".repeat(64), builder_node_id: "node-alpha", compatibility: {expected_architecture: "linux/arm64", observed_architecture: "linux/arm64", state: "compatible"}, image_bytes: 2 * GIB, image_digest: imageDigest, runtime: {build_id: "build-chat", copied_bytes: 0, image_bytes: 2 * GIB, image_digest: imageDigest, missing_image_distribution_bytes: 2 * GIB, missing_nas_bytes: 2 * GIB, missing_spark_bytes: 2 * GIB, nas_coverage: "complete", reclaimable_bytes: 0, required_bytes: 2 * GIB, reused_bytes: 0, running_coverage: "complete", spark_coverage: "partial"}, source: {source_bundle_sha256: "9".repeat(64), state: "available"}, state: "available"},
+    preparation: null,
+    conflicts: [],
+    stops: [],
+    reclaimed_bytes: 0,
+    phases: [{index: 0, kind: "transfer", state: "planned", node_ids: ["node-alpha", "node-beta"], detail: "Copy the model and container to the selected Sparks."}],
+    allowed: true,
+    blockers: [],
+    warnings: [],
+    invocation: {origin: "web.library"},
+    plan_digest: "f".repeat(64),
+    stop_before_prepare: false,
+    stop_before_transfer: false,
+  };
+}
+
+function libraryRunSwitchOperation(requestKey: string, state = "queued") {
+  return {
+    schema_version: 2,
+    operation_id: "00000000-0000-4000-8000-000000000707",
+    kind: "recipe.run-switch.v2",
+    action: "run",
+    state,
+    plan_digest: "f".repeat(64),
+    request_key: requestKey,
+    node_ids: ["node-alpha", "node-beta"],
+    current_phase: "transfer",
+    completed_phases: [],
+    progress: {
+      phase_index: 0,
+      phase_count: 3,
+      phase: "transfer",
+      state: state === "queued" ? "queued" : "running",
+      completed_bytes: 0,
+      total_bytes: null,
+      total_bytes_known: false,
+      members: [
+        {node_id: "node-alpha", phase: "transfer", state: "running", completed_bytes: 0, total_bytes: null},
+        {node_id: "node-beta", phase: "transfer", state: "pending", completed_bytes: 0, total_bytes: null},
+      ],
+    },
+    status_reason: null,
+    result: null,
+  };
+}
+
 function libraryOperation(state: string) {
   return {id: "operation-load", kind: "run", owner_id: "installation-chat", state, plan_digest: "load-plan-digest", nodes: ["node-alpha", "node-beta"], result: {job_id: "job-load"}};
 }
 
-function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId) {
+function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId): components["schemas"]["TelemetryPoint"] {
   return {
     id: `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`,
     node_id: telemetryNodeId,
@@ -86,7 +171,76 @@ function telemetry(observedAt: string, sequence = 4, telemetryNodeId = nodeId) {
   };
 }
 
-function localSnapshot() {
+function richTelemetryMetrics(observedAt: string, telemetryNodeId = nodeId): components["schemas"]["TelemetryMetrics"] {
+  const series = (key: string, scope: components["schemas"]["TelemetrySeries"]["scope"], value: number | string | boolean | null, unit: string, context: Partial<components["schemas"]["TelemetrySeries"]> = {}): components["schemas"]["TelemetrySeries"] => ({
+    key, scope, value, unit, source: "spark.telemetry.fixture", measurement_kind: "measured", observed_at: observedAt, received_at: observedAt,
+    freshness: "fresh", freshness_threshold_seconds: 6, support_status: "available", aggregation: "latest", node_id: telemetryNodeId, ...context,
+  });
+  const capability = (key: string, scope: components["schemas"]["TelemetryCapability"]["scope"], unit: string, supported = true, reason: string | null = null): components["schemas"]["TelemetryCapability"] => ({
+    key, scope, unit, source: "spark.telemetry.fixture", measurement_kind: "measured", freshness_threshold_seconds: 6, supported, reason, node_id: telemetryNodeId,
+  });
+  return {
+    schema_version: 2,
+    series: [
+      series("gpu.clock.sm", "accelerator", 1680, "MHz", {device_id: "gpu0"}),
+      series("gpu.throttle", "accelerator", "none", "state", {device_id: "gpu0"}),
+      series("gpu.power", "accelerator", 68.4, "W", {device_id: "gpu0"}),
+      series("gpu.process_memory", "accelerator", 18.5, "GiB", {device_id: "gpu0", process_id: 4021, process_name: "vllm"}),
+      series("cpu.temperature", "node", 51.2, "°C"),
+      series("cpu.load.1m", "node", 2.1, "load"),
+      series("cpu.power", "node", 88.2, "W"),
+      series("memory.bandwidth", "memory", 312.5, "GB/s"),
+      series("disk.read", "storage", 74.1, "MB/s", {device_id: "nvme0n1"}),
+      series("disk.write", "storage", 12.7, "MB/s", {device_id: "nvme0n1"}),
+      series("network.receive", "network", 2.4, "MB/s", {interface_name: "eth0"}),
+      series("network.transmit", "network", 0.8, "MB/s", {interface_name: "eth0"}),
+      series("runtime.decode", "runtime", 112.4, "tok/s", {run_id: "run-chat"}),
+      series("runtime.prefill", "runtime", 841.7, "tok/s", {run_id: "run-chat"}),
+      series("runtime.kv_cache", "runtime", 42.8, "%", {run_id: "run-chat"}),
+      series("runtime.queue", "runtime", 2, "requests", {run_id: "run-chat"}),
+      series("runtime.ttft.p95", "runtime", 184, "ms", {run_id: "run-chat"}),
+      series("runtime.e2e.p95", "runtime", 921, "ms", {run_id: "run-chat"}),
+      series("runtime.itl.p95", "runtime", 24.2, "ms", {run_id: "run-chat"}),
+      series("runtime.cache_hits", "runtime", 91, "%", {run_id: "run-chat"}),
+      series("runtime.mtp_acceptance", "runtime", 78, "%", {run_id: "run-chat"}),
+      series("runtime.preemptions", "runtime", 0, "events", {run_id: "run-chat"}),
+    ],
+    capabilities: [
+      capability("gpu.clock.sm", "accelerator", "MHz"),
+      capability("gpu.throttle", "accelerator", "state"),
+      capability("gpu.power", "accelerator", "W"),
+      capability("gpu.process_memory", "accelerator", "GiB"),
+      capability("cpu.temperature", "node", "°C"),
+      capability("cpu.load.1m", "node", "load"),
+      capability("cpu.power", "node", "W"),
+      capability("memory.bandwidth", "memory", "GB/s"),
+      capability("disk.read", "storage", "MB/s"),
+      capability("disk.write", "storage", "MB/s"),
+      capability("network.receive", "network", "MB/s"),
+      capability("network.transmit", "network", "MB/s"),
+      capability("runtime.decode", "runtime", "tok/s"),
+      capability("runtime.prefill", "runtime", "tok/s"),
+      capability("runtime.kv_cache", "runtime", "%"),
+      capability("runtime.queue", "runtime", "requests"),
+      capability("runtime.ttft.p95", "runtime", "ms"),
+      capability("runtime.e2e.p95", "runtime", "ms"),
+      capability("runtime.itl.p95", "runtime", "ms"),
+      capability("runtime.cache_hits", "runtime", "%"),
+      capability("runtime.mtp_acceptance", "runtime", "%"),
+      capability("runtime.preemptions", "runtime", "events"),
+      capability("gpu.encoder", "accelerator", "utilization", false, "This Spark does not expose encoder counters."),
+    ],
+    runtimes: [{run_id: "run-chat", engine_id: "engine-qwen", backend: "vllm", version: "0.8.5", endpoint: "http://aurora.fixture.invalid:8000", model: "Qwen 3", model_version: "qwen/3", recipe_revision: "revision-chat", context_limit_tokens: 32768, serving_node_ids: [nodeId, borealisId], ranks: [0, 1], readiness: "running", error: null, adapter: "openai-chat", adapter_version: "2", adapter_supported: true, adapter_reason: null}],
+    workloads: [{run_id: "run-chat", request_id: "req-42", job_id: null, model: "Qwen 3", recipe_revision: "revision-chat", engine_id: "engine-qwen", state: "running", origin_node_id: nodeId, executor_node_ids: [nodeId, borealisId], created_at: observedAt, started_at: observedAt, ended_at: null, elapsed_seconds: 4.2, failure: null, title: "Interactive request", progress_value: null, progress_max: null, eta_seconds: null, eta_source: null}],
+    provenance: {collector: "vonk-controller", collector_version: "fixture-2", host_uptime_seconds: 98231, source_observed_at: observedAt},
+  };
+}
+
+function richTelemetry(observedAt: string, sequence = 5, telemetryNodeId = nodeId): components["schemas"]["TelemetryPoint"] {
+  return {...telemetry(observedAt, sequence, telemetryNodeId), metrics: richTelemetryMetrics(observedAt, telemetryNodeId)};
+}
+
+function localSnapshot(): components["schemas"]["FleetSnapshot"] {
   const observedAt = new Date().toISOString();
   return {
     schema_version: 1,
@@ -120,14 +274,14 @@ function localSnapshot() {
       ip_address: "192.168.1.212",
       lifecycle: "managed",
       labels: {role: "inference"},
-      connection: {agent_state: "inactive", certificate_state: "expired", online_state: "offline", offline_reason: "certificate-expired", last_seen_at: null, last_seen_age_seconds: null},
+      connection: {agent_state: "retired", certificate_state: "expired", online_state: "offline", offline_reason: "certificate-expired", last_seen_at: null, last_seen_age_seconds: null},
       inventory: null,
       telemetry: null,
       installed: [{
         installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", topology_name: "pair", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "installed", group_state: "installed", complete: true, degraded_reason: null,
       }],
       loaded: [{
-        run_id: "run-chat", installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "lost", rank_age_seconds: null, rank_fresh: false, run_state: "lost", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "member-rank-unhealthy",
+        run_id: "run-chat", installation_id: "install-chat", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", title: "Qwen pair", alias: "chat", expected_rank_count: 2, present_ranks: [0, 1], member_node_ids: [nodeId, borealisId], rank: 1, role: "worker", rank_state: "lost", rank_age_seconds: 0, rank_fresh: false, run_state: "lost", route_state: "failed", group_state: "degraded", healthy: false, degraded_reason: "rank-not-running",
       }],
       reservations: {disk_bytes: 0, unified_memory_bytes: 0, host_memory_bytes: 0, gpu_memory_bytes: 0, port_count: 0},
       warnings: [{code: "node.offline", detail: "Certificate renewal is required.", severity: "error"}, {code: "telemetry.missing", detail: "No telemetry sample is available.", severity: "warning"}, {code: "run.degraded", detail: "The Qwen pair has an unhealthy member rank.", severity: "warning"}],
@@ -138,17 +292,19 @@ function localSnapshot() {
 async function installLocalFleetFixture(page: Page) {
   const snapshot = localSnapshot();
   const profile = {
-    schema_version: 1, id: "00000000-0000-4000-8000-000000000101", name: "Studio service", description: "Keep the studio Qwen endpoint available on the Spark pair.",
+    schema_version: 2, id: "00000000-0000-4000-8000-000000000101", name: "Studio service", description: "Keep the studio Qwen endpoint available on the Spark pair.",
     installation_policy: "keep-cached", labels: {purpose: "interactive"}, favorite: true, profile_digest: "d".repeat(64), created_by: "admin",
     created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
+    scope: {node_ids: [nodeId, borealisId]},
     assignments: [{id: "00000000-0000-4000-8000-000000000102", recipe_id: "recipe-chat", recipe_revision_id: "revision-chat", recipe_title: "Qwen pair", model_title: "Qwen 3", topology_name: "pair", desired_state: "running", alias: "chat", nodes: [
       {node_id: nodeId, rank: 0, role: "leader", endpoint_owner: true},
       {node_id: borealisId, rank: 1, role: "worker", endpoint_owner: false},
     ]}],
   };
   const profilePreview = {
-    schema_version: 1, profile_id: profile.id, profile_name: profile.name, profile_digest: profile.profile_digest, plan_digest: "e".repeat(64), generated_at: snapshot.generated_at, allowed: false,
-    summary: {already_correct: 0, blockers: 1, distributions: 0, installs: 0, placements: 0, starts: 0, stops: 0, uninstalls: 0},
+    schema_version: 2, profile_id: profile.id, profile_name: profile.name, profile_digest: profile.profile_digest, plan_digest: "e".repeat(64), generated_at: snapshot.generated_at, allowed: false,
+    scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
+    summary: {already_correct: 0, blockers: 1, builds: 0, distributions: 0, installs: 0, placements: 0, starts: 0, stops: 0, uninstalls: 0},
     assignments: [{assignment_id: profile.assignments[0].id, recipe_revision_id: "revision-chat", recipe_title: "Qwen pair", desired_state: "running", current_state: "degraded", node_ids: [nodeId, borealisId], actions: [], reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}]}],
     reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}], steps: [],
   };
@@ -162,8 +318,30 @@ async function installLocalFleetFixture(page: Page) {
     body: `retry: 60000\nid: ${snapshot.event_cursor}\nevent: fleet-snapshot\ndata: ${JSON.stringify({schema_version: 1, reset_reason: "initial", snapshot})}\n\n`,
   }));
   await page.route("**/api/v1/fleet", route => route.fulfill({json: snapshot}));
-  await page.route("**/api/v1/fleet-profiles", route => route.fulfill({json: {schema_version: 1, generated_at: snapshot.generated_at, profiles: [profile]}}));
+  await page.route("**/api/v1/fleet-profiles", route => route.fulfill({json: {schema_version: 2, generated_at: snapshot.generated_at, profiles: [profile]}}));
   await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: profilePreview}));
+  await page.route("**/api/v1/fleet-profiles/*/status", route => route.fulfill({json: {
+    schema_version: 2, profile_id: profile.id, profile_digest: profile.profile_digest, generated_at: snapshot.generated_at,
+    state: "drifted", matched: false, drifted: true, scope: {node_ids: [nodeId, borealisId], idle_node_ids: []},
+    reasons: [{code: "profile.node_offline", severity: "error", detail: "Borealis must be online before this profile can be applied."}],
+  }}));
+  await page.route("**/api/v1/fleet-profiles/*/apply", async route => {
+    const body = await route.request().postDataJSON() as {request_key?: string; plan_digest?: string};
+    return route.fulfill({status: 202, json: {
+      schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
+      plan_digest: body.plan_digest ?? "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
+      state: "running", current_operation_id: null, current_step: 1, total_steps: 4,
+      progress: {phase: "Downloading model", message: "Downloading model", completed_bytes: 0, total_bytes: null, total_bytes_known: false, request_key: body.request_key ?? null},
+      status_reason: null, result: null,
+    }});
+  });
+  await page.route("**/api/v1/fleet-profile-applications/*", route => route.fulfill({json: {
+    schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
+    plan_digest: "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at, state: "running",
+    current_operation_id: null, current_step: 1, total_steps: 4,
+    progress: {phase: "Downloading model", message: "Downloading model", completed_bytes: 0, total_bytes: null, total_bytes_known: false},
+    status_reason: null, result: null,
+  }}));
   await page.route("**/api/v1/nodes/*/profile", async route => {
     const nodeId = route.request().url().split("/").at(-2) ?? "";
     const input = await route.request().postDataJSON() as {display_name: string};
@@ -213,6 +391,19 @@ async function installLocalFleetFixture(page: Page) {
     libraryState.lastApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
     return route.fulfill({json: libraryOperation("queued")});
   });
+  await page.route("**/api/v1/recipes/run-switch-plans/preview", async route => {
+    libraryState.lastRunSwitchPreviewBody = await route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({json: libraryRunSwitchPlan()});
+  });
+  await page.route("**/api/v1/recipes/run-switches", async route => {
+    libraryState.lastRunSwitchApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
+    const requestKey = String(libraryState.lastRunSwitchApplyBody.request_key ?? "");
+    return route.fulfill({status: 202, json: libraryRunSwitchOperation(requestKey)});
+  });
+  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707", async route => {
+    const requestKey = String(libraryFixtures.get(page)?.lastRunSwitchApplyBody?.request_key ?? "");
+    return route.fulfill({json: libraryRunSwitchOperation(requestKey, "running")});
+  });
   await page.route("**/api/v1/recipes/operations/operation-load", route => route.fulfill({json: libraryOperation("partial")}));
   await page.route("**/api/v1/recipes/operations/operation-load/retry", route => {
     libraryState.retryCount += 1;
@@ -223,6 +414,25 @@ async function installLocalFleetFixture(page: Page) {
     operation_total: 2, operations: [], progress: {completed: 1, failed: 1, running: 0, total: 2},
     target_total: 2, targets: ["node-alpha", "node-beta"],
   }}));
+  await page.route("**/api/v1/nodes/*/telemetry/current", route => {
+    const url = new URL(route.request().url());
+    const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
+    const observedAt = new Date().toISOString();
+    return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", sample: richTelemetry(observedAt, 5, requestedNodeId)}});
+  });
+  await page.route("**/api/v1/nodes/*/telemetry/capabilities", route => {
+    const url = new URL(route.request().url());
+    const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
+    const observedAt = new Date().toISOString();
+    return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", capabilities: richTelemetryMetrics(observedAt, requestedNodeId).capabilities}});
+  });
+  await page.route("**/api/v1/nodes/*/telemetry/workloads", route => {
+    const url = new URL(route.request().url());
+    const requestedNodeId = url.pathname.split("/").at(-3) ?? nodeId;
+    const observedAt = new Date().toISOString();
+    const metrics = richTelemetryMetrics(observedAt, requestedNodeId);
+    return route.fulfill({json: {schema_version: 2, node_id: requestedNodeId, observed_at: observedAt, received_at: observedAt, freshness: "live", run_id: null, state: null, runtimes: metrics.runtimes, workloads: metrics.workloads}});
+  });
   await page.route("**/api/v1/nodes/*/telemetry?*", route => {
     const url = new URL(route.request().url());
     const start = url.searchParams.get("start") ?? snapshot.generated_at;
@@ -239,12 +449,12 @@ async function installLocalFleetFixture(page: Page) {
       source_sample_count: 2,
       gap_samples: 0,
       metrics: {
-        gpu_utilization_percent: {count: 2, minimum: 61, mean: 66.5, maximum: 72},
-        memory_available_bytes: {count: 2, minimum: 90 * GIB, mean: 91 * GIB, maximum: 92 * GIB},
-        temperature_c: {count: 2, minimum: 43.5, mean: 44.25, maximum: 45},
+        gpu_utilization_percent: {count: 2, minimum: 61, mean: 66.5, maximum: 72, key: "gpu_utilization_percent", scope: "accelerator", unit: "%", source: "spark.telemetry.fixture", measurement_kind: "measured", aggregation: "mean"},
+        memory_available_bytes: {count: 2, minimum: 90 * GIB, mean: 91 * GIB, maximum: 92 * GIB, key: "memory_available_bytes", scope: "memory", unit: "bytes", source: "spark.telemetry.fixture", measurement_kind: "measured", aggregation: "mean"},
+        temperature_c: {count: 2, minimum: 43.5, mean: 44.25, maximum: 45, key: "temperature_c", scope: "node", unit: "°C", source: "spark.telemetry.fixture", measurement_kind: "measured", aggregation: "mean"},
       },
     }];
-    return route.fulfill({json: {schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points}});
+    return route.fulfill({json: {schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points, metadata: {requested_start: start, requested_end: end, actual_start: start, actual_end: end, requested_resolution: resolution, actual_resolution: resolution, timezone: "UTC", point_count: points.length, coverage_seconds: 3600, gap_samples: 0, downsampled: resolution !== "raw"}}});
   });
 }
 
@@ -294,7 +504,7 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("link", {name: "Install model or recipe"}).click();
+  await page.getByRole("link", {name: "Download to Library"}).click();
   await expect(page).toHaveURL(new RegExp(`/library\\?spark=${nodeId}$`));
   await expect(page.getByRole("complementary", {name: "Managing models on Aurora"})).toBeVisible();
 });
@@ -348,7 +558,7 @@ test("Node history and lifecycle controls work on desktop and mobile", async ({p
     await page.getByRole("button", {name: "View Aurora details"}).click();
     await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
     const detail = page.getByRole("complementary", {name: "Aurora details"});
-    await expect(detail.getByRole("link", {name: "Install model or recipe"})).toBeVisible();
+    await expect(detail.getByRole("link", {name: "Download to Library"})).toBeVisible();
     await expect(detail.getByRole("button", {name: "Stop Aurora solo on this Spark"})).toBeVisible();
     await expect(detail.getByText("Stop all 2 active runs before removing this recipe from all 2 Sparks.")).toBeVisible();
     await testInfo.attach(`fleet-spark-lifecycle-${width}.png`, {body: await detail.screenshot(), contentType: "image/png"});
@@ -731,6 +941,25 @@ test("Library separates installation capacity from load memory admission", async
   await expect(placement.locator(".placement-group")).not.toContainText("run.insufficient_memory");
   await expectNoSeriousAccessibilityViolations(page);
   await testInfo.attach("installable-load-blocked.png", {body: await placement.screenshot(), contentType: "image/png"});
+});
+
+test("Library uses the schema 2 one-click Run path when the Controller exposes run-switch", async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto("/library/recipes/recipe-chat");
+
+  const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
+  const run = authority.getByRole("button", {name: "Run", exact: true}).first();
+  await expect(run).toBeVisible();
+  await expect(authority.getByRole("button", {name: "Review Load"})).toHaveCount(0);
+  await run.click();
+
+  const state = libraryFixtures.get(page)!;
+  await expect.poll(() => state.lastRunSwitchPreviewBody).toMatchObject({schema_version: 2, model_version_sha256: "e".repeat(64), recipe_revision_id: "revision-chat", action: "run", retention: "retain-cached"});
+  await expect.poll(() => state.lastRunSwitchApplyBody).toMatchObject({schema_version: 2, plan_digest: "f".repeat(64), request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  const progress = authority.getByRole("region", {name: "Qwen Chat progress"});
+  await expect(progress).toContainText("Copying model and container to node-alpha");
+  await expect(progress).toContainText("Total bytes unavailable");
+  await expect(progress.getByRole("progressbar", {name: "Run progress"})).toHaveAttribute("aria-valuetext", "Total bytes unavailable");
 });
 
 test.skip("Library fixture journey keeps visual authority primary through preview, partial retry, and Advanced recovery", async ({page}, testInfo) => {

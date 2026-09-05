@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import type {
   ControlApi,
   FleetProfile,
@@ -17,7 +17,7 @@ type WorkloadRow = {
   title: string;
 };
 
-const TERMINAL_APPLICATION_STATES = new Set(["succeeded", "failed", "cancelled", "waiting-for-operator"]);
+const TERMINAL_APPLICATION_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
 function stateLabel(state: MatrixState): string {
   if (state === "planned") return "Profile change";
@@ -29,6 +29,17 @@ function profileStatus(preview?: FleetProfilePreview): {label: string; tone: "go
   if (!preview.allowed) return {label: `${preview.summary.blockers} blocked`, tone: "danger"};
   if (preview.steps.length === 0) return {label: "Live state matches", tone: "good"};
   return {label: `${preview.steps.length} changes`, tone: "attention"};
+}
+
+function applicationPhase(application: FleetProfileApplication): string {
+  const progress = application.progress;
+  if (progress && typeof progress === "object") {
+    const record = progress as Record<string, unknown>;
+    for (const key of ["message", "phase", "current_phase", "current_step_label"]) {
+      if (typeof record[key] === "string" && record[key]) return String(record[key]).replaceAll("-", " ");
+    }
+  }
+  return application.status_reason || (application.state === "succeeded" ? "Profile applied" : "Switch in progress");
 }
 
 function workloadRows(nodes: readonly VisualFleetNode[], profile?: FleetProfile): WorkloadRow[] {
@@ -79,13 +90,12 @@ function workloadRows(nodes: readonly VisualFleetNode[], profile?: FleetProfile)
 }
 
 function ApplicationProgress({application}: {application: FleetProfileApplication}) {
-  const percentage = application.total_steps === 0 ? 100 : Math.round(application.current_step / application.total_steps * 100);
   return <section className={`profile-application profile-application-${application.state}`} aria-live="polite">
     <div>
-      <strong>{application.state === "succeeded" ? "Profile applied" : application.state === "running" || application.state === "queued" ? "Applying profile" : "Profile needs attention"}</strong>
-      <span>{application.current_step} of {application.total_steps} steps · {application.state.replaceAll("-", " ")}</span>
+      <strong>{applicationPhase(application)}</strong>
+      <span>Controller step {application.current_step} of {application.total_steps} · {application.state.replaceAll("-", " ")}</span>
     </div>
-    <div className="profile-application-track" role="progressbar" aria-label="Fleet Profile application progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}><span style={{transform: `scaleX(${percentage / 100})`}}/></div>
+    <div className="profile-application-track is-indeterminate" role="progressbar" aria-label="Fleet Profile application progress" aria-valuetext="The Controller has not reported a byte total"><span/></div>
     {application.status_reason && <p>{application.status_reason}</p>}
   </section>;
 }
@@ -104,7 +114,9 @@ export function FleetOperatingBoard({api, nodes, now, onManageNode}: {
   const [previewing, setPreviewing] = useState(false);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [applying, setApplying] = useState(false);
+  const [requestKey, setRequestKey] = useState<string>();
   const [error, setError] = useState("");
+  const planRef = useRef<HTMLElement>(null);
   const nodeStateKey = useMemo(() => nodes.map(node => [
     node.id,
     node.connection.online_state,
@@ -114,10 +126,6 @@ export function FleetOperatingBoard({api, nodes, now, onManageNode}: {
   ].join("~")).sort().join("|"), [nodes]);
 
   useEffect(() => {
-    if (typeof api.fleetProfiles !== "function") {
-      setLoading(false);
-      return;
-    }
     const controller = new AbortController();
     setLoading(true);
     api.fleetProfiles(controller.signal).then(result => {
@@ -125,6 +133,7 @@ export function FleetOperatingBoard({api, nodes, now, onManageNode}: {
       setSelectedProfileId(current => current && result.profiles.some(profile => profile.id === current)
         ? current
         : result.profiles[0]?.id);
+      setRequestKey(undefined);
       setError("");
     }).catch(value => {
       if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Fleet Profiles are unavailable.");
@@ -183,8 +192,11 @@ export function FleetOperatingBoard({api, nodes, now, onManageNode}: {
     setApplying(true);
     setError("");
     try {
-      const next = await api.applyFleetProfile(selectedProfile.id, preview.plan_digest);
+      const key = requestKey ?? crypto.randomUUID();
+      setRequestKey(key);
+      const next = await api.applyFleetProfile(selectedProfile.id, {plan_digest: preview.plan_digest, request_key: key});
       setApplication(next);
+      if (next.state === "succeeded") setRequestKey(undefined);
       if (TERMINAL_APPLICATION_STATES.has(next.state)) setPreviewAttempt(value => value + 1);
     } catch (value) {
       setError(value instanceof Error ? value.message : "The Fleet Profile could not be applied.");
@@ -207,7 +219,7 @@ export function FleetOperatingBoard({api, nodes, now, onManageNode}: {
       </dl>
       <div className="fleet-profile-actions">
         <span className={`profile-match profile-match-${status.tone}`}>{previewing ? "Checking live state" : status.label}</span>
-        <button type="button" disabled={!preview?.allowed || preview.steps.length === 0 || applying} onClick={() => void applyProfile()}>{applying ? "Starting…" : preview && !preview.allowed ? "Resolve blockers" : preview?.steps.length ? `Apply ${preview.steps.length} changes` : "Profile applied"}</button>
+        <button type="button" disabled={applying || (!preview?.allowed && !preview) || (Boolean(preview?.allowed) && preview.steps.length === 0)} onClick={() => preview && !preview.allowed ? planRef.current?.focus() : void applyProfile()}>{applying ? "Starting…" : preview && !preview.allowed ? "Inspect blockers" : preview?.steps.length ? "Switch profile" : "Profile applied"}</button>
       </div>
     </header>
 
@@ -219,7 +231,7 @@ export function FleetOperatingBoard({api, nodes, now, onManageNode}: {
         <div className="profile-rail-heading"><strong>Fleet profiles</strong><span>{profiles.length}</span></div>
         {loading && <p role="status">Loading saved profiles…</p>}
         {!loading && profiles.length === 0 && <div className="profile-rail-empty"><strong>No saved profiles</strong><p>Choose a recipe in Library to create the first repeatable Fleet setup.</p><a className="button secondary" href="/library?profile=new">Browse Library</a></div>}
-        {profiles.map(profile => <button key={profile.id} type="button" className="profile-rail-item" aria-pressed={profile.id === selectedProfileId} onClick={() => { setApplication(undefined); setSelectedProfileId(profile.id); }}>
+        {profiles.map(profile => <button key={profile.id} type="button" className="profile-rail-item" aria-pressed={profile.id === selectedProfileId} onClick={() => { setApplication(undefined); setRequestKey(undefined); setSelectedProfileId(profile.id); }}>
           <span>{profile.name}</span>
           <small>{profile.assignments.length} {profile.assignments.length === 1 ? "workload" : "workloads"} · {profile.installation_policy === "exact" ? "Exact" : "Keep cached"}</small>
         </button>)}
@@ -262,14 +274,13 @@ export function FleetOperatingBoard({api, nodes, now, onManageNode}: {
         </div>
       </div>
 
-      {selectedProfile && preview && <aside className="profile-plan" aria-label="Profile change preview">
+      {selectedProfile && preview && <aside ref={planRef} tabIndex={-1} id="fleet-profile-plan" className="profile-plan" aria-label="Profile change preview">
         <div><strong>{!preview.allowed ? "Blocked" : preview.steps.length ? `${preview.steps.length} changes` : "In sync"}</strong><span>{selectedProfile.description || "Saved Fleet operating state"}</span></div>
-        {preview.reasons.length > 0 && <ul>{preview.reasons.slice(0, 4).map(reason => <li key={`${reason.code}:${reason.detail}`} className={`reason-${reason.severity}`}><strong>{reason.code.split(".").at(-1)?.replaceAll("_", " ")}</strong><span>{reason.detail}</span></li>)}</ul>}
-        {preview.steps.length > 0 && <ol>{preview.steps.slice(0, 6).map(step => {
+        {preview.reasons.length > 0 && <ul>{preview.reasons.map(reason => <li key={`${reason.code}:${reason.detail}`} className={`reason-${reason.severity}`}><strong>{reason.code.split(".").at(-1)?.replaceAll("_", " ")}</strong><span>{reason.detail}</span></li>)}</ul>}
+        {preview.steps.length > 0 && <ol>{preview.steps.map(step => {
           const nodeCount = step.node_ids?.length ?? 0;
           return <li key={step.index}><span>{step.label}</span><small>{nodeCount} {nodeCount === 1 ? "Spark" : "Sparks"}</small></li>;
         })}</ol>}
-        {preview.steps.length > 6 && <p>+ {preview.steps.length - 6} more planned changes</p>}
       </aside>}
     </div>
   </section>;
