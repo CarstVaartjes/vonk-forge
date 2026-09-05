@@ -15,7 +15,12 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha2
 from vonk_forge_contracts.resolver import validate_recipe_models
 
 from .auth import CursorCodec
-from .models import CatalogDocument, CatalogDocumentHead, CatalogDocumentRevision, CatalogRecipeModelReference
+from .models import (
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+    CatalogRecipeModelReference,
+)
 
 
 class CatalogError(RuntimeError):

@@ -1134,10 +1134,22 @@ class CatalogRecipeModelReference(Base):
 
 
 @event.listens_for(CatalogDocumentRevision, "before_update")
-def _catalog_document_revision_is_immutable(_mapper, _connection, target: CatalogDocumentRevision) -> None:
-    history = inspect(target).attrs.state.history
-    previous = history.deleted[0] if history.deleted else None
-    if previous == "active" or (target.state == "active" and previous != "candidate"):
+def _catalog_document_revision_is_immutable(
+    _mapper, _connection, target: CatalogDocumentRevision
+) -> None:
+    state = inspect(target)
+    changed = {
+        attribute.key
+        for attribute in state.attrs
+        if attribute.history.has_changes()
+    }
+    previous_state = state.attrs.state.history.deleted
+    if previous_state and previous_state[0] == "active":
+        raise ValueError("active catalog document revisions are immutable")
+    if target.state == "active" and (
+        not previous_state
+        or changed - {"state", "artifact_key", "execution_key", "projected"}
+    ):
         raise ValueError("active catalog document revisions are immutable")
 
 

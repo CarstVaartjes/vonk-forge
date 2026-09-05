@@ -12,8 +12,6 @@ from alembic.config import Config
 from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_forge_contracts import ModelDefinition, content_sha256
-
 from vonk_control.catalog_entities import CatalogEntityService, CatalogValidationError
 from vonk_control.models import (
     Base,
@@ -22,6 +20,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
+from vonk_forge_contracts import ModelDefinition, content_sha256
 
 NOW = datetime(2026, 9, 5, tzinfo=UTC)
 
