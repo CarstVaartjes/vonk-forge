@@ -1483,6 +1483,7 @@ def production_app() -> FastAPI:
     from .fleet_projection import FleetProjection
     from .fleet_stream import FleetStream
     from .install_admission import InstallAdmissionService
+    from .execution_plan_service import ControllerExecutionPlanService
     from .jobs import JobService
     from .library_projection import LibraryProjection
     from .logging import DatabaseJobLogStore
@@ -1562,6 +1563,7 @@ def production_app() -> FastAPI:
         current_revision=current_revision,
         model_cache=model_cache,
     )
+    execution_plans = ControllerExecutionPlanService(model_cache)
 
     def reconciliation_authority_input(
         reconciliation_id: str,
@@ -1625,6 +1627,7 @@ def production_app() -> FastAPI:
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             operator_jurisdiction=settings.operator_jurisdiction,
+            compiled_plan_provider=execution_plans.compile_installation,
         ),
         run_admission=RunAdmissionService(
             sessions,

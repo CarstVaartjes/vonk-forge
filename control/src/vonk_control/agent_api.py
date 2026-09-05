@@ -67,7 +67,6 @@ from .models import (
     AgentOperation,
     ClusterMapping,
     InstallationNode,
-    LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -76,16 +75,14 @@ from .models import (
 )
 from .operation_api import bounded_error_responses
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
-from .recipe_contract import recipe_content_sha256, validate_recipe
+from .compiled_execution_plan import (
+    CompiledExecutionPlanError,
+    validate_compiled_launch_payload,
+)
 from .recipe_operations import (
     RecipeRunObservation,
     prepare_exact_recipe_run_observation_nodes,
     record_recipe_run_observations,
-)
-from .recipe_runtime_specs import (
-    RecipeRuntimeSpecError,
-    compile_runtime_spec,
-    resolve_recipe_entities,
 )
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .distribution import DistributionError, DistributionService
@@ -2038,58 +2035,44 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=404, detail="recipe specification does not exist"
                 )
-            revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
-            mapping = session.get(ClusterMapping, installation.mapping_id)
-            build = session.get(RecipeBuild, installation.recipe_build_id)
-            if (
-                revision is None
-                or revision.lifecycle != "resolved"
-                or revision.content_sha256 is None
-                or mapping is None
-                or mapping.state != "ready"
-                or mapping.generation != installation.mapping_generation
-                or build is None
-                or build.state != "succeeded"
-                or build.image_digest != installation.image_digest
-                or build.recipe_revision_id != revision.id
-            ):
-                raise HTTPException(
-                    status_code=409, detail="recipe specification authority is stale"
-                )
-            document = revision.document
-            parameters = mapping.parameters
-            try:
-                resolved_entities = resolve_recipe_entities(session, document)
-            except RecipeRuntimeSpecError as error:
-                detail = {
-                    "runtime distribution does not implement harness": (
-                        "recipe specification distribution-harness binding is invalid"
-                    ),
-                    "patch bundle does not apply to distribution": (
-                        "recipe specification patch-distribution binding is invalid"
-                    ),
-                }.get(str(error), "recipe specification dependencies are stale")
+            if installation.state not in {"installing", "installed", "partial"}:
                 raise HTTPException(
                     status_code=409,
-                    detail=detail,
-                ) from None
-        validate_recipe(document)
-        if recipe_content_sha256(document) != revision.content_sha256:
-            raise HTTPException(
-                status_code=409, detail="recipe specification digest changed"
-            )
+                    detail="recipe specification installation is not ready",
+                )
+            if not isinstance(installation.plan, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            compiled_plans = installation.plan.get("compiled_execution_plans")
+            if not isinstance(compiled_plans, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            candidate = compiled_plans.get(identity.node_id)
+            if not isinstance(candidate, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
         try:
-            spec = compile_runtime_spec(
-                document,
-                resolved_entities=resolved_entities,
-                parameters=parameters,
-                role=placement.role,
-                rank=placement.rank,
-                recipe_build_id=build.id,
-                image_digest=build.image_digest,
+            spec = validate_compiled_launch_payload(candidate)
+        except (CompiledExecutionPlanError, TypeError, ValueError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail=f"recipe specification compiled execution plan is invalid: {error}",
+            ) from None
+        topology = spec.get("topology")
+        if not isinstance(topology, Mapping) or (
+            topology.get("rank") != placement.rank
+            or topology.get("role") != placement.role
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification placement does not match the installation",
             )
-        except RecipeRuntimeSpecError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
         return _json_response(spec)
 
     def workload_helper_service() -> WorkloadHelperAuthorityService:

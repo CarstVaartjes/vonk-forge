@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -15,7 +16,10 @@ from vonk_control.compiled_execution_plan import (
     compile_verified_execution_plan,
     execution_identity_sha256,
     materialized_model_path,
+    validate_compiled_launch_payload,
 )
+from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.recipe_operations import _compiled_plan_for_start
 
 
 def _spec(
@@ -186,6 +190,205 @@ def test_prebuilt_plan_binds_exact_file_and_controller_archive_receipts() -> Non
     assert "recipe_revision_sha256" not in payload
     assert "source" not in payload["runtime_image"]
     assert "build_id" not in payload["runtime_image"]
+
+
+def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    validated = validate_compiled_launch_payload(payload)
+    assert set(validated) == {
+        "schema_version",
+        "identity",
+        "runtime",
+        "artifacts",
+        "runtime_image",
+        "security",
+        "topology",
+        "lifecycle",
+        "endpoint",
+    }
+    assert validated["runtime"]["executable"] == "/opt/vonk/bin/vllm"
+    assert validated["runtime"]["argv"] == ["serve"]
+    assert validated["artifacts"][0]["selection_id"] == "primary"
+    assert validated["artifacts"][0]["mount"] == {
+        "target": "/models",
+        "read_only": True,
+    }
+    rendered = json.dumps(validated, sort_keys=True)
+    assert "model_version_sha256" not in rendered
+    assert "runtime_distribution_sha256" not in rendered
+    assert "patch_bundle_sha256" not in rendered
+
+
+def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    polluted = copy.deepcopy(payload)
+    polluted["identity"]["model_version_sha256"] = "f" * 64
+    with pytest.raises(CompiledExecutionPlanError, match="identity fields"):
+        validate_compiled_launch_payload(polluted)
+
+    mismatched = copy.deepcopy(payload)
+    mismatched["artifacts"][0]["distribution_object"]["bytes"] += 1
+    with pytest.raises(CompiledExecutionPlanError, match="receipt is inconsistent"):
+        validate_compiled_launch_payload(mismatched)
+
+
+def test_start_claim_binds_live_rank_placement_without_reintroducing_authority() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    started = _compiled_plan_for_start(
+        payload,
+        node=SimpleNamespace(
+            node_id="spk_" + "a" * 32,
+            rank=0,
+            role="entrypoint",
+            port=8000,
+            required_memory_bytes=4096,
+            fabric_address=None,
+        ),
+        endpoint_address="192.0.2.10",
+        master_address=None,
+        master_port=None,
+        world_size=1,
+    )
+    assert started["runtime"]["placement"]["endpoint_address"] == "192.0.2.10"
+    assert started["runtime"]["placement"]["reserved_memory_bytes"] == 4096
+    assert validate_compiled_launch_payload(started)["schema_version"] == 2
+
+
+def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
+    pytest.importorskip("vonk_forge_contracts")
+    from importlib.resources import files
+
+    from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/recipe-source-build.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    model = ModelDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/model-definition.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    recipe_document = recipe.model_dump(mode="json")
+    model_document = model.model_dump(mode="json")
+    model_digest = content_sha256(model)
+    recipe_document["models"][0]["model"]["content_sha256"] = model_digest
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    recipe_digest = content_sha256(recipe)
+    artifact_set_digest = "a" * 64
+
+    class Manifest:
+        digest = artifact_set_digest
+
+    class Cache:
+        def resolve_artifact_set(self, *, recipe_revision_sha256: str) -> Manifest:
+            assert recipe_revision_sha256 == recipe_digest
+            return Manifest()
+
+        def manifest_for_artifact_set(self, digest: str) -> Manifest:
+            assert digest == artifact_set_digest
+            return Manifest()
+
+        def resolve_verified_artifact_set(
+            self, digest: str
+        ) -> tuple[dict[str, object], ...]:
+            assert digest == artifact_set_digest
+            return (
+                {
+                    "path": "model.safetensors",
+                    "sha256": "c" * 64,
+                    "bytes": 1024,
+                    "file": "controller-owned",
+                    "file_id": "weights",
+                    "model_content_sha256": model_digest,
+                    "roles": ["weights"],
+                },
+            )
+
+    node = SimpleNamespace(
+        node_id="spk_" + "1" * 32,
+        rank=0,
+        role="entrypoint",
+    )
+    revision = SimpleNamespace(
+        content_sha256=recipe_digest,
+        document=recipe_document,
+    )
+    build = SimpleNamespace(
+        id="build-1",
+        state="succeeded",
+        image_digest="sha256:" + "1" * 64,
+        build_input_sha256="b" * 64,
+        oci_layout_sha256="f" * 64,
+        image_bytes=4096,
+    )
+    service = ControllerExecutionPlanService(Cache())
+    plans = service.compile_installation(
+        None,
+        revision=revision,
+        build=build,
+        mapping_nodes=(node,),
+        parameters={},
+        resolved_entities={
+            "models": (SimpleNamespace(document=model_document, content_digest=model_digest),)
+        },
+    )
+
+    payload = plans[node.node_id]
+    validate_compiled_launch_payload(payload)
+    assert payload["identity"]["model_artifact_set_sha256"] == artifact_set_digest
+    assert payload["identity"]["model_artifact_bytes"] == 1024
+    assert payload["identity"]["build_input_sha256"] == "b" * 64
+    assert payload["artifacts"][0]["path"] == "model.safetensors"
+    assert payload["runtime_image"]["source"] == "controller-build"
+    assert "repository" not in json.dumps(payload, sort_keys=True)
 
 
 def test_controller_built_receipt_and_pulled_receipt_share_reusable_identity() -> None:

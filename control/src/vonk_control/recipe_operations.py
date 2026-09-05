@@ -530,6 +530,11 @@ class RecipeOperationService:
             assert installation is not None
             installation.state = "installing"
             installation.updated_at = now
+            compiled_plans = plan.compiled_plan_by_node
+            if set(compiled_plans) != {node.node_id for node in plan.nodes}:
+                raise RecipeOperationConflict(
+                    "compiled execution plan is missing for one or more mapped nodes"
+                )
             job = self._queue_in_session(
                 session,
                 kind="recipe.install",
@@ -542,18 +547,13 @@ class RecipeOperationService:
                     (
                         node.node_id,
                         {
-                            "schema_version": 1,
+                            "schema_version": 2,
                             "installation_id": installation_id,
-                            "recipe_revision_id": plan.recipe_revision_id,
-                            "recipe_content_sha256": plan.recipe_content_sha256,
-                            "mapping_id": plan.mapping_id,
-                            "mapping_generation": plan.mapping_generation,
-                            "recipe_build_id": plan.recipe_build_id,
-                            "image_digest": plan.image_digest,
                             "plan_digest": plan.plan_digest,
                             "rank": node.rank,
                             "role": node.role,
                             "expected_bytes": node.required_bytes,
+                            "compiled_execution_plan": compiled_plans[node.node_id],
                         },
                     )
                     for node in plan.nodes
@@ -649,6 +649,18 @@ class RecipeOperationService:
             revision = session.get(LocalRecipeRevision, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)
             assert run is not None and revision is not None and installation is not None
+            compiled_plans = installation.plan.get("compiled_execution_plans")
+            if not isinstance(compiled_plans, Mapping):
+                raise RecipeOperationConflict(
+                    "compiled execution plan is unavailable for the installed recipe"
+                )
+            if any(
+                not isinstance(compiled_plans.get(node.node_id), Mapping)
+                for node in plan.nodes
+            ):
+                raise RecipeOperationConflict(
+                    "compiled execution plan is missing for one or more run ranks"
+                )
             start_order = _topology_order(revision.document, "start_order")
             topology = recipe_topology(revision.document)
             two_phase_start = world_size > 1 and topology.get("mode") == "distributed"
@@ -687,14 +699,9 @@ class RecipeOperationService:
                 (
                     node.node_id,
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "run_id": run_id,
                         "installation_id": plan.installation_id,
-                        "recipe_revision_id": plan.recipe_revision_id,
-                        "recipe_content_sha256": recipe_digest,
-                        "mapping_id": plan.mapping_id,
-                        "mapping_generation": plan.mapping_generation,
-                        "image_digest": installation.image_digest,
                         "plan_digest": plan.plan_digest,
                         "alias": plan.alias,
                         "rank": node.rank,
@@ -707,6 +714,16 @@ class RecipeOperationService:
                             else node.fabric_address
                         ),
                         "world_size": world_size,
+                        "compiled_execution_plan": _compiled_plan_for_start(
+                            compiled_plans[node.node_id],
+                            node=node,
+                            endpoint_address=(
+                                presences[node.node_id] if node.endpoint_owner else None
+                            ),
+                            master_address=master_address,
+                            master_port=master_port,
+                            world_size=world_size,
+                        ),
                         "local_address": (
                             node.fabric_address if world_size > 1 else None
                         ),
@@ -2903,6 +2920,55 @@ class RecipeOperationService:
         ):
             reservation.state = "released"
             reservation.released_at = now
+
+
+def _compiled_plan_for_start(
+    value: Mapping[str, object],
+    *,
+    node: object,
+    endpoint_address: str | None,
+    master_address: str | None,
+    master_port: int | None,
+    world_size: int,
+) -> dict[str, object]:
+    """Bind live rank placement to an immutable receipt-bound launch plan."""
+
+    payload = json.loads(canonical_message(value))
+    runtime = payload.get("runtime")
+    placement = runtime.get("placement") if isinstance(runtime, Mapping) else None
+    if not isinstance(runtime, dict) or not isinstance(placement, dict):
+        raise RecipeOperationConflict("compiled execution plan placement is invalid")
+    node_id = getattr(node, "node_id", None)
+    rank = getattr(node, "rank", None)
+    role = getattr(node, "role", None)
+    port = getattr(node, "port", None)
+    reserved = getattr(node, "required_memory_bytes", None)
+    fabric_address = getattr(node, "fabric_address", None)
+    if (
+        not isinstance(node_id, str)
+        or type(rank) is not int
+        or not isinstance(role, str)
+        or type(port) is not int
+        or type(reserved) is not int
+    ):
+        raise RecipeOperationConflict("compiled execution plan placement is incomplete")
+    placement.update(
+        {
+            "endpoint_address": endpoint_address,
+            "rank": rank,
+            "role": role,
+            "world_size": world_size,
+            "local_address": fabric_address if world_size > 1 else None,
+            "master_address": master_address,
+            "master_port": master_port,
+            "port": port,
+            "reserved_memory_bytes": reserved,
+        }
+    )
+    topology = payload.get("topology")
+    if isinstance(topology, dict):
+        topology.update({"rank": rank, "role": role, "world_size": world_size})
+    return payload
 
 
 def _required_string(value: Mapping[str, object], key: str) -> str:
