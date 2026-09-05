@@ -35,15 +35,13 @@ from .fleet_profile_contract import (
 )
 from .models import (
     AgentNode,
-    CatalogEntity,
-    CatalogEntityRevision,
+    CatalogDocument,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     FleetProfile,
     FleetProfileApplication,
     InstallationNode,
-    LocalRecipe,
-    LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -52,6 +50,7 @@ from .models import (
 from .preparation_contract import RolloutPreparation
 from .recipe_contract import RecipeContractError, recipe_topology
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
+from .recipe_runtime_specs import resolve_recipe_entities
 from .run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchOperation,
@@ -313,12 +312,15 @@ class RunSwitchFleetProfileAdapter:
         if assignment is None:
             raise FleetProfileConflict("Profile switch assignment is unavailable")
         with self._sessions() as session:
-            revision = session.get(LocalRecipeRevision, assignment.recipe_revision_id)
+            revision = session.get(CatalogDocumentRevision, assignment.recipe_revision_id)
             if revision is None:
                 raise KeyError(assignment.recipe_revision_id)
-            model = revision.document.get("model")
+            resolved = resolve_recipe_entities(session, revision.document)
+            models = resolved.get("models")
             model_digest = (
-                model.get("content_sha256") if isinstance(model, Mapping) else None
+                models[0].content_digest
+                if isinstance(models, Sequence) and models
+                else None
             )
         if not isinstance(model_digest, str):
             raise FleetProfileConflict("Profile assignment has no exact model identity")
@@ -2158,11 +2160,11 @@ class FleetProfileService:
             else {}
         )
         for value in values:
-            revision = session.get(LocalRecipeRevision, value.recipe_revision_id)
+            revision = session.get(CatalogDocumentRevision, value.recipe_revision_id)
             if revision is None:
                 raise FleetProfileConflict("profile recipe revision does not exist")
-            if revision.lifecycle != "resolved" or revision.content_sha256 is None:
-                raise FleetProfileConflict("profile recipe revision must be resolved")
+            if revision.kind != "recipe" or revision.state != "active":
+                raise FleetProfileConflict("profile recipe revision must be active")
             try:
                 topology = recipe_topology(revision.document)
             except RecipeContractError as error:
@@ -2252,12 +2254,12 @@ class FleetProfileService:
                 raise FleetProfileConflict(
                     "stored Fleet profile recipe revision is invalid"
                 )
-            revision = session.get(LocalRecipeRevision, revision_id)
+            revision = session.get(CatalogDocumentRevision, revision_id)
             if revision is None:
                 raise FleetProfileConflict(
                     "stored Fleet profile recipe revision is unavailable"
                 )
-            recipe = session.get(LocalRecipe, revision.recipe_id)
+            recipe = session.get(CatalogDocument, revision.document_id)
             if recipe is None:
                 raise FleetProfileConflict("stored Fleet profile recipe is unavailable")
             model_title = self._model_title(session, revision.document)
@@ -2301,31 +2303,15 @@ class FleetProfileService:
 
     @staticmethod
     def _model_title(session: Session, document: Mapping[str, object]) -> str | None:
-        model = document.get("model")
-        if not isinstance(model, Mapping):
+        try:
+            models = resolve_recipe_entities(session, document).get("models")
+        except (KeyError, RuntimeError, TypeError, ValueError):
             return None
-        publisher, slug, content_sha256 = (
-            model.get("publisher"),
-            model.get("slug"),
-            model.get("content_sha256"),
-        )
-        if not all(isinstance(item, str) for item in (publisher, slug, content_sha256)):
+        if not isinstance(models, Sequence) or not models:
             return None
-        title = session.scalar(
-            select(CatalogEntity.title)
-            .join(
-                CatalogEntityRevision,
-                CatalogEntityRevision.entity_id == CatalogEntity.id,
-            )
-            .where(
-                CatalogEntity.kind == "model-version",
-                CatalogEntity.publisher == publisher,
-                CatalogEntity.slug == slug,
-                CatalogEntityRevision.content_sha256 == content_sha256,
-            )
-            .limit(1)
-        )
-        return title or f"{publisher}/{slug}"
+        model = models[0]
+        root = session.get(CatalogDocument, model.document_id)
+        return root.title if root is not None else f"{model.publisher}/{model.slug}"
 
     class _AssignmentState:
         def __init__(

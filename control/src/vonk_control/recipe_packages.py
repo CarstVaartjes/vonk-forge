@@ -17,10 +17,7 @@ from urllib.parse import urljoin, urlsplit
 
 import httpx
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
-from vonk_forge_contracts.resolver import (
-    validate_model_references,
-    validate_recipe_models,
-)
+from vonk_forge_contracts.resolver import validate_recipe_models
 
 from .recipe_library import (
     RecipeLibraryChange,
@@ -563,7 +560,6 @@ class RecipePackageClient:
             models = [ModelDefinition.model_validate(_json(files[path])) for path in model_paths]
             if {f"models/{model.identity.slug}.json" for model in models} != set(model_paths):
                 raise ValueError("model snapshot identity does not match its path")
-            validate_model_references(models)
             validate_recipe_models(recipe, models)
             _validate_package_paths(recipe, set(files) - {"manifest.json"}, manifest.get("build_inputs"))
             release_history = _release_history(recipe, item.content_sha256)
