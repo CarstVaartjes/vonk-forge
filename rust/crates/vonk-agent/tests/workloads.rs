@@ -677,6 +677,126 @@ fn container_arguments_are_typed_and_hardened() {
 }
 
 #[test]
+fn opaque_runtime_argument_values_stay_after_the_image_boundary() {
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        outputs: RefCell::new(VecDeque::new()),
+    };
+    let directory = tempdir().unwrap();
+    let opaque =
+        "value with spaces; {\"mode\": [\"$\", \"μ\"]} --device=/dev/nvidia0 --mount=type=bind";
+    let mut workload = spec();
+    workload.runtime.arguments = vec![
+        RuntimeArgument {
+            name: "device".to_owned(),
+            value: ArgumentValue::String(opaque.to_owned()),
+        },
+        RuntimeArgument {
+            name: "mount".to_owned(),
+            value: ArgumentValue::String(String::new()),
+        },
+    ];
+    bind_distributed_placement(&mut workload);
+    workload.validate().unwrap();
+    let round_trip: WorkloadSpec =
+        serde_json::from_value(serde_json::to_value(&workload).unwrap()).unwrap();
+    assert_eq!(round_trip.runtime.arguments, workload.runtime.arguments);
+
+    let arguments = OciRuntime {
+        runner: &runner,
+        data_root: directory.path(),
+        huggingface_curl_config: None,
+    }
+    .start_arguments(
+        &workload,
+        "cb555393-764b-4eb6-8f15-b416d289428f",
+        "45ea6921-50c9-4971-be2a-4cd04ce05069",
+        &Placement {
+            endpoint_address: Some("192.168.1.212".parse::<IpAddr>().unwrap()),
+            rank: 1,
+            role: "worker".to_owned(),
+            world_size: 2,
+            local_address: Some("192.168.100.11".parse::<IpAddr>().unwrap()),
+            master_address: Some("192.168.100.10".parse::<IpAddr>().unwrap()),
+            master_port: Some(29500),
+            port: 8101,
+            reserved_memory_bytes: 64 * 1024 * 1024 * 1024,
+        },
+    )
+    .unwrap();
+
+    let image_index = arguments
+        .iter()
+        .position(|value| value == &workload.runtime.image)
+        .unwrap();
+    let opaque_index = arguments
+        .windows(2)
+        .position(|values| values == ["--device", opaque])
+        .map(|index| index + 1)
+        .unwrap();
+    assert!(opaque_index > image_index);
+    let empty_index = arguments
+        .windows(2)
+        .position(|values| values == ["--mount", ""])
+        .map(|index| index + 1)
+        .unwrap();
+    assert!(empty_index > image_index);
+    assert!(
+        !arguments[..image_index]
+            .windows(2)
+            .any(|values| values == ["--device", opaque])
+    );
+    assert!(
+        !arguments[..image_index]
+            .iter()
+            .any(|value| value == "value with spaces;" || value == "{\"mode\": [\"$\",")
+    );
+}
+
+#[test]
+fn runtime_argument_bounds_reject_nul_and_structural_overflow_but_allow_empty_values() {
+    let mut workload = spec();
+    workload.runtime.arguments = vec![RuntimeArgument {
+        name: "future_option".to_owned(),
+        value: ArgumentValue::String(String::new()),
+    }];
+    workload.runtime.entrypoint.push(String::new());
+    workload.validate().unwrap();
+
+    workload.runtime.arguments[0].value = ArgumentValue::String("bad\0value".to_owned());
+    assert!(workload.validate().is_err());
+
+    workload.runtime.arguments[0].value = ArgumentValue::String("x".repeat(4097));
+    assert!(workload.validate().is_err());
+
+    workload.runtime.arguments[0].value = ArgumentValue::String(String::new());
+    workload.runtime.entrypoint[0].push('\0');
+    assert!(workload.validate().is_err());
+
+    workload.runtime.entrypoint = vec!["x".repeat(4096); 257];
+    assert!(workload.validate().is_err());
+
+    workload.runtime.entrypoint = vec!["engine".to_owned(); 513];
+    assert!(workload.validate().is_err());
+}
+
+#[test]
+fn canonical_runtime_fixture_deserializes_and_validates_as_the_runtime_wire() {
+    let document: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../control/tests/fixtures/canonical_runtime_spec_v2.json"
+    ))
+    .unwrap();
+    let runtime: RuntimeSpec = serde_json::from_value(document["runtime"].clone()).unwrap();
+    assert_eq!(runtime.interface, "vonk.runtime.v1");
+    assert_eq!(runtime.entrypoint[0], "/opt/vonk/bin/vllm");
+    assert!(runtime.entrypoint.iter().any(|value| value == "--port"));
+
+    let mut workload = spec();
+    workload.runtime = runtime;
+    workload.validate().unwrap();
+}
+
+#[test]
 fn direct_fabric_host_mode_has_one_compiled_privilege_shape() {
     let runner = FakeRunner {
         calls: RefCell::new(vec![]),

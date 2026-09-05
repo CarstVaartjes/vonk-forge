@@ -28,6 +28,16 @@ pub struct WorkloadSpec {
 
 pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
+// These bounds carry the compiler's structured argv without treating engine
+// arguments as container-engine options.  Keep the first item non-empty (it
+// is the executable), while subsequent items are opaque values and may be
+// empty.  The total bound prevents a large number of individually valid
+// values from creating an unbounded launch request.
+const MAX_ARGV_ITEMS: usize = 512;
+const MAX_ARGV_ITEM_BYTES: usize = 4096;
+const MAX_ARGV_BYTES: usize = 1024 * 1024;
+const MAX_RUNTIME_ARGUMENT_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CompiledExecutionPlan {
@@ -493,6 +503,14 @@ impl RuntimeSpec {
         {
             return Err(WorkloadError::Invalid("runtime"));
         }
+        let argument_bytes = self.arguments.iter().try_fold(0_usize, |total, argument| {
+            total
+                .checked_add(argument.name.len())
+                .and_then(|value| value.checked_add(argument.value.as_string().map_or(0, str::len)))
+        });
+        if argument_bytes.is_none_or(|bytes| bytes > MAX_RUNTIME_ARGUMENT_BYTES) {
+            return Err(WorkloadError::Invalid("runtime argument size"));
+        }
         for argument in &self.arguments {
             if argument.name.is_empty()
                 || argument.name.len() > 64
@@ -505,7 +523,7 @@ impl RuntimeSpec {
                             || matches!(byte, b'_' | b'-')
                     }
                 })
-                || matches!(&argument.value, ArgumentValue::String(value) if value.len() > 1024 || value.contains('\0'))
+                || matches!(&argument.value, ArgumentValue::String(value) if value.len() > MAX_ARGV_ITEM_BYTES || value.contains('\0'))
             {
                 return Err(WorkloadError::Invalid("runtime argument"));
             }
@@ -844,10 +862,15 @@ fn valid_name(value: &str) -> bool {
 
 fn valid_argv(value: &[String]) -> bool {
     !value.is_empty()
-        && value.len() <= 64
+        && value.len() <= MAX_ARGV_ITEMS
+        && !value[0].is_empty()
         && value
             .iter()
-            .all(|item| !item.is_empty() && item.len() <= 512 && !item.contains('\0'))
+            .all(|item| item.len() <= MAX_ARGV_ITEM_BYTES && !item.contains('\0'))
+        && value
+            .iter()
+            .try_fold(0_usize, |total, item| total.checked_add(item.len()))
+            .is_some_and(|bytes| bytes <= MAX_ARGV_BYTES)
 }
 
 fn numeric_non_root_user(value: &str) -> bool {
