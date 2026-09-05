@@ -53,7 +53,20 @@ def _arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _scan_secrets(root: Path) -> None:
+def _scan_secrets(root: Path, platform_root: Path) -> None:
+    excluded_root: Path | None = None
+    try:
+        platform_root.relative_to(root)
+    except ValueError:
+        pass
+    else:
+        # The producer workflow checks out this repository below the recipe
+        # checkout. Its contents are platform-owned and are validated by the
+        # platform checkout itself, so they are outside the recipe authority
+        # being scanned here. Keep the root itself in scope when both roots
+        # are the same (as in local validation).
+        if platform_root != root:
+            excluded_root = platform_root
     for path in root.rglob("*"):
         if (
             not path.is_file()
@@ -61,6 +74,13 @@ def _scan_secrets(root: Path) -> None:
             or "__pycache__" in path.parts
         ):
             continue
+        if excluded_root is not None:
+            try:
+                path.relative_to(excluded_root)
+            except ValueError:
+                pass
+            else:
+                continue
         if path.suffix.lower() in {
             ".gz",
             ".tar",
@@ -535,7 +555,7 @@ def validate(library_root: Path, platform_root: Path) -> dict[str, Any]:
         raise LibraryValidationError(
             f"recipe-library root is unavailable: {library_root}"
         )
-    _scan_secrets(library_root)
+    _scan_secrets(library_root, platform_root)
     if not (library_root / "models").is_dir() or not (library_root / "contracts").is_dir():
         raise LibraryValidationError(
             "schema-2 library requires models and contracts directories"
