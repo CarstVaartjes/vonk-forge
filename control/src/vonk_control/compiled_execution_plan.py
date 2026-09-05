@@ -562,10 +562,14 @@ class CompiledExecutionPlan(_StrictModel):
                 "stop_timeout_seconds": lifecycle.get("stop_timeout_seconds"),
             },
         }
-        if endpoint is not None:
-            payload["endpoint"] = dict(_mapping(endpoint, "endpoint"))
-        else:
-            payload["job"] = dict(_mapping(job, "job"))
+        # Keep both mutually exclusive interface keys on the wire.  Rust and
+        # the privileged helper validate the schema by shape, so omitting the
+        # inactive branch would make a semantically valid endpoint payload
+        # ambiguous after a round trip through persisted JSON.
+        payload["endpoint"] = (
+            dict(_mapping(endpoint, "endpoint")) if endpoint is not None else None
+        )
+        payload["job"] = dict(_mapping(job, "job")) if job is not None else None
         return payload
 
 
@@ -899,13 +903,10 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
         "topology",
         "lifecycle",
     }
-    if (
-        set(payload) - (expected | {"endpoint", "job"})
-        or not expected <= set(payload)
-        or payload.get("schema_version") != 2
-    ):
+    required = expected | {"endpoint", "job"}
+    if set(payload) != required or payload.get("schema_version") != 2:
         raise CompiledExecutionPlanError("compiled launch plan schema is invalid")
-    if ("endpoint" in payload) == ("job" in payload):
+    if (payload.get("endpoint") is None) == (payload.get("job") is None):
         raise CompiledExecutionPlanError("compiled launch plan interface is invalid")
     identity = _mapping(payload.get("identity"), "compiled launch identity")
     if set(identity) != {

@@ -22,8 +22,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.host_helper import HostHelperSignature
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
-from vonk_control.auth import TokenCodec
-from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.host_helper_authority import (
@@ -79,9 +77,6 @@ from vonk_control.route_runtime import (
     verify_active_route_bundle,
 )
 from vonk_control.run_admission import RunAdmissionService
-
-from .test_catalog_service import _seed_recipe_dependencies
-
 
 class RecordingQueue:
     def __init__(self) -> None:
@@ -410,12 +405,33 @@ def setup_services(
                     "recovery": "restart-worker-then-entrypoint",
                 },
             }
-    catalog = CatalogService(
-        sessions, clock=lambda: NOW, cursors=TokenCodec(b"c" * 32).cursor_codec()
-    )
-    _seed_recipe_dependencies(catalog, document)
-    draft = catalog.create_recipe("admin", RecipeDraftInput("qwen3-vllm", document))
-    revision = catalog.resolve(draft.recipe_id, 1, "admin")
+    # The operation fixture owns its immutable runtime projection.  Catalog
+    # dependency seeding was removed with the retired schema-one catalog
+    # helper; the canonical catalog tests exercise library import separately.
+    with sessions.begin() as session:
+        recipe = LocalRecipe(
+            slug="qwen3-vllm",
+            title="Qwen 3 vLLM",
+            description="Operation test runtime projection",
+            source_kind="local",
+            created_by="admin",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(recipe)
+        session.flush()
+        revision = LocalRecipeRevision(
+            recipe_id=recipe.id,
+            revision_number=1,
+            lifecycle="resolved",
+            schema_version=1,
+            document=document,
+            content_sha256=hashlib.sha256(canonical_message(document)).hexdigest(),
+            created_by="admin",
+            created_at=NOW,
+        )
+        session.add(revision)
+        session.flush()
     mappings = ClusterMappingService(sessions)
     mapping_plan = mappings.preview(revision.id, node_ids, {}, "admin")
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=NOW)

@@ -240,6 +240,7 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
         "topology",
         "lifecycle",
         "endpoint",
+        "job",
     }
     assert validated["runtime"]["executable"] == "/opt/vonk/bin/vllm"
     assert validated["runtime"]["argv"] == ["serve"]
@@ -250,10 +251,39 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
     }
     assert validated["security"]["network_mode"] == "none"
     assert validated["security"]["host_network"] is False
+    assert validated["endpoint"]["port"] == 8000
+    assert validated["job"] is None
     rendered = json.dumps(validated, sort_keys=True)
     assert "model_version_sha256" not in rendered
     assert "runtime_distribution_sha256" not in rendered
     assert "patch_bundle_sha256" not in rendered
+
+
+def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    missing = copy.deepcopy(payload)
+    del missing["job"]
+    with pytest.raises(CompiledExecutionPlanError, match="schema"):
+        validate_compiled_launch_payload(missing)
+
+    both = copy.deepcopy(payload)
+    both["job"] = {"id": "job-1"}
+    with pytest.raises(CompiledExecutionPlanError, match="interface"):
+        validate_compiled_launch_payload(both)
 
 
 def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt() -> None:

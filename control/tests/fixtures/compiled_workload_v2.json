@@ -242,5 +242,6 @@
       "synthetic-tiny"
     ],
     "health_path": "/v1/models"
-  }
+  },
+  "job": null
 }
