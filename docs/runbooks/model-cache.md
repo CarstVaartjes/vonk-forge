@@ -7,10 +7,12 @@ the Mia dual-GPU node runtime. Each GPU node keeps its own complete copy under
 The Controller-side cache downloader supports optional gated/private access
 through the [Hugging Face model-cache authentication guide](../model-cache-huggingface-auth.md).
 The default deployment has no `HF_TOKEN_FILE`, so public downloads remain
-anonymous. When enabled, create `secrets/hf-token` with owner-only permissions
-(`chmod 0400 secrets/hf-token`), set `HF_TOKEN_FILE=./secrets/hf-token` in the
-host `.env`, then recreate or restart the `control-api` and `control-worker`
-services so the normalized secret volume is refreshed:
+anonymous. The signed NAS installer creates an empty regular
+`secrets/hf-token` with owner-only permissions without prompting. To enable
+gated access, replace it with a protected token file (`chmod 0400
+secrets/hf-token`), set `HF_TOKEN_FILE=./secrets/hf-token` in the host `.env`,
+then recreate or restart the `control-api` and `control-worker` services so the
+normalized secret volume is refreshed:
 
 ```bash
 docker compose up -d --force-recreate control-api control-worker

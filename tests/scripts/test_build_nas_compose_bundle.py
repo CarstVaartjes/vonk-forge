@@ -139,9 +139,16 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",
         "litellm-upstream-key",
+        "hf-token",
     }
     secret_prompts = {item["file"]: item for item in payload["secrets"]}
     assert secret_prompts["admin-password"]["generate_bytes"] == 24
+    assert secret_prompts["hf-token"] == {
+        "file": "hf-token",
+        "prompt": "Hugging Face access token (optional; leave blank for public models)",
+        "generate_bytes": None,
+        "optional": True,
+    }
     for external in (
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",
