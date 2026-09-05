@@ -29,8 +29,10 @@ EXPECTED_BASELINE_TABLES = {
     "agent_operations",
     "agent_presence",
     "audit_events",
-    "catalog_entities",
-    "catalog_entity_revisions",
+    "catalog_documents",
+    "catalog_document_heads",
+    "catalog_document_revisions",
+    "catalog_recipe_model_references",
     "cluster_mapping_nodes",
     "cluster_mappings",
     "control_process_heartbeats",
@@ -68,8 +70,6 @@ EXPECTED_BASELINE_TABLES = {
     "recipe_runs",
     "recipe_source_bundles",
     "source_bundle_archives",
-    "recipe_revisions",
-    "recipes",
     "recipe_test_reports",
     "reconciliation_cancellations",
     "reconciliation_completion_generation",
@@ -178,6 +178,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0015_model_cache.py",
         "0016_rich_telemetry_metrics.py",
         "0017_artifact_distribution_assignments.py",
+        "0018_canonical_catalog_documents.py",
     ]
 
 
@@ -314,7 +315,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            == "0017_dist_assignments"
+            == "0018_canonical_catalog_documents"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -444,7 +445,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0017_dist_assignments"
+            == "0018_canonical_catalog_documents"
         )
 
 
@@ -526,7 +527,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0017_dist_assignments"
+            == "0018_canonical_catalog_documents"
         )
 
 
