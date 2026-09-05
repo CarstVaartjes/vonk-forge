@@ -7,9 +7,11 @@ import io
 import json
 import os
 import re
+import shutil
 import tarfile
 import tempfile
 from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from urllib.parse import urljoin, urlsplit
 
@@ -27,10 +29,12 @@ from .recipe_library import (
     RecipeLibraryRelease,
     RecipeLibrarySnapshot,
 )
+from .source_bundles import SourceBundleError, generate_source_bundle
 
 PACKAGE_SCHEMA_VERSION = 2
 PACKAGE_INDEX_PATH = "/v1/recipe-library/index.json"
 PACKAGE_MEDIA_TYPE = "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
+PACKAGE_REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 MAX_INDEX_BYTES = 12 * 1024 * 1024
 MAX_PACKAGE_BYTES = 256 * 1024 * 1024
 MAX_PACKAGE_FILES = 2048
@@ -39,10 +43,40 @@ MAX_PACKAGE_TOTAL_BYTES = 256 * 1024 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
+_INDEX_MEDIA_TYPES = {"application/json", "text/plain"}
+_PACKAGE_MEDIA_TYPES = {"application/octet-stream", PACKAGE_MEDIA_TYPE}
 
 
 class RecipePackageError(RecipeLibraryError):
     """The trusted package descriptor or package contents are invalid."""
+
+
+@dataclass(frozen=True, slots=True)
+class RecipePackageHandle:
+    """Immutable package identity plus durable local archive/closure paths."""
+
+    publication_commit: str
+    source_commit: str
+    package_sha256: str
+    package_size: int
+    package_path: str
+    recipe_content_sha256: str
+    archive_path: Path
+    closure_path: Path
+    recipe: RecipeDefinition
+    models: tuple[ModelDefinition, ...]
+
+    @property
+    def recipe_identity(self) -> tuple[str, str, str]:
+        identity = self.recipe.identity
+        return identity.publisher, identity.slug, self.recipe_content_sha256
+
+    @property
+    def model_identities(self) -> tuple[tuple[str, str, str], ...]:
+        return tuple(
+            (model.identity.publisher, model.identity.slug, content_sha256(model))
+            for model in self.models
+        )
 
 
 def _sha256(value: bytes) -> str:
@@ -117,7 +151,15 @@ def _validate_package_paths(
 class RecipePackageClient:
     """Fetch complete recipe packages and persist verified bytes by digest."""
 
-    def __init__(self, base_url: str, *, cache_root: Path, transport: httpx.BaseTransport | None = None, timeout_seconds: float = 8.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        cache_root: Path,
+        transport: httpx.BaseTransport | None = None,
+        timeout_seconds: float = 8.0,
+        publication_commit: str | None = None,
+    ) -> None:
         parsed = urlsplit(base_url.rstrip("/"))
         if not parsed.hostname or (parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1", "caddy"}):
             raise RecipePackageError("recipe_package.url_insecure", "recipe package URL must use HTTPS")
@@ -126,11 +168,24 @@ class RecipePackageClient:
         self._base_url = base_url.rstrip("/")
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
-        self._client = httpx.Client(base_url=self._base_url, timeout=httpx.Timeout(timeout_seconds), follow_redirects=False, trust_env=False, transport=transport, headers={"Accept": "application/json"})
+        if publication_commit is not None and not _SHA1.fullmatch(publication_commit):
+            raise RecipePackageError(
+                "recipe_package.commit_invalid", "publication commit is invalid"
+            )
+        self._publication_commit = publication_commit
+        self._client = httpx.Client(
+            base_url=self._base_url,
+            timeout=httpx.Timeout(timeout_seconds),
+            follow_redirects=False,
+            trust_env=False,
+            transport=transport,
+            headers={"Accept": "application/json, text/plain"},
+        )
         self._snapshot: RecipeLibrarySnapshot | None = None
         self._previous_snapshot: RecipeLibrarySnapshot | None = None
         self._packages: dict[str, dict[str, object]] = {}
         self._prepared: dict[str, RecipeLibraryItem] = {}
+        self._snapshot_path = self._cache_root / "snapshot.json"
 
     def close(self) -> None:
         self._client.close()
@@ -139,21 +194,52 @@ class RecipePackageClient:
         try:
             response = self._client.get(PACKAGE_INDEX_PATH)
         except (httpx.HTTPError, OSError) as error:
+            persisted = self._read_persisted_snapshot()
+            if persisted is not None:
+                return persisted
             raise RecipePackageError("recipe_package.unavailable", "recipe package index is unavailable") from error
+        media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         if response.status_code != 200 or response.is_redirect:
+            persisted = self._read_persisted_snapshot()
+            if persisted is not None:
+                return persisted
             raise RecipePackageError("recipe_package.unavailable", "recipe package index is unavailable")
-        if response.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json" or len(response.content) > MAX_INDEX_BYTES:
+        if media_type not in _INDEX_MEDIA_TYPES or len(response.content) > MAX_INDEX_BYTES:
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index response is invalid")
+        publication = response.headers.get("x-vonk-publication-commit") or response.headers.get(
+            "x-recipe-library-publication-commit"
+        )
+        if publication is not None and not _SHA1.fullmatch(publication):
+            raise RecipePackageError("recipe_package.response_invalid", "recipe publication identity is invalid")
+        snapshot, packages = self._parse_index(response.content, publication_commit=publication)
+        self._persist_index(response.content, publication_commit=publication)
+        self._previous_snapshot = self._snapshot
+        self._packages = packages
+        self._snapshot = snapshot
+        self._prepared = {}
+        return snapshot
+
+    def _parse_index(
+        self, raw: bytes, *, publication_commit: str | None = None
+    ) -> tuple[RecipeLibrarySnapshot, dict[str, dict[str, object]]]:
         try:
-            index = _json(response.content)
+            index = _json(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index is invalid JSON") from error
         if not isinstance(index, Mapping) or index.get("schema_version") != PACKAGE_SCHEMA_VERSION or index.get("kind") != "recipe-library-index":
             raise RecipePackageError("recipe_package.schema_incompatible", "recipe package index schema is unsupported")
         repository, commit, raw_recipes = index.get("repository"), index.get("source_commit"), index.get("recipes")
         contract = index.get("package_contract")
-        if not isinstance(repository, str) or not isinstance(commit, str) or not _SHA1.fullmatch(commit) or not isinstance(contract, Mapping) or contract.get("schema_version") != PACKAGE_SCHEMA_VERSION or contract.get("media_type") != PACKAGE_MEDIA_TYPE or not isinstance(raw_recipes, list) or len(raw_recipes) > 256:
+        if repository != PACKAGE_REPOSITORY or not isinstance(commit, str) or not _SHA1.fullmatch(commit) or not isinstance(contract, Mapping) or contract.get("schema_version") != PACKAGE_SCHEMA_VERSION or contract.get("media_type") != PACKAGE_MEDIA_TYPE or not isinstance(raw_recipes, list):
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index identity is invalid")
+        index_publication = index.get("publication_commit")
+        if index_publication is not None and (
+            not isinstance(index_publication, str) or not _SHA1.fullmatch(index_publication)
+        ):
+            raise RecipePackageError(
+                "recipe_package.response_invalid", "recipe publication identity is invalid"
+            )
+        resolved_publication = publication_commit or self._publication_commit or index_publication or commit
         raw_packages: list[Mapping[str, object]] = []
         for recipe in raw_recipes:
             if not isinstance(recipe, Mapping) or not isinstance(recipe.get("document"), Mapping) or not isinstance(recipe.get("package"), Mapping):
@@ -163,6 +249,13 @@ class RecipePackageClient:
             except (TypeError, ValueError) as error:
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package recipe document is invalid") from error
             package = recipe["package"]
+            package_media_type = package.get("media_type")
+            if package_media_type not in _PACKAGE_MEDIA_TYPES:
+                raise RecipePackageError(
+                    "recipe_package.response_invalid", "recipe package media type is unsupported"
+                )
+            if package.get("recipe_content_sha256") not in {None, recipe.get("content_sha256")}:
+                raise RecipePackageError("recipe_package.response_invalid", "package recipe identity is inconsistent")
             raw_packages.append({
                 "publisher": document.identity.publisher, "slug": document.identity.slug,
                 "source_path": recipe.get("source_path"), "recipe_content_sha256": recipe.get("content_sha256"),
@@ -178,21 +271,45 @@ class RecipePackageClient:
             publisher, slug, digest = raw.get("publisher"), raw.get("slug"), raw.get("recipe_content_sha256")
             package_digest, location, size, source_path = raw.get("package_sha256"), raw.get("location"), raw.get("size"), raw.get("source_path")
             location_url = urlsplit(str(location))
-            if not all(isinstance(value, str) for value in (publisher, slug, digest, package_digest, location, source_path)) or source_path != f"recipes/{slug}.json" or not _SLUG.fullmatch(str(publisher)) or not _SLUG.fullmatch(str(slug)) or not _SHA256.fullmatch(str(digest)) or not _SHA256.fullmatch(str(package_digest)) or not _safe_path(str(location)) or str(location).startswith("/") or location_url.scheme or location_url.netloc or not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= MAX_PACKAGE_BYTES:
+            if not all(isinstance(value, str) for value in (publisher, slug, digest, package_digest, location, source_path)) or source_path != f"recipes/{slug}.json" or not _SLUG.fullmatch(str(publisher)) or not _SLUG.fullmatch(str(slug)) or not _SHA256.fullmatch(str(digest)) or not _SHA256.fullmatch(str(package_digest)) or not _safe_path(str(location)) or str(location).startswith("/") or location_url.scheme or location_url.netloc or location_url.query or location_url.fragment or not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= MAX_PACKAGE_BYTES:
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package entry identity is invalid")
             key = f"{publisher}/{slug}"
             if key in packages:
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package identity is duplicated")
             packages[key] = dict(raw)
+            packages[key]["publication_commit"] = resolved_publication
             tags = raw.get("tags", [])
             items.append(RecipeLibraryItem(library_commit=commit, source_path=str(source_path), publisher=str(publisher), slug=str(slug), title=str(raw.get("title", "")), description=str(raw.get("description", "")), tags=tuple(str(tag) for tag in tags) if isinstance(tags, list) else (), content_sha256=str(digest), uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}", document={}))
         if [(item.publisher, item.slug) for item in items] != sorted((item.publisher, item.slug) for item in items):
             raise RecipePackageError("recipe_package.response_invalid", "recipe package index is not sorted")
-        self._previous_snapshot = self._snapshot
+        return RecipeLibrarySnapshot(commit=commit, items=tuple(items), repository=repository), packages
+
+    def _persist_index(self, raw: bytes, *, publication_commit: str | None) -> None:
+        payload = {"index": raw.decode("utf-8"), "publication_commit": publication_commit}
+        temporary = self._snapshot_path.with_suffix(".tmp")
+        try:
+            temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+            os.replace(temporary, self._snapshot_path)
+        except OSError:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+
+    def _read_persisted_snapshot(self) -> RecipeLibrarySnapshot | None:
+        try:
+            payload = _json(self._snapshot_path.read_bytes())
+            if not isinstance(payload, Mapping) or not isinstance(payload.get("index"), str):
+                return None
+            publication = payload.get("publication_commit")
+            if publication is not None and not isinstance(publication, str):
+                return None
+            snapshot, packages = self._parse_index(payload["index"].encode("utf-8"), publication_commit=publication)
+        except (OSError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, RecipePackageError):
+            return None
         self._packages = packages
-        self._snapshot = RecipeLibrarySnapshot(commit=commit, items=tuple(items), repository=repository)
-        self._prepared = {}
-        return self._snapshot
+        self._snapshot = snapshot
+        return snapshot
 
     def prepare(self, snapshot: RecipeLibrarySnapshot) -> None:
         if self._snapshot is None or self._snapshot.commit != snapshot.commit:
@@ -216,23 +333,47 @@ class RecipePackageClient:
         if uri in self._prepared:
             return self._prepared[uri]
         package = self._packages[f"{publisher}/{slug}"]
-        archive = self._cached_or_download(str(package["package_sha256"]), str(package["location"]), int(package["size"]))
-        return self._decode_package(archive, item)
+        package_digest = str(package["package_sha256"])
+        archive, archive_path = self._cached_or_download(
+            package_digest,
+            str(package["location"]),
+            int(package["size"]),
+            expected_publication=str(package.get("publication_commit", "")) or None,
+        )
+        return self._decode_package(archive, item, package=package, archive_path=archive_path)
 
-    def _cached_or_download(self, digest: str, location: str, expected_size: int) -> bytes:
+    def _cached_or_download(
+        self,
+        digest: str,
+        location: str,
+        expected_size: int,
+        *,
+        expected_publication: str | None = None,
+    ) -> tuple[bytes, Path]:
         target = self._cache_root / digest[:2] / f"{digest}.tar.gz"
         try:
             cached = target.read_bytes()
             if len(cached) == expected_size and _sha256(cached) == digest:
-                return cached
+                return cached, target
         except OSError:
             pass
         try:
             response = self._client.get(urljoin(self._base_url + "/", location))
         except (httpx.HTTPError, OSError) as error:
             raise RecipePackageError("recipe_package.unavailable", "recipe package is unavailable") from error
-        media_type = response.headers.get("content-type", "").split(";", 1)[0].strip()
-        if response.status_code != 200 or response.is_redirect or media_type != PACKAGE_MEDIA_TYPE or len(response.content) != expected_size or len(response.content) > MAX_PACKAGE_BYTES or _sha256(response.content) != digest:
+        media_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        publication = response.headers.get("x-vonk-publication-commit") or response.headers.get(
+            "x-recipe-library-publication-commit"
+        )
+        if (
+            publication is not None
+            and not _SHA1.fullmatch(publication)
+            or expected_publication is not None
+            and publication is not None
+            and publication != expected_publication
+        ):
+            raise RecipePackageError("recipe_package.snapshot_changed", "recipe package publication changed")
+        if response.status_code != 200 or response.is_redirect or media_type not in _PACKAGE_MEDIA_TYPES or len(response.content) != expected_size or len(response.content) > MAX_PACKAGE_BYTES or _sha256(response.content) != digest:
             raise RecipePackageError("recipe_package.digest_mismatch", "recipe package bytes do not match the trusted index")
         target.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary_name = tempfile.mkstemp(prefix=f".{digest}.", suffix=".tmp", dir=target.parent)
@@ -246,9 +387,16 @@ class RecipePackageClient:
         finally:
             if temporary.exists():
                 temporary.unlink()
-        return response.content
+        return response.content, target
 
-    def _decode_package(self, archive: bytes, item: RecipeLibraryItem) -> RecipeLibraryItem:
+    def _decode_package(
+        self,
+        archive: bytes,
+        item: RecipeLibraryItem,
+        *,
+        package: Mapping[str, object] | None = None,
+        archive_path: Path | None = None,
+    ) -> RecipeLibraryItem:
         files: dict[str, bytes] = {}
         total = 0
         try:
@@ -299,7 +447,97 @@ class RecipePackageClient:
         except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise RecipePackageError("recipe_package.package_invalid", "recipe package identity or contents are invalid") from error
         metadata = recipe.metadata
-        return RecipeLibraryItem(library_commit=item.library_commit, source_path=item.source_path, publisher=item.publisher, slug=item.slug, title=metadata.title, description=metadata.description, tags=tuple(metadata.tags), content_sha256=item.content_sha256, uri=item.uri, document=recipe.model_dump(mode="json"), release_history=release_history, dependencies=tuple(model.model_dump(mode="json") for model in models))
+        package_digest = str(package.get("package_sha256")) if package is not None else _sha256(archive)
+        package_size = int(package.get("size", len(archive))) if package is not None else len(archive)
+        package_path = str(package.get("location", "")) if package is not None else ""
+        publication_commit = str(package.get("publication_commit", item.library_commit)) if package is not None else item.library_commit
+        if archive_path is None:
+            archive_path = Path(getattr(self, "_archive_path", "")) if getattr(self, "_archive_path", None) else Path(".")
+        closure_path = self._materialize_closure(files, package_digest, archive_path)
+        source_bundle: bytes | None = None
+        source_bundle_sha256: str | None = None
+        if recipe.execution.mode == "build":
+            context = recipe.execution.build.context.path.rstrip("/")
+            context_files = {
+                path.removeprefix(f"{context}/"): content
+                for path, content in files.items()
+                if path.startswith(f"{context}/")
+            }
+            try:
+                bundle = generate_source_bundle(context_files)
+            except (SourceBundleError, ValueError) as error:
+                raise RecipePackageError(
+                    "recipe_package.package_invalid", "recipe build source closure is invalid"
+                ) from error
+            source_bundle, source_bundle_sha256 = bundle.archive, bundle.sha256
+        handle = RecipePackageHandle(
+            publication_commit=publication_commit,
+            source_commit=item.library_commit,
+            package_sha256=package_digest,
+            package_size=package_size,
+            package_path=package_path,
+            recipe_content_sha256=item.content_sha256,
+            archive_path=archive_path,
+            closure_path=closure_path,
+            recipe=recipe,
+            models=tuple(models),
+        )
+        return replace(
+            item,
+            title=metadata.title,
+            description=metadata.description,
+            tags=tuple(metadata.tags),
+            document=recipe.model_dump(mode="json"),
+            release_history=release_history,
+            dependencies=tuple(model.model_dump(mode="json") for model in models),
+            source_bundle=source_bundle,
+            package_handle=handle,
+            package_sha256=package_digest,
+            source_bundle_sha256=source_bundle_sha256,
+        )
+
+    def _materialize_closure(
+        self, files: Mapping[str, bytes], digest: str, archive_path: Path
+    ) -> Path:
+        root = getattr(self, "_cache_root", archive_path.parent)
+        # Keep the closure beside its digest-addressed package object.  The
+        # directory itself is the durable reference persisted in the import
+        # receipt (``<cache>/<digest>/closure``).
+        target = root / digest / "closure"
+        marker = target / ".complete"
+        if marker.is_file():
+            try:
+                if marker.read_text(encoding="ascii") == digest:
+                    return target
+            except (OSError, UnicodeDecodeError):
+                pass
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.exists():
+            # A process interrupted before publishing the completion marker.
+            # It is never exposed as a usable closure.
+            shutil.rmtree(target, ignore_errors=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = Path(tempfile.mkdtemp(prefix=f".{digest}.", dir=target.parent))
+        try:
+            for name, content in files.items():
+                destination = temporary / Path(*PurePosixPath(name).parts)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(content)
+            marker_path = temporary / ".complete"
+            marker_path.write_text(digest, encoding="ascii")
+            try:
+                os.replace(temporary, target)
+            except FileExistsError:
+                pass
+        finally:
+            if temporary.exists():
+                for path in sorted(temporary.rglob("*"), reverse=True):
+                    if path.is_file() or path.is_symlink():
+                        path.unlink()
+                    elif path.is_dir():
+                        path.rmdir()
+                temporary.rmdir()
+        return target
 
 
 def load_recipe_package(path: Path, *, package_sha256: str, publisher: str, slug: str, recipe_content_sha256: str, library_commit: str, source_path: str) -> RecipeLibraryItem:
@@ -307,11 +545,20 @@ def load_recipe_package(path: Path, *, package_sha256: str, publisher: str, slug
         archive = path.read_bytes()
     except OSError as error:
         raise RecipePackageError("recipe_package.unavailable", "offline recipe package is unavailable") from error
-    if len(archive) > MAX_PACKAGE_BYTES or _sha256(archive) != package_sha256:
+    if not _SHA256.fullmatch(package_sha256) or len(archive) > MAX_PACKAGE_BYTES or _sha256(archive) != package_sha256:
         raise RecipePackageError("recipe_package.digest_mismatch", "offline recipe package digest does not match")
     item = RecipeLibraryItem(library_commit=library_commit, source_path=source_path, publisher=publisher, slug=slug, title="", description="", tags=(), content_sha256=recipe_content_sha256, uri=f"vonk://catalog/{publisher}/{slug}@sha256:{recipe_content_sha256}", document={})
     decoder = RecipePackageClient.__new__(RecipePackageClient)
-    return decoder._decode_package(archive, item)
+    decoder._cache_root = path.parent / ".recipe-package-cache"
+    return decoder._decode_package(archive, item, package={"package_sha256": package_sha256, "size": len(archive), "location": str(path)}, archive_path=path)
 
 
-__all__ = ["PACKAGE_INDEX_PATH", "PACKAGE_MEDIA_TYPE", "RecipePackageClient", "RecipePackageError", "load_recipe_package"]
+__all__ = [
+    "PACKAGE_INDEX_PATH",
+    "PACKAGE_MEDIA_TYPE",
+    "PACKAGE_REPOSITORY",
+    "RecipePackageClient",
+    "RecipePackageError",
+    "RecipePackageHandle",
+    "load_recipe_package",
+]
