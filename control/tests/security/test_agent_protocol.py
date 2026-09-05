@@ -173,6 +173,7 @@ def test_stale_fence_cannot_publish_success(service) -> None:
 
 
 def test_protocol_has_no_arbitrary_operation_member() -> None:
+    assert AgentOperation.ARTIFACT_DISTRIBUTION.value == "artifact.distribution.v1"
     with pytest.raises(ValueError):
         AgentOperation("arbitrary.command")
 
