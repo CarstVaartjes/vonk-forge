@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
-from pathlib import Path
+import json
+from importlib.resources import files
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -15,19 +15,16 @@ from vonk_control.fleet_profiles import (
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
 )
-from vonk_control.models import (
-    AgentNode,
-    Base,
-    LocalRecipe,
-    LocalRecipeRevision,
-)
-from vonk_control.recipe_contract import recipe_content_sha256, validate_recipe
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+from vonk_control.models import AgentNode, Base, CatalogDocument, CatalogDocumentRevision
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
 PROFILE = "00000000-0000-4000-8000-000000000001"
 REVISION = "00000000-0000-4000-8000-000000000002"
+MODEL_DOCUMENT = "00000000-0000-4000-8000-000000000003"
+MODEL_REVISION = "00000000-0000-4000-8000-000000000004"
 NODE = "spk_" + "1" * 32
-FIXTURE = Path(__file__).parent / "fixtures" / "global" / "recipe-v1-minimal.json"
 
 
 class Jobs:
@@ -48,43 +45,88 @@ def _setup(
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    document = json.loads(FIXTURE.read_text())
-    validate_recipe(document)
+    model = ModelDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "model-definition.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-image.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    document = recipe.model_dump(mode="json")
+    model_document = model.model_dump(mode="json")
     with sessions.begin() as session:
         session.add(
             AgentNode(
                 node_id=NODE,
                 state="active",
-                protocol_version=1,
+                protocol_version=2,
                 architecture="linux-arm64",
                 capabilities=[],
                 last_seen_at=NOW,
             )
         )
         session.add(
-            LocalRecipe(
+            CatalogDocument(
                 id=PROFILE,
-                slug="tiny-chat",
-                title="Tiny Chat",
-                description="A small illustrative chat recipe.",
-                source_kind="local",
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                title=recipe.metadata.title,
                 created_by="admin",
                 created_at=NOW,
                 updated_at=NOW,
-            )
-        )
-        session.add(
-            LocalRecipeRevision(
-                id=REVISION,
-                recipe_id=PROFILE,
-                revision_number=1,
-                lifecycle="resolved",
-                schema_version=1,
-                document=document,
-                content_sha256=recipe_content_sha256(document),
+            ),
+            CatalogDocument(
+                id=MODEL_DOCUMENT,
+                kind="model",
+                publisher=model.identity.publisher,
+                slug=model.identity.slug,
+                title=model.identity.model.title,
                 created_by="admin",
                 created_at=NOW,
-            )
+                updated_at=NOW,
+            ),
+        )
+        session.add_all(
+            [
+                CatalogDocumentRevision(
+                id=REVISION,
+                document_id=PROFILE,
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                revision_number=1,
+                state="active",
+                schema_version=2,
+                document=document,
+                content_digest=content_sha256(recipe),
+                execution_key="b" * 64,
+                created_by="admin",
+                created_at=NOW,
+            ),
+                CatalogDocumentRevision(
+                id=MODEL_REVISION,
+                document_id=MODEL_DOCUMENT,
+                kind="model",
+                publisher=model.identity.publisher,
+                slug=model.identity.slug,
+                revision_number=1,
+                state="active",
+                schema_version=2,
+                document=model_document,
+                content_digest=content_sha256(model),
+                artifact_key="a" * 64,
+                created_by="admin",
+                created_at=NOW,
+            ),
+            ]
         )
     codec = TokenCodec(b"p" * 32)
     audits = MemoryAuditStore()
