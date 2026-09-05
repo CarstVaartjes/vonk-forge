@@ -231,8 +231,9 @@ def assemble_production_worker(
     artifact_job_retention_seconds: int,
     artifact_job_reconcile_interval_seconds: int,
     artifact_job_reconcile_batch_limit: int,
-    operator_jurisdiction: str | None = None,
     model_cache=None,
+    agent_artifact_root: Path | None = None,
+    operator_jurisdiction: str | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
 ) -> Worker:
     """Compose the worker-owned reconciliation runtime."""
@@ -244,6 +245,8 @@ def assemble_production_worker(
     from .artifact_sizes import DeclaredArtifactSizeResolver
     from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
+    from .distribution import build_distribution_service_from_components
+    from .distribution_executor import DurableDistributionPhaseExecutor
     from .fleet_profiles import FleetProfileService, RunSwitchFleetProfileAdapter
     from .install_admission import InstallAdmissionService
     from .recipe_builds import RecipeBuildService
@@ -257,6 +260,24 @@ def assemble_production_worker(
         TelemetryMaintenance,
         TelemetryMaintenanceCadence,
     )
+
+    if model_cache is not None:
+        if agent_artifact_root is None:
+            raise ValueError("agent artifact root is required with model cache")
+        distribution = build_distribution_service_from_components(
+            model_cache,
+            sessions,
+            agent_artifact_root,
+            clock=clock,
+        )
+        artifact_phase_executor = DurableDistributionPhaseExecutor(
+            sessions,
+            agent_jobs,
+            distribution,
+            clock=clock,
+        )
+    else:
+        artifact_phase_executor = None
 
     reconciliations = AgentReconciliationService(
         sessions,
@@ -305,6 +326,8 @@ def assemble_production_worker(
         lifecycle=lifecycle,
         clock=clock,
         mappings=ClusterMappingService(sessions),
+        model_cache=model_cache,
+        artifact_phase_executor=artifact_phase_executor,
     )
     recipe_operations = RecipeOperationWorker(
         sessions,
@@ -432,7 +455,6 @@ if __name__ == "__main__":
         authority=authority,
         worker_id=os.environ.get("HOSTNAME", "control-worker"),
         operator_jurisdiction=settings.operator_jurisdiction,
-        model_cache=model_cache,
         artifact_job_root=settings.state_path / "artifact-jobs" / "blobs",
         artifact_job_storage_max_bytes=settings.artifact_job_storage_max_bytes,
         artifact_job_retention_seconds=settings.artifact_job_retention_seconds,
@@ -440,6 +462,8 @@ if __name__ == "__main__":
             settings.artifact_job_reconcile_interval_seconds
         ),
         artifact_job_reconcile_batch_limit=settings.artifact_job_reconcile_batch_limit,
+        model_cache=model_cache,
+        agent_artifact_root=settings.agent_artifact_root,
         loop_heartbeat=WorkerHeartbeatRecorder(
             sessions,
             process_instance_id=current_worker_instance_id(),

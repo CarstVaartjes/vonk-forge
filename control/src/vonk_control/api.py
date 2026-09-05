@@ -114,6 +114,7 @@ from .recipe_builds import RecipeBuildService
 from .recipe_library import RecipeLibraryClient, RecipeLibraryError
 from .recipe_operations import RecipeOperationService
 from .recipe_packages import RecipePackageClient
+from .distribution_executor import DurableDistributionPhaseExecutor
 from .run_switch_api import install_run_switch_routes
 from .run_switch_operations import RunSwitchOperationService
 from .source_bundles import DatabaseSourceBundleStore
@@ -1649,6 +1650,12 @@ def production_app() -> FastAPI:
         clock=clock,
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
+        artifact_phase_executor=DurableDistributionPhaseExecutor(
+            sessions,
+            agent_services.operations,
+            agent_services.distribution,
+            clock=clock,
+        ),
     )
     artifact_jobs = ArtifactJobService(
         sessions,
