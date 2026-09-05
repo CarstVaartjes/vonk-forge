@@ -439,7 +439,11 @@ impl DistributionObject {
                 .split('/')
                 .any(|part| part.is_empty() || part == "." || part == "..")
             || !lower_hex(&self.sha256, 64)
-            || !(1..=16 * 1024_u64.pow(4)).contains(&self.bytes)
+            || self.bytes > 16 * 1024_u64.pow(4)
+            || self.bytes == 0
+                && !(self.kind == "model"
+                    && self.sha256
+                        == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
             || !matches!(self.kind.as_str(), "model" | "oci-archive" | "oci-layer")
         {
             return Err(ProtocolError::Identity("distribution object"));
@@ -2138,6 +2142,20 @@ mod distribution_tests {
         value.objects[0].name = "weights/model bin".to_owned();
         assert!(value.validate().is_err());
         value.objects[0].name = "../model.bin".to_owned();
+        assert!(value.validate().is_err());
+    }
+
+    #[test]
+    fn empty_model_support_object_uses_the_canonical_empty_digest() {
+        let mut value = assignment();
+        value.objects[0] = DistributionObject {
+            name: "tokenizer_config.json".to_owned(),
+            sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".to_owned(),
+            bytes: 0,
+            kind: "model".to_owned(),
+        };
+        value.validate().unwrap();
+        value.objects[0].kind = "oci-archive".to_owned();
         assert!(value.validate().is_err());
     }
 }
