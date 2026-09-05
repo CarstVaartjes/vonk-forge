@@ -11,6 +11,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DistributionObject
+from vonk_control.auth import TokenCodec
 from vonk_control.distribution import (
     DistributionService,
     MemoryVerifiedObjectSource,
@@ -30,6 +31,9 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache_api import model_cache_operation_provider
+from vonk_control.operation_api import merge_operation_providers
+from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system
 
@@ -647,3 +651,115 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         progress={},
     )
     assert replay.operation_id == copy_child.operation_id
+
+    cached_model = executor.execute(
+        plan,
+        model_phase,
+        item_index=0,
+        actor="operator",
+        request_key=parent_request,
+        progress={},
+    )
+    assert cached_model.operation_id is None
+    assert cached_model.result == {
+        "skipped": True,
+        "coverage": "complete",
+        "artifact_set_sha256": artifact_set,
+        "downloaded_bytes": 0,
+        "total_bytes": 0,
+    }
+
+    copy_view = executor.get(copy_child.operation_id)
+    member_progress = copy_view.result["progress"]["members"]
+    run_id = str(uuid.uuid4())
+    with services.sessions.begin() as session:
+        session.add(
+            Job(
+                id=run_id,
+                request_id=str(uuid.uuid4()),
+                kind="recipe.run-switch.v2",
+                state="running",
+                actor="operator",
+                authority_revision=plan.plan_digest,
+                targets=list(nodes),
+                payload_digest=plan.plan_digest,
+                payload={"action": "run"},
+                result={
+                    "phase": "transfer",
+                    "phase_index": 0,
+                    "completed_bytes": 90,
+                    "total_bytes": 90,
+                    "total_bytes_known": True,
+                    "members": member_progress,
+                },
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    run_provider = RunSwitchOperationService(
+        services.sessions,
+        clock=clock,
+    ).activity_provider()
+    family_item = run_provider.get_operation(run_id)
+    assert family_item["progress"]["completed_bytes"] == 90
+    assert {
+        (item["member_id"], item["completed_bytes"], item["total_bytes"])
+        for item in family_item["progress"]["members"]
+    } == {(NODE_A, 45, 45), (NODE_B, 45, 45)}
+    restarted_provider = RunSwitchOperationService(
+        services.sessions,
+        clock=clock,
+    ).activity_provider()
+    assert restarted_provider.get_operation(run_id)["progress"] == family_item["progress"]
+
+    cursors = TokenCodec(b"p" * 32).cursor_codec()
+    merged = merge_operation_providers(
+        (run_provider, model_cache_operation_provider(cache, cursors)),
+        cursor=None,
+        limit=100,
+        state=None,
+        node_id=None,
+        cursors=cursors,
+    )
+    merged_run = next(item for item in merged.items if item["id"] == run_id)
+    assert merged_run["progress"]["completed_bytes"] == 90
+    assert {
+        (item["member_id"], item["completed_bytes"], item["total_bytes"])
+        for item in merged_run["progress"]["members"]
+    } == {(NODE_A, 45, 45), (NODE_B, 45, 45)}
+
+    unknown_id = str(uuid.uuid4())
+    with services.sessions.begin() as session:
+        session.add(
+            Job(
+                id=unknown_id,
+                request_id=str(uuid.uuid4()),
+                kind="recipe.run-switch.v2",
+                state="running",
+                actor="operator",
+                authority_revision=plan.plan_digest,
+                targets=[NODE_A],
+                payload_digest=plan.plan_digest,
+                payload={"action": "run"},
+                result={
+                    "phase": "transfer",
+                    "phase_index": 0,
+                    "completed_bytes": 0,
+                    "total_bytes": None,
+                    "total_bytes_known": False,
+                    "members": [{
+                        "node_id": NODE_A,
+                        "phase": "transfer",
+                        "state": "running",
+                        "completed_bytes": 0,
+                        "total_bytes": None,
+                    }],
+                },
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    unknown_item = run_provider.get_operation(unknown_id)
+    assert unknown_item["progress"].get("total_bytes") is None
+    assert unknown_item["progress"]["total_bytes_known"] is False
+    assert unknown_item["progress"]["members"][0].get("total_bytes") is None

@@ -3689,7 +3689,14 @@ class RunSwitchOperationService:
 
     @staticmethod
     def _operation_view(job: Job) -> RunSwitchOperation:
-        progress = job.result if isinstance(job.result, Mapping) else {}
+        progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+        # The durable progress payload contains member counters, while the
+        # Job row owns the authoritative target membership.  Keep the
+        # projection valid even when a plan is unavailable during restart or
+        # recovery and the raw payload has no copied node_ids field.
+        progress["node_ids"] = [
+            str(node_id) for node_id in job.targets if isinstance(node_id, str)
+        ]
         raw_plan = job.payload.get("plan")
         plan = _load_plan(raw_plan) if isinstance(raw_plan, Mapping) else None
         action = plan.action if plan is not None else str(job.payload.get("action", "run"))
