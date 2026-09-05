@@ -49,6 +49,7 @@ _MAX_ARTIFACTS = 128
 _MAX_MANIFEST_BYTES = 1_048_576
 _CHUNK_BYTES = 1024 * 1024
 _MAX_HTTP_REDIRECTS = 0
+_USE_MANIFEST_BYTES = object()
 
 
 class ModelCacheError(RuntimeError):
@@ -906,6 +907,27 @@ class ModelCacheService:
             recipe_revision_id=recipe_revision_id,
             artifacts=artifacts,
         )
+        set_digest = manifest.digest
+        # A retry of the same idempotency key must return the original
+        # operation even when its partial checkpoint has changed the current
+        # preview's remaining-byte estimate.
+        with self._lock, self._session() as session:
+            existing = session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key
+                )
+            )
+            if existing is not None:
+                if (
+                    existing.kind != "download"
+                    or existing.payload.get("artifact_set_sha256") != set_digest
+                    or existing.plan_digest != requested_plan
+                ):
+                    raise ModelCacheConflict(
+                        "model_cache.request_key_reused",
+                        "request key was already used for another cache operation",
+                    )
+                return self.get_operation(existing.id)
         preview = self._download_preview_for_manifest(manifest)
         if preview["plan_digest"] != requested_plan:
             raise ModelCacheConflict("model_cache.stale_plan", "download preview is stale")
@@ -914,13 +936,16 @@ class ModelCacheService:
                 "model_cache.download_blocked",
                 "; ".join(str(item) for item in preview["blockers"]),
             )
-        set_digest = manifest.digest
+        transfer = preview.get("_transfer")
+        if not isinstance(transfer, Mapping):
+            transfer = self._transfer_state_for_manifest(manifest, force=False)
         payload = {
             "schema_version": SCHEMA_VERSION,
             "source_policy": SOURCE_POLICY,
             "artifact_set_sha256": set_digest,
             "manifest": manifest.document(),
             "plan_digest": requested_plan,
+            "transfer": dict(transfer),
         }
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
@@ -951,7 +976,11 @@ class ModelCacheService:
                     artifact_set_sha256=set_digest,
                     plan_digest=requested_plan,
                     payload=payload,
-                    progress=self._progress(manifest, phase="queued"),
+                    progress=self._progress(
+                        manifest,
+                        phase="queued",
+                        expected_bytes=int(transfer["total_bytes"]),
+                    ),
                     actor=actor,
                     created_at=now,
                     updated_at=now,
@@ -1018,19 +1047,11 @@ class ModelCacheService:
         self, manifest: ArtifactSetManifest
     ) -> dict[str, object]:
         already_cached = 0
-        new_bytes = 0
         for spec in _unique_artifacts(manifest.artifacts).values():
             if self._object_is_verified(spec):
                 already_cached += spec.expected_bytes
-                continue
-            partial = self._partial_path(manifest.digest, spec.sha256)
-            partial_bytes = 0
-            try:
-                if partial.is_file() and not partial.is_symlink():
-                    partial_bytes = min(spec.expected_bytes, partial.stat().st_size)
-            except OSError:
-                partial_bytes = 0
-            new_bytes += max(0, spec.expected_bytes - partial_bytes)
+        transfer = self._transfer_state_for_manifest(manifest, force=False)
+        new_bytes = int(transfer["total_bytes"])
         storage = self.storage_summary()
         blockers = []
         if new_bytes > storage.available_bytes:
@@ -1056,7 +1077,105 @@ class ModelCacheService:
             "blockers": blockers,
             "warnings": [],
             "_manifest": manifest,
+            "_transfer": transfer,
         }
+
+    def _partial_bytes(self, set_digest: str, spec: ArtifactSpec) -> int:
+        """Return only a bounded, reusable partial checkpoint length."""
+        partial = self._partial_path(set_digest, spec.sha256)
+        try:
+            if not partial.is_file() or partial.is_symlink():
+                return 0
+            size = partial.stat().st_size
+        except OSError:
+            return 0
+        if size < 0 or size > spec.expected_bytes:
+            return 0
+        if size == spec.expected_bytes and not self._verify_file(partial, spec):
+            return 0
+        return size
+
+    def _transfer_state_for_manifest(
+        self,
+        manifest: ArtifactSetManifest,
+        *,
+        force: bool,
+    ) -> dict[str, object]:
+        """Create the immutable planned transfer and per-object baselines."""
+        artifacts: dict[str, dict[str, int]] = {}
+        total_bytes = 0
+        for digest, spec in _unique_artifacts(manifest.artifacts).items():
+            baseline = (
+                0
+                if force
+                else (
+                    spec.expected_bytes
+                    if self._object_is_verified(spec)
+                    else self._partial_bytes(manifest.digest, spec)
+                )
+            )
+            remaining = max(0, spec.expected_bytes - baseline)
+            artifacts[digest] = {
+                "baseline_bytes": baseline,
+                "received_bytes": 0,
+            }
+            total_bytes += remaining
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "total_bytes": total_bytes,
+            "artifacts": artifacts,
+        }
+
+    @staticmethod
+    def _transfer_totals(payload: Mapping[str, object]) -> tuple[int | None, int]:
+        raw_transfer = payload.get("transfer")
+        if not isinstance(raw_transfer, Mapping):
+            return None, 0
+        raw_total = raw_transfer.get("total_bytes")
+        total = raw_total if type(raw_total) is int and raw_total >= 0 else None
+        raw_artifacts = raw_transfer.get("artifacts")
+        if not isinstance(raw_artifacts, Mapping):
+            return total, 0
+        received = 0
+        for raw_entry in raw_artifacts.values():
+            if not isinstance(raw_entry, Mapping):
+                continue
+            value = raw_entry.get("received_bytes")
+            if type(value) is int and value >= 0:
+                received += value
+        return total, received
+
+    def _ensure_transfer_state(
+        self,
+        operation_id: str,
+        manifest: ArtifactSetManifest,
+        *,
+        force: bool,
+    ) -> dict[str, object]:
+        """Persist a transfer ledger when resuming an older schema-2 row."""
+        with self._session(write=True) as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None:
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            raw = operation.payload.get("transfer")
+            if isinstance(raw, Mapping):
+                return dict(raw)
+            transfer = self._transfer_state_for_manifest(manifest, force=force)
+            operation.payload = dict(operation.payload) | {"transfer": transfer}
+            return transfer
+
+    def _operation_transfer_snapshot(
+        self, operation_id: str
+    ) -> tuple[int | None, int]:
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None:
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            return self._transfer_totals(operation.payload)
 
     def _ensure_set(
         self,
@@ -1134,6 +1253,7 @@ class ModelCacheService:
         phase: str,
         completed_artifacts: int = 0,
         downloaded_bytes: int = 0,
+        expected_bytes: int | None | object = _USE_MANIFEST_BYTES,
         current_artifact_key: str | None = None,
     ) -> dict[str, object]:
         return {
@@ -1142,7 +1262,11 @@ class ModelCacheService:
             "completed_artifacts": completed_artifacts,
             "total_artifacts": len(manifest.artifacts),
             "downloaded_bytes": downloaded_bytes,
-            "expected_bytes": manifest.expected_bytes,
+            "expected_bytes": (
+                manifest.expected_bytes
+                if expected_bytes is _USE_MANIFEST_BYTES
+                else expected_bytes
+            ),
             "current_artifact_key": current_artifact_key,
         }
 
@@ -1167,9 +1291,17 @@ class ModelCacheService:
             set_digest = operation_set_digest
         if set_digest is None:
             raise ModelCacheConflict("model_cache.set_missing", "cache operation has no artifact set")
+        transfer = self._ensure_transfer_state(
+            operation_id, manifest, force=force
+        )
+        planned_total = transfer.get("total_bytes")
+        planned_total = (
+            planned_total
+            if type(planned_total) is int and planned_total >= 0
+            else None
+        )
         self._set_operation_state(operation_id, "running")
         completed = 0
-        downloaded = 0
         processed_digests: set[str] = set()
         try:
             with self._session(write=True) as session:
@@ -1183,7 +1315,8 @@ class ModelCacheService:
                     manifest,
                     phase="verifying" if force else "downloading",
                     completed_artifacts=completed,
-                    downloaded_bytes=downloaded,
+                    downloaded_bytes=self._operation_transfer_snapshot(operation_id)[1],
+                    expected_bytes=planned_total,
                     current_artifact_key=spec.key,
                 )
                 if spec.sha256 in processed_digests:
@@ -1203,18 +1336,21 @@ class ModelCacheService:
                         set_digest,
                         operation_id=operation_id,
                         completed_artifacts=completed,
-                        downloaded_bytes=downloaded,
+                        force=force,
                         interrupt_after_bytes=interrupt_after_bytes,
                     )
                 processed_digests.add(spec.sha256)
                 completed += 1
-                downloaded += spec.expected_bytes
+                # The transfer ledger records only bytes received from the
+                # source during this operation.  Reused verified objects and
+                # pre-existing partial checkpoints never contribute here.
             self._set_operation_progress(
                 operation_id,
                 manifest,
                 phase="completed",
                 completed_artifacts=completed,
-                downloaded_bytes=downloaded,
+                downloaded_bytes=self._operation_transfer_snapshot(operation_id)[1],
+                expected_bytes=planned_total,
                 current_artifact_key=None,
             )
             with self._session(write=True) as session:
@@ -1247,12 +1383,16 @@ class ModelCacheService:
         *,
         operation_id: str,
         completed_artifacts: int,
-        downloaded_bytes: int,
+        force: bool,
         interrupt_after_bytes: int | None,
     ) -> None:
         part = self._partial_path(set_digest, spec.sha256)
         part.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         if part.is_symlink():
+            part.unlink(missing_ok=True)
+        if force:
+            # Repair has an independent transfer budget and must not inherit
+            # bytes from a stale partial produced by another operation.
             part.unlink(missing_ok=True)
         offset = part.stat().st_size if part.exists() else 0
         if offset > spec.expected_bytes:
@@ -1298,6 +1438,7 @@ class ModelCacheService:
                             set_digest=set_digest,
                             actual_bytes=received,
                             state="partial",
+                            completed_artifacts=completed_artifacts,
                         )
                         raise InterruptedError("download interrupted at a durable checkpoint")
                     self._checkpoint_artifact(
@@ -1307,7 +1448,6 @@ class ModelCacheService:
                         actual_bytes=received,
                         state="partial",
                         completed_artifacts=completed_artifacts,
-                        downloaded_bytes=downloaded_bytes + max(0, received - effective_offset),
                     )
         finally:
             close()
@@ -1492,7 +1632,6 @@ class ModelCacheService:
         actual_bytes: int,
         state: str,
         completed_artifacts: int = 0,
-        downloaded_bytes: int = 0,
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
@@ -1504,12 +1643,51 @@ class ModelCacheService:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is not None:
                 manifest = ArtifactSetManifest.from_document(operation.payload["manifest"])
+                payload = dict(operation.payload)
+                raw_transfer = payload.get("transfer")
+                transfer = dict(raw_transfer) if isinstance(raw_transfer, Mapping) else {}
+                raw_artifacts = transfer.get("artifacts")
+                artifacts = dict(raw_artifacts) if isinstance(raw_artifacts, Mapping) else {}
+                raw_entry = artifacts.get(spec.sha256)
+                entry = dict(raw_entry) if isinstance(raw_entry, Mapping) else {}
+                baseline = entry.get("baseline_bytes")
+                baseline = baseline if type(baseline) is int and baseline >= 0 else 0
+                previous_received = entry.get("received_bytes")
+                previous_received = (
+                    previous_received
+                    if type(previous_received) is int and previous_received >= 0
+                    else 0
+                )
+                entry["baseline_bytes"] = baseline
+                entry["received_bytes"] = max(
+                    previous_received, max(0, actual_bytes - baseline)
+                )
+                artifacts[spec.sha256] = entry
+                transfer["schema_version"] = SCHEMA_VERSION
+                transfer["artifacts"] = artifacts
+                total = transfer.get("total_bytes")
+                total = total if type(total) is int and total >= 0 else None
+                received = sum(
+                    value.get("received_bytes", 0)
+                    for value in artifacts.values()
+                    if isinstance(value, Mapping)
+                    and type(value.get("received_bytes")) is int
+                    and value.get("received_bytes", 0) >= 0
+                )
+                payload["transfer"] = transfer
+                operation.payload = payload
+                old_progress = operation.progress if isinstance(operation.progress, Mapping) else {}
+                old_downloaded = old_progress.get("downloaded_bytes")
+                old_downloaded = old_downloaded if type(old_downloaded) is int and old_downloaded >= 0 else 0
+                old_completed = old_progress.get("completed_artifacts")
+                old_completed = old_completed if type(old_completed) is int and old_completed >= 0 else 0
                 operation.state = "running" if state != "partial" else "partial"
                 operation.progress = self._progress(
                     manifest,
                     phase="downloading" if state == "partial" else "verifying",
-                    completed_artifacts=completed_artifacts,
-                    downloaded_bytes=downloaded_bytes,
+                    completed_artifacts=max(old_completed, completed_artifacts),
+                    downloaded_bytes=max(old_downloaded, received),
+                    expected_bytes=total,
                     current_artifact_key=spec.key,
                 )
                 operation.current_artifact_key = spec.key
@@ -1570,10 +1748,17 @@ class ModelCacheService:
             if operation is not None:
                 operation.state = "partial"
                 operation.last_error = detail[:512]
+                _total, received = self._transfer_totals(operation.payload)
                 operation.progress = self._progress(
                     manifest,
                     phase="downloading",
-                    downloaded_bytes=self._verified_bytes(session, set_digest),
+                    completed_artifacts=(
+                        operation.progress.get("completed_artifacts", 0)
+                        if isinstance(operation.progress, Mapping)
+                        else 0
+                    ),
+                    downloaded_bytes=received,
+                    expected_bytes=_total,
                     current_artifact_key=operation.current_artifact_key,
                 )
                 operation.updated_at = now
@@ -1642,17 +1827,24 @@ class ModelCacheService:
         completed_artifacts: int,
         downloaded_bytes: int,
         current_artifact_key: str | None,
+        expected_bytes: int | None = None,
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is None:
                 raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+            old_progress = operation.progress if isinstance(operation.progress, Mapping) else {}
+            old_downloaded = old_progress.get("downloaded_bytes")
+            old_downloaded = old_downloaded if type(old_downloaded) is int and old_downloaded >= 0 else 0
+            old_completed = old_progress.get("completed_artifacts")
+            old_completed = old_completed if type(old_completed) is int and old_completed >= 0 else 0
             operation.progress = self._progress(
                 manifest,
                 phase=phase,
-                completed_artifacts=completed_artifacts,
-                downloaded_bytes=downloaded_bytes,
+                completed_artifacts=max(old_completed, completed_artifacts),
+                downloaded_bytes=max(old_downloaded, downloaded_bytes),
+                expected_bytes=expected_bytes,
                 current_artifact_key=current_artifact_key,
             )
             operation.current_artifact_key = current_artifact_key
@@ -1840,12 +2032,15 @@ class ModelCacheService:
         if preview["plan_digest"] != requested_plan:
             raise ModelCacheConflict("model_cache.stale_plan", "repair preview is stale")
         request_key = _request_key(request_key)
+        manifest = self._manifest_for_set(digest)
+        transfer = self._transfer_state_for_manifest(manifest, force=True)
         payload = {
             "schema_version": SCHEMA_VERSION,
             "source_policy": SOURCE_POLICY,
             "artifact_set_sha256": digest,
-            "manifest": self._manifest_for_set(digest).document(),
+            "manifest": manifest.document(),
             "plan_digest": requested_plan,
+            "transfer": transfer,
         }
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
@@ -1871,7 +2066,9 @@ class ModelCacheService:
                     plan_digest=requested_plan,
                     payload=payload,
                     progress=self._progress(
-                        self._manifest_for_set(digest), phase="queued"
+                        manifest,
+                        phase="queued",
+                        expected_bytes=int(transfer["total_bytes"]),
                     ),
                     actor=actor,
                     created_at=self._clock(),

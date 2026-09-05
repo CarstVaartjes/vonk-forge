@@ -328,5 +328,8 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
     assert completed.result["artifact_set_sha256"] == manifest.digest == artifact_set
     assert completed.result["coverage"] == "complete"
     assert completed.result["evidence"]["coverage"] == "complete"
-    assert completed.result["progress"]["completed_bytes"] == len(payload)
-    assert completed.result["progress"]["total_bytes"] == len(payload)
+    # The set was completed by the earlier resumable operation before this
+    # child ran, so this operation received no bytes despite its planned
+    # remaining range.
+    assert completed.result["progress"]["completed_bytes"] == 0
+    assert completed.result["progress"]["total_bytes"] < len(payload)

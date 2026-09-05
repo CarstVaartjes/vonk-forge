@@ -29,7 +29,7 @@ class ModelCacheOperationProgress:
         Attributes:
             completed_artifacts (int):
             downloaded_bytes (int):
-            expected_bytes (int):
+            expected_bytes (Union[None, int]):
             phase (ModelCacheOperationProgressPhase):
             total_artifacts (int):
             current_artifact_key (Union[None, Unset, str]):
@@ -38,7 +38,7 @@ class ModelCacheOperationProgress:
 
     completed_artifacts: int
     downloaded_bytes: int
-    expected_bytes: int
+    expected_bytes: Union[None, int]
     phase: ModelCacheOperationProgressPhase
     total_artifacts: int
     current_artifact_key: Union[None, Unset, str] = UNSET

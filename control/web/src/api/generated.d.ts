@@ -4596,7 +4596,7 @@ export interface components {
             /** Downloaded Bytes */
             downloaded_bytes: number;
             /** Expected Bytes */
-            expected_bytes: number;
+            expected_bytes?: number | null;
             /**
              * Phase
              * @enum {string}
