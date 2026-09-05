@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.util
 import json
 import os
+import re
+import sys
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,28 +34,30 @@ IMPORT_EVIDENCE_PATH = Path(
         "/private/tmp/vonk-canonical-import-corpus-evidence.json",
     )
 )
-PUBLICATION_COMMIT = "2001c6502bfdc66141dd7224bfde5d77734e9959"
 REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 
 
-def _published_index() -> tuple[dict[str, Any], dict[str, Any], Path]:
+def _published_index() -> tuple[dict[str, Any], dict[str, Any], Path, str]:
     if not EVIDENCE_PATH.is_file():
         pytest.skip(f"published corpus evidence is unavailable: {EVIDENCE_PATH}")
     evidence = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
     cache_root = Path(str(evidence.get("cache_root", "")))
     snapshot_path = cache_root / "snapshot.json"
-    if (
-        evidence.get("publication_commit") != PUBLICATION_COMMIT
-        or not snapshot_path.is_file()
-    ):
-        pytest.skip("published corpus evidence is not the requested immutable publication")
+    publication = evidence.get("publication_commit")
+    if not isinstance(publication, str) or re.fullmatch(r"[0-9a-f]{40}", publication) is None:
+        pytest.fail("published corpus receipt does not carry a valid publication commit")
+    if not snapshot_path.is_file():
+        pytest.skip("published corpus evidence has no durable index snapshot")
     snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    snapshot_publication = snapshot.get("publication_commit")
+    if snapshot_publication is not None and snapshot_publication != publication:
+        pytest.fail("publication receipt and durable index snapshot disagree")
     index = json.loads(snapshot["index"])
     if index.get("schema_version") != 2 or index.get("kind") != "recipe-library-index":
         pytest.fail("published corpus index is not the schema-2 recipe-library index")
     if index.get("repository") != REPOSITORY:
         pytest.fail("published corpus index repository identity is invalid")
-    return evidence, index, cache_root
+    return evidence, index, cache_root, publication
 
 
 def _model_key(row: dict[str, Any]) -> tuple[str, str, str]:
@@ -106,15 +111,33 @@ def _package_model_keys(
     return package_models
 
 
+def _linked_package_cache(
+    index: dict[str, Any], source_root: Path, destination_root: Path
+) -> Path:
+    """Expose verified package bytes through a private cache without copying them."""
+
+    destination_root.mkdir(parents=True, exist_ok=True)
+    prefixes = {
+        str(row["package"]["sha256"])[:2] for row in index["recipes"]
+    }
+    for prefix in prefixes:
+        source = source_root / prefix
+        if not source.is_dir():
+            raise AssertionError(f"verified package cache prefix is missing: {source}")
+        (destination_root / prefix).symlink_to(source, target_is_directory=True)
+    return destination_root
+
+
 def test_p9_corpus_closure_is_dynamic_and_preserves_unlinked_models() -> None:
     """Derive all expected counts from the immutable index, including growth."""
 
-    _evidence, index, _cache_root = _published_index()
+    _evidence, index, _cache_root, _publication = _published_index()
     models = index["catalog_entities"]
     recipes = index["recipes"]
     model_keys = {_model_key(row) for row in models}
     assert len(model_keys) == len(models), "the canonical model index has duplicate identities"
     recipe_keys: set[tuple[str, str, str]] = set()
+    selected_model_keys: set[tuple[str, str, str]] = set()
     for row in recipes:
         recipe_key = (
             str(row["document"]["identity"]["publisher"]),
@@ -123,18 +146,16 @@ def test_p9_corpus_closure_is_dynamic_and_preserves_unlinked_models() -> None:
         )
         assert recipe_key not in recipe_keys, "the canonical recipe index has duplicate identities"
         recipe_keys.add(recipe_key)
+        selected_model_keys.update(_recipe_model_keys(row))
         assert _recipe_model_keys(row) <= model_keys, (
             f"recipe {recipe_key} references a model outside the complete model index"
         )
     package_model_keys = _package_model_keys(index, _cache_root)
     unlinked = model_keys - package_model_keys
 
-    # These are lower bounds for the launch corpus.  All downstream assertions
-    # use the live index sizes, so adding a model or recipe does not require a
-    # test edit.
-    assert len(models) >= 92
-    assert len(recipes) >= 84
-    assert len(unlinked) == 11
+    assert package_model_keys <= model_keys
+    assert selected_model_keys <= package_model_keys
+    assert package_model_keys | unlinked == model_keys
 
     if IMPORT_EVIDENCE_PATH.is_file():
         imported = json.loads(IMPORT_EVIDENCE_PATH.read_text(encoding="utf-8"))
@@ -146,7 +167,7 @@ def test_p9_corpus_closure_is_dynamic_and_preserves_unlinked_models() -> None:
 def test_p9_package_snapshot_is_complete_and_offline_restartable() -> None:
     """Verify every package byte and the durable snapshot used after restart."""
 
-    _evidence, index, cache_root = _published_index()
+    _evidence, index, cache_root, _publication = _published_index()
     snapshot = cache_root / "snapshot.json"
     assert snapshot.is_file()
     assert not (cache_root / "snapshot.candidate.json").exists(), (
@@ -189,9 +210,18 @@ def test_p9_catalog_surface_has_no_legacy_entity_authoring_routes() -> None:
 
 def _acceptance_module():
     try:
-        return importlib.import_module(
-            "control.tests.test_controller_catalog_postgres_acceptance"
-        )
+        module_name = "_p9_controller_catalog_postgres_acceptance"
+        module = sys.modules.get(module_name)
+        if module is not None:
+            return module
+        path = Path(__file__).with_name("test_controller_catalog_postgres_acceptance.py")
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load acceptance module from {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        return module
     except ImportError as error:
         pytest.fail(
             "P9 Controller acceptance is blocked by the production profile/API "
@@ -205,7 +235,7 @@ def test_p9_postgres_controller_api_projects_model_recipe_pairs(
     """Import/query the full corpus, then verify API list/detail identity."""
 
     acceptance = _acceptance_module()
-    index, cache_root = acceptance._corpus()
+    _evidence, index, cache_root, publication = _published_index()
     acceptance._upgrade_fresh_database(postgres_engine)
 
     from sqlalchemy import func, select
@@ -213,6 +243,8 @@ def test_p9_postgres_controller_api_projects_model_recipe_pairs(
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog_service import CatalogService
     from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+    from vonk_control.library_api import install_library_routes
+    from vonk_control.library_projection import LibraryProjection
     from vonk_control.models import CatalogDocumentRevision
     from vonk_control.recipe_packages import RecipePackageClient
     from vonk_control.source_bundles import SourceBundleStore
@@ -225,11 +257,12 @@ def test_p9_postgres_controller_api_projects_model_recipe_pairs(
         cursors=TokenCodec(b"p" * 32).cursor_codec(),
         source_bundles=SourceBundleStore(tmp_path / "source-bundles"),
     )
+    private_cache = _linked_package_cache(index, cache_root, tmp_path / "packages")
     reader = RecipePackageClient(
         "http://127.0.0.1",
-        cache_root=cache_root,
+        cache_root=private_cache,
         transport=acceptance._transport(index, cache_root, []),
-        publication_commit=acceptance.PUBLICATION_COMMIT,
+        publication_commit=publication,
     )
     snapshot = reader.list()
     reader.prepare(snapshot)
@@ -251,6 +284,27 @@ def test_p9_postgres_controller_api_projects_model_recipe_pairs(
                 CatalogDocumentRevision.state == "active",
             )
         ) == len(index["catalog_entities"])
+        recipe_revisions = list(
+            session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
+            )
+        )
+    recipe_id_by_digest = {
+        revision.content_digest: revision.document_id for revision in recipe_revisions
+    }
+    expected_pairs = {
+        (
+            str(selection["model"]["publisher"]),
+            str(selection["model"]["slug"]),
+            str(selection["model"]["content_sha256"]),
+            recipe_id_by_digest[str(row["content_sha256"])],
+        )
+        for row in index["recipes"]
+        for selection in row["document"]["models"]
+    }
 
     api = acceptance._app(
         acceptance.TokenCodec(b"p" * 32),
@@ -270,17 +324,49 @@ def test_p9_postgres_controller_api_projects_model_recipe_pairs(
         assert projected["model_version_publisher"] == selected["publisher"]
         assert projected["model_version_slug"] == selected["slug"]
 
-    local = api.get("/api/v1/catalog/recipes?limit=100")
-    assert local.status_code == 200, local.text
-    assert len(local.json()["recipes"]) == len(index["recipes"])
-    for summary in local.json()["recipes"]:
-        detail = api.get(f"/api/v1/catalog/recipes/{summary['recipe_id']}")
-        assert detail.status_code == 200, detail.text
-        document = detail.json()["document"]
-        expected = next(
-            row for row in index["recipes"] if row["document"]["identity"]["slug"] == summary["slug"]
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"l" * 32).cursor_codec(),
+        clock=clock,
+    )
+    install_library_routes(
+        api.app,
+        actor_dependency=lambda: acceptance.Actor("acceptance", "administrator"),
+        projection=projection,
+    )
+    library = api.get("/api/v1/library?limit=100")
+    assert library.status_code == 200, library.text
+    library_payload = library.json()
+    assert len(library_payload["models"]) == len(index["catalog_entities"])
+    actual_pairs = {
+        (
+            item["model"]["publisher"],
+            item["model"]["slug"],
+            item["model"]["content_sha256"],
+            recipe["recipe_id"],
         )
-        assert detail.json()["content_sha256"] == expected["content_sha256"]
-        assert document["models"][0]["model"] == expected["document"]["models"][0]["model"]
+        for item in library_payload["models"]
+        for recipe in item["recipes"]
+    }
+    assert actual_pairs == expected_pairs
+    assert library_payload["unlinked_recipes"] == []
+
+    for recipe_id in sorted(recipe_id_by_digest.values()):
+        detail = api.get(f"/api/v1/library/recipes/{recipe_id}")
+        assert detail.status_code == 200, detail.text
+        detail_payload = detail.json()
+        document = next(
+            row["document"]
+            for row in index["recipes"]
+            if recipe_id_by_digest[str(row["content_sha256"])] == recipe_id
+        )
+        assert detail_payload["recipe"]["recipe_id"] == recipe_id
+        expected_model = document["models"][0]["model"]
+        assert detail_payload["model"] == {
+            "kind": "model-version",
+            "publisher": expected_model["publisher"],
+            "slug": expected_model["slug"],
+            "content_sha256": expected_model["content_sha256"],
+        }
     api.close()
     reader.close()

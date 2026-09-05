@@ -1471,7 +1471,6 @@ def production_app() -> FastAPI:
     from .agent_upgrades import AgentUpgradeService
     from .artifact_sizes import DeclaredArtifactSizeResolver
     from .audit import SqlAuditStore
-    from .catalog_seeds import seed_builtin_harnesses
     from .dashboard import DashboardService
     from .database_authority import (
         DatabaseAuthorityService,
@@ -1501,9 +1500,6 @@ def production_app() -> FastAPI:
     settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url))
     clock = lambda: datetime.now(UTC)
-    with sessions.begin() as session:
-        seed_builtin_harnesses(session, clock())
-
     token_codec = TokenCodec(settings.token_signing_key)
     cursor_codec = token_codec.cursor_codec()
     job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
