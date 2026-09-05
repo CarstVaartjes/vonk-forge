@@ -1116,13 +1116,21 @@ jobs:
             --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
             --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
             --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
+          scripts/render-production-compose --channel pinned \
+            --output release-output/docker-compose.pinned.yml \
+            --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
+            --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
+            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
+            --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
       - name: Upload production Compose
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: platform-build-${{ needs.release-metadata.outputs.version }}
           retention-days: 1
           if-no-files-found: error
-          path: release-output/docker-compose.production.yml
+          path: |
+            release-output/docker-compose.production.yml
+            release-output/docker-compose.pinned.yml
 
   release-manifest:
     name: Publish container release manifest
@@ -1222,6 +1230,7 @@ jobs:
             "Vonk Forge $VERSION" \
             vonk-forge-images.env vonk-forge-images.env.sha256 \
             release-output/docker-compose.production.yml \
+            release-output/docker-compose.pinned.yml \
             "${release_assets[@]}"
 
   advance-production-aliases:

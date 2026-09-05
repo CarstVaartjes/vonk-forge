@@ -370,7 +370,7 @@ jobs:
           expires_at=$(($(date +%s) + 604800))
           case "$CHANNEL" in
             dev) compose_name=docker-compose.pinned.yml ;;
-            stable) compose_name=docker-compose.production.yml ;;
+            stable) compose_name=docker-compose.pinned.yml ;;
             *) exit 64 ;;
           esac
           mapfile -t compose_paths < <(find "$RUNNER_TEMP/compose" -type f -name "$compose_name")

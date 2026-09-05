@@ -52,6 +52,8 @@ case "$platform-$architecture" in
 esac
 [ "${#expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
 case "$expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
+# The verified payload installs channel-following Compose images (:dev/:latest).
+# This checksum authenticates the installer payload; it does not pin runtime images.
 payload_expected='@NAS_PAYLOAD_SHA256@'
 [ "${#payload_expected}" -eq 64 ] || fail "this installer endpoint is not published correctly"
 case "$payload_expected" in *[!0-9a-f]*) fail "this installer endpoint is not published correctly" ;; esac
