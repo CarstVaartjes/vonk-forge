@@ -1,6 +1,6 @@
 import {render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {ControlApi, TelemetryHistory, VisualFleetNode} from "../api/types";
+import type {ControlApi, RichTelemetryPoint, TelemetryCapabilitiesResponse, TelemetryCurrentResponse, TelemetryHistory, TelemetryWorkloadsResponse, VisualFleetNode} from "../api/types";
 import {NodeDetail} from "./node-detail";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
@@ -108,7 +108,7 @@ test("opens a Spark-scoped model management workspace", () => {
   const control = {nodeTelemetryHistory: async () => history()} as unknown as ControlApi;
   render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
 
-  expect(screen.getByRole("link", {name: "Install model or recipe"})).toHaveAttribute(
+  expect(screen.getByRole("link", {name: "Download to Library"})).toHaveAttribute(
     "href",
     `/library?spark=${encodeURIComponent(node().id)}`,
   );
@@ -313,4 +313,52 @@ test("separates complete and healthy recipe evidence from transitional group sta
   expect(loaded).not.toHaveTextContent("Vision pair");
   expect(runState).toHaveTextContent("Degraded · 2 of 2 ranks · route not published");
   expect(runState).toHaveTextContent("Group degraded · Run stopping · Rank stopping · Route failed");
+});
+
+test("surfaces rich telemetry by scope with workload placement and unsupported evidence", async () => {
+  const sample = history().points[0] as RichTelemetryPoint;
+  sample.metrics = {
+    schema_version: 2,
+    series: [
+      {key: "gpu.clock_mhz", scope: "accelerator", device_id: "GB10-0", value: 1420, unit: "MHz", source: "nvidia-smi", measurement_kind: "measured", observed_at: sample.observed_at, received_at: sample.received_at, freshness: "fresh", freshness_threshold_seconds: 6, support_status: "available", reason: null, aggregation: "latest"},
+      {key: "network.rx_bytes_per_second", scope: "network", interface_name: "eth0", value: 2400, unit: "bytes/s", source: "procfs", measurement_kind: "measured", observed_at: sample.observed_at, received_at: sample.received_at, freshness: "fresh", freshness_threshold_seconds: 20, support_status: "available", reason: null, aggregation: "latest"},
+    ],
+    capabilities: [{key: "gpu.throttle_reason", scope: "accelerator", device_id: "GB10-0", unit: "reason", source: "nvidia-smi", measurement_kind: "measured", supported: false, freshness_threshold_seconds: 6, reason: "The collector cannot read throttle reasons on this driver."}],
+    runtimes: [],
+    workloads: [],
+    provenance: {collector: "spark-agent", collector_version: "2.1.0", host_uptime_seconds: 7200, source_observed_at: sample.observed_at},
+  };
+  const current: TelemetryCurrentResponse = {schema_version: 2, node_id: node().id, observed_at: sample.observed_at, received_at: sample.received_at, freshness: "live", sample};
+  const capabilities: TelemetryCapabilitiesResponse = {schema_version: 2, node_id: node().id, observed_at: sample.observed_at, received_at: sample.received_at, freshness: "live", capabilities: sample.metrics.capabilities};
+  const workloads: TelemetryWorkloadsResponse = {
+    schema_version: 2, node_id: node().id, observed_at: sample.observed_at, received_at: sample.received_at, freshness: "live",
+    runtimes: [{run_id: "run-chat", engine_id: "engine-1", backend: "vllm", version: "0.9", endpoint: "https://spark-one.local/chat", model: "Qwen 3.5", model_version: "qwen-3-5", recipe_revision: "revision-chat", context_limit_tokens: 32768, serving_node_ids: [node().id, "spark-two"], ranks: [0, 1], readiness: "running", error: null, adapter: "openai-chat", adapter_version: "1", adapter_supported: true, adapter_reason: null}],
+    workloads: [{request_id: "request-1", job_id: null, run_id: "run-chat", model: "Qwen 3.5", recipe_revision: "revision-chat", engine_id: "engine-1", state: "running", origin_node_id: node().id, executor_node_ids: [node().id, "spark-two"], created_at: sample.observed_at, started_at: sample.observed_at, ended_at: null, elapsed_seconds: 2.5, failure: null, title: "Chat request", progress_value: null, progress_max: null, eta_seconds: null, eta_source: null}],
+  };
+  const currentEndpoint = vi.fn(async () => current);
+  const capabilitiesEndpoint = vi.fn(async () => capabilities);
+  const workloadsEndpoint = vi.fn(async () => workloads);
+  const control = {nodeTelemetryHistory: async () => history(), nodeTelemetryCurrent: currentEndpoint, nodeTelemetryCapabilities: capabilitiesEndpoint, nodeTelemetryWorkloads: workloadsEndpoint} as unknown as ControlApi;
+  const user = userEvent.setup();
+  render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
+
+  await user.click(screen.getByRole("tab", {name: "Metrics"}));
+  expect(await screen.findByText("Gpu · Clock Mhz")).toBeVisible();
+  expect(screen.getAllByText("GB10-0").length).toBeGreaterThan(0);
+  expect(screen.getByText("Network · Rx Bytes Per Second")).toBeVisible();
+  expect(screen.getByText("Unsupported")).toBeVisible();
+  expect(screen.getByText(/spark-agent 2.1.0/)).toBeVisible();
+  expect(currentEndpoint).toHaveBeenCalledWith(node().id, expect.any(AbortSignal));
+  expect(capabilitiesEndpoint).toHaveBeenCalledWith(node().id, expect.any(AbortSignal));
+
+  await user.click(screen.getByRole("tab", {name: "Workloads"}));
+  expect((await screen.findAllByText("Qwen 3.5"))[0]).toBeVisible();
+  expect(screen.getByText(/ranks 0, 1/)).toBeVisible();
+  expect(screen.getByText("Chat request")).toBeVisible();
+  expect(workloadsEndpoint).toHaveBeenCalledWith(node().id, undefined, undefined, expect.any(AbortSignal));
+
+  await user.click(screen.getByRole("tab", {name: "Services"}));
+  expect(await screen.findByText("openai-chat")).toBeVisible();
+  await user.click(screen.getByRole("tab", {name: "Events"}));
+  expect(await screen.findByText(/Telemetry: Live/)).toBeVisible();
 });

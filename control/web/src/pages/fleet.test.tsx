@@ -61,7 +61,12 @@ function control(
   history: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, resolution, maximumPoints) => ({schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points: []}),
   updateNodeProfile: ControlApi["updateNodeProfile"] = async (nodeId, input) => ({id: nodeId, display_name: input.display_name, hostname: `${nodeId}.internal`, ip_address: null}),
 ): ControlApi {
-  return {visualFleet, nodeTelemetryHistory: history, updateNodeProfile} as ControlApi;
+  return {
+    visualFleet,
+    nodeTelemetryHistory: history,
+    updateNodeProfile,
+    fleetProfiles: async () => ({profiles: []}),
+  } as unknown as ControlApi;
 }
 
 async function flush(): Promise<void> {

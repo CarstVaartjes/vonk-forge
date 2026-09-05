@@ -14,6 +14,8 @@ type LibraryFixtureState = {
   detailFailuresRemaining: number;
   empty: boolean;
   lastApplyBody?: Record<string, unknown>;
+  lastRunSwitchApplyBody?: Record<string, unknown>;
+  lastRunSwitchPreviewBody?: Record<string, unknown>;
   retryCount: number;
   snapshotFailuresRemaining: number;
 };
@@ -53,6 +55,80 @@ function libraryLoadPlan() {
       {active_reserved_bytes: 4 * GIB, allowed: true, available_memory_bytes: 100 * GIB, blockers: [], endpoint_owner: false, fabric_address: "fabric://node-beta", fabric_bandwidth_mbps: 25_000, free_after_bytes: 36 * GIB, inventory_observed_at: "2026-08-15T11:59:45Z", memory_floor_bytes: 8 * GIB, memory_kind: "unified", node_id: "node-beta", port: 8000, rank: 1, rendezvous_port: null, required_memory_bytes: 60 * GIB, role: "worker", warnings: []},
     ],
     plan_digest: "load-plan-digest", recipe_revision_id: "revision-chat",
+  };
+}
+
+function libraryRunSwitchPlan() {
+  return {
+    schema_version: 2,
+    generated_at: "2026-09-05T00:00:00Z",
+    action: "run",
+    model_version_sha256: "e".repeat(64),
+    recipe_revision_id: "revision-chat",
+    recipe_content_sha256: "a".repeat(64),
+    alias: "qwen-chat",
+    run_id: null,
+    spark_group: {nodes: [
+      {node_id: "node-alpha", rank: 0, role: "leader", endpoint_owner: true},
+      {node_id: "node-beta", rank: 1, role: "worker", endpoint_owner: false},
+    ]},
+    mapping: {mapping_id: "mapping-chat", generation: 4},
+    installation_id: "installation-chat",
+    installation_state: "installed",
+    recipe_build_id: "build-chat",
+    image_digest: `sha256:${"d".repeat(64)}`,
+    start_plan_digest: null,
+    model_capabilities: [{name: "chat", declared: null, evidence: "unknown", support: "unknown", evidence_digest: null, detail: "Model capability evidence is not declared."}],
+    recipe_capabilities: [{name: "chat", declared: true, evidence: "observed", support: "supported", evidence_digest: "c".repeat(64), detail: "The selected recipe exposes chat."}],
+    freshness: [],
+    fit_current: {},
+    fit_after_stop: null,
+    fit: {},
+    storage: {},
+    runtime_storage: {},
+    build: {},
+    preparation: null,
+    conflicts: [],
+    stops: [],
+    reclaimed_bytes: 0,
+    phases: [{index: 0, kind: "transfer", state: "planned", node_ids: ["node-alpha", "node-beta"], detail: "Copy the model and container to the selected Sparks."}],
+    allowed: true,
+    blockers: [],
+    warnings: [],
+    invocation: {origin: "web.library"},
+    plan_digest: "f".repeat(64),
+    stop_before_prepare: false,
+    stop_before_transfer: false,
+  };
+}
+
+function libraryRunSwitchOperation(requestKey: string, state = "queued") {
+  return {
+    schema_version: 2,
+    operation_id: "00000000-0000-4000-8000-000000000707",
+    kind: "recipe.run-switch.v2",
+    action: "run",
+    state,
+    plan_digest: "f".repeat(64),
+    request_key: requestKey,
+    node_ids: ["node-alpha", "node-beta"],
+    current_phase: "transfer",
+    completed_phases: [],
+    progress: {
+      phase_index: 0,
+      phase_count: 3,
+      phase: "transfer",
+      state: state === "queued" ? "queued" : "running",
+      completed_bytes: 0,
+      total_bytes: null,
+      total_bytes_known: false,
+      members: [
+        {node_id: "node-alpha", phase: "transfer", state: "running", completed_bytes: 0, total_bytes: null},
+        {node_id: "node-beta", phase: "transfer", state: "pending", completed_bytes: 0, total_bytes: null},
+      ],
+    },
+    status_reason: null,
+    result: null,
   };
 }
 
@@ -213,6 +289,19 @@ async function installLocalFleetFixture(page: Page) {
     libraryState.lastApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
     return route.fulfill({json: libraryOperation("queued")});
   });
+  await page.route("**/api/v1/recipes/run-switch-plans/preview", async route => {
+    libraryState.lastRunSwitchPreviewBody = await route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({json: libraryRunSwitchPlan()});
+  });
+  await page.route("**/api/v1/recipes/run-switches", async route => {
+    libraryState.lastRunSwitchApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
+    const requestKey = String(libraryState.lastRunSwitchApplyBody.request_key ?? "");
+    return route.fulfill({status: 202, json: libraryRunSwitchOperation(requestKey)});
+  });
+  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707", async route => {
+    const requestKey = String(libraryFixtures.get(page)?.lastRunSwitchApplyBody?.request_key ?? "");
+    return route.fulfill({json: libraryRunSwitchOperation(requestKey, "running")});
+  });
   await page.route("**/api/v1/recipes/operations/operation-load", route => route.fulfill({json: libraryOperation("partial")}));
   await page.route("**/api/v1/recipes/operations/operation-load/retry", route => {
     libraryState.retryCount += 1;
@@ -294,7 +383,7 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("link", {name: "Install model or recipe"}).click();
+  await page.getByRole("link", {name: "Download to Library"}).click();
   await expect(page).toHaveURL(new RegExp(`/library\\?spark=${nodeId}$`));
   await expect(page.getByRole("complementary", {name: "Managing models on Aurora"})).toBeVisible();
 });
@@ -348,7 +437,7 @@ test("Node history and lifecycle controls work on desktop and mobile", async ({p
     await page.getByRole("button", {name: "View Aurora details"}).click();
     await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
     const detail = page.getByRole("complementary", {name: "Aurora details"});
-    await expect(detail.getByRole("link", {name: "Install model or recipe"})).toBeVisible();
+    await expect(detail.getByRole("link", {name: "Download to Library"})).toBeVisible();
     await expect(detail.getByRole("button", {name: "Stop Aurora solo on this Spark"})).toBeVisible();
     await expect(detail.getByText("Stop all 2 active runs before removing this recipe from all 2 Sparks.")).toBeVisible();
     await testInfo.attach(`fleet-spark-lifecycle-${width}.png`, {body: await detail.screenshot(), contentType: "image/png"});
@@ -731,6 +820,25 @@ test("Library separates installation capacity from load memory admission", async
   await expect(placement.locator(".placement-group")).not.toContainText("run.insufficient_memory");
   await expectNoSeriousAccessibilityViolations(page);
   await testInfo.attach("installable-load-blocked.png", {body: await placement.screenshot(), contentType: "image/png"});
+});
+
+test("Library uses the schema 2 one-click Run path when the Controller exposes run-switch", async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto("/library/recipes/recipe-chat");
+
+  const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
+  const run = authority.getByRole("button", {name: "Run", exact: true}).first();
+  await expect(run).toBeVisible();
+  await expect(authority.getByRole("button", {name: "Review Load"})).toHaveCount(0);
+  await run.click();
+
+  const state = libraryFixtures.get(page)!;
+  await expect.poll(() => state.lastRunSwitchPreviewBody).toMatchObject({schema_version: 2, model_version_sha256: "e".repeat(64), recipe_revision_id: "revision-chat", action: "run", retention: "retain-cached"});
+  await expect.poll(() => state.lastRunSwitchApplyBody).toMatchObject({schema_version: 2, plan_digest: "f".repeat(64), request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  const progress = authority.getByRole("region", {name: "Qwen Chat progress"});
+  await expect(progress).toContainText("Copying model and container to node-alpha");
+  await expect(progress).toContainText("Total bytes unavailable");
+  await expect(progress.getByRole("progressbar", {name: "Run progress"})).toHaveAttribute("aria-valuetext", "Total bytes unavailable");
 });
 
 test.skip("Library fixture journey keeps visual authority primary through preview, partial retry, and Advanced recovery", async ({page}, testInfo) => {

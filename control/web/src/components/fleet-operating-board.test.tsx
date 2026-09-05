@@ -137,11 +137,11 @@ test("maps live and desired workloads across Sparks and applies the exact previe
   expect(within(matrix).getByText("DeepSeek V4 Flash")).toBeVisible();
   expect(within(matrix).getByText("Installed")).toBeVisible();
   expect(within(matrix).getByText("Profile change")).toBeVisible();
-  const apply = await screen.findByRole("button", {name: "Apply 2 changes"});
+  const apply = await screen.findByRole("button", {name: "Switch profile"});
   expect(screen.getByText("2 changes", {selector: ".profile-plan strong"})).toBeVisible();
 
   await user.click(apply);
-  await waitFor(() => expect(applyFleetProfile).toHaveBeenCalledWith(PROFILE_ID, preview.plan_digest));
+  await waitFor(() => expect(applyFleetProfile).toHaveBeenCalledWith(PROFILE_ID, {plan_digest: preview.plan_digest, request_key: expect.any(String)}));
   expect(await screen.findByText("Profile applied", {selector: ".profile-application strong"})).toBeVisible();
 
   await user.click(screen.getByRole("button", {name: "Manage Spark Beta — stale"}));
@@ -165,5 +165,5 @@ test("keeps a blocked profile readable and prevents apply", async () => {
 
   expect(await screen.findByText("1 blocked")).toBeVisible();
   expect(screen.getByText("Build the selected recipe before applying this profile.")).toBeVisible();
-  expect(screen.getByRole("button", {name: "Resolve blockers"})).toBeDisabled();
+  expect(screen.getByRole("button", {name: "Inspect blockers"})).toBeEnabled();
 });

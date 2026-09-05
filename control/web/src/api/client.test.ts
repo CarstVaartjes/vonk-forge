@@ -1,5 +1,5 @@
 import {AuthenticationRequired} from "../auth";
-import type {AgentRepairManifest, AgentUpgradePlan} from "./types";
+import type {AgentRepairManifest, AgentUpgradePlan, RunSwitchPreviewRequest} from "./types";
 import {ApiClient} from "./client";
 
 const REPAIR_NODE = `spk_${"a".repeat(32)}`;
@@ -237,6 +237,79 @@ it("requests bounded node telemetry history through the generated operation", as
     resolution: "raw",
     start: "2026-08-15T11:00:00.000Z",
   });
+});
+
+it("binds the one-click run switch, NAS cache, and rich telemetry routes", async () => {
+  // Break caught: a primary Run action falls back to the retired lifecycle
+  // routes, cache actions lose their digest/key contract, or telemetry reads
+  // silently use the old aggregate endpoint.
+  const requests: Request[] = [];
+  const modelDigest = "a".repeat(64);
+  const artifactDigest = "b".repeat(64);
+  const requestKey = "00000000-0000-4000-8000-000000000401";
+  const runInput: RunSwitchPreviewRequest = {
+    schema_version: 2,
+    model_version_sha256: modelDigest,
+    recipe_revision_id: "revision-run",
+    spark_group: {nodes: [{node_id: "spark-a", rank: 0, role: "leader", endpoint_owner: true}, {node_id: "spark-b", rank: 1, role: "worker", endpoint_owner: false}]},
+    alias: "chat",
+    action: "run",
+    retention: "retain-cached",
+    invocation: {origin: "web.library"},
+  };
+  const response = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request.clone());
+    return new Response(JSON.stringify({}), {headers: {"Content-Type": "application/json"}, status: request.method === "POST" ? 202 : 200});
+  };
+  vi.stubGlobal("fetch", response);
+
+  const api = new ApiClient();
+  await api.previewRecipeRunSwitch(runInput);
+  await api.applyRecipeRunSwitch({...runInput, plan_digest: "run-plan", request_key: requestKey});
+  await api.getRecipeRunSwitchOperation("run-operation");
+  await api.modelCacheInventory("cache-cursor");
+  await api.modelCacheEntry(artifactDigest);
+  await api.previewModelCacheDownload({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first"});
+  await api.downloadModelCache({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first", plan_digest: "cache-download-plan", request_key: requestKey});
+  await api.previewModelCacheRepair({schema_version: 2, artifact_set_sha256: artifactDigest});
+  await api.repairModelCache({schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "cache-repair-plan", request_key: requestKey, source_policy: "nas-first"});
+  await api.previewModelCacheEviction({schema_version: 2, target_bytes: 1024});
+  await api.evictModelCache({schema_version: 2, target_bytes: 1024, plan_digest: "cache-eviction-plan", request_key: requestKey});
+  await api.modelCacheUpdates();
+  await api.modelCacheOperations("operations-cursor");
+  await api.modelCacheOperation("cache-operation");
+  await api.nodeTelemetryCurrent("spark-a");
+  await api.nodeTelemetryCapabilities("spark-a");
+  await api.nodeTelemetryWorkloads("spark-a", "run-operation", "running");
+
+  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
+    ["POST", "/api/v1/recipes/run-switch-plans/preview"],
+    ["POST", "/api/v1/recipes/run-switches"],
+    ["GET", "/api/v1/recipes/run-switches/run-operation"],
+    ["GET", "/api/v1/model-cache"],
+    ["GET", `/api/v1/model-cache/entries/${artifactDigest}`],
+    ["POST", "/api/v1/model-cache/download-preview"],
+    ["POST", "/api/v1/model-cache/download"],
+    ["POST", "/api/v1/model-cache/repair-preview"],
+    ["POST", "/api/v1/model-cache/repair"],
+    ["POST", "/api/v1/model-cache/eviction-preview"],
+    ["POST", "/api/v1/model-cache/evict"],
+    ["GET", "/api/v1/model-cache/updates"],
+    ["GET", "/api/v1/model-cache/operations"],
+    ["GET", "/api/v1/model-cache/operations/cache-operation"],
+    ["GET", "/api/v1/nodes/spark-a/telemetry/current"],
+    ["GET", "/api/v1/nodes/spark-a/telemetry/capabilities"],
+    ["GET", "/api/v1/nodes/spark-a/telemetry/workloads"],
+  ]);
+  expect(Object.fromEntries(new URL(requests[3]!.url).searchParams)).toEqual({cursor: "cache-cursor", limit: "100"});
+  expect(Object.fromEntries(new URL(requests[12]!.url).searchParams)).toEqual({cursor: "operations-cursor", limit: "100"});
+  expect(Object.fromEntries(new URL(requests[16]!.url).searchParams)).toEqual({run_id: "run-operation", state: "running"});
+  expect(await requests[0]!.clone().json()).toEqual(runInput);
+  expect(await requests[1]!.clone().json()).toEqual({...runInput, plan_digest: "run-plan", request_key: requestKey});
+  expect(await requests[6]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first", plan_digest: "cache-download-plan", request_key: requestKey});
+  expect(await requests[8]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "cache-repair-plan", request_key: requestKey, source_policy: "nas-first"});
+  expect(requests.slice(0, 2).every(request => request.headers.get("Content-Type"))).toBe(true);
 });
 
 it("uses the durable artifact-job routes and preserves raw upload authority", async () => {
