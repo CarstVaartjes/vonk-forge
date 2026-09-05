@@ -6,6 +6,7 @@ import hashlib
 import io
 import os
 import tarfile
+from copy import deepcopy
 from pathlib import Path
 
 import httpx
@@ -16,6 +17,7 @@ from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     PACKAGE_REPOSITORY,
     RecipePackageClient,
+    RecipePackageError,
 )
 
 
@@ -248,6 +250,24 @@ def _canonical_package_fixture() -> tuple[bytes, dict[str, object], dict[str, ob
     return _canonical(index) + b"\n", row, package
 
 
+def _package_with_extra_member(package: bytes) -> bytes:
+    files: dict[str, bytes] = {}
+    with tarfile.open(fileobj=io.BytesIO(package), mode="r:*") as archive:
+        for member in archive.getmembers():
+            stream = archive.extractfile(member)
+            assert stream is not None
+            files[member.name] = stream.read()
+    files["fixture.txt"] = b"same recipe, new package bytes\n"
+    manifest = json.loads(files["manifest.json"])
+    manifest["files"] = [
+        {"path": path, "sha256": hashlib.sha256(content).hexdigest(), "size": len(content)}
+        for path, content in sorted(files.items())
+        if path != "manifest.json"
+    ]
+    files["manifest.json"] = _canonical(manifest) + b"\n"
+    return _repack(files)
+
+
 def test_production_reader_pins_raw_index_and_package_to_resolved_commit(tmp_path: Path) -> None:
     index, row, package = _canonical_package_fixture()
     publication = "2" * 40
@@ -330,3 +350,109 @@ def test_publication_network_smoke_at_published_commit(tmp_path: Path) -> None:
         assert item.package_handle.closure_path.is_dir()
     finally:
         client.close()
+
+
+def test_double_list_keeps_unvalidated_candidate_out_of_previous_good_state(tmp_path: Path) -> None:
+    index, _, package = _canonical_package_fixture()
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": "2" * 40})
+        if request.url.path.endswith(("catalog-index.json", "index.json")):
+            return httpx.Response(200, headers={"content-type": "text/plain"}, content=index)
+        return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=package)
+
+    client = RecipePackageClient(
+        None, api_url="http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler)
+    )
+    client.list()
+    candidate = client.list()
+    client.prepare(candidate)
+    assert len([url for url in calls if url.endswith("tiny-recipe.tar.gz")]) == 1
+    client.close()
+
+
+def test_same_recipe_digest_but_changed_package_bytes_are_fetched(tmp_path: Path) -> None:
+    index, row, package = _canonical_package_fixture()
+    changed = _package_with_extra_member(package)
+    changed_row = deepcopy(row)
+    changed_row["package"] = dict(changed_row["package"])
+    changed_row["package"]["sha256"] = hashlib.sha256(changed).hexdigest()
+    changed_row["package"]["expected_bytes"] = len(changed)
+    changed_index = json.loads(index)
+    changed_index["recipes"] = [changed_row]
+    state = {"index": index, "package": package}
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if request.url.path.endswith("/commits/main"):
+            return httpx.Response(200, json={"sha": "2" * 40})
+        if request.url.path.endswith(("catalog-index.json", "index.json")):
+            return httpx.Response(200, headers={"content-type": "application/json"}, content=state["index"])
+        return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=state["package"])
+
+    client = RecipePackageClient(
+        None, api_url="http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler)
+    )
+    client.prepare(client.list())
+    calls.clear()
+    state["index"] = _canonical(changed_index) + b"\n"
+    state["package"] = changed
+    client.prepare(client.list())
+    assert len([url for url in calls if url.endswith("tiny-recipe.tar.gz")]) == 1
+    client.close()
+
+
+def test_failed_candidate_can_retry_against_previous_good_snapshot(tmp_path: Path) -> None:
+    index, row, package = _canonical_package_fixture()
+    bad_row = deepcopy(row)
+    bad_row["package"] = dict(bad_row["package"])
+    bad_row["package"]["sha256"] = "0" * 64
+    bad_row["package"]["expected_bytes"] = 1
+    bad_index = json.loads(index)
+    bad_index["recipes"] = [bad_row]
+    state = {"index": index, "package": package}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(("catalog-index.json", "index.json")):
+            return httpx.Response(200, headers={"content-type": "application/json"}, content=state["index"])
+        return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=state["package"])
+
+    client = RecipePackageClient("http://127.0.0.1", cache_root=tmp_path / "packages", transport=httpx.MockTransport(handler))
+    client.prepare(client.list())
+    state["index"] = _canonical(bad_index) + b"\n"
+    with pytest.raises(RecipePackageError, match="bytes do not match"):
+        client.prepare(client.list())
+    state["index"] = index
+    retried = client.list()
+    client.prepare(retried)
+    assert client.fetch(retried.items[0].uri).package_handle is not None
+    client.close()
+
+
+def test_restart_offline_reuses_promoted_snapshot_and_package_closure(tmp_path: Path) -> None:
+    index, _, package = _canonical_package_fixture()
+
+    def online(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith(("catalog-index.json", "index.json")):
+            return httpx.Response(200, headers={"content-type": "application/json"}, content=index)
+        return httpx.Response(200, headers={"content-type": "application/octet-stream"}, content=package)
+
+    cache = tmp_path / "packages"
+    first = RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(online))
+    first.prepare(first.list())
+    first.close()
+
+    def offline(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+
+    restarted = RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(offline))
+    snapshot = restarted.list()
+    restarted.prepare(snapshot)
+    item = restarted.fetch(snapshot.items[0].uri)
+    assert item.package_handle is not None
+    assert item.package_handle.closure_path.is_dir()
+    restarted.close()
