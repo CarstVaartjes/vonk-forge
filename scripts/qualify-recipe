@@ -18,7 +18,6 @@ import re
 import subprocess
 import sys
 import tarfile
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from importlib.machinery import SourceFileLoader
@@ -38,6 +37,10 @@ SUPPORTED_CHECKS = frozenset({
 
 class QualificationError(RuntimeError):
     pass
+
+
+class EnvironmentLimited(QualificationError):
+    """A requested environment gate is not available on this checkout."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,63 +411,11 @@ def _architecture(engine: str, timeout: float) -> str:
 
 
 def _container(inputs: QualificationInputs, args: argparse.Namespace, architecture: str) -> dict[str, object]:
-    if args.artifact_root.is_symlink() or not args.artifact_root.is_dir():
-        raise QualificationError("installed artifact root is unavailable")
-    recipe = inputs.recipe
-    first = inputs.compiled[0]
-    runtime = first.get("runtime")
-    security = first.get("security")
-    if not isinstance(runtime, Mapping) or not isinstance(runtime.get("image"), str) or not isinstance(security, Mapping):
-        raise QualificationError("compiled image reference is invalid")
-    with tempfile.TemporaryDirectory(prefix="vonk-qualify-") as directory:
-        extracted = Path(directory) / "package"
-        extracted.mkdir()
-        outputs = Path(directory) / "outputs"
-        outputs.mkdir()
-        with tarfile.open(inputs.package.path, "r:gz") as archive:
-            archive.extractall(extracted, filter="data")
-        image = runtime["image"]
-        if recipe.execution.mode == "build":
-            build = recipe.execution.build
-            network = "none" if build.network.mode == "none" else "default"
-            image = f"localhost/vonk/qualification:{inputs.source_digest[:16]}"
-            command = ["build", "--platform", "linux/arm64", "--network", network, "--pull=false", "--file", str(extracted / build.dockerfile), "--tag", image]
-            if build.target is not None:
-                command.extend(("--target", build.target))
-            for argument in build.arguments:
-                command.extend(("--build-arg", f"{argument.name}={argument.value}"))
-            command.append(str(extracted / build.context.path))
-            _run([args.engine, *command], timeout=min(args.timeout_seconds, 600.0))
-        names: list[str] = []
-        try:
-            for rank, spec in enumerate(inputs.compiled):
-                spec_runtime = spec["runtime"]
-                spec_security = spec["security"]
-                assert isinstance(spec_runtime, Mapping) and isinstance(spec_security, Mapping)
-                name = f"vonk-qualify-{recipe.identity.slug[:32]}-{rank}"
-                command = [
-                    "run", "--detach", "--name", name, "--pull", "never",
-                    "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
-                    "--user", str(spec_security["user"]), "--network",
-                    str(spec_security["network_mode"]),
-                    "--mount", f"type=bind,src={args.artifact_root.resolve()},dst=/run/vonk/models,readonly",
-                    "--mount", f"type=bind,src={outputs},dst=/run/vonk/outputs",
-                ]
-                for item in spec_runtime.get("environment", ()):
-                    if isinstance(item, Mapping):
-                        command.extend(("--env", f"{item['name']}={item['value']}"))
-                command.extend((str(image), *spec_runtime["entrypoint"]))
-                _run([args.engine, *command], timeout=min(args.timeout_seconds, 600.0))
-                names.append(name)
-            for name in names:
-                inspected = _run([args.engine, "inspect", "--format", "{{.State.Running}}", name], timeout=30).stdout.strip()
-                if inspected != "true":
-                    raise QualificationError(f"container did not remain running: {name}")
-        finally:
-            for name in reversed(names):
-                _run([args.engine, "stop", "--time", str(recipe.runtime.lifecycle.stop_timeout_seconds), name], timeout=60, check=False)
-                _run([args.engine, "rm", "-f", name], timeout=60, check=False)
-    return {"detected_architecture": architecture, "passed": True, "physical_claim": False, "recipe": recipe.identity.slug, "status": "passed", "steps": [{"check": "container.started", "ranks": len(inputs.compiled)}]}
+    del inputs, args, architecture
+    raise EnvironmentLimited(
+        "production CompiledExecutionPlan launch adapter/materializer is unavailable; "
+        "container qualification refuses to launch a handwritten runtime"
+    )
 
 
 def _print(value: Mapping[str, object]) -> None:
@@ -493,6 +444,10 @@ def main() -> int:
     try:
         _print(_container(inputs, args, architecture))
         return 0
+    except EnvironmentLimited as error:
+        _print({"detected_architecture": architecture, "detail": str(error), "passed": False,
+                "physical_claim": False, "recipe": inputs.recipe.identity.slug, "status": "environment-limited"})
+        return 3
     except (OSError, QualificationError, subprocess.SubprocessError) as error:
         _print({"detected_architecture": architecture, "error": str(error), "passed": False, "physical_claim": False, "recipe": inputs.recipe.identity.slug, "status": "failed"})
         return 1

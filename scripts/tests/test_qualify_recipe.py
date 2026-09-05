@@ -127,3 +127,34 @@ def test_container_gate_reports_environment_without_spark_claim(tmp_path: Path) 
     assert payload["status"] == "environment-limited"
     assert payload["required_architecture"] == "arm64"
     assert payload["physical_claim"] is False
+
+
+def test_container_gate_refuses_without_production_launch_adapter(tmp_path: Path) -> None:
+    root = _library_root()
+    engine = tmp_path / "engine.py"
+    log = tmp_path / "engine.log"
+    engine.write_text(
+        f"""#!/usr/bin/env python3
+import sys
+from pathlib import Path
+args=sys.argv[1:]
+Path({str(log)!r}).open('a', encoding='utf-8').write(' '.join(args)+'\\n')
+if args[:1] == ['info']:
+    print('arm64')
+""",
+        encoding="utf-8",
+    )
+    engine.chmod(0o755)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--recipe", str(_recipes(root)[0]), "--library-root", str(root),
+         "--platform-root", str(ROOT), "--level", "container", "--engine", str(engine),
+         "--artifact-root", str(tmp_path / "models")],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 3
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "environment-limited"
+    assert "production CompiledExecutionPlan" in payload["detail"]
+    engine_log = log.read_text(encoding="utf-8")
+    assert "info" in engine_log
+    assert " run " not in engine_log
