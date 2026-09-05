@@ -22,8 +22,8 @@ use crate::{
     inventory::{available_disk_bytes, available_memory_bytes},
     process::{ProcessError, ProcessRunner, Program},
     workloads::{
-        ArgumentValue, ArtifactSpec, Placement, WorkloadError, WorkloadSpec, image_digest,
-        managed_path,
+        ArgumentValue, ArtifactSpec, CompiledExecutionPlan, Placement, WorkloadError, WorkloadSpec,
+        image_digest, managed_path,
     },
 };
 
@@ -377,6 +377,19 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         )?;
         File::open(&installation)?.sync_all()?;
         Ok(())
+    }
+
+    /// Materialize only the model files authorized by a compiled Controller
+    /// plan. The distribution client must preserve the selection scope in its
+    /// staging layout; a flat path would make colliding files such as
+    /// ``config.json`` ambiguous and is rejected by this boundary.
+    pub fn materialize_compiled_models(
+        &self,
+        plan: &CompiledExecutionPlan,
+        distribution_root: &Path,
+        installation_id: &str,
+    ) -> Result<Vec<PathBuf>, OciError> {
+        materialize_compiled_models(self.data_root, plan, distribution_root, installation_id)
     }
 
     pub fn verify_image(&self, spec: &WorkloadSpec) -> Result<(), OciError> {
@@ -2068,6 +2081,90 @@ fn lower_hex(value: &str, length: usize) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
+fn materialize_compiled_models(
+    data_root: &Path,
+    plan: &CompiledExecutionPlan,
+    distribution_root: &Path,
+    installation_id: &str,
+) -> Result<Vec<PathBuf>, OciError> {
+    if !distribution_root.is_absolute() || !data_root.is_absolute() {
+        return Err(OciError::Artifact);
+    }
+    plan.validate()?;
+    let installation = managed_path(data_root, "installations", installation_id)?;
+    let destination_root = installation.join("models");
+    fs::create_dir_all(&installation)?;
+    fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))?;
+    fs::create_dir_all(&destination_root)?;
+    fs::set_permissions(&destination_root, fs::Permissions::from_mode(0o700))?;
+
+    let scoped_root = distribution_root
+        .join("models")
+        .join(&plan.model_artifact_set_sha256);
+    let mut materialized = Vec::with_capacity(plan.artifacts.len());
+    for artifact in &plan.artifacts {
+        let source = scoped_root
+            .join(&artifact.selection_id)
+            .join(&artifact.path);
+        if !source.starts_with(&scoped_root) {
+            return Err(OciError::Artifact);
+        }
+        let source_metadata = fs::symlink_metadata(&source)?;
+        if !source_metadata.file_type().is_file()
+            || source_metadata.file_type().is_symlink()
+            || source_metadata.len() != artifact.bytes
+            || sha256_file(&source)? != artifact.sha256
+        {
+            return Err(OciError::Artifact);
+        }
+
+        let destination = destination_root
+            .join(&artifact.selection_id)
+            .join(&artifact.path);
+        if !destination.starts_with(&destination_root) {
+            return Err(OciError::Artifact);
+        }
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        }
+        if destination.exists() {
+            let metadata = fs::symlink_metadata(&destination)?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || metadata.len() != artifact.bytes
+                || sha256_file(&destination)? != artifact.sha256
+            {
+                return Err(OciError::Artifact);
+            }
+        } else {
+            let temporary = destination.with_extension(format!(
+                "{}.{}.partial",
+                std::process::id(),
+                artifact.file_id
+            ));
+            if temporary.exists() {
+                return Err(OciError::Artifact);
+            }
+            fs::copy(&source, &temporary)?;
+            let metadata = fs::symlink_metadata(&temporary)?;
+            if metadata.file_type().is_symlink()
+                || !metadata.file_type().is_file()
+                || metadata.len() != artifact.bytes
+                || sha256_file(&temporary)? != artifact.sha256
+            {
+                let _ = fs::remove_file(&temporary);
+                return Err(OciError::Artifact);
+            }
+            fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
+            fs::rename(&temporary, &destination)?;
+        }
+        materialized.push(destination);
+    }
+    File::open(&destination_root)?.sync_all()?;
+    Ok(materialized)
+}
+
 fn artifact_key(artifact: &crate::workloads::ArtifactSpec) -> Result<String, OciError> {
     Ok(hex::encode(Sha256::digest(serde_json::to_vec(artifact)?)))
 }
@@ -2200,9 +2297,67 @@ fn canonical_uuid(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{OciError, is_public_ip, public_https_endpoint_with};
-    use std::{cell::RefCell, collections::VecDeque, net::IpAddr};
+    use super::{OciError, is_public_ip, materialize_compiled_models, public_https_endpoint_with};
+    use serde_json::{Value, json};
+    use sha2::Digest;
+    use std::{cell::RefCell, collections::VecDeque, fs, net::IpAddr, path::Path};
+    use tempfile::tempdir;
     use url::Url;
+
+    fn digest(value: &[u8]) -> String {
+        hex::encode(sha2::Sha256::digest(value))
+    }
+
+    fn compiled_plan() -> Value {
+        let primary = digest(b"primary");
+        let secondary = digest(b"secondary");
+        json!({
+            "schema_version": 2,
+            "recipe_revision_sha256": "a".repeat(64),
+            "harness_sha256": "b".repeat(64),
+            "execution_sha256": "c".repeat(64),
+            "model_artifact_set_sha256": "d".repeat(64),
+            "model_artifact_set_bytes": 15,
+            "artifacts": [
+                {
+                    "id": "primary-config",
+                    "selection_id": "primary",
+                    "file_id": "config-primary",
+                    "path": "config.json",
+                    "sha256": primary,
+                    "bytes": 7,
+                    "roles": ["entrypoint"],
+                    "mount": {"source": "/run/vonk/models/primary", "target": "/models", "read_only": true},
+                    "materialized_path": "/run/vonk/models/primary/config.json",
+                    "model": {"publisher": "vonk-forge", "slug": "primary-model", "content_sha256": "e".repeat(64)},
+                    "distribution_object": {"name": "config.json", "sha256": primary, "bytes": 7, "kind": "model"}
+                },
+                {
+                    "id": "secondary-config",
+                    "selection_id": "secondary",
+                    "file_id": "config-secondary",
+                    "path": "config.json",
+                    "sha256": secondary,
+                    "bytes": 8,
+                    "roles": ["entrypoint"],
+                    "mount": {"source": "/run/vonk/models/secondary", "target": "/models", "read_only": true},
+                    "materialized_path": "/run/vonk/models/secondary/config.json",
+                    "model": {"publisher": "vonk-forge", "slug": "secondary-model", "content_sha256": "f".repeat(64)},
+                    "distribution_object": {"name": "config.json", "sha256": secondary, "bytes": 8, "kind": "model"}
+                }
+            ],
+            "runtime_image": {
+                "image_digest": format!("sha256:{}", "1".repeat(64)),
+                "oci_layout_sha256": "2".repeat(64),
+                "image_bytes": 4096,
+                "architecture": "linux-arm64",
+                "runtime_interface": "vonk.runtime.v1",
+                "source": "published",
+                "build_id": null,
+                "distribution_object": {"name": "image.oci.tar", "sha256": "2".repeat(64), "bytes": 4096, "kind": "oci-archive"}
+            }
+        })
+    }
 
     #[test]
     fn only_globally_routable_ipv6_is_public() {
@@ -2231,5 +2386,103 @@ mod tests {
         let endpoint = public_https_endpoint_with(&url, resolve).unwrap();
         assert_eq!(endpoint.address, "93.184.216.34".parse::<IpAddr>().unwrap());
         assert!(public_https_endpoint_with(&url, resolve).is_err());
+    }
+
+    #[test]
+    fn compiled_models_materialize_selection_scoped_colliding_paths() {
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        plan.validate().unwrap();
+        let data = tempdir().unwrap();
+        let distribution = tempdir().unwrap();
+        let root = distribution
+            .path()
+            .join("models")
+            .join(&plan.model_artifact_set_sha256);
+        fs::create_dir_all(root.join("primary")).unwrap();
+        fs::create_dir_all(root.join("secondary")).unwrap();
+        fs::write(root.join("primary/config.json"), b"primary").unwrap();
+        fs::write(root.join("secondary/config.json"), b"secondary").unwrap();
+
+        let paths = materialize_compiled_models(
+            data.path(),
+            &plan,
+            distribution.path(),
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+        )
+        .unwrap();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            fs::read(data.path().join(
+                "installations/cb555393-764b-4eb6-8f15-b416d289428f/models/primary/config.json"
+            ))
+            .unwrap(),
+            b"primary"
+        );
+        assert_eq!(
+            fs::read(data.path().join(
+                "installations/cb555393-764b-4eb6-8f15-b416d289428f/models/secondary/config.json"
+            ))
+            .unwrap(),
+            b"secondary"
+        );
+    }
+
+    #[test]
+    fn compiled_models_materialize_valid_empty_support_files() {
+        let mut value = compiled_plan();
+        value["model_artifact_set_bytes"] = json!(0);
+        let artifact = &mut value["artifacts"][0];
+        artifact["id"] = json!("tokenizer-config");
+        artifact["selection_id"] = json!("primary");
+        artifact["file_id"] = json!("tokenizer-config");
+        artifact["path"] = json!("tokenizer_config.json");
+        artifact["sha256"] = json!(crate::workloads::EMPTY_SHA256);
+        artifact["bytes"] = json!(0);
+        artifact["roles"] = json!(["tokenizer"]);
+        artifact["materialized_path"] = json!("/run/vonk/models/primary/tokenizer_config.json");
+        artifact["distribution_object"] = json!({
+            "name": "tokenizer_config.json",
+            "sha256": crate::workloads::EMPTY_SHA256,
+            "bytes": 0,
+            "kind": "model"
+        });
+        value["artifacts"] = json!([artifact.clone()]);
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let data = tempdir().unwrap();
+        let distribution = tempdir().unwrap();
+        let source = distribution
+            .path()
+            .join("models")
+            .join(&plan.model_artifact_set_sha256)
+            .join("primary");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("tokenizer_config.json"), &[]).unwrap();
+        materialize_compiled_models(
+            data.path(),
+            &plan,
+            distribution.path(),
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::metadata(data.path().join("installations/cb555393-764b-4eb6-8f15-b416d289428f/models/primary/tokenizer_config.json")).unwrap().len(),
+            0
+        );
+    }
+
+    #[test]
+    fn compiled_models_reject_duplicate_path_within_one_selection() {
+        let mut value = compiled_plan();
+        let duplicate = value["artifacts"][0].clone();
+        value["artifacts"] = json!([duplicate.clone(), duplicate]);
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let result = materialize_compiled_models(
+            Path::new("/tmp/vonk-agent-test-data"),
+            &plan,
+            Path::new("/tmp/vonk-agent-test-distribution"),
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+        );
+        assert!(matches!(result, Err(OciError::Workload(_))));
     }
 }

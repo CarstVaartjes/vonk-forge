@@ -12,6 +12,8 @@ use thiserror::Error;
 use uuid::Uuid;
 use vonk_agent_protocol::RecipeImageImportRequest;
 
+use crate::workloads::CompiledExecutionPlan;
+
 #[derive(Debug, Error)]
 pub enum ImageImportError {
     #[error("OCI archive storage is invalid")]
@@ -128,6 +130,24 @@ impl ImageImporter<'_> {
         }
         fs::rename(&temporary, &destination)?;
         Ok(destination)
+    }
+
+    /// Retain the exact OCI archive authorized by a compiled execution plan.
+    /// The plan's archive receipt is the only source for image bytes and
+    /// layout identity at this boundary.
+    pub fn retain_compiled_runtime_image(
+        &self,
+        plan: &CompiledExecutionPlan,
+        archive: &Path,
+    ) -> Result<PathBuf, ImageImportError> {
+        plan.validate().map_err(|_| ImageImportError::Digest)?;
+        let image = &plan.runtime_image;
+        self.retain_verified_distribution_archive(
+            &image.oci_layout_sha256,
+            &image.image_digest,
+            image.image_bytes,
+            archive,
+        )
     }
 
     pub fn distribution_runtime_arguments(
