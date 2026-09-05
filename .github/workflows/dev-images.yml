@@ -155,7 +155,7 @@ jobs:
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$WORKER_DIGEST" \
             --hermes-image "$hermes_image" \
             --litellm-image "$litellm_image" \
-            --commit "$GITHUB_SHA"
+            --channel pinned
           scripts/render-dev-compose \
             --template deploy/compose/compose.yaml \
             --output "$publication_root/docker-compose.dev.yml" \
@@ -724,6 +724,8 @@ jobs:
           DEV_ALIAS: ${{ steps.metadata.outputs.dev_alias }}
           WORKER_DIGEST: ${{ steps.publish.outputs.worker_digest }}
           WORKER_IMAGE: ${{ steps.metadata.outputs.worker_image }}
+          HERMES_DIGEST: ${{ steps.publish.outputs.hermes_digest }}
+          LITELLM_DIGEST: ${{ steps.publish.outputs.litellm_digest }}
         run: |
           set -euo pipefail
           git fetch --force --no-tags origin \
@@ -733,6 +735,8 @@ jobs:
           scripts/promote-image-aliases \
             "$API_IMAGE" "$API_DIGEST" \
             "$WORKER_IMAGE" "$WORKER_DIGEST" "$DEV_ALIAS" \
+            ghcr.io/carstvaartjes/vonk-forge-hermes "$HERMES_DIGEST" \
+            ghcr.io/carstvaartjes/vonk-forge-litellm "$LITELLM_DIGEST" \
             --postcondition bash -c '
               set -euo pipefail
               git fetch --force --no-tags origin \
