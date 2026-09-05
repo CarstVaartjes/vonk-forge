@@ -1191,8 +1191,11 @@ async fn sha256_path(path: &Path, expected_bytes: u64) -> Result<String, ClientE
     let mut file = tokio::fs::File::open(path).await?;
     let mut digest = Sha256::new();
     let mut total = 0_u64;
+    // Keep the buffer on the heap: this async future is held by the default
+    // tokio worker stack, where a 1 MiB inline array can overflow it.  64 KiB
+    // matches the bounded buffers used by the adjacent OCI hashing paths.
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
-        let mut buffer = [0_u8; 1024 * 1024];
         let count = tokio::io::AsyncReadExt::read(&mut file, &mut buffer).await?;
         if count == 0 {
             break;
