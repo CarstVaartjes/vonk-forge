@@ -42,7 +42,6 @@ from vonk_control.models import (
 from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
 
-
 PUBLICATION_COMMIT = "2001c6502bfdc66141dd7224bfde5d77734e9959"
 REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 EVIDENCE_PATH = Path(
@@ -232,10 +231,6 @@ def test_fresh_orbstack_postgres_imports_exact_published_corpus_and_survives_off
     assert len(snapshot.items) == 84
     reader.prepare(snapshot)
 
-    # The package cache was verified by the production-reader lane.  A fresh
-    # database still has to persist every catalog Model, including 11 Models
-    # that are intentionally absent from every package closure.
-    assert catalog.import_catalog_models("system:acceptance", models) == 92
     sync = ManagedRecipeCatalogSyncService(
         sessions, catalog=catalog, reader=reader, clock=clock
     )

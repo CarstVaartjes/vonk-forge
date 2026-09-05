@@ -228,11 +228,9 @@ class ManagedRecipeCatalogSyncService:
     ) -> dict[str, object]:
         result = _empty_result()
         package_mode = callable(getattr(self._reader, "prepare", None))
-        indexed_models = getattr(self._reader, "catalog_entities", None)
-        if callable(indexed_models):
-            indexed_models = indexed_models()
-        if indexed_models is not None:
-            self._catalog.import_catalog_models(actor, tuple(indexed_models))
+        # The immutable index is authoritative for the complete Model catalog,
+        # including valid revisions that no package happens to reference.
+        self._catalog.import_catalog_models(actor, snapshot.catalog_entities)
         local = self._catalog.recipe_catalog_local_revisions(
             [item.slug for item in snapshot.items]
         )
