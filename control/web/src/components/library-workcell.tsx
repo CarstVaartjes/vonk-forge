@@ -87,8 +87,10 @@ export type LibraryRecipeRecord = {
   key: string;
   managed: boolean;
   model?: LibraryModel["model"];
+  modelCapabilities?: LibraryModel["model_capabilities"];
   modelKey: string;
   modelTitle: string;
+  modelVersion?: LibraryModel["model_version"];
   recipe?: LibraryRecipeSummary;
   title: string;
   withdrawal?: ManagedCatalogWithdrawal;
@@ -129,8 +131,10 @@ export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot, publicRecip
         key: recipe.recipe_id,
         managed: Boolean(catalog),
         model: libraryModel.model,
+        modelCapabilities: libraryModel.model_capabilities,
         modelKey: modelVersionKey(libraryModel.model),
         modelTitle: catalog?.model_version_title ?? friendlyModelName(libraryModel.model),
+        modelVersion: libraryModel.model_version,
         recipe,
         title: recipe.title,
         withdrawnInstalled: false,
@@ -149,8 +153,8 @@ export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot, publicRecip
       custom: false,
       key: catalog.uri,
       managed: true,
-      modelKey: `${catalog.model_version_publisher}/${catalog.model_version_slug}`,
-      modelTitle: catalog.model_version_title,
+      modelKey: "unlinked",
+      modelTitle: "Model identity unavailable",
       title: catalog.title,
       withdrawnInstalled: false,
     });
@@ -182,14 +186,12 @@ export function applyManagedCatalogWithdrawals(
   });
 }
 
-function recordCapabilities(record: LibraryRecipeRecord): PublicRecipeCapability[] {
+export function recordCapabilities(record: LibraryRecipeRecord): PublicRecipeCapability[] {
   return record.catalog?.capabilities ?? (record.recipe ? normalizedCapabilities(record.recipe) : []);
 }
 
 function modelFamilyTitle(value: string): string {
-  const title = value.replace(/\s+[0-9a-f]{8}$/i, "").replace(/^NVIDIA\s+/i, "");
-  const variant = /\s+(?:NVFP4|BF16|FP16|FP8|FP4|INT8|INT4|EXL3|AQLM|AWQ|GPTQ|GGUF|TorchAO|DFlash\d*|Abliterated)(?:\s|$)/i.exec(title);
-  return (variant ? title.slice(0, variant.index) : title).trim();
+  return value.trim();
 }
 
 function recordModelFamily(record: LibraryRecipeRecord): string {

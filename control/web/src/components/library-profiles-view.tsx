@@ -4,9 +4,12 @@ import type {
   ControlApi,
   FleetProfile,
   FleetProfileApplyInput,
+  FleetProfileCaptureInput,
+  FleetProfileDuplicateInput,
   FleetProfileInput,
   FleetProfileApplication,
   FleetProfilePreview,
+  FleetProfileStatus,
   VisualFleetNode,
   VisualFleetSnapshot,
 } from "../api/types";
@@ -15,23 +18,12 @@ import type {LibraryRecipeRecord} from "./library-workcell";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 type AssignmentInput = NonNullable<FleetProfileInput["assignments"]>[number];
-type ProfileScope = {node_ids: string[]};
-type ScopeAwareFleetProfile = FleetProfile & {scope: ProfileScope};
-type ScopeAwareFleetProfileInput = FleetProfileInput & {scope: ProfileScope};
-type FleetProfileStatus = {
-  schema_version: number;
-  profile_id: string;
-  profile_digest: string;
-  state: string;
-  matched: boolean;
-  drifted: boolean;
-  scope: {node_ids: string[]; idle_node_ids?: string[]};
-  reasons: Array<{code: string; detail: string; severity: "info" | "warning" | "error"}>;
-  generated_at: string;
-};
+type ProfileScope = FleetProfile["scope"];
+type ScopeAwareFleetProfile = FleetProfile;
+type ScopeAwareFleetProfileInput = FleetProfileInput;
 type ProfileApi = ControlApi & {
-  captureCurrentFleetProfile(input: {name: string; description: string; installation_policy: FleetProfileInput["installation_policy"]; labels?: Record<string, string>; favorite: boolean}, signal?: AbortSignal): Promise<ScopeAwareFleetProfile>;
-  duplicateFleetProfile(profileId: string, input: {name: string; description?: string | null}, signal?: AbortSignal): Promise<ScopeAwareFleetProfile>;
+  captureCurrentFleetProfile(input: FleetProfileCaptureInput, signal?: AbortSignal): Promise<ScopeAwareFleetProfile>;
+  duplicateFleetProfile(profileId: string, input: FleetProfileDuplicateInput, signal?: AbortSignal): Promise<ScopeAwareFleetProfile>;
   fleetProfileStatus(profileId: string, signal?: AbortSignal): Promise<FleetProfileStatus>;
 };
 type AssignmentDraft = {

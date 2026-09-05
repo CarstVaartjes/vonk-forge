@@ -17,9 +17,12 @@ import type {
   FleetProfile,
   FleetProfileApplication,
   FleetProfileApplyInput,
+  FleetProfileCaptureInput,
+  FleetProfileDuplicateInput,
   FleetProfileInput,
   FleetProfileList,
   FleetProfilePreview,
+  FleetProfileStatus,
   RunSwitchApplyRequest,
   RunSwitchOperation,
   RunSwitchPlan,
@@ -372,16 +375,23 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  captureCurrentFleetProfile(input: {name: string; description: string; installation_policy: FleetProfileInput["installation_policy"]; labels?: Record<string, string>; favorite: boolean}, signal?: AbortSignal): Promise<FleetProfile> {
-    return this.request("/api/v1/fleet-profiles/capture-current", {method: "POST", body: JSON.stringify(input), signal});
+  async captureCurrentFleetProfile(input: FleetProfileCaptureInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profiles/capture-current", {body: input, signal}));
   }
 
-  duplicateFleetProfile(profileId: string, input: {name: string; description?: string | null}, signal?: AbortSignal): Promise<FleetProfile> {
-    return this.request(`/api/v1/fleet-profiles/${encodeURIComponent(profileId)}/duplicate`, {method: "POST", body: JSON.stringify(input), signal});
+  async duplicateFleetProfile(profileId: string, input: FleetProfileDuplicateInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/duplicate", {
+      params: {path: {profile_id: profileId}},
+      body: input,
+      signal,
+    }));
   }
 
-  fleetProfileStatus(profileId: string, signal?: AbortSignal): Promise<{schema_version: 2; profile_id: string; profile_digest: string; state: string; matched: boolean; drifted: boolean; scope: {node_ids: string[]; idle_node_ids?: string[]}; reasons: Array<{code: string; detail: string; severity: "info" | "warning" | "error"}>; generated_at: string}> {
-    return this.request(`/api/v1/fleet-profiles/${encodeURIComponent(profileId)}/status`, {signal});
+  async fleetProfileStatus(profileId: string, signal?: AbortSignal): Promise<FleetProfileStatus> {
+    return resultData(await this.generated.GET("/api/v1/fleet-profiles/{profile_id}/status", {
+      params: {path: {profile_id: profileId}},
+      signal,
+    }));
   }
 
   async applyFleetProfile(profileId: string, input: FleetProfileApplyInput, signal?: AbortSignal): Promise<FleetProfileApplication> {
@@ -393,75 +403,75 @@ export class ApiClient implements ControlApi {
   }
 
   async fleetProfileApplication(applicationId: string, signal?: AbortSignal): Promise<FleetProfileApplication> {
-    return this.request(`/api/v1/fleet-profiles/applications/${encodeURIComponent(applicationId)}`, {signal});
-  }
-
-  previewRecipeRunSwitch(input: RunSwitchPreviewRequest, signal?: AbortSignal): Promise<RunSwitchPlan> {
-    return this.request("/api/v1/recipes/run-switch-plans/preview", {
-      method: "POST",
-      body: JSON.stringify(input),
+    return resultData(await this.generated.GET("/api/v1/fleet-profile-applications/{application_id}", {
+      params: {path: {application_id: applicationId}},
       signal,
-    });
+    }));
   }
 
-  applyRecipeRunSwitch(input: RunSwitchApplyRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return this.request("/api/v1/recipes/run-switches", {
-      method: "POST",
-      body: JSON.stringify(input),
+  async previewRecipeRunSwitch(input: RunSwitchPreviewRequest, signal?: AbortSignal): Promise<RunSwitchPlan> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switch-plans/preview", {body: input, signal}));
+  }
+
+  async applyRecipeRunSwitch(input: RunSwitchApplyRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switches", {body: input, signal}));
+  }
+
+  async getRecipeRunSwitchOperation(operationId: string, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.GET("/api/v1/recipes/run-switches/{operation_id}", {
+      params: {path: {operation_id: operationId}},
       signal,
-    });
+    }));
   }
 
-  getRecipeRunSwitchOperation(operationId: string, signal?: AbortSignal): Promise<RunSwitchOperation> {
-    return this.request(`/api/v1/recipes/run-switches/${encodeURIComponent(operationId)}`, {signal});
+  async modelCacheInventory(cursor?: string, signal?: AbortSignal): Promise<ModelCacheInventoryResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache", {params: {query: {limit: 100, cursor}}, signal}));
   }
 
-  modelCacheInventory(cursor?: string, signal?: AbortSignal): Promise<ModelCacheInventoryResponse> {
-    const params = new URLSearchParams({limit: "100"});
-    if (cursor) params.set("cursor", cursor);
-    return this.request(`/api/v1/model-cache?${params.toString()}`, {signal});
+  async modelCacheEntry(artifactSetSha256: string, signal?: AbortSignal): Promise<CacheEntryResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/entries/{artifact_set_sha256}", {
+      params: {path: {artifact_set_sha256: artifactSetSha256}},
+      signal,
+    }));
   }
 
-  modelCacheEntry(artifactSetSha256: string, signal?: AbortSignal): Promise<CacheEntryResponse> {
-    return this.request(`/api/v1/model-cache/entries/${encodeURIComponent(artifactSetSha256)}`, {signal});
+  async previewModelCacheDownload(input: ModelCacheDownloadPreviewInput, signal?: AbortSignal): Promise<ModelCacheDownloadPreviewResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/download-preview", {body: input, signal}));
   }
 
-  previewModelCacheDownload(input: ModelCacheDownloadPreviewInput, signal?: AbortSignal): Promise<ModelCacheDownloadPreviewResponse> {
-    return this.request("/api/v1/model-cache/download-preview", {method: "POST", body: JSON.stringify(input), signal});
+  async downloadModelCache(input: ModelCacheDownloadInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/download", {body: input, signal}));
   }
 
-  downloadModelCache(input: ModelCacheDownloadInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return this.request("/api/v1/model-cache/download", {method: "POST", body: JSON.stringify(input), signal});
+  async previewModelCacheRepair(input: ModelCacheRepairPreviewInput, signal?: AbortSignal): Promise<ModelCacheRepairPreviewResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/repair-preview", {body: input, signal}));
   }
 
-  previewModelCacheRepair(input: ModelCacheRepairPreviewInput, signal?: AbortSignal): Promise<ModelCacheRepairPreviewResponse> {
-    return this.request("/api/v1/model-cache/repair-preview", {method: "POST", body: JSON.stringify(input), signal});
+  async repairModelCache(input: ModelCacheRepairInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/repair", {body: input, signal}));
   }
 
-  repairModelCache(input: ModelCacheRepairInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return this.request("/api/v1/model-cache/repair", {method: "POST", body: JSON.stringify(input), signal});
+  async previewModelCacheEviction(input: ModelCacheEvictionPreviewInput, signal?: AbortSignal): Promise<ModelCacheEvictionPreviewResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/eviction-preview", {body: input, signal}));
   }
 
-  previewModelCacheEviction(input: ModelCacheEvictionPreviewInput, signal?: AbortSignal): Promise<ModelCacheEvictionPreviewResponse> {
-    return this.request("/api/v1/model-cache/eviction-preview", {method: "POST", body: JSON.stringify(input), signal});
+  async evictModelCache(input: ModelCacheEvictInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/evict", {body: input, signal}));
   }
 
-  evictModelCache(input: ModelCacheEvictInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return this.request("/api/v1/model-cache/evict", {method: "POST", body: JSON.stringify(input), signal});
+  async modelCacheUpdates(signal?: AbortSignal): Promise<ModelCacheUpdatesResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/updates", {params: {query: {limit: 100}}, signal}));
   }
 
-  modelCacheUpdates(signal?: AbortSignal): Promise<ModelCacheUpdatesResponse> {
-    return this.request("/api/v1/model-cache/updates", {signal});
+  async modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/operations", {params: {query: {limit: 100, cursor}}, signal}));
   }
 
-  modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse> {
-    const params = new URLSearchParams({limit: "100"});
-    if (cursor) params.set("cursor", cursor);
-    return this.request(`/api/v1/model-cache/operations?${params.toString()}`, {signal});
-  }
-
-  modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
-    return this.request(`/api/v1/model-cache/operations/${encodeURIComponent(operationId)}`, {signal});
+  async modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/operations/{operation_id}", {
+      params: {path: {operation_id: operationId}},
+      signal,
+    }));
   }
 
   async updateNodeProfile(nodeId: string, input: NodeProfileUpdate, signal?: AbortSignal): Promise<FleetNodeIdentity> {
@@ -725,20 +735,25 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  nodeTelemetryCurrent(nodeId: string, signal?: AbortSignal): Promise<TelemetryCurrentResponse> {
-    return this.request(`/api/v1/nodes/${encodeURIComponent(nodeId)}/telemetry/current`, {signal});
+  async nodeTelemetryCurrent(nodeId: string, signal?: AbortSignal): Promise<TelemetryCurrentResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/current", {
+      params: {path: {node_id: nodeId}},
+      signal,
+    }));
   }
 
-  nodeTelemetryCapabilities(nodeId: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse> {
-    return this.request(`/api/v1/nodes/${encodeURIComponent(nodeId)}/telemetry/capabilities`, {signal});
+  async nodeTelemetryCapabilities(nodeId: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/capabilities", {
+      params: {path: {node_id: nodeId}},
+      signal,
+    }));
   }
 
-  nodeTelemetryWorkloads(nodeId: string, runId?: string, state?: string, signal?: AbortSignal): Promise<TelemetryWorkloadsResponse> {
-    const params = new URLSearchParams();
-    if (runId) params.set("run_id", runId);
-    if (state) params.set("state", state);
-    const query = params.toString();
-    return this.request(`/api/v1/nodes/${encodeURIComponent(nodeId)}/telemetry/workloads${query ? `?${query}` : ""}`, {signal});
+  async nodeTelemetryWorkloads(nodeId: string, runId?: string, state?: string, signal?: AbortSignal): Promise<TelemetryWorkloadsResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/workloads", {
+      params: {path: {node_id: nodeId}, query: {run_id: runId, state}},
+      signal,
+    }));
   }
 
   async agents(): Promise<AgentsResponse> {

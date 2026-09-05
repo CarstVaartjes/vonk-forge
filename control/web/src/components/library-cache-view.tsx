@@ -145,7 +145,7 @@ function entryFromResponse(response: CacheEntryResponse, records: LibraryRecipeR
     update_available: response.update_available,
     recipe_update_available: response.recipe_update_available,
     verified_at: response.verified_at,
-    last_error: response.last_error,
+    last_error: response.last_error ?? null,
     target_states: targetStates(recipeIds, fleet),
     note: response.last_error ?? undefined,
   };
@@ -322,7 +322,7 @@ export function LibraryCacheView({api, entries: recordEntries, fleet, onBusyChan
     setOperationError("");
     try {
       if (action === "download") {
-        const plan = await cacheApi.previewModelCacheDownload({schema_version: 2, ...(entry.artifact_set_sha256 ? {artifact_set_sha256: entry.artifact_set_sha256} : {recipe_revision_sha256: entry.recipe_revision_sha256!})});
+        const plan = await cacheApi.previewModelCacheDownload({schema_version: 2, source_policy: "nas-first", ...(entry.artifact_set_sha256 ? {artifact_set_sha256: entry.artifact_set_sha256} : {recipe_revision_sha256: entry.recipe_revision_sha256!})});
         const nextReview: CacheReview = {action, plan};
         if (plan.blockers.length > 0) setReview(nextReview);
         else await applyReview(nextReview, entry);
@@ -389,6 +389,8 @@ export function LibraryCacheView({api, entries: recordEntries, fleet, onBusyChan
   }
 
   const closeReview = () => setReview(undefined);
+  const operationExpectedBytes = operation?.progress.expected_bytes ?? null;
+  const operationHasExpectedBytes = typeof operationExpectedBytes === "number" && operationExpectedBytes > 0;
 
   return <section className="library-cache-view" aria-labelledby="library-cache-heading">
     <header className="library-subview-heading">
@@ -407,7 +409,7 @@ export function LibraryCacheView({api, entries: recordEntries, fleet, onBusyChan
       <label><span>Find an artifact set</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search model, variant, recipe, digest…"/></label>
       <div className="library-cache-filters" role="group" aria-label="Filter NAS cache">{CACHE_FILTERS.map(option => <button key={option.value} type="button" aria-pressed={filter === option.value} onClick={() => setFilter(option.value)}>{option.label}{option.value === "updates" && updateCount > 0 ? ` · ${updateCount}` : ""}</button>)}</div>
     </div>
-    {operation && <section className={`library-cache-operation state-${operation.state}`} aria-live="polite"><div><strong>{operationLabel(operation)}</strong><span>{operationPhaseLabel(operation)} · {operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} artifacts · {formatBytes(operation.progress.downloaded_bytes)} / {operation.progress.expected_bytes > 0 ? formatBytes(operation.progress.expected_bytes) : "total unavailable"}</span></div>{operation.progress.expected_bytes > 0 ? <div className="library-cache-operation-track" role="progressbar" aria-label="NAS cache bytes transferred" aria-valuemin={0} aria-valuemax={operation.progress.expected_bytes} aria-valuenow={operation.progress.downloaded_bytes}><span style={{width: `${Math.min(100, operation.progress.downloaded_bytes / operation.progress.expected_bytes * 100)}%`}}/></div> : operation.progress.total_artifacts > 0 ? <div className="library-cache-operation-track" role="progressbar" aria-label="NAS cache artifacts completed" aria-valuemin={0} aria-valuemax={operation.progress.total_artifacts} aria-valuenow={operation.progress.completed_artifacts}><span style={{width: `${Math.min(100, operation.progress.completed_artifacts / operation.progress.total_artifacts * 100)}%`}}/></div> : <div className="library-cache-operation-track is-indeterminate" role="progressbar" aria-label="NAS cache operation progress" aria-valuetext="Total bytes and artifact count unavailable"><span/></div>}{operation.last_error && <p>{operation.last_error}</p>}{requestKey && <details className="library-cache-operation-advanced"><summary>Operation details</summary><code>Request key {requestKey}</code>{operation.plan_digest && <code>Plan digest {operation.plan_digest}</code>}</details>}{TERMINAL_OPERATION_STATES.has(operation.state) && operation.state !== "succeeded" && <button type="button" className="button secondary" onClick={() => { setOperation(undefined); setOperationError(""); }}>Recheck before retrying</button>}</section>}
+    {operation && <section className={`library-cache-operation state-${operation.state}`} aria-live="polite"><div><strong>{operationLabel(operation)}</strong><span>{operationPhaseLabel(operation)} · {operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} artifacts · {formatBytes(operation.progress.downloaded_bytes)} / {operationHasExpectedBytes ? formatBytes(operationExpectedBytes) : "total unavailable"}</span></div>{operationHasExpectedBytes ? <div className="library-cache-operation-track" role="progressbar" aria-label="NAS cache bytes transferred" aria-valuemin={0} aria-valuemax={operationExpectedBytes} aria-valuenow={operation.progress.downloaded_bytes}><span style={{width: `${Math.min(100, operation.progress.downloaded_bytes / operationExpectedBytes * 100)}%`}}/></div> : operation.progress.total_artifacts > 0 ? <div className="library-cache-operation-track" role="progressbar" aria-label="NAS cache artifacts completed" aria-valuemin={0} aria-valuemax={operation.progress.total_artifacts} aria-valuenow={operation.progress.completed_artifacts}><span style={{width: `${Math.min(100, operation.progress.completed_artifacts / operation.progress.total_artifacts * 100)}%`}}/></div> : <div className="library-cache-operation-track is-indeterminate" role="progressbar" aria-label="NAS cache operation progress" aria-valuetext="Total bytes and artifact count unavailable"><span/></div>}{operation.last_error && <p>{operation.last_error}</p>}{requestKey && <details className="library-cache-operation-advanced"><summary>Operation details</summary><code>Request key {requestKey}</code>{operation.plan_digest && <code>Plan digest {operation.plan_digest}</code>}</details>}{TERMINAL_OPERATION_STATES.has(operation.state) && operation.state !== "succeeded" && <button type="button" className="button secondary" onClick={() => { setOperation(undefined); setOperationError(""); }}>Recheck before retrying</button>}</section>}
     {operationError && <div className="library-cache-state is-error" role="alert"><span>{operationError}</span><button type="button" className="button secondary" onClick={() => setOperationError("")}>Dismiss</button></div>}
     <section className="library-cache-list" aria-label="NAS artifact sets">
       <div className="library-cache-list-heading"><span>{visibleEntries.length} of {entries.length} artifact set{entries.length === 1 ? "" : "s"}</span><small>Controller cache, Spark staging, and running state are shown separately.</small></div>

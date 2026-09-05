@@ -2,10 +2,10 @@ import {useMemo, useState} from "react";
 import type {MouseEvent} from "react";
 import type {ControlApi, PublicRecipeCapability, VisualFleetSnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
-import {modelLibraryPath} from "../lib/library-route";
+import {modelLibraryPath, modelVersionKey, recipeLibraryPath} from "../lib/library-route";
 import {humanizeIdentifier} from "./library-technical-details";
 import type {LibraryRecipeRecord, LibraryWorkcellFilters} from "./library-workcell";
-import {filterLibraryRecipeRecords} from "./library-workcell";
+import {filterLibraryRecipeRecords, recordCapabilities} from "./library-workcell";
 
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 
@@ -24,6 +24,7 @@ type ModelVariant = {
   key: string;
   title: string;
   modelTitle: string;
+  modelCapabilities: string[];
   recipeCount: number;
   requiredSparks: number | null;
   recipeCapabilities: PublicRecipeCapability[];
@@ -48,33 +49,44 @@ type ModelFamily = {
 };
 
 function modelFamilyKey(record: LibraryRecipeRecord): string {
-  const catalog = record.catalog;
-  if (catalog) return `${catalog.model_publisher}/${catalog.model_slug}`;
+  const familyIdentity = record.modelVersion?.family?.identity;
+  if (familyIdentity) return modelVersionKey(familyIdentity);
   if (record.model) return `${record.model.publisher}/${record.model.slug}`;
-  return record.modelTitle || "unlinked";
+  return "unlinked";
 }
 
 function modelFamilyTitle(record: LibraryRecipeRecord | undefined): string {
-  // The catalog's model_title is the authoritative family label. Do not
-  // infer a family by stripping digits or variant tokens from a display name:
-  // version numbers are meaningful model identity (for example, Qwen 3).
-  const title = record?.catalog?.model_title?.trim() || record?.modelTitle?.trim();
+  const title = record?.modelVersion?.family?.metadata.title?.trim()
+    || record?.catalog?.model_title?.trim()
+    || record?.modelTitle?.trim();
   if (title) return title;
   return record?.model ? humanizeIdentifier(`${record.model.publisher}/${record.model.slug}`) : "Unlinked model";
 }
 
 function variantKey(record: LibraryRecipeRecord): string {
-  return record.catalog?.content_sha256
-    ?? record.recipe?.selected_revision?.content_sha256
-    ?? record.recipe?.selected_revision?.id
-    ?? record.key;
+  // A recipe revision is an execution contract. The Models view groups the
+  // exact model payload by its content addressed identity, so two recipes
+  // that point at the same model stay one model variant.
+  return record.model ? modelVersionKey(record.model) : "unlinked";
 }
 
 function modelVersionTitle(record: LibraryRecipeRecord | undefined): string {
   const catalog = record?.catalog;
-  if (catalog?.model_version_title) return catalog.model_version_title;
-  if (record?.modelTitle) return record.modelTitle;
-  return record?.title ?? "Model version not reported";
+  const facts = record?.modelVersion;
+  if (catalog?.model_version_title?.trim()) return catalog.model_version_title;
+  if (facts?.metadata?.title?.trim()) return facts.metadata.title;
+  if (facts?.version?.trim()) return facts.version;
+  if (record?.model) return humanizeIdentifier(`${record.model.publisher}/${record.model.slug}`);
+  return "Model version not reported";
+}
+
+function modelVariantTitle(record: LibraryRecipeRecord | undefined): string {
+  const format = record?.modelVersion?.format;
+  if (format?.quantization?.trim()) return format.quantization;
+  if (format?.precision?.trim()) return format.precision;
+  if (record?.catalog?.precision?.trim()) return record.catalog.precision;
+  const quantization = record?.catalog?.quantizations.find(value => value.trim());
+  return quantization ?? "Exact model version";
 }
 
 function recipeSparkCount(record: LibraryRecipeRecord): number | null {
@@ -118,13 +130,18 @@ function groupModels(records: LibraryRecipeRecord[]): ModelFamily[] {
       modelKey: variants.values().next().value?.[0]?.modelKey ?? versionKey,
       variants: [...variants.entries()].map(([key, grouped]) => {
         const first = grouped[0];
-        const recipeCapabilities = [...new Set(grouped.flatMap(record => record.catalog?.capabilities ?? []))];
-        const quantizations = [...new Set(grouped.flatMap(record => record.catalog?.quantizations ?? []))];
+        const recipeCapabilities = [...new Set(grouped.flatMap(recordCapabilities))];
+        const quantizations = [...new Set(grouped.flatMap(record => {
+          const format = record.modelVersion?.format;
+          return [format?.quantization, format?.precision, record.catalog?.precision, ...(record.catalog?.quantizations ?? [])].filter((value): value is string => Boolean(value?.trim()));
+        }))];
+        const modelCapabilities = [...new Set(grouped.flatMap(record => (record.modelCapabilities?.facts ?? []).filter(fact => fact.support === "supported").map(fact => fact.capability)))];
         const requiredSparks = [...new Set(grouped.map(recipeSparkCount).filter((value): value is number => value !== null))];
         return {
           key,
-          title: first ? (first.catalog?.title ?? first.title) : key,
+          title: modelVariantTitle(first),
           modelTitle: first?.catalog?.model_title ?? first?.modelTitle ?? "Model metadata not reported",
+          modelCapabilities,
           recipeCount: grouped.length,
           requiredSparks: requiredSparks.length === 1 ? requiredSparks[0] : requiredSparks.length > 1 ? Math.max(...requiredSparks) : null,
           recipeCapabilities,
@@ -197,7 +214,7 @@ export function LibraryModelsView({api: _api, entries, fleet: _fleet, filters, o
         const flat = family.versions.length === 1 && version.variants.length === 1;
         return <section className={`library-model-version${flat ? " is-flat" : ""}`} key={version.key}>
           {!flat && <header><div><h3>{version.title}</h3><small>{version.variants.length} exact variant{version.variants.length === 1 ? "" : "s"}</small></div><a className="text-link" href={versionHref(version.modelKey)} onClick={event => onNavigate(event, versionHref(version.modelKey))}>Compare recipes</a></header>}
-          {version.variants.map(variant => <article className="library-model-row" key={variant.key}><div className="library-model-identity"><strong>{variant.title}</strong><small>{flat ? `${version.title} · ` : ""}{variant.modelTitle}{variant.quantizations.length ? ` · ${variant.quantizations.join(" · ")}` : ""}</small></div><div className="library-model-capabilities" aria-label="Model and recipe capabilities">{variant.recipeCapabilities.length > 0 && variant.recipeCapabilities.slice(0, 3).map(capability => <span key={capability}>Recipe: {capabilityText(capability)}</span>)}<details className="library-model-capability-unknown"><summary>Capabilities unavailable</summary><p>Model capability evidence is not declared. Recipe capabilities above come from the linked recipe record.</p></details></div><div className="library-model-cache-state"><span className="state-dot is-unknown" aria-hidden="true"/><details><summary>Cache status unavailable</summary><p>Controller cache inventory has not reported this exact artifact set.</p></details></div><div className="library-model-requirements"><strong>{variant.requiredSparks === null ? "Spark count unknown" : `${variant.requiredSparks} Spark${variant.requiredSparks === 1 ? "" : "s"}`}</strong><small>{variant.recipeCount} recipe{variant.recipeCount === 1 ? "" : "s"}{variant.expectedBytes !== null ? ` · ${formatBytes(variant.expectedBytes)} download` : ""}</small></div><div className="library-model-actions"><a className="button secondary" href={`/library/cache?model=${encodeURIComponent(variant.modelKey)}&artifact=${encodeURIComponent(variant.key)}`} onClick={event => onNavigate(event, `/library/cache?model=${encodeURIComponent(variant.modelKey)}&artifact=${encodeURIComponent(variant.key)}`)}>Download to Library</a><a className="text-link" href={versionHref(variant.modelKey)} onClick={event => onNavigate(event, versionHref(variant.modelKey))}>Recipes</a></div></article>)}
+          {version.variants.map(variant => <article className="library-model-row" key={variant.key}><div className="library-model-identity"><strong>{variant.title}</strong><small>{flat ? `${version.title} · ` : ""}{variant.modelTitle}</small></div><div className="library-model-capabilities" aria-label="Model and recipe capabilities">{variant.modelCapabilities.slice(0, 3).map(capability => <span className="library-model-capability-model" key={`model-${capability}`}>Model: {humanizeIdentifier(capability)}</span>)}{variant.recipeCapabilities.slice(0, 3).map(capability => <span className="library-model-capability-recipe" key={`recipe-${capability}`}>Recipe: {capabilityText(capability)}</span>)}{variant.modelCapabilities.length === 0 && <details className="library-model-capability-unknown"><summary>Capabilities unavailable</summary><p>Model capability evidence is unavailable from the Controller. Recipe capabilities above describe the linked recipe interface.</p></details>}</div><div className="library-model-cache-state"><span className="state-dot is-unknown" aria-hidden="true"/><details><summary>Cache status unavailable</summary><p>Controller cache inventory has not reported this exact artifact set.</p></details></div><div className="library-model-requirements"><strong>{variant.requiredSparks === null ? "Spark count unknown" : `${variant.requiredSparks} Spark${variant.requiredSparks === 1 ? "" : "s"}`}</strong><small>{variant.expectedBytes !== null ? `${formatBytes(variant.expectedBytes)} download` : "Download size unknown"}</small></div><div className="library-model-actions"><a className="button secondary" href={`/library/cache?model=${encodeURIComponent(variant.modelKey)}&artifact=${encodeURIComponent(variant.key)}`} onClick={event => onNavigate(event, `/library/cache?model=${encodeURIComponent(variant.modelKey)}&artifact=${encodeURIComponent(variant.key)}`)}>Download to Library</a><details className="library-model-linked-recipes"><summary>Recipes · {variant.recipeCount}</summary><ul>{variant.records.map(record => <li key={record.key}>{record.recipe ? <a href={recipeLibraryPath(record.recipe.recipe_id)} onClick={event => onNavigate(event, recipeLibraryPath(record.recipe!.recipe_id))}>{record.title}</a> : <span>{record.title}</span>}</li>)}</ul></details></div></article>)}
         </section>;
       })}</div>}
     </section>)}</div>}

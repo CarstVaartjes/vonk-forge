@@ -21,6 +21,7 @@ function operation(kind: "download" | "repair"): ModelCacheOperationResponse {
   return {
     schema_version: 2,
     id: `${kind}-operation`,
+    attempt: 1,
     request_key: "00000000-0000-4000-8000-000000000001",
     kind,
     state: "succeeded",

@@ -33,6 +33,11 @@ function operation(overrides: Partial<RunSwitchOperation> = {}): RunSwitchOperat
   };
 }
 
+const fit = {allowed: true, nodes: [{allowed: true, node_id: nodeA, rank: 0, role: "leader"}]};
+const storage = {copied_bytes: 0, nas_coverage: "unknown" as const, reclaimable_bytes: 0, reclaimed_bytes: 0, required_bytes: null, retention: "retain-cached" as const, reused_bytes: 0, running_coverage: "unknown" as const, spark_coverage: "unknown" as const};
+const runtimeStorage = {build_id: null, copied_bytes: 0, image_digest: null, nas_coverage: "unknown" as const, reclaimable_bytes: 0, reused_bytes: 0, running_coverage: "unknown" as const, spark_coverage: "unknown" as const};
+const build = {build_id: null, compatibility: {expected_architecture: "linux/arm64", state: "unknown" as const}, image_digest: null, runtime: runtimeStorage, source: {state: "unknown" as const}, state: "unknown" as const};
+
 test("keeps unknown byte progress indeterminate and polls the durable operation", async () => {
   vi.useFakeTimers();
   const next = operation({state: "succeeded", current_phase: "final_verify", progress: {...operation().progress, phase: "final_verify", state: "succeeded", completed_bytes: 0, members: [{node_id: nodeA, phase: "final_verify", state: "succeeded", completed_bytes: 0, total_bytes: null}]}});
@@ -65,12 +70,12 @@ test("one Run action previews and applies the exact model and selected Spark gro
     model_capabilities: [],
     recipe_capabilities: [],
     freshness: [],
-    fit_current: {},
+    fit_current: fit,
     fit_after_stop: null,
-    fit: {},
-    storage: {},
-    runtime_storage: {},
-    build: {},
+    fit,
+    storage,
+    runtime_storage: runtimeStorage,
+    build,
     preparation: null,
     conflicts: [],
     stops: [],

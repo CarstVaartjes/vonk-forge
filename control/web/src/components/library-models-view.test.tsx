@@ -1,4 +1,5 @@
 import {render, screen, within} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {EMPTY_LIBRARY_WORKCELL_FILTERS, buildLibraryRecipeRecords} from "./library-workcell";
 import {LibraryModelsView} from "./library-models-view";
 import type {LibrarySnapshot, PublicRecipe} from "../api/types";
@@ -40,9 +41,31 @@ test("uses the catalog family title, flattens a single variant, and keeps detach
   expect(within(families).getByRole("button", {name: /Qwen 3/})).toBeVisible();
   expect(within(families).queryByRole("button", {name: /Unlinked/})).not.toBeInTheDocument();
   expect(within(families).getByRole("article")).toHaveTextContent("Qwen 3 BF16 · Qwen 3");
+  expect(within(families).getByText("Model: Text Generation")).toBeVisible();
   expect(within(families).getByText("Recipe: Chat")).toBeVisible();
-  expect(within(families).getByText("Capabilities unavailable")).toBeVisible();
   expect(screen.getByText(/Unlinked and custom recipes live in/)).toBeVisible();
+});
+
+test("deduplicates recipes that reference one exact model variant and links both recipes", async () => {
+  const secondCatalogRecipe: PublicRecipe = {
+    ...knownCatalogRecipe,
+    slug: "qwen-code",
+    title: "Qwen Code",
+    uri: `vonk://catalog/vonk-forge/qwen-code@sha256:${"d".repeat(64)}`,
+    content_sha256: "d".repeat(64),
+    capabilities: ["reasoning"],
+    local: {...knownCatalogRecipe.local, recipe_id: "recipe-code", content_sha256: "a".repeat(64)},
+  };
+  const user = userEvent.setup();
+  renderModels(librarySnapshot, [knownCatalogRecipe, secondCatalogRecipe]);
+
+  const row = screen.getByRole("article");
+  expect(screen.getAllByRole("article")).toHaveLength(1);
+  expect(within(row).getByText("BF16", {selector: "strong"})).toBeVisible();
+  expect(within(row).getByText("Recipes · 2")).toBeVisible();
+  await user.click(within(row).getByText("Recipes · 2"));
+  expect(within(row).getByRole("link", {name: "Qwen Chat"})).toBeVisible();
+  expect(within(row).getByRole("link", {name: "Qwen Code"})).toBeVisible();
 });
 
 test("shows an unknown linked model as an explicit evidence state", () => {

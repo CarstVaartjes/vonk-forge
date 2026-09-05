@@ -41,13 +41,14 @@ function node(id: string, name: string): VisualFleetNode {
 }
 
 const profile: FleetProfile = {
-  schema_version: 1,
+  schema_version: 2,
   id: PROFILE_ID,
   name: "Studio Ready",
   description: "Keep DeepSeek ready across the studio pair.",
   installation_policy: "keep-cached",
   labels: {purpose: "interactive"},
   favorite: true,
+  scope: {node_ids: [NODE_A, NODE_B]},
   assignments: [{
     id: "00000000-0000-4000-8000-000000000003",
     recipe_id: "00000000-0000-4000-8000-000000000004",
@@ -69,7 +70,8 @@ const profile: FleetProfile = {
 };
 
 const preview: FleetProfilePreview = {
-  schema_version: 1,
+  schema_version: 2,
+  scope: {node_ids: [NODE_A, NODE_B], idle_node_ids: []},
   profile_id: PROFILE_ID,
   profile_name: profile.name,
   profile_digest: profile.profile_digest,
@@ -86,7 +88,7 @@ const preview: FleetProfilePreview = {
 };
 
 const succeeded: FleetProfileApplication = {
-  schema_version: 1,
+  schema_version: 2,
   id: "00000000-0000-4000-8000-000000000005",
   profile_id: PROFILE_ID,
   profile_digest: profile.profile_digest,
