@@ -746,31 +746,40 @@ def _public_recipe_metadata(
                 ),
             }
         )
-    raw_artifacts = document.get("artifacts")
-    raw_artifacts = raw_artifacts if isinstance(raw_artifacts, list) else []
     artifact_identities = []
-    for artifact in raw_artifacts:
-        if not isinstance(artifact, Mapping):
+    for model in dependencies:
+        if model.get("kind") != "model":
             continue
-        include_paths = artifact.get("include_paths", [])
-        include_paths = include_paths if isinstance(include_paths, list) else []
-        identity = {
-            "kind": artifact.get("kind"),
-            "repository": artifact.get("repository"),
-            "revision": artifact.get("revision"),
-            "include_paths": sorted(set(include_paths)),
-        }
-        artifact_identities.append(
-            {
-                "artifact_id": artifact.get("id"),
-                "identity_sha256": hashlib.sha256(
-                    json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
-                ).hexdigest(),
-                "download_bytes": artifact.get("download_bytes"),
-                "installed_bytes": artifact.get("installed_bytes"),
-                "roles": sorted(set(artifact.get("roles", []))),
+        identity = model.get("identity")
+        files = model.get("files")
+        if not isinstance(identity, Mapping) or not isinstance(files, list):
+            continue
+        for model_file in files:
+            if not isinstance(model_file, Mapping):
+                continue
+            file_identity = {
+                "publisher": identity.get("publisher"),
+                "slug": identity.get("slug"),
+                "id": model_file.get("id"),
+                "path": model_file.get("path"),
+                "sha256": model_file.get("sha256"),
+                "size_bytes": model_file.get("size_bytes"),
             }
-        )
+            artifact_identities.append(
+                {
+                    "artifact_id": model_file.get("id"),
+                    "identity_sha256": hashlib.sha256(
+                        json.dumps(
+                            file_identity, sort_keys=True, separators=(",", ":")
+                        ).encode()
+                    ).hexdigest(),
+                    "download_bytes": model_file.get("size_bytes"),
+                    "installed_bytes": model_file.get("size_bytes"),
+                    "roles": sorted(
+                        set(model_file.get("roles", []))
+                    ),
+                }
+            )
     artifact_identities.sort(key=lambda item: str(item["identity_sha256"]))
     execution = document.get("execution")
     build = execution.get("build") if isinstance(execution, Mapping) else None
@@ -1881,12 +1890,9 @@ def install_catalog_routes(
                         "explicitly declare a complete executable runtime contract",
                     ),
                 )
-            if value.source_bundle is not None:
-                build = value.document.get("build")
-                context = build.get("context") if isinstance(build, dict) else None
-                source_sha256 = (
-                    context.get("sha256") if isinstance(context, dict) else None
-                )
+            source_bundle = getattr(value, "source_bundle", None)
+            source_sha256 = getattr(value, "source_bundle_sha256", None)
+            if source_bundle is not None:
                 if not isinstance(source_sha256, str):
                     raise CatalogValidationError(
                         "recipe_library.source_invalid",
@@ -1894,7 +1900,7 @@ def install_catalog_routes(
                     )
                 catalog().store_source_bundle(
                     source_sha256,
-                    io.BytesIO(value.source_bundle),
+                    io.BytesIO(source_bundle),
                     actor.subject,
                 )
             result = catalog().import_recipe_library(
@@ -1904,6 +1910,9 @@ def install_catalog_routes(
                 document=value.document,
                 expected_content_sha256=value.content_sha256,
                 dependency_documents=value.dependencies,
+                package_handle=getattr(value, "package_handle", None),
+                package_sha256=getattr(value, "package_sha256", None),
+                source_bundle_sha256=source_sha256,
                 release_version=(
                     value.release_history[0].version
                     if value.release_history
