@@ -2,7 +2,7 @@
 
 This evidence belongs to the isolated `codex/p9-launch-acceptance` checkout.
 The base is `codex/interface-integration` at
-`89dbf619fcb9dce109b2158b4d4d3d431b5bd2db`. The test owner only added
+`49124cc33261877b02fdc8d8f2f243eb37b9e04a`. The test owner only added
 `control/tests/test_p9_fresh_launch_acceptance.py` and this evidence file.
 
 The acceptance consumes the existing immutable evidence and cache paths:
@@ -30,6 +30,25 @@ Using the existing control virtual environment and a task-specific cache:
 /opt/vonk-forge/control/.venv/bin/pytest -q \
   control/tests/test_p9_fresh_launch_acceptance.py
 3 passed, 1 skipped
+
+PYTHONPATH=/private/tmp/vonk-forge-recipes-publication-acceptance/contracts/src:\
+/private/tmp/vonk-forge-p9-launch-acceptance/control/src:\
+/private/tmp/vonk-forge-p9-launch-acceptance/src \
+  /opt/vonk-forge/control/.venv/bin/pytest -q \
+  control/tests/test_p9_fresh_launch_acceptance.py
+3 passed, 1 skipped
+
+The same explicit candidate-contract path allows the pre-existing connected
+catalog acceptance to collect:
+
+```text
+PYTHONPATH=/private/tmp/vonk-forge-recipes-publication-acceptance/contracts/src:\
+/private/tmp/vonk-forge-p9-launch-acceptance/control/src:\
+/private/tmp/vonk-forge-p9-launch-acceptance/src \
+  /opt/vonk-forge/control/.venv/bin/pytest -q \
+  control/tests/test_controller_catalog_postgres_acceptance.py
+2 passed, 1 skipped
+```
 ```
 
 The passing checks validate canonical index closure, the 11 unlinked Model
@@ -47,8 +66,8 @@ failed to connect to the docker API at
 unix:///Users/carstvaartjes/.orbstack/run/docker.sock
 ```
 
-The pre-existing connected acceptance was also attempted with the checked-out
-source on `PYTHONPATH`:
+Before the integrated profile change, the pre-existing connected acceptance
+was attempted with only the checked-out platform source on `PYTHONPATH`:
 
 ```text
 PYTHONPATH=/private/tmp/vonk-forge-p9-launch-acceptance/control/src:/private/tmp/vonk-forge-p9-launch-acceptance/src \
@@ -56,7 +75,7 @@ PYTHONPATH=/private/tmp/vonk-forge-p9-launch-acceptance/control/src:/private/tmp
   control/tests/test_controller_catalog_postgres_acceptance.py
 ```
 
-Collection is currently blocked by the installed public-contract package:
+That stale environment collected with the following blocker:
 
 ```text
 ImportError: cannot import name 'validate_model_references'
@@ -69,8 +88,8 @@ GitHub. No synthetic PostgreSQL/API success is claimed.
 
 ## Rerun after integration
 
-After the contract package/API import fix is present and OrbStack is healthy,
-run:
+The integrated profile change removes that import mismatch. With the
+published contracts candidate source available and OrbStack healthy, run:
 
 ```text
 UV_CACHE_DIR=/private/tmp/vonk-p9-uv-cache \
@@ -78,6 +97,10 @@ UV_CACHE_DIR=/private/tmp/vonk-p9-uv-cache \
   control/tests/test_p9_fresh_launch_acceptance.py \
   control/tests/test_controller_catalog_postgres_acceptance.py
 ```
+
+If the frozen environment still resolves the old Git dependency, prepend the
+candidate contract source explicitly as in the passing `PYTHONPATH` command
+above, or install that candidate into the task environment before rerunning.
 
 That connected lane will create a disposable PostgreSQL database, migrate a
 fresh schema, import the complete Model/Recipe corpus, verify public list and
