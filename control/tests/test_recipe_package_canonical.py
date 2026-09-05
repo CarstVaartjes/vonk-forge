@@ -9,7 +9,6 @@ import os
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -23,7 +22,6 @@ from vonk_control.recipe_packages import (
     RecipePackageClient,
     RecipePackageError,
 )
-from vonk_forge_contracts import ModelDefinition, content_sha256
 
 ROOT = Path(os.environ.get("VONK_RECIPE_CANDIDATE_ROOT", "/private/tmp/vonk-forge-recipes-contract-conversion-final"))
 
@@ -130,27 +128,11 @@ def test_candidate_package_imports_into_canonical_controller_documents(tmp_path:
         clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
         cursors=TokenCodec(b"c" * 32).cursor_codec(),
     )
-    package_sha256 = hashlib.sha256(package).hexdigest()
-    models = tuple(ModelDefinition.model_validate(value) for value in item.dependencies)
-    handle = SimpleNamespace(
-        publication_commit=item.library_commit,
-        source_commit=item.library_commit,
-        package_sha256=package_sha256,
-        package_size=len(package),
-        package_path=row["package"]["path"],
-        recipe_content_sha256=item.content_sha256,
-        archive_path=tmp_path / "packages" / package_sha256 / "archive.tar.gz",
-        closure_path=tmp_path / "packages" / package_sha256 / "closure",
-        recipe_identity=(item.publisher, item.slug, item.content_sha256),
-        model_identities=tuple(
-            (
-                model.identity.publisher,
-                model.identity.slug,
-                content_sha256(model),
-            )
-            for model in models
-        ),
-    )
+    handle = item.package_handle
+    assert handle is not None
+    package_sha256 = handle.package_sha256
+    assert handle.closure_path.is_dir()
+    assert (handle.closure_path / "recipe.json").is_file()
     view = catalog.import_recipe_library(
         "package-test",
         library_commit=item.library_commit,
@@ -160,7 +142,7 @@ def test_candidate_package_imports_into_canonical_controller_documents(tmp_path:
         dependency_documents=item.dependencies,
         package_handle=handle,
         package_sha256=package_sha256,
-        source_bundle_sha256="s" * 64,
+        source_bundle_sha256=item.source_bundle_sha256,
     )
     assert view.schema_version == 2
     with sessions() as session:
@@ -171,7 +153,7 @@ def test_candidate_package_imports_into_canonical_controller_documents(tmp_path:
         receipt = session.scalar(select(RecipeImport).where(RecipeImport.source_sha256 == item.content_sha256))
         assert receipt is not None
         assert receipt.redacted_source["package_sha256"] == package_sha256
-        assert receipt.redacted_source["source_bundle_sha256"] == "s" * 64
+        assert receipt.redacted_source["source_bundle_sha256"] == item.source_bundle_sha256
         assert receipt.redacted_source["package_handle"]["closure_path"].endswith(
             f"{package_sha256}/closure"
         )
