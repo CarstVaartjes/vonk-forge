@@ -389,7 +389,18 @@ def test_runtime_spec_is_compiled_from_the_trusted_builtin_projection() -> None:
         "8000",
     ]
     assert spec["runtime"]["arguments"] == []
-    assert spec["runtime"]["environment"] == []
+    assert spec["runtime"]["environment"] == [
+        {
+            "name": "XDG_CACHE_HOME",
+            "value": "/outputs/cache",
+            "secret": None,
+        },
+        {
+            "name": "VLLM_CACHE_ROOT",
+            "value": "/outputs/cache/vllm",
+            "secret": None,
+        },
+    ]
     assert spec["endpoint"] == {
         "protocol": "openai",
         "port": 8000,
