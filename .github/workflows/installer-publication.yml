@@ -5,6 +5,9 @@ on:
     workflows:
       - CI
       - Installer publication source
+      - Agent release
+      - Development images
+      - Installer setups
     types: [completed]
   schedule:
     # Refresh only re-signs the already published immutable generation.
@@ -33,7 +36,13 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       ((github.event.workflow_run.name == 'Installer publication source' &&
        github.event.workflow_run.head_branch == 'main') ||
-       github.event.workflow_run.name == 'CI')
+       github.event.workflow_run.name == 'CI' ||
+       (github.event.workflow_run.name == 'Agent release' &&
+        github.event.workflow_run.head_branch == 'main') ||
+       (github.event.workflow_run.name == 'Development images' &&
+        github.event.workflow_run.head_branch == 'main') ||
+       (github.event.workflow_run.name == 'Installer setups' &&
+        github.event.workflow_run.head_branch == 'main'))
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -83,35 +92,27 @@ jobs:
           development_run() {
             local workflow=$1 exact_runs candidate
             exact_runs=$RUNNER_TEMP/${workflow%.yml}-exact-runs.json
-            for attempt in $(seq 1 360); do
-              gh api --paginate \
-                -H 'Accept: application/vnd.github+json' \
-                -H 'X-GitHub-Api-Version: 2022-11-28' \
-                "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=push&head_sha=$SOURCE_SHA&per_page=100" \
-                --jq '.workflow_runs[]' | jq -s . > "$exact_runs"
-              candidate=$(jq -r --arg sha "$SOURCE_SHA" '
-                [.[] | select(
-                  .head_sha == $sha and .head_branch == "main" and
-                  .event == "push"
-                )] | sort_by(.created_at) | reverse | .[0] // empty |
-                [.id, .run_number, .head_sha, .status, (.conclusion // "")] | @tsv
-              ' "$exact_runs")
-              if test -z "$candidate"; then
-                break
-              fi
-              IFS=$'\t' read -r run_id run_number run_sha run_status run_conclusion \
-                <<< "$candidate"
+            # workflow_run is the readiness edge. Query once; if the exact
+            # producer is still absent or running, this fan-in exits cleanly
+            # and the producer's completion event retries it.
+            gh api --paginate \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=push&head_sha=$SOURCE_SHA&per_page=100" \
+              --jq '.workflow_runs[]' | jq -s . > "$exact_runs"
+            candidate=$(jq -r --arg sha "$SOURCE_SHA" '
+              [.[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push")]
+              | sort_by(.created_at) | reverse | .[0] // empty
+              | [.id, .run_number, .head_sha, .status, (.conclusion // "")] | @tsv
+            ' "$exact_runs")
+            if test -n "$candidate"; then
+              IFS=$'\t' read -r run_id run_number run_sha run_status run_conclusion <<< "$candidate"
               if test "$run_status" != completed; then
-                sleep 5
-                continue
+                not_ready
               fi
               test "$run_conclusion" = success
               printf '%s\t%s\t%s\n' "$run_id" "$run_number" "$run_sha"
               return 0
-            done
-            if test -n "$candidate"; then
-              echo "$workflow did not complete for $SOURCE_SHA" >&2
-              return 1
             fi
 
             # A path-filtered producer has no run for an unchanged component.
@@ -124,7 +125,12 @@ jobs:
               "/repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?event=push&status=completed&branch=main&per_page=100" \
               --jq '.workflow_runs[]' | jq -s . > "$completed_runs"
             while IFS=$'\t' read -r run_id run_number run_sha; do
-              if git merge-base --is-ancestor "$run_sha" "$SOURCE_SHA"; then
+              if git merge-base --is-ancestor "$run_sha" "$SOURCE_SHA" && case "$workflow" in
+                agent-release.yml) git diff --quiet "$run_sha" "$SOURCE_SHA" -- .github/actions/agent-package-build .github/actions/agent-package-compile .github/actions/agent-package-security install packaging rust Cargo.lock Cargo.toml scripts tests ;;
+                dev-images.yml) git diff --quiet "$run_sha" "$SOURCE_SHA" -- control deploy/compose inventory pyproject.toml scripts src .github/workflows/dev-images.yml ;;
+                installer-setups.yml) git diff --quiet "$run_sha" "$SOURCE_SHA" -- install packaging rust Cargo.lock Cargo.toml .github/workflows/installer-setups.yml scripts ;;
+                *) false ;;
+              esac; then
                 printf '%s\t%s\t%s\n' "$run_id" "$run_number" "$run_sha"
                 return 0
               fi
@@ -148,7 +154,7 @@ jobs:
           git fetch --force --tags origin
 
           case "$TRIGGER_NAME" in
-            'Installer publication source')
+            'Installer publication source'|'Agent release'|'Development images'|'Installer setups')
               channel=dev
               authority_ref=refs/heads/main
               tag_oid=
