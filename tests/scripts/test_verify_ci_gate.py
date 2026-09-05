@@ -20,8 +20,12 @@ def _module():
 
 def _valid(**overrides: str):
     selected = {
-        "rust": "true", "repository": "false", "control": "true", "web": "true",
-        "generated": "false", "compose": "true",
+        "rust": "true",
+        "repository": "false",
+        "control": "true",
+        "web": "true",
+        "generated": "false",
+        "compose": "true",
     }
     results = {
         "lint": "success",
@@ -50,7 +54,15 @@ def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
     selected, results = _valid()
     for area in selected:
         selected[area] = "false"
-    for job in ("rust-quality-gate", "rust-tests", "rust-platform", "repository", "control", "web", "generated", "compose"):
+    for job in (
+        "rust-tests",
+        "rust-platform",
+        "repository",
+        "control",
+        "web",
+        "generated",
+        "compose",
+    ):
         results[job] = "skipped"
     assert _module().verify("success", selected, results) == []
 

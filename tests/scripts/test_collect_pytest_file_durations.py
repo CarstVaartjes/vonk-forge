@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "collect-pytest-file-durations"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "collect-pytest-file-durations"
 
 
 def _module():

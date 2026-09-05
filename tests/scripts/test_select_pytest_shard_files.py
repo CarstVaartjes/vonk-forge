@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "select-pytest-shard-files"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "select-pytest-shard-files"
 
 
 def _module():

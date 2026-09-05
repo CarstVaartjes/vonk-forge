@@ -8,7 +8,7 @@ import sys
 
 AREAS = ("rust", "repository", "control", "web", "generated", "compose")
 AREA_JOBS = {
-    "rust": ("rust-quality-gate", "rust-tests", "rust-platform"),
+    "rust": ("rust-tests", "rust-platform"),
     "repository": ("repository",),
     "control": ("control",),
     "web": ("web",),
@@ -27,12 +27,14 @@ def _pairs(values: list[str], label: str) -> dict[str, str]:
     return result
 
 
-def verify(selector_result: str, selected: dict[str, str], results: dict[str, str]) -> list[str]:
+def verify(
+    selector_result: str, selected: dict[str, str], results: dict[str, str]
+) -> list[str]:
     errors: list[str] = []
     if selector_result != "success":
         errors.append(f"selector result is {selector_result!r}, expected 'success'")
 
-    required_success = {"lint", "rust-umbrella", "catalog-runtime"}
+    required_success = {"lint", "rust-umbrella", "rust-quality-gate", "catalog-runtime"}
     for job in required_success:
         if results.get(job) != "success":
             errors.append(f"{job} result is {results.get(job)!r}, expected 'success'")
@@ -40,7 +42,9 @@ def verify(selector_result: str, selected: dict[str, str], results: dict[str, st
     for area in AREAS:
         selection = selected.get(area)
         if selection not in {"true", "false"}:
-            errors.append(f"{area} selection is {selection!r}, expected 'true' or 'false'")
+            errors.append(
+                f"{area} selection is {selection!r}, expected 'true' or 'false'"
+            )
         else:
             expected = "success" if selection == "true" else "skipped"
             for job in AREA_JOBS[area]:

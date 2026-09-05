@@ -2,8 +2,8 @@
 
 Vonk Forge publishes one immutable release from a signed tag. The release contains
 digest-pinned API and worker images, the rendered production Compose file, a
-digest-pinned optional Hermes image, and native `arm64` and `amd64` Spark agent
-packages with checksums, SBOMs, provenance, and Sigstore bundles. A signed
+digest-pinned optional Hermes image, and the native `arm64` Spark agent
+package with checksums, SBOMs, provenance, and Sigstore bundles. A signed
 installer-channel manifest binds those assets to the stable curl endpoints.
 
 Operators prepare a NAS upgrade by rerunning the same stable installer from the
@@ -27,15 +27,43 @@ offline wheel bundle.
 
 ## CI authority boundary
 
-The release workflow:
+Normal main-branch publication updates only the development channel (`:dev`).
+Production (`:latest`) advances only for an explicit signed version tag, after the
+candidate passes NAS and ARM64 Spark installer acceptance. Public upstream
+`:latest` tags are controlled by their publishers and may change independently
+between acceptance and a later pull; our production release gate cannot freeze
+those images.
 
-1. validates the signed release tag;
-2. promotes the exact tested API and worker images;
-3. renders production Compose with `:latest` images and `pull_policy: always`;
-4. builds and verifies both native agent packages;
-5. creates an immutable GitHub Release containing the Compose and package assets;
-6. publishes the signed installer-channel manifest and setup binaries; and
-7. advances image aliases only after verifying the release assets.
+The release path:
+
+1. verifies signed tag authority and creates immutable image/package artifacts;
+2. assembles and signs an immutable installer candidate;
+3. runs NAS and Spark acceptance against the candidate Vonk image digests using
+   a temporary Compose overlay, while checking that the installed Compose remains
+   on floating channels;
+4. verifies the complete signed acceptance receipt, published candidate objects,
+   current source authority, and the existing channel pointer;
+5. advances all four Vonk image aliases, rechecks authority, then publishes the
+   signed installer pointer last.
+
+`Installer publication` is the only image-channel promotion workflow. Its promotion
+job records the channel, source commit, generation, and four image digests in the
+Actions summary and uploads a receipt. Failed promotion attempts restore existing
+image aliases where possible. Registry tags and the installer pointer are separate
+writes, so promotion is not atomic; first publication cannot safely remove an alias
+that had no prior value. Rerun a failed job to reconcile an already accepted set.
+
+Development producers build and validate each image once. Producer-completion
+events resolve exact successful runs, or successful ancestor runs whose build
+inputs have not changed. Missing producers leave publication pending without a
+runner polling loop; their completion events retry readiness. Daily manifest
+refresh renews the existing accepted generation's expiry without changing images.
+
+PRs expose one always-running `CI gate` that checks every selected suite result,
+including selector failures. Deleted files participate in area selection.
+Repository and control shards use recent successful CI timing artifacts; missing,
+stale, or invalid timings fall back to collection counts. Timing data affects only
+assignment, never whether a test is selected.
 
 ## Local verification
 
