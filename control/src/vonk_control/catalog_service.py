@@ -52,7 +52,6 @@ from .recipe_contract import (
     recipe_model_dependencies,
     recipe_patch_bundle,
     recipe_references,
-    recipe_topology,
     validate_recipe,
 )
 from .schema_resources import read_runtime_schema
@@ -1036,11 +1035,9 @@ class CatalogService:
                     "catalog.recipe_unresolved",
                     "resolve the recipe before attaching a test report",
                 )
-            build = _mapping(revision.document["build"])
-            context = _mapping(build["context"])
             try:
-                topology = recipe_topology(revision.document)
-            except RecipeContractError as error:
+                topology = RecipeDefinition.model_validate(revision.document).topology.model_dump(mode="json")
+            except (TypeError, ValueError) as error:
                 raise CatalogValidationError(
                     "catalog.test_report_topology_mismatch",
                     "test report topology is not declared by this recipe",
@@ -1054,11 +1051,6 @@ class CatalogService:
                 raise CatalogValidationError(
                     "catalog.test_report_recipe_mismatch",
                     "test report does not match this recipe revision",
-                )
-            if clean.get("source_bundle_sha256") != context["sha256"]:
-                raise CatalogValidationError(
-                    "catalog.test_report_source_bundle_mismatch",
-                    "test report does not match this recipe source bundle",
                 )
             if (
                 clean.get("topology_name") != topology["name"]

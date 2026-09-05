@@ -12,6 +12,7 @@ from typing import Protocol
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition
 
 from .catalog_service import CatalogError, CatalogService
 from .models import (
@@ -731,17 +732,14 @@ def _model_version_key(session: Session, revision_id: str) -> str | None:
     revision = session.get(LocalRecipeRevision, revision_id)
     if revision is None:
         return None
-    model = revision.document.get("model")
-    if not isinstance(model, Mapping):
+    try:
+        recipe = RecipeDefinition.model_validate(revision.document)
+    except (TypeError, ValueError):
         return None
-    publisher, slug, digest = (
-        model.get("publisher"),
-        model.get("slug"),
-        model.get("content_sha256"),
-    )
-    if not all(isinstance(value, str) and value for value in (publisher, slug, digest)):
+    if not recipe.models:
         return None
-    return f"{publisher}/{slug}@{digest}"
+    reference = recipe.models[0].model
+    return f"{reference.publisher}/{reference.slug}@{reference.content_sha256}"
 
 
 def _release_version(
