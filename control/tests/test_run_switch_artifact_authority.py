@@ -19,4 +19,3 @@ def test_run_switch_requires_the_controller_model_cache_manifest_provider() -> N
             retention="retain",
             now=datetime(2026, 9, 6, tzinfo=UTC),
         )
-
