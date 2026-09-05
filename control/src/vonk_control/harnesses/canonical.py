@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
+from math import isfinite
 from pathlib import Path
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.resolver import (
@@ -159,12 +160,14 @@ def _models(values: object) -> tuple[ModelDefinition, ...]:
 def _scalar(value: object, label: str) -> str:
     if type(value) is bool:
         rendered = "true" if value else "false"
-    elif type(value) in (str, int):
+    elif type(value) in (str, int, float):
+        if type(value) is float and not isfinite(value):
+            raise HarnessCompileError(f"{label} is not finite")
         rendered = str(value)
     else:
         raise HarnessCompileError(f"{label} must be a scalar")
-    if _SAFE_TOKEN.fullmatch(rendered) is None:
-        raise HarnessCompileError(f"{label} contains unsafe shell syntax")
+    if not rendered or len(rendered) > 4096 or "\x00" in rendered:
+        raise HarnessCompileError(f"{label} exceeds the bounded argv value contract")
     return rendered
 
 
@@ -224,10 +227,19 @@ def _settings(recipe: RecipeDefinition, supplied: Mapping[str, object] | None) -
 def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str, ...]:
     entrypoint = tuple(recipe.runtime.entrypoint)
     executable = Path(entrypoint[0]).name
-    if executable not in _EXECUTABLES[recipe.runtime.engine]:
+    if entrypoint[0].startswith("/"):
+        path = Path(entrypoint[0])
+        if (
+            not entrypoint[0].startswith("/opt/vonk/bin/")
+            or path.name in {"sh", "bash", "dash", "env", "busybox"}
+            or "/../" in entrypoint[0]
+            or "//" in entrypoint[0]
+        ):
+            raise HarnessCompileError("recipe entrypoint is outside the trusted harness path")
+    elif executable not in _EXECUTABLES[recipe.runtime.engine]:
         raise HarnessCompileError("recipe entrypoint does not match its engine harness")
-    if any(type(item) is not str or not _SAFE_TOKEN.fullmatch(item) for item in entrypoint):
-        raise HarnessCompileError("recipe entrypoint contains unsafe shell syntax")
+    if any(type(item) is not str or not item or len(item) > 4096 or "\x00" in item for item in entrypoint):
+        raise HarnessCompileError("recipe entrypoint contains invalid argv data")
     result = list(entrypoint[1:])
     seen: set[str] = set()
     for argument in recipe.runtime.arguments:
@@ -271,7 +283,8 @@ def _model_mounts(recipe: RecipeDefinition, models: tuple[ModelDefinition, ...],
         raise HarnessCompileError(str(error)) from error
     by_identity = {(m.identity.publisher, m.identity.slug): m for m in models}
     selected: list[tuple[dict[str, object], HarnessMount]] = []
-    mounts_by_target: dict[str, HarnessMount] = {}
+    mounts_by_key: dict[tuple[str, str], HarnessMount] = {}
+    target_owner: dict[str, str] = {}
     for selection in recipe.models:
         model = by_identity[(selection.model.publisher, selection.model.slug)]
         files = {item.id: item for item in model.files}
@@ -279,8 +292,13 @@ def _model_mounts(recipe: RecipeDefinition, models: tuple[ModelDefinition, ...],
             if role not in selector.roles:
                 continue
             source = f"/run/vonk/models/{selection.id}/{selector.file_id}"
-            mount = mounts_by_target.setdefault(
-                selector.mount.target,
+            target_owner.setdefault(selector.mount.target, selection.id)
+            if target_owner[selector.mount.target] != selection.id:
+                raise HarnessCompileError(
+                    f"model mount target is claimed by multiple selections: {selector.mount.target}"
+                )
+            mount = mounts_by_key.setdefault(
+                (selection.id, selector.mount.target),
                 HarnessMount(
                     f"/run/vonk/models/{selection.id}",
                     selector.mount.target,
@@ -306,6 +324,68 @@ def _model_mounts(recipe: RecipeDefinition, models: tuple[ModelDefinition, ...],
     if not selected:
         raise HarnessCompileError("mapped role has no selected model files")
     return tuple(selected)
+
+
+def _distributed_args(
+    recipe: RecipeDefinition,
+    command: list[str],
+    *,
+    role: str,
+    rank: int,
+) -> list[str]:
+    topology = recipe.topology
+    if topology.mode != "distributed":
+        return command
+
+    def has(name: str) -> bool:
+        wanted = name.removeprefix("--").replace("_", "-")
+        return any(
+            item.startswith("--")
+            and item[2:].split("=", 1)[0].replace("_", "-") == wanted
+            for item in command
+        )
+
+    if recipe.runtime.engine == "sglang":
+        if not has("nnodes"):
+            command.extend(("--nnodes", str(topology.node_count)))
+        if not has("node-rank"):
+            command.extend(("--node-rank", str(rank)))
+        if not has("dist-init-addr"):
+            command.extend(("--dist-init-addr", "VONK_MASTER_ADDR:VONK_MASTER_PORT"))
+        return command
+    if recipe.runtime.engine == "vllm":
+        parallelism = topology.parallelism
+        if not has("tensor-parallel-size"):
+            command.extend(("--tensor-parallel-size", str(parallelism.tensor)))
+        if not has("pipeline-parallel-size"):
+            command.extend(("--pipeline-parallel-size", str(parallelism.pipeline)))
+        if parallelism.backend in {"mp", "ray"} and not has("distributed-executor-backend"):
+            command.extend(("--distributed-executor-backend", parallelism.backend))
+        if not has("nnodes"):
+            command.extend(("--nnodes", str(topology.node_count)))
+        if not has("node-rank"):
+            command.extend(("--node-rank", str(rank)))
+        if role == "worker" and not has("headless"):
+            command.append("--headless")
+        return command
+    raise HarnessCompileError(
+        f"distributed topology is not supported by the {recipe.runtime.engine} harness"
+    )
+
+
+def _harness_security(slug: str, topology: object) -> tuple[tuple[str, ...], bool]:
+    path = Path(__file__).parents[4] / "config" / "execution-harnesses" / f"{slug}.json"
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise HarnessCompileError("trusted execution harness identity is unavailable") from error
+    requirements = document.get("capability_requirements")
+    exceptions = document.get("security_exceptions")
+    if not isinstance(requirements, list) or not isinstance(exceptions, list):
+        raise HarnessCompileError("trusted execution harness security identity is invalid")
+    devices = ("nvidia.com/gpu=all",) if "nvidia-gpu" in requirements else ()
+    host_network = "host-network" in exceptions and getattr(topology, "mode", None) == "distributed"
+    return devices, host_network
 
 
 def _harness_digest(slug: str) -> str:
@@ -345,21 +425,14 @@ def compile_canonical_harness(
     command = list(_argv(recipe, _settings(recipe, settings)))
     wrapper = _WRAPPERS[slug]
     entry = tuple(recipe.runtime.entrypoint)
-    # Wrapper paths are platform-owned; the engine-owned suffix and all runtime
-    # arguments retain their declared order and values.
-    if slug == "vllm":
-        command = [wrapper, *entry[1:]]
-    elif slug == "sglang":
-        command = [wrapper, *entry[1:]]
-    elif slug == "tensorrt-llm":
-        command = [wrapper, *entry[1:]]
-    else:
-        command = [wrapper, *entry[1:]]
+    # Trusted absolute entrypoints remain authored by the recipe repository.
+    # Short names retain the platform wrapper fallback used by examples.
+    command.insert(0, entry[0] if entry[0].startswith("/") else wrapper)
     # Replace a model path with the declared target when the recipe uses the
     # canonical /models root and preserve explicit subpaths.
     primary_target = mounts[0][1].target
     command = [primary_target if value == "/models" else value for value in command]
-    command.extend(_argv(recipe, _settings(recipe, settings))[len(entry) - 1 :])
+    command = _distributed_args(recipe, command, role=role, rank=rank)
     interface = recipe.interfaces[0]
     if interface.adapter == "openai":
         if "--host" not in command:
@@ -369,8 +442,13 @@ def compile_canonical_harness(
     else:
         if "--output-dir" not in command:
             command.extend(("--output-dir", "/outputs"))
-    if any(type(item) is not str or not _SAFE_TOKEN.fullmatch(item) for item in command):
-        raise HarnessCompileError("compiled harness command is unsafe")
+    if any(type(item) is not str or not item or len(item) > 4096 or "\x00" in item for item in command):
+        raise HarnessCompileError("compiled harness command contains invalid argv data")
+    devices, _host_network = _harness_security(slug, topology)
+    model_mounts: list[HarnessMount] = []
+    for _artifact, mount in mounts:
+        if mount not in model_mounts:
+            model_mounts.append(mount)
     validate_paths(slug, writable_paths(slug), dict(environment))
     projection = HarnessProjection(
         slug=slug,
@@ -382,10 +460,8 @@ def compile_canonical_harness(
         user="10001:10001",
         no_new_privileges=True,
         capabilities=(),
-        # The agent materializes every selected file below this one immutable
-        # root.  Per-file source paths remain in the artifact projection so the
-        # package handle and runtime payload can be checked against one another.
-        model_mounts=(HarnessMount("/run/vonk/models", "/models", read_only=True),),
+        devices=devices,
+        model_mounts=tuple(model_mounts),
         output_mount=HarnessMount("/run/vonk/outputs", "/outputs", read_only=False, isolated=True),
         input_mount=(HarnessMount("/run/vonk/inputs", "/inputs", read_only=True, isolated=True) if getattr(interface, "input", None) is not None else None),
         environment=environment,
@@ -401,7 +477,7 @@ def compile_canonical_harness(
         ),
     )
     try:
-        validate_projection(projection, canonical_argv=True)
+        validate_projection(projection, canonical_argv=True, canonical_mounts=True)
     except HarnessCompileError as error:
         raise HarnessCompileError(str(error)) from error
     return projection, tuple(artifact for artifact, _mount in mounts), image_digest
