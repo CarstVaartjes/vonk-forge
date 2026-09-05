@@ -98,7 +98,7 @@ def upgrade() -> None:
     op.create_table(
         "catalog_recipe_model_references",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("recipe_revision_id", sa.String(36), sa.ForeignKey("catalog_document_revisions.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("recipe_revision_id", sa.String(36), nullable=False),
         sa.Column("recipe_kind", sa.String(16), nullable=False),
         sa.Column("selection_id", sa.String(64), nullable=False),
         sa.Column("model_revision_id", sa.String(36), nullable=False),

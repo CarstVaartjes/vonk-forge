@@ -34,7 +34,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql.functions import FunctionElement
 
 
@@ -1021,6 +1021,9 @@ class CatalogDocument(Base):
     __tablename__ = "catalog_documents"
     __table_args__ = (
         UniqueConstraint("kind", "publisher", "slug", name="uq_catalog_document_identity"),
+        UniqueConstraint(
+            "id", "kind", "publisher", "slug", name="uq_catalog_document_root_target"
+        ),
         CheckConstraint("kind IN ('model','recipe')", name="ck_catalog_document_kind"),
         CheckConstraint("publisher = lower(publisher) AND length(publisher) BETWEEN 2 AND 63", name="ck_catalog_document_publisher"),
         CheckConstraint("slug = lower(slug) AND length(slug) BETWEEN 2 AND 63", name="ck_catalog_document_slug"),
@@ -1043,6 +1046,15 @@ class CatalogDocumentRevision(Base):
     __table_args__ = (
         UniqueConstraint("document_id", "revision_number", name="uq_catalog_document_revision_number"),
         UniqueConstraint("kind", "publisher", "slug", "content_digest", name="uq_catalog_document_revision_identity_digest"),
+        UniqueConstraint(
+            "id",
+            "kind",
+            "publisher",
+            "slug",
+            "content_digest",
+            name="uq_catalog_document_revision_fk_target",
+        ),
+        UniqueConstraint("id", "kind", name="uq_catalog_document_revision_kind"),
         ForeignKeyConstraint(
             ["document_id", "kind", "publisher", "slug"],
             ["catalog_documents.id", "catalog_documents.kind", "catalog_documents.publisher", "catalog_documents.slug"],
@@ -2858,52 +2870,3 @@ class ResourceReservation(Base):
         DateTime(timezone=True), nullable=False
     )
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class Recipe(Base):
-    """Greenfield Library recipe identity owned by PostgreSQL."""
-
-    __tablename__ = "recipes"
-    recipe_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    source: Mapped[str] = mapped_column(Text, nullable=False)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class RecipeRevision(Base):
-    """Content-addressed immutable revision in the greenfield Library."""
-
-    __tablename__ = "recipe_revisions"
-    __table_args__ = (
-        UniqueConstraint(
-            "recipe_id", "revision_number", name="uq_recipe_revision_number"
-        ),
-        UniqueConstraint(
-            "recipe_id", "content_digest", name="uq_recipe_revision_digest"
-        ),
-        CheckConstraint("revision_number >= 1", name="ck_recipe_revision_number"),
-    )
-    revision_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    recipe_id: Mapped[str] = mapped_column(
-        ForeignKey("recipes.recipe_id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    content: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-@event.listens_for(RecipeRevision, "before_update")
-@event.listens_for(RecipeRevision, "before_delete")
-def _recipe_revision_is_immutable(_mapper, _connection, target: RecipeRevision) -> None:
-    raise ValueError("recipe revisions are immutable")

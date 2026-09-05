@@ -12,7 +12,11 @@ from alembic.config import Config
 from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_control.catalog_entities import CatalogEntityService, CatalogValidationError
+from vonk_control.catalog_entities import (
+    CatalogConflict,
+    CatalogEntityService,
+    CatalogValidationError,
+)
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -66,6 +70,12 @@ def test_fresh_postgres_migration_builds_canonical_schema(postgres_engine) -> No
         "catalog_document_heads",
         "catalog_recipe_model_references",
     } <= set(inspector.get_table_names())
+    assert {
+        "catalog_entities",
+        "catalog_entity_revisions",
+        "recipes",
+        "recipe_revisions",
+    }.isdisjoint(inspector.get_table_names())
     with postgres_engine.connect() as connection:
         assert connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one() == "0018_canonical_catalog_documents"
 
@@ -82,6 +92,13 @@ def test_valid_model_write_read_and_projection_is_postgres_backed(catalog) -> No
         assert stored is not None
         assert stored.document["schema_version"] == 2
         assert session.scalar(select(CatalogDocumentHead).where(CatalogDocumentHead.active_revision_id == active.id)) is not None
+
+
+def test_catalog_identity_is_unique_in_postgres(catalog) -> None:
+    document = _model()
+    catalog.create_draft(document, actor="operator")
+    with pytest.raises(CatalogConflict, match="identity already exists"):
+        catalog.create_draft(document, actor="operator")
 
 
 def test_active_canonical_json_cannot_be_mutated(catalog) -> None:
