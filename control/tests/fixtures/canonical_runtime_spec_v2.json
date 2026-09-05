@@ -29,7 +29,8 @@
     "protocol": "openai"
   },
   "identity": {
-    "execution_sha256": "e8cd2ea8bb19a374a6ad62dd72eb4d07cadff46332755f6e18507801fd7ced41",
+    "build_input_sha256": null,
+    "execution_sha256": "bb0916b1a8a9cf80bad3e726a4c51c25a3c64c406eb9631839261b3ea2d30446",
     "harness_sha256": "830a82426fa7d2c0e60b7f97ffb9dbb915cb3ca39ff223001e14680722ce3a21",
     "model_dependencies": [
       {
