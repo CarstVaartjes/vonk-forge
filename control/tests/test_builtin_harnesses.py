@@ -1475,17 +1475,17 @@ def test_vllm_accepts_offline_and_nvfp4_runtime_environment() -> None:
     assert ("VLLM_USE_FLASHINFER_MOE_FP4", "0") in projection.environment
 
 
-def test_vllm_accepts_mia_dspark_cache_graph_and_scheduler_environment() -> None:
+def test_vllm_rejects_recipe_owned_optional_runtime_paths() -> None:
     recipe = _recipe("vllm")
     expected = {
-        "B12X_CUTE_COMPILE_CACHE_DIR": "/cache/b12x-cute-compile",
+        "B12X_CUTE_COMPILE_CACHE_DIR": "/outputs/cache/b12x-cute-compile",
         "DSPARK_MAX_INFLIGHT_PREFILLS": "2",
-        "FLASHINFER_WORKSPACE_BASE": "/cache/flashinfer",
-        "TILELANG_CACHE_DIR": "/cache/tilelang",
-        "TRITON_CACHE_DIR": "/cache/triton",
+        "FLASHINFER_WORKSPACE_BASE": "/outputs/cache/flashinfer",
+        "TILELANG_CACHE_DIR": "/outputs/cache/tilelang",
+        "TRITON_CACHE_DIR": "/outputs/cache/triton",
         "TORCH_FR_BUFFER_SIZE": "2000",
-        "TORCH_FR_DUMP_TEMP_FILE": "/outputs/nccl/comm_lib_trace_rank_",
-        "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/outputs/nccl/fr_dump_pipe_",
+        "TORCH_FR_DUMP_TEMP_FILE": "/outputs/cache/nccl-fr/comm_lib_trace_rank_",
+        "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": "/outputs/cache/nccl-fr/fr_dump_pipe_",
         "TORCH_NCCL_DUMP_ON_TIMEOUT": "1",
         "TORCH_NCCL_ENABLE_MONITORING": "1",
         "VLLM_B12X_W4A16_FORCE_BLOCKS_PER_SM": "1",
@@ -1514,11 +1514,8 @@ def test_vllm_accepts_mia_dspark_cache_graph_and_scheduler_environment() -> None
         distribution
     )
 
-    projection = _compile("vllm", recipe=recipe, distribution=distribution)
-
-    assert set(projection.environment) == set(VLLM_PLATFORM_ENVIRONMENT) | set(
-        expected.items()
-    )
+    with pytest.raises(HarnessCompileError, match="platform-owned"):
+        _compile("vllm", recipe=recipe, distribution=distribution)
 
 
 def test_vllm_injects_platform_owned_writable_cache_environment() -> None:

@@ -423,6 +423,7 @@ class VllmHarnessCompiler:
                     "VLLM_WORKER_MULTIPROC_METHOD",
                 }
             ),
+            engine_slug=self.slug,
         )
         if any(
             name in _PLATFORM_ENVIRONMENT_NAMES for name, _value in recipe_environment
