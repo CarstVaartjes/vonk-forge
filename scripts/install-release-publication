@@ -1627,6 +1627,19 @@ def promote(arguments: argparse.Namespace) -> None:
     _verify_candidate_objects(entries, filesystem, remote)
     _validate_existing_pointer(plan, release_public_key, filesystem, remote)
 
+    if arguments.preflight_only:
+        print(
+            json.dumps(
+                {
+                    "channel": plan["channel"],
+                    "generation": plan["generation"],
+                    "phase": "preflight",
+                },
+                sort_keys=True,
+            )
+        )
+        return
+
     prefix = f"artifacts/{plan['channel']}/releases/{plan['generation']}/acceptance"
     acceptance_objects = (
         (
@@ -1664,9 +1677,7 @@ def quarantine_dev_pointer(arguments: argparse.Namespace) -> None:
         raise PublicationError("expected pointer digest is invalid")
     filesystem, remote = _destination(arguments)
     pointer_key = "artifacts/dev/current.manifest"
-    retired_key = (
-        f"artifacts/dev/retired-pointers/{arguments.expected_sha256}.manifest"
-    )
+    retired_key = f"artifacts/dev/retired-pointers/{arguments.expected_sha256}.manifest"
     if filesystem is not None:
         pointer_path = filesystem / pointer_key
         retired_path = filesystem / retired_key
@@ -1683,9 +1694,7 @@ def quarantine_dev_pointer(arguments: argparse.Namespace) -> None:
             else:
                 raise PublicationError("dev channel pointer is unavailable")
         else:
-            current = _safe_bytes(
-                pointer_path, "dev channel pointer", 64 * 1024
-            )
+            current = _safe_bytes(pointer_path, "dev channel pointer", 64 * 1024)
             if hashlib.sha256(current).hexdigest() != arguments.expected_sha256:
                 raise PublicationError("dev channel pointer digest changed")
             with tempfile.TemporaryDirectory(
@@ -1696,9 +1705,13 @@ def quarantine_dev_pointer(arguments: argparse.Namespace) -> None:
                 _atomic_local_copy(source, retired_path, True)
             pointer_path.unlink()
             already_quarantined = False
-        if pointer_path.exists() or hashlib.sha256(
-            _safe_bytes(retired_path, "retired channel manifest", 64 * 1024)
-        ).hexdigest() != arguments.expected_sha256:
+        if (
+            pointer_path.exists()
+            or hashlib.sha256(
+                _safe_bytes(retired_path, "retired channel manifest", 64 * 1024)
+            ).hexdigest()
+            != arguments.expected_sha256
+        ):
             raise PublicationError("dev channel pointer quarantine is incomplete")
     else:
         assert remote is not None
@@ -1730,9 +1743,10 @@ def quarantine_dev_pointer(arguments: argparse.Namespace) -> None:
             if result.returncode != 0:
                 raise PublicationError("dev channel pointer removal failed")
             already_quarantined = False
-        if _rclone_object_exists(remote, pointer_key) or _rclone_digest(
-            remote, retired_key
-        ) != arguments.expected_sha256:
+        if (
+            _rclone_object_exists(remote, pointer_key)
+            or _rclone_digest(remote, retired_key) != arguments.expected_sha256
+        ):
             raise PublicationError("dev channel pointer quarantine is incomplete")
     print(
         json.dumps(
@@ -1928,6 +1942,11 @@ def parser() -> argparse.ArgumentParser:
     promotion.add_argument("--accepted-evidence-signature", type=Path, required=True)
     promotion.add_argument("--acceptance-public-key", type=Path, required=True)
     promotion.add_argument("--acceptance-public-key-sha256", required=True)
+    promotion.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="validate the candidate and pointer without writing publication objects",
+    )
     promotion_destinations = promotion.add_mutually_exclusive_group(required=True)
     promotion_destinations.add_argument("--filesystem", type=Path)
     promotion_destinations.add_argument("--rclone-remote")

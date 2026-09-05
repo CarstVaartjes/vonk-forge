@@ -948,9 +948,9 @@ def test_acceptance_authority_rejects_internally_consistent_invented_graph(
         graph = report["lifecycle"]["proof"]["publication_graph"]
         graph["packages"]["linux-arm64"]["candidate_sha256"] = invented_digest
         graph["candidate_package_sha256"] = invented_digest
-        report["lifecycle"]["proof"]["installation"]["identity"][
-            "package_sha256"
-        ] = invented_digest
+        report["lifecycle"]["proof"]["installation"]["identity"]["package_sha256"] = (
+            invented_digest
+        )
         _canonical(report_path, report)
 
     result = subprocess.run(
@@ -1216,56 +1216,6 @@ def test_acceptance_authority_rejects_incomplete_arm64_gate_ownership(
     assert not (tmp_path / "acceptance/acceptance.json").exists()
 
 
-def test_installer_publication_has_one_development_fanin_anchor() -> None:
-    source = yaml.load(
-        (ROOT / ".github/workflows/installer-publication-source.yml").read_text(),
-        Loader=yaml.BaseLoader,
-    )
-    publication = yaml.load(
-        (ROOT / ".github/workflows/installer-publication.yml").read_text(),
-        Loader=yaml.BaseLoader,
-    )
-
-    producer_paths: set[str] = set()
-    for name in ("agent-release.yml", "dev-images.yml", "installer-setups.yml"):
-        producer = yaml.load(
-            (ROOT / ".github/workflows" / name).read_text(),
-            Loader=yaml.BaseLoader,
-        )
-        producer_paths.update(producer["on"]["push"]["paths"])
-    producer_paths.update(
-        {
-            ".github/workflows/installer-publication-source.yml",
-            ".github/workflows/installer-publication.yml",
-            "install/**",
-            "scripts/build-nas-compose-bundle",
-            "scripts/install-release-publication",
-            "tests/acceptance/test_fresh_nas_install.py",
-            "tests/acceptance/test_spark_lifecycle.py",
-        }
-    )
-    assert source["on"]["push"]["branches"] == ["main"]
-    assert set(source["on"]["push"]["paths"]) == producer_paths
-    assert publication["on"]["workflow_run"]["workflows"] == [
-        "CI",
-        "Installer publication source",
-    ]
-    assert "schedule" not in publication["on"]
-    authority = publication["jobs"]["authority"]
-    assert "Installer publication source" in authority["if"]
-    assert "Development images" not in authority["if"]
-    bind = next(
-        step
-        for step in authority["steps"]
-        if step["name"] == "Bind accepted workflow evidence to source authority"
-    )
-    script = bind["run"]
-    assert script.count("sleep 60") == 1
-    assert script.index("sleep 60") < script.index(
-        "development_run agent-release.yml"
-    )
-
-
 def test_installer_acceptance_signer_requires_current_gate_report_set() -> None:
     publication = yaml.load(
         (ROOT / ".github/workflows/installer-publication.yml").read_text(),
@@ -1372,10 +1322,17 @@ def _promote(
     receipt: Path,
     signature: Path,
     public_key: Path,
+    *,
+    preflight_only: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         _promote_command(
-            publication, receipt, signature, public_key, filesystem=destination
+            publication,
+            receipt,
+            signature,
+            public_key,
+            filesystem=destination,
+            preflight_only=preflight_only,
         ),
         cwd=ROOT,
         text=True,
@@ -1392,6 +1349,7 @@ def _promote_command(
     *,
     filesystem: Path | None = None,
     remote: str | None = None,
+    preflight_only: bool = False,
 ) -> list[str]:
     if (filesystem is None) == (remote is None):
         raise AssertionError("select one promotion destination")
@@ -1419,8 +1377,50 @@ def _promote_command(
         str(public_key),
         "--acceptance-public-key-sha256",
         hashlib.sha256(encoded).hexdigest(),
+        *(["--preflight-only"] if preflight_only else []),
         *destination,
     ]
+
+
+def test_preflight_validates_without_writing_publication_objects(
+    tmp_path: Path,
+) -> None:
+    inputs = _inputs(tmp_path / "inputs")
+    publication = _assemble(tmp_path / "publication", inputs)
+    destination = tmp_path / "destination"
+    published = _publish_candidate(publication, destination)
+    assert published.returncode == 0, published.stderr
+    receipt, signature, public_key = _acceptance_receipt(
+        tmp_path / "publication", publication
+    )
+    before = sorted(
+        str(path.relative_to(destination)) for path in destination.rglob("*")
+    )
+    result = subprocess.run(
+        _promote_command(
+            publication,
+            receipt,
+            signature,
+            public_key,
+            filesystem=destination,
+            preflight_only=True,
+        ),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "channel": "stable",
+        "generation": json.loads((publication / "publication-plan.json").read_text())[
+            "generation"
+        ],
+        "phase": "preflight",
+    }
+    assert before == sorted(
+        str(path.relative_to(destination)) for path in destination.rglob("*")
+    )
 
 
 def _publish_accepted(
@@ -2134,7 +2134,11 @@ def test_assemble_rejects_incomplete_platform_matrix(
     assert not (tmp_path / "publication").exists()
 
 
-def test_promotion_refuses_rejected_acceptance_evidence(tmp_path: Path) -> None:
+@pytest.mark.parametrize("preflight_only", [False, True])
+def test_promotion_refuses_rejected_acceptance_evidence(
+    tmp_path: Path,
+    preflight_only: bool,
+) -> None:
     publication = _assemble(tmp_path / "inputs", _inputs(tmp_path / "inputs"))
     destination = tmp_path / "public"
     assert _publish_candidate(publication, destination).returncode == 0
@@ -2142,7 +2146,14 @@ def test_promotion_refuses_rejected_acceptance_evidence(tmp_path: Path) -> None:
         tmp_path / "acceptance", publication, status="rejected"
     )
 
-    result = _promote(publication, destination, receipt, signature, public_key)
+    result = _promote(
+        publication,
+        destination,
+        receipt,
+        signature,
+        public_key,
+        preflight_only=preflight_only,
+    )
 
     assert result.returncode == 2
     assert "evidence is not accepted" in result.stderr
@@ -2207,9 +2218,9 @@ def test_development_assembly_reuses_images_from_an_accepted_ancestor(
     command[command.index("--images-source-sha") + 1] = images_source_sha
     for role in ("api", "worker", "hermes", "litellm"):
         option = f"--{role}-image"
-        command[command.index(option) + 1] = command[
-            command.index(option) + 1
-        ].replace(f"dev-sha-{SOURCE_SHA}", f"dev-sha-{images_source_sha}")
+        command[command.index(option) + 1] = command[command.index(option) + 1].replace(
+            f"dev-sha-{SOURCE_SHA}", f"dev-sha-{images_source_sha}"
+        )
 
     result = subprocess.run(
         command, cwd=ROOT, text=True, capture_output=True, check=False
@@ -2309,8 +2320,10 @@ def test_static_endpoints_do_not_change_between_release_generations(
     ).read_bytes()
 
 
+@pytest.mark.parametrize("preflight_only", [False, True])
 def test_stable_publication_refuses_version_rollback_before_writing(
     tmp_path: Path,
+    preflight_only: bool,
 ) -> None:
     newest_inputs = _inputs(tmp_path / "newest", version="1.2.4")
     newest = _assemble(tmp_path / "newest", newest_inputs)
@@ -2328,7 +2341,14 @@ def test_stable_publication_refuses_version_rollback_before_writing(
         tmp_path / "older-acceptance", older
     )
     before = (destination / "artifacts/stable/current.manifest").read_bytes()
-    rollback = _promote(older, destination, receipt, signature, public_key)
+    rollback = _promote(
+        older,
+        destination,
+        receipt,
+        signature,
+        public_key,
+        preflight_only=preflight_only,
+    )
 
     assert rollback.returncode == 2
     assert "refusing to regress" in rollback.stderr

@@ -53,6 +53,7 @@ from tests.acceptance.test_fresh_nas_install import (
     generate_bundle,
     host_command_environment,
     is_channel_image,
+    is_immutable_image,
     nas_responses,
     tailscale_service_hostname,
 )
@@ -85,6 +86,7 @@ COMPOSE_IMAGE_ROLES = {
     "api": "control-api",
     "worker": "control-worker",
     "hermes": "hermes-agent",
+    "litellm": "litellm",
 }
 
 ED25519_PKCS8_V2_PREFIX = bytes.fromhex("3051020101300506032b657004220420")
@@ -627,11 +629,14 @@ class SparkLifecycle:
         self._cleanup()
 
     def _compose(self, *arguments: str) -> list[str]:
+        overlay = os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+        files = ["-f", "docker-compose.yaml", "-f", overlay] if overlay else []
         return [
             "docker",
             "compose",
             "--project-name",
             self.project,
+            *files,
             *arguments,
         ]
 
@@ -997,18 +1002,71 @@ class SparkLifecycle:
             raise LifecycleError("Compose image graph is invalid") from error
         if not isinstance(services, dict):
             raise LifecycleError("Compose image graph is invalid")
-        for role, service in COMPOSE_IMAGE_ROLES.items():
-            configured_service = services.get(service)
-            if not isinstance(configured_service, dict) or configured_service.get(
-                "image"
-            ) != str(images.get(role)).split("@", 1)[0].rsplit(":", 1)[0] + (
-                ":dev" if self.arguments.channel == "dev" else ":latest"
-            ):
-                raise LifecycleError("Compose image graph differs from publication")
-        for service in services.values():
+        base = self._run_command(
+            [
+                "docker",
+                "compose",
+                "--project-name",
+                self.project,
+                "--profile",
+                "hermes",
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=self.bundle,
+        )
+        try:
+            base_services = json.loads(base.stdout)["services"]
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            raise LifecycleError("base Compose image graph is invalid") from error
+        if not isinstance(base_services, dict):
+            raise LifecycleError("base Compose image graph is invalid")
+        for service in base_services.values():
             image = service.get("image") if isinstance(service, dict) else None
             if not isinstance(image, str) or not is_channel_image(
                 image, self.arguments.channel
+            ):
+                raise LifecycleError("base Compose image does not follow its channel")
+        for role, service in COMPOSE_IMAGE_ROLES.items():
+            configured_service = services.get(service)
+            expected_image = str(images.get(role)).split("@", 1)[0].rsplit(":", 1)[
+                0
+            ] + (":dev" if self.arguments.channel == "dev" else ":latest")
+            if os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+                expected_image = str(images.get(role))
+            if (
+                not isinstance(configured_service, dict)
+                or configured_service.get("image") != expected_image
+            ):
+                raise LifecycleError("Compose image graph differs from publication")
+        provisioner = services.get("hermes-litellm-key-provisioner")
+        provisioner_expected = str(images["litellm"])
+        if not os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
+            provisioner_expected = provisioner_expected.split("@", 1)[0].rsplit(":", 1)[
+                0
+            ] + (":dev" if self.arguments.channel == "dev" else ":latest")
+        if (
+            not isinstance(provisioner, dict)
+            or provisioner.get("image") != provisioner_expected
+        ):
+            raise LifecycleError("Compose image graph differs from publication")
+        for service in services.values():
+            image = service.get("image") if isinstance(service, dict) else None
+            if (
+                not isinstance(image, str)
+                or (
+                    image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+                    and os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+                    and not is_immutable_image(image)
+                )
+                or (
+                    (
+                        not os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY")
+                        or not image.startswith("ghcr.io/carstvaartjes/vonk-forge-")
+                    )
+                    and not is_channel_image(image, self.arguments.channel)
+                )
             ):
                 raise LifecycleError("Compose image does not follow its channel")
 

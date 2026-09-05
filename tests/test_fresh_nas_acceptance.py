@@ -129,8 +129,8 @@ def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> 
         channel="pinned",
         api_image=f"ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:{digest}",
         worker_image=f"ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3@sha256:{digest}",
-            hermes_image=f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{digest}",
-            litellm_image=f"ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3@sha256:{digest}",
+        hermes_image=f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{digest}",
+        litellm_image=f"ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3@sha256:{digest}",
     )
     payload = builder._payload(builder._read_compose(rendered), "stable")
     required = payload["required_values"]
@@ -241,9 +241,7 @@ def test_tailscale_disabled_mode_refuses_credentials_and_gateway_ownership(
     acceptance = _acceptance_module()
     monkeypatch.setenv("VONK_ACCEPTANCE_TAILSCALE_MODE", "disabled")
     monkeypatch.delenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID", raising=False)
-    monkeypatch.delenv(
-        "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", raising=False
-    )
+    monkeypatch.delenv("VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("VONK_ACCEPTANCE_REQUIRE_TAILNET_CLIENT", raising=False)
 
     assert acceptance.tailscale_acceptance_mode() == "disabled"
@@ -274,9 +272,7 @@ def test_full_tailscale_acceptance_requires_isolated_disposable_tailnet(
     with pytest.raises(AcceptanceError, match="isolated disposable test tailnet"):
         acceptance.assert_tailscale_acceptance_boundary("full")
 
-    monkeypatch.setenv(
-        "VONK_ACCEPTANCE_TAILNET_KIND", acceptance.ISOLATED_TAILNET_KIND
-    )
+    monkeypatch.setenv("VONK_ACCEPTANCE_TAILNET_KIND", acceptance.ISOLATED_TAILNET_KIND)
     acceptance.assert_tailscale_acceptance_boundary("full")
 
     with pytest.raises(AcceptanceError, match="must not select a tailnet kind"):
@@ -1072,3 +1068,25 @@ def test_routed_service_checks_require_authentication_and_expected_data(
     )
     assert registry["ca_file"] == secrets / "step-ca/root-certificate"
     assert registry["client_certificate"] == client_certificate
+
+
+@pytest.mark.parametrize(
+    "mutation", [None, "wrong_role", "floating_candidate", "pinned_upstream"]
+)
+def test_candidate_overlay_checks_exact_roles_and_floating_upstream(mutation):
+    acceptance = _acceptance_module()
+    api = "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-x@sha256:" + "a" * 64
+    worker = "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-x@sha256:" + "b" * 64
+    expected = {"control-api": {"image": api}, "control-worker": {"image": worker}}
+    services = {**expected, "postgres": {"image": "postgres:latest"}}
+    if mutation == "wrong_role":
+        services["control-api"] = {"image": worker}
+    elif mutation == "floating_candidate":
+        services["control-api"] = {"image": "ghcr.io/carstvaartjes/vonk-forge-api:dev"}
+    elif mutation == "pinned_upstream":
+        services["postgres"] = {"image": "postgres@sha256:" + "c" * 64}
+    if mutation:
+        with pytest.raises(acceptance.AcceptanceError):
+            acceptance.assert_candidate_image_graph(services, expected)
+    else:
+        acceptance.assert_candidate_image_graph(services, expected)
