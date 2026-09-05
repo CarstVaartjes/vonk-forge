@@ -16,7 +16,7 @@ SCRIPT = ROOT / "scripts" / "validate-recipe-library"
 CANDIDATE = Path(
     os.environ.get(
         "VONK_FORGE_RECIPE_LIBRARY",
-        "/private/tmp/vonk-forge-recipes-contract-conversion-final-795b44f",
+        "/private/tmp/vonk-forge-recipes-contract-conversion-final",
     )
 )
 
