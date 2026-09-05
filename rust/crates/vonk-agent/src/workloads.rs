@@ -34,7 +34,7 @@ pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934c
 // empty.  The total bound prevents a large number of individually valid
 // values from creating an unbounded launch request.
 const MAX_ARGV_ITEMS: usize = 512;
-const MAX_ARGV_ITEM_BYTES: usize = 4096;
+const MAX_ARGV_ITEM_BYTES: usize = 65_536;
 const MAX_ARGV_BYTES: usize = 1024 * 1024;
 const MAX_RUNTIME_ARGUMENT_BYTES: usize = 1024 * 1024;
 

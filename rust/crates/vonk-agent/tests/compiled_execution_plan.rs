@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use vonk_agent::workloads::{CompiledExecutionPlan, WorkloadError, materialized_model_path};
 
 fn fixture() -> Value {
@@ -84,4 +84,35 @@ fn retired_upstream_authority_is_rejected_by_strict_serde() {
     let mut value = fixture();
     value["artifacts"][0]["repository"] = serde_json::json!("huggingface/private");
     assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_err());
+}
+
+#[test]
+fn opaque_argv_preserves_large_json_and_unicode_byte_boundaries() {
+    let mut value = fixture();
+    let compact_json = format!("{{\"payload\":\"{}\"}}", "x".repeat(4_090));
+    assert!(compact_json.len() > 4_096);
+    assert!(compact_json.len() <= 65_536);
+    let exact_unicode = "🙂".repeat(16_384);
+    assert_eq!(exact_unicode.len(), 65_536);
+    value["runtime"]["argv"] = json!(["serve", compact_json, exact_unicode]);
+
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    plan.validate().unwrap();
+    assert_eq!(serde_json::to_value(plan).unwrap(), value);
+}
+
+#[test]
+fn opaque_argv_rejects_nul_and_token_or_total_overflow() {
+    let mut value = fixture();
+    value["runtime"]["argv"] = json!([format!("{}x", "🙂".repeat(16_384))]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    assert!(plan.validate().is_err());
+
+    value["runtime"]["argv"] = json!(["value\u{0000}"]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    assert!(plan.validate().is_err());
+
+    value["runtime"]["argv"] = json!(vec!["x".repeat(65_536); 17]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    assert!(plan.validate().is_err());
 }
