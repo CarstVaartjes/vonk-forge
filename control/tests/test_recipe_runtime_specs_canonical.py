@@ -15,6 +15,10 @@ from vonk_control.recipe_runtime_specs import (  # noqa: E402
     RecipeRuntimeSpecError,
     compile_runtime_spec,
 )
+from vonk_control.harnesses.canonical import (  # noqa: E402
+    _scalar,
+    _validate_argv_size,
+)
 
 
 def _example(name: str) -> dict[str, object]:
@@ -107,6 +111,38 @@ def test_unknown_engine_values_preserve_order_and_reserved_paths_fail(model: obj
     reserved = contracts.RecipeDefinition.model_validate(raw)
     with pytest.raises(RecipeRuntimeSpecError, match="platform-owned"):
         compile_runtime_spec(reserved, models=[model], role="entrypoint", rank=0)
+
+
+def test_canonical_argv_preserves_empty_and_repeated_options(model: object) -> None:
+    raw = _example("recipe-image.json")
+    raw["runtime"]["arguments"] = [  # type: ignore[index]
+        {"name": "repeated_option", "value": ""},
+        {"name": "repeated_option", "value": "second"},
+    ]
+    recipe = contracts.RecipeDefinition.model_validate(raw)
+    argv = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)["runtime"]["entrypoint"]
+    first = argv.index("--repeated_option")
+    assert argv[first : first + 4] == ["--repeated_option", "", "--repeated_option", "second"]
+
+
+def test_canonical_argv_json_and_utf8_bounds() -> None:
+    value = {
+        "outer": ["first value", {"unicode": "Ω; $HOME"}],
+        "nested": {"z": 1, "a": True},
+    }
+    assert _scalar(value, "payload") == (
+        '{"nested":{"a":true,"z":1},"outer":["first value",{"unicode":"Ω; $HOME"}]}'
+    )
+    assert len(_scalar({"text": "x" * 5000}, "large-json").encode("utf-8")) > 4096
+
+    exact = "Ω" * 32768
+    assert len(_scalar(exact, "exact").encode("utf-8")) == 65536
+    with pytest.raises(ValueError, match="bounded"):
+        _scalar(exact + "Ω", "too-large")
+
+    _validate_argv_size(["x" * 65536] * 16)
+    with pytest.raises(ValueError, match="total"):
+        _validate_argv_size(["x" * 65536] * 16 + ["x"])
 
 
 def test_final_recipe_corpus_all_roles_if_published_checkout_is_configured() -> None:
