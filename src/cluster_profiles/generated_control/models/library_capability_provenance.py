@@ -34,6 +34,8 @@ class LibraryCapabilityProvenance:
             slug (str):
             source_kind (LibraryCapabilityProvenanceSourceKind):
             revision_id (Union[None, Unset, str]):
+            source_revision (Union[None, Unset, str]):
+            source_url (Union[None, Unset, str]):
      """
 
     content_sha256: Union[None, str]
@@ -43,6 +45,8 @@ class LibraryCapabilityProvenance:
     slug: str
     source_kind: LibraryCapabilityProvenanceSourceKind
     revision_id: Union[None, Unset, str] = UNSET
+    source_revision: Union[None, Unset, str] = UNSET
+    source_url: Union[None, Unset, str] = UNSET
 
 
 
@@ -70,6 +74,18 @@ class LibraryCapabilityProvenance:
         else:
             revision_id = self.revision_id
 
+        source_revision: Union[None, Unset, str]
+        if isinstance(self.source_revision, Unset):
+            source_revision = UNSET
+        else:
+            source_revision = self.source_revision
+
+        source_url: Union[None, Unset, str]
+        if isinstance(self.source_url, Unset):
+            source_url = UNSET
+        else:
+            source_url = self.source_url
+
 
         field_dict: dict[str, Any] = {}
 
@@ -83,6 +99,10 @@ class LibraryCapabilityProvenance:
         })
         if revision_id is not UNSET:
             field_dict["revision_id"] = revision_id
+        if source_revision is not UNSET:
+            field_dict["source_revision"] = source_revision
+        if source_url is not UNSET:
+            field_dict["source_url"] = source_url
 
         return field_dict
 
@@ -134,6 +154,26 @@ class LibraryCapabilityProvenance:
         revision_id = _parse_revision_id(d.pop("revision_id", UNSET))
 
 
+        def _parse_source_revision(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        source_revision = _parse_source_revision(d.pop("source_revision", UNSET))
+
+
+        def _parse_source_url(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        source_url = _parse_source_url(d.pop("source_url", UNSET))
+
+
         library_capability_provenance = cls(
             content_sha256=content_sha256,
             evidence_digest=evidence_digest,
@@ -142,6 +182,8 @@ class LibraryCapabilityProvenance:
             slug=slug,
             source_kind=source_kind,
             revision_id=revision_id,
+            source_revision=source_revision,
+            source_url=source_url,
         )
 
         return library_capability_provenance

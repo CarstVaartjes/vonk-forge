@@ -3638,7 +3638,11 @@ export interface components {
              * Source Kind
              * @enum {string}
              */
-            source_kind: "model-version" | "recipe-revision";
+            source_kind: "model-version" | "recipe-revision" | "model-capability-evidence";
+            /** Source Revision */
+            source_revision?: string | null;
+            /** Source Url */
+            source_url?: string | null;
         };
         /**
          * LibraryCatalogReference

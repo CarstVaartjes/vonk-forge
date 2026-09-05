@@ -29,19 +29,19 @@ class ModelCacheOperationProgress:
         Attributes:
             completed_artifacts (int):
             downloaded_bytes (int):
-            expected_bytes (Union[None, int]):
             phase (ModelCacheOperationProgressPhase):
             total_artifacts (int):
             current_artifact_key (Union[None, Unset, str]):
+            expected_bytes (Union[None, Unset, int]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
     completed_artifacts: int
     downloaded_bytes: int
-    expected_bytes: Union[None, int]
     phase: ModelCacheOperationProgressPhase
     total_artifacts: int
     current_artifact_key: Union[None, Unset, str] = UNSET
+    expected_bytes: Union[None, Unset, int] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
 
@@ -53,8 +53,6 @@ class ModelCacheOperationProgress:
 
         downloaded_bytes = self.downloaded_bytes
 
-        expected_bytes = self.expected_bytes
-
         phase: str = self.phase
 
         total_artifacts = self.total_artifacts
@@ -65,6 +63,12 @@ class ModelCacheOperationProgress:
         else:
             current_artifact_key = self.current_artifact_key
 
+        expected_bytes: Union[None, Unset, int]
+        if isinstance(self.expected_bytes, Unset):
+            expected_bytes = UNSET
+        else:
+            expected_bytes = self.expected_bytes
+
         schema_version = self.schema_version
 
 
@@ -73,12 +77,13 @@ class ModelCacheOperationProgress:
         field_dict.update({
             "completed_artifacts": completed_artifacts,
             "downloaded_bytes": downloaded_bytes,
-            "expected_bytes": expected_bytes,
             "phase": phase,
             "total_artifacts": total_artifacts,
         })
         if current_artifact_key is not UNSET:
             field_dict["current_artifact_key"] = current_artifact_key
+        if expected_bytes is not UNSET:
+            field_dict["expected_bytes"] = expected_bytes
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -92,8 +97,6 @@ class ModelCacheOperationProgress:
         completed_artifacts = d.pop("completed_artifacts")
 
         downloaded_bytes = d.pop("downloaded_bytes")
-
-        expected_bytes = d.pop("expected_bytes")
 
         phase = check_model_cache_operation_progress_phase(d.pop("phase"))
 
@@ -112,6 +115,16 @@ class ModelCacheOperationProgress:
         current_artifact_key = _parse_current_artifact_key(d.pop("current_artifact_key", UNSET))
 
 
+        def _parse_expected_bytes(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        expected_bytes = _parse_expected_bytes(d.pop("expected_bytes", UNSET))
+
+
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -119,10 +132,10 @@ class ModelCacheOperationProgress:
         model_cache_operation_progress = cls(
             completed_artifacts=completed_artifacts,
             downloaded_bytes=downloaded_bytes,
-            expected_bytes=expected_bytes,
             phase=phase,
             total_artifacts=total_artifacts,
             current_artifact_key=current_artifact_key,
+            expected_bytes=expected_bytes,
             schema_version=schema_version,
         )
 
