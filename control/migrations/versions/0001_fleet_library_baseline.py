@@ -109,26 +109,6 @@ def upgrade() -> None:
     op.create_index(op.f('ix_control_authority_proposals_base_revision'), 'control_authority_proposals', ['base_revision'], unique=False)
     op.create_index(op.f('ix_control_authority_proposals_applied_revision'), 'control_authority_proposals', ['applied_revision'], unique=False)
     op.create_index(op.f('ix_control_authority_proposals_created_at'), 'control_authority_proposals', ['created_at'], unique=False)
-    op.create_table('catalog_entities',
-    sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('kind', sa.String(length=32), nullable=False),
-    sa.Column('publisher', sa.String(length=63), nullable=False),
-    sa.Column('slug', sa.String(length=63), nullable=False),
-    sa.Column('title', sa.String(length=120), nullable=False),
-    sa.Column('created_by', sa.String(length=200), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.CheckConstraint("kind IN ('model-group','model','model-version','execution-harness','runtime-distribution','patch-bundle')", name='ck_catalog_entities_kind'),
-    sa.CheckConstraint('length(title) BETWEEN 1 AND 120', name='ck_catalog_entities_title'),
-    sa.CheckConstraint('publisher = lower(publisher) AND length(publisher) BETWEEN 2 AND 63', name='ck_catalog_entities_publisher'),
-    sa.CheckConstraint('slug = lower(slug) AND length(slug) BETWEEN 2 AND 63', name='ck_catalog_entities_slug'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('kind', 'publisher', 'slug', name='uq_catalog_entities_identity')
-    )
-    op.create_index(op.f('ix_catalog_entities_kind'), 'catalog_entities', ['kind'], unique=False)
-    op.create_index(op.f('ix_catalog_entities_publisher'), 'catalog_entities', ['publisher'], unique=False)
-    op.create_index(op.f('ix_catalog_entities_slug'), 'catalog_entities', ['slug'], unique=False)
-    op.create_index(op.f('ix_catalog_entities_updated_at'), 'catalog_entities', ['updated_at'], unique=False)
     op.create_table('control_process_heartbeats',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('process_kind', sa.String(length=16), nullable=False),
@@ -399,56 +379,6 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('node_id')
     )
 
-    op.create_table('recipes',
-    sa.Column('recipe_id', sa.String(length=128), nullable=False),
-    sa.Column('slug', sa.String(length=128), nullable=False),
-    sa.Column('title', sa.String(length=200), nullable=False),
-    sa.Column('source', sa.Text(), nullable=False),
-    sa.Column('created_by', sa.String(length=200), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.PrimaryKeyConstraint('recipe_id'),
-    sa.UniqueConstraint('slug')
-    )
-    op.create_table('recipe_revisions',
-    sa.Column('revision_id', sa.String(length=128), nullable=False),
-    sa.Column('recipe_id', sa.String(length=128), nullable=False),
-    sa.Column('revision_number', sa.Integer(), nullable=False),
-    sa.Column('content', sa.JSON(), nullable=False),
-    sa.Column('content_digest', sa.String(length=64), nullable=False),
-    sa.Column('created_by', sa.String(length=200), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.CheckConstraint('revision_number >= 1', name='ck_recipe_revision_number'),
-    sa.ForeignKeyConstraint(['recipe_id'], ['recipes.recipe_id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('revision_id'),
-    sa.UniqueConstraint('recipe_id', 'revision_number', name='uq_recipe_revision_number'),
-    sa.UniqueConstraint('recipe_id', 'content_digest', name='uq_recipe_revision_digest')
-    )
-    op.create_index(op.f('ix_recipe_revisions_recipe_id'), 'recipe_revisions', ['recipe_id'], unique=False)
-    op.create_index(op.f('ix_recipe_revisions_content_digest'), 'recipe_revisions', ['content_digest'], unique=False)
-
-    op.create_table('catalog_entity_revisions',
-    sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('entity_id', sa.String(length=36), nullable=False),
-    sa.Column('revision_number', sa.Integer(), nullable=False),
-    sa.Column('lifecycle', sa.String(length=16), nullable=False),
-    sa.Column('schema_version', sa.Integer(), nullable=False),
-    sa.Column('document', sa.JSON(), nullable=False),
-    sa.Column('content_sha256', sa.String(length=64), nullable=True),
-    sa.Column('created_by', sa.String(length=200), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.CheckConstraint("content_sha256 IS NULL OR (length(content_sha256) = 64 AND content_sha256 = lower(content_sha256) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(content_sha256, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_catalog_entity_revisions_content_digest'),
-    sa.CheckConstraint("lifecycle != 'resolved' OR content_sha256 IS NOT NULL", name='ck_catalog_entity_revisions_resolved_digest'),
-    sa.CheckConstraint("lifecycle IN ('draft','blocked','resolved','deprecated')", name='ck_catalog_entity_revisions_lifecycle'),
-    sa.CheckConstraint('revision_number >= 1', name='ck_catalog_entity_revisions_number'),
-    sa.CheckConstraint('schema_version = 1', name='ck_catalog_entity_revisions_schema'),
-    sa.ForeignKeyConstraint(['entity_id'], ['catalog_entities.id'], ondelete='RESTRICT'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('entity_id', 'revision_number', name='uq_catalog_entity_revision_number')
-    )
-    op.create_index(op.f('ix_catalog_entity_revisions_content_sha256'), 'catalog_entity_revisions', ['content_sha256'], unique=False)
-    op.create_index(op.f('ix_catalog_entity_revisions_entity_id'), 'catalog_entity_revisions', ['entity_id'], unique=False)
-    op.create_index(op.f('ix_catalog_entity_revisions_lifecycle'), 'catalog_entity_revisions', ['lifecycle'], unique=False)
     op.create_table('jobs',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('request_id', sa.String(length=36), nullable=False),
@@ -1162,14 +1092,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_jobs_reconciliation_id'), table_name='jobs')
     op.drop_index(op.f('ix_jobs_created_at'), table_name='jobs')
     op.drop_table('jobs')
-    op.drop_index(op.f('ix_catalog_entity_revisions_lifecycle'), table_name='catalog_entity_revisions')
-    op.drop_index(op.f('ix_catalog_entity_revisions_entity_id'), table_name='catalog_entity_revisions')
-    op.drop_index(op.f('ix_catalog_entity_revisions_content_sha256'), table_name='catalog_entity_revisions')
-    op.drop_table('catalog_entity_revisions')
-    op.drop_index(op.f('ix_recipe_revisions_content_digest'), table_name='recipe_revisions')
-    op.drop_index(op.f('ix_recipe_revisions_recipe_id'), table_name='recipe_revisions')
-    op.drop_table('recipe_revisions')
-    op.drop_table('recipes')
     op.drop_table('agent_profiles')
     op.drop_table('agent_node_profiles')
     op.drop_index(op.f('ix_agent_enrollments_state'), table_name='agent_enrollments')
@@ -1201,11 +1123,6 @@ def downgrade() -> None:
     op.drop_table('fleet_event_cursor')
     op.drop_index(op.f('ix_control_process_heartbeats_completed_at'), table_name='control_process_heartbeats')
     op.drop_table('control_process_heartbeats')
-    op.drop_index(op.f('ix_catalog_entities_updated_at'), table_name='catalog_entities')
-    op.drop_index(op.f('ix_catalog_entities_slug'), table_name='catalog_entities')
-    op.drop_index(op.f('ix_catalog_entities_publisher'), table_name='catalog_entities')
-    op.drop_index(op.f('ix_catalog_entities_kind'), table_name='catalog_entities')
-    op.drop_table('catalog_entities')
     op.drop_index(op.f('ix_audit_events_request_id'), table_name='audit_events')
     op.drop_index(op.f('ix_audit_events_occurred_at'), table_name='audit_events')
     op.drop_table('audit_events')
