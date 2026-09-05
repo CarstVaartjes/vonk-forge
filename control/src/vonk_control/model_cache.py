@@ -27,18 +27,14 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .catalog_contract import CatalogKind
 from .models import (
-    CatalogEntity,
-    CatalogEntityRevision,
+    CatalogDocumentRevision,
     FleetProfile,
-    LocalRecipeRevision,
     ModelCacheArtifact,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
     RecipeInstallation,
-    RecipeRevision,
     RecipeRun,
 )
 from .runtime_init import RuntimeSecretError, read_runtime_secret
@@ -110,6 +106,26 @@ class ArtifactSpec:
             "model_version_sha256": self.model_version_sha256,
         }
 
+    def cache_identity(self) -> dict[str, object]:
+        """Return only immutable bytes/source identity for cache reuse.
+
+        Model/recipe content digests, roles, and mount selectors are
+        provenance or runtime execution facts.  They must remain visible in
+        the manifest but cannot make the same selected file bytes download a
+        second time.
+        """
+        return {
+            "key": self.key,
+            "id": self.artifact_id,
+            "path": self.path,
+            "kind": self.kind,
+            "repository": self.repository,
+            "source": self.source,
+            "revision": self.revision,
+            "sha256": self.sha256,
+            "download_bytes": self.expected_bytes,
+        }
+
     @classmethod
     def from_manifest(cls, value: Mapping[str, object]) -> ArtifactSpec:
         try:
@@ -176,7 +192,15 @@ class ArtifactSetManifest:
 
     @property
     def digest(self) -> str:
-        return _sha256_json(self.document())
+        return _sha256_json(self.identity_document())
+
+    def identity_document(self) -> dict[str, object]:
+        """Return the reusable identity, separate from requested provenance."""
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "source_policy": SOURCE_POLICY,
+            "artifacts": [item.cache_identity() for item in self.artifacts],
+        }
 
     @property
     def expected_bytes(self) -> int:
@@ -313,7 +337,12 @@ def _validate_artifact(value: ArtifactSpec) -> None:
         or not _is_hex(value.sha256)
         or not isinstance(value.expected_bytes, int)
         or isinstance(value.expected_bytes, bool)
-        or value.expected_bytes <= 0
+        or value.expected_bytes < 0
+        or (
+            value.expected_bytes == 0
+            and value.sha256
+            != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        )
         or not value.roles
         or len(value.roles) > 32
         or any(not isinstance(role, str) for role in value.roles)
@@ -516,6 +545,121 @@ def _parse_iso(value: str) -> datetime:
         ) from error
 
 
+def _recipe_model_digests(document: Mapping[str, object]) -> list[str]:
+    raw_models = document.get("models")
+    if not isinstance(raw_models, list) or not raw_models:
+        raise ModelCacheResolutionError(
+            "model_cache.recipe_model_missing",
+            "canonical recipe does not declare model selections",
+        )
+    result: list[str] = []
+    for selection in raw_models:
+        reference = selection.get("model") if isinstance(selection, Mapping) else None
+        digest = reference.get("content_sha256") if isinstance(reference, Mapping) else None
+        if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != _DIGEST_LENGTH:
+            raise ModelCacheResolutionError(
+                "model_cache.model_pin_invalid", "canonical recipe model pin is invalid"
+            )
+        if digest not in result:
+            result.append(digest)
+    if len(result) > _MAX_ARTIFACTS:
+        raise ModelCacheResolutionError("model_cache.dependency_count", "recipe model set is too large")
+    return result
+
+
+def _recipe_model_file_ids(
+    document: Mapping[str, object] | None, digest: str
+) -> set[str] | None:
+    if document is None:
+        return None
+    raw_models = document.get("models")
+    if not isinstance(raw_models, list):
+        raise ModelCacheResolutionError(
+            "model_cache.recipe_model_missing", "canonical recipe model selections are invalid"
+        )
+    selected: set[str] = set()
+    found = False
+    for selection in raw_models:
+        if not isinstance(selection, Mapping):
+            raise ModelCacheResolutionError("model_cache.recipe_model_missing", "canonical recipe model selection is invalid")
+        reference = selection.get("model")
+        if not isinstance(reference, Mapping) or reference.get("content_sha256") != digest:
+            continue
+        found = True
+        files = selection.get("files")
+        if not isinstance(files, list):
+            raise ModelCacheResolutionError("model_cache.artifacts_missing", "canonical recipe file selectors are invalid")
+        for value in files:
+            file_id = value.get("file_id") if isinstance(value, Mapping) else None
+            if not isinstance(file_id, str) or not file_id:
+                raise ModelCacheResolutionError("model_cache.artifact_invalid", "canonical recipe file selector is invalid")
+            selected.add(file_id)
+    return selected if found else None
+
+
+def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[dict[str, object]]:
+    document = row.document
+    source = document.get("source") if isinstance(document, Mapping) else None
+    files = document.get("files") if isinstance(document, Mapping) else None
+    if not isinstance(source, Mapping) or not isinstance(files, list) or not files:
+        raise ModelCacheResolutionError(
+            "model_cache.artifacts_missing", "canonical model has no complete file manifest"
+        )
+    repository = source.get("repository")
+    revision = source.get("revision")
+    if not isinstance(repository, str) or not isinstance(revision, str):
+        raise ModelCacheResolutionError("model_cache.source_invalid", "canonical model source is invalid")
+    result: list[dict[str, object]] = []
+    for value in files:
+        if not isinstance(value, Mapping):
+            raise ModelCacheResolutionError("model_cache.artifact_invalid", "canonical model file is invalid")
+        file_id = value.get("id")
+        path = value.get("path")
+        digest = value.get("sha256")
+        size = value.get("size_bytes")
+        roles = value.get("roles")
+        if (
+            not isinstance(file_id, str)
+            or not isinstance(path, str)
+            or not isinstance(digest, str)
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or not isinstance(roles, list)
+        ):
+            raise ModelCacheResolutionError("model_cache.artifact_invalid", "canonical model file integrity metadata is invalid")
+        result.append(
+            {
+                "id": file_id,
+                "path": path,
+                "kind": "huggingface.file",
+                "repository": repository,
+                "revision": revision,
+                "sha256": digest,
+                "download_bytes": size,
+                "roles": list(roles),
+            }
+        )
+    return result
+
+
+def _same_model_artifact_identity(
+    row: CatalogDocumentRevision, manifest: ArtifactSetManifest
+) -> bool:
+    """Compare selected file bytes while ignoring revision/editorial facts."""
+    try:
+        current = {
+            str(item["id"]): (str(item["path"]), str(item["sha256"]), int(item["download_bytes"]))
+            for item in _canonical_model_artifacts(row)
+        }
+    except (KeyError, TypeError, ValueError, ModelCacheResolutionError):
+        return False
+    selected = {
+        item.artifact_id: (item.path, item.sha256, item.expected_bytes)
+        for item in manifest.artifacts
+    }
+    return bool(selected) and all(current.get(key) == identity for key, identity in selected.items())
+
+
 class ModelCacheService:
     """Resolve, download, verify, repair and evict NAS model artifact sets."""
 
@@ -627,6 +771,7 @@ class ModelCacheService:
             )
         with self._session() as session:
             recipe_document: Mapping[str, object] | None = None
+            recipe_model_digests: list[str] = []
             if recipe_digest is not None or recipe_revision_id is not None:
                 recipe_document, _resolved_recipe_id, resolved_recipe_digest = self._recipe_document(
                     session, recipe_digest, recipe_revision_id
@@ -637,69 +782,45 @@ class ModelCacheService:
                         "exact recipe revision is not resolved",
                     )
                 recipe_digest = resolved_recipe_digest
-                reference = recipe_document.get("model")
-                candidate = (
-                    reference.get("content_sha256")
-                    if isinstance(reference, Mapping)
-                    else None
-                )
-                if not isinstance(candidate, str):
+                recipe_model_digests = _recipe_model_digests(recipe_document)
+                if not recipe_model_digests:
                     raise ModelCacheResolutionError(
                         "model_cache.recipe_model_missing",
                         "recipe does not bind an exact model revision",
                     )
-                if model_digest is not None and candidate != model_digest:
+                if model_digest is not None and model_digest not in recipe_model_digests:
                     raise ModelCacheConflict(
                         "model_cache.pin_mismatch",
                         "recipe and requested model revisions do not match",
                     )
-                model_digest = candidate
+                model_digest = model_digest or recipe_model_digests[0]
             if model_digest is None:
                 raise ModelCacheResolutionError(
                     "model_cache.pin_required",
                     "an exact model revision is required after recipe resolution",
                 )
-            model_rows: dict[str, CatalogEntityRevision] = {}
-            self._collect_model_versions(session, model_digest, model_rows)
-            if recipe_document is not None:
-                raw_dependencies = recipe_document.get("dependencies", ())
-                if not isinstance(raw_dependencies, list):
-                    raise ModelCacheResolutionError(
-                        "model_cache.dependencies_invalid",
-                        "recipe model dependencies are invalid",
-                    )
-                for reference in raw_dependencies:
-                    if not isinstance(reference, Mapping) or not isinstance(
-                        reference.get("content_sha256"), str
-                    ):
-                        raise ModelCacheResolutionError(
-                            "model_cache.dependencies_invalid",
-                            "recipe model dependency pin is invalid",
-                        )
-                    self._collect_model_versions(
-                        session, reference["content_sha256"], model_rows
-                    )
+            model_rows: dict[str, CatalogDocumentRevision] = {}
+            requested_model_digests = (
+                recipe_model_digests if recipe_document is not None else [model_digest]
+            )
+            for digest in requested_model_digests:
+                self._collect_model_versions(session, digest, model_rows)
             specs: list[ArtifactSpec] = []
             model_ref: Mapping[str, object] | None = None
             for digest, row in sorted(model_rows.items()):
                 if digest == model_digest:
                     model_ref = {
-                        "kind": "model-version",
-                        "publisher": row.entity.publisher,
-                        "slug": row.entity.slug,
+                        "kind": "model",
+                        "publisher": row.publisher,
+                        "slug": row.slug,
                         "content_sha256": digest,
+                        "artifact_key": row.artifact_key,
                     }
-                raw_artifacts = row.document.get("artifacts")
-                if not isinstance(raw_artifacts, list):
-                    raise ModelCacheResolutionError(
-                        "model_cache.artifacts_missing",
-                        "model revision does not declare its complete artifact inventory",
-                    )
+                raw_artifacts = _canonical_model_artifacts(row)
+                selected_ids = _recipe_model_file_ids(recipe_document, digest)
                 for raw in raw_artifacts:
-                    if not isinstance(raw, Mapping):
-                        raise ModelCacheResolutionError(
-                            "model_cache.artifact_invalid", "model artifact metadata is invalid"
-                        )
+                    if selected_ids is not None and raw["id"] not in selected_ids:
+                        continue
                     specs.append(
                         self._artifact_from_catalog(
                             raw,
@@ -722,38 +843,33 @@ class ModelCacheService:
         digest: str | None,
         revision_id: str | None,
     ) -> tuple[Mapping[str, object], str, str]:
-        local = None
         if revision_id is not None:
-            local = session.get(LocalRecipeRevision, revision_id)
-            if local is None:
-                greenfield = session.get(RecipeRevision, revision_id)
-                if greenfield is not None:
-                    return greenfield.content, greenfield.revision_id, greenfield.content_digest
-        elif digest is not None:
-            local = session.scalar(
-                select(LocalRecipeRevision).where(
-                    LocalRecipeRevision.content_sha256 == digest,
-                    LocalRecipeRevision.lifecycle == "resolved",
+            revision = session.get(CatalogDocumentRevision, revision_id)
+        else:
+            revision = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.content_digest == digest,
+                    CatalogDocumentRevision.state == "active",
                 )
             )
-            if local is None:
-                greenfield = session.scalar(
-                    select(RecipeRevision).where(RecipeRevision.content_digest == digest)
-                )
-                if greenfield is not None:
-                    return greenfield.content, greenfield.revision_id, greenfield.content_digest
-        if local is None or local.lifecycle != "resolved" or local.content_sha256 is None:
+        if (
+            revision is None
+            or revision.kind != "recipe"
+            or revision.state != "active"
+            or not isinstance(revision.content_digest, str)
+        ):
             raise ModelCacheResolutionError(
                 "model_cache.recipe_revision_missing",
                 "exact recipe revision is not resolved",
             )
-        return local.document, local.id, local.content_sha256
+        return revision.document, revision.id, revision.content_digest
 
     def _collect_model_versions(
         self,
         session: Session,
         digest: str,
-        rows: dict[str, CatalogEntityRevision],
+        rows: dict[str, CatalogDocumentRevision],
     ) -> None:
         if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != 64:
             raise ModelCacheResolutionError(
@@ -762,12 +878,10 @@ class ModelCacheService:
         if digest in rows:
             return
         row = session.scalar(
-            select(CatalogEntityRevision)
-            .join(CatalogEntity)
-            .where(
-                CatalogEntity.kind == CatalogKind.MODEL_VERSION.value,
-                CatalogEntityRevision.content_sha256 == digest,
-                CatalogEntityRevision.lifecycle == "resolved",
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.content_digest == digest,
+                CatalogDocumentRevision.state == "active",
             )
         )
         if row is None:
@@ -776,23 +890,10 @@ class ModelCacheService:
                 "exact model revision is not resolved",
             )
         rows[digest] = row
-        dependencies = row.document.get("dependencies", ())
-        if not isinstance(dependencies, list):
-            raise ModelCacheResolutionError(
-                "model_cache.dependencies_invalid", "model dependencies are invalid"
-            )
         if len(rows) > _MAX_ARTIFACTS:
             raise ModelCacheResolutionError(
                 "model_cache.dependency_count", "model dependency set is too large"
             )
-        for reference in dependencies:
-            if not isinstance(reference, Mapping) or not isinstance(
-                reference.get("content_sha256"), str
-            ):
-                raise ModelCacheResolutionError(
-                    "model_cache.dependencies_invalid", "model dependency pin is invalid"
-                )
-            self._collect_model_versions(session, reference["content_sha256"], rows)
 
     def _artifact_from_catalog(
         self,
@@ -821,7 +922,9 @@ class ModelCacheService:
             )
         source, revision = _source_for_catalog_artifact(value)
         spec = ArtifactSpec(
-            key=f"artifact-{model_version_sha256[:12]}-{raw_id}",
+            # The file digest/path is the reusable identity.  A model
+            # revision digest is retained as provenance below only.
+            key=f"artifact-{raw_digest[:12]}-{raw_id}",
             artifact_id=raw_id,
             path=raw_path,
             kind=raw_kind,
@@ -1212,10 +1315,16 @@ class ModelCacheService:
             session.add(row)
             session.flush()
         elif row.manifest != manifest.document():
-            raise ModelCacheConflict(
-                "model_cache.identity_conflict",
-                "artifact-set digest resolves to different immutable content",
-            )
+            # The set row keeps the first requested provenance document, while
+            # the primary key is the reusable file identity.  A later model
+            # or recipe revision may have different notes, capabilities,
+            # roles, or requested digests without changing any bytes.
+            stored = ArtifactSetManifest.from_document(row.manifest)
+            if stored.digest != manifest.digest:
+                raise ModelCacheConflict(
+                    "model_cache.identity_conflict",
+                    "artifact-set digest resolves to different immutable content",
+                )
         for spec in manifest.artifacts:
             artifact = session.get(ModelCacheArtifact, spec.sha256)
             if artifact is None:
@@ -2403,6 +2512,8 @@ class ModelCacheService:
                     "schema_version": SCHEMA_VERSION,
                     "artifact_set_sha256": digest,
                     "artifact_key": spec.key,
+                    "file_id": spec.artifact_id,
+                    "model_content_sha256": spec.model_version_sha256,
                     "path": spec.path,
                     "sha256": object_digest,
                     "bytes": size,
@@ -2636,33 +2747,18 @@ class ModelCacheService:
             revision_id = assignment.get("recipe_revision_id")
             if not isinstance(revision_id, str) or not revision_id:
                 continue
-            revision = session.get(LocalRecipeRevision, revision_id)
-            if revision is None or revision.lifecycle != "resolved":
+            revision = session.get(CatalogDocumentRevision, revision_id)
+            if revision is None or revision.kind != "recipe" or revision.state != "active":
                 continue
             if (
                 row.recipe_revision_sha256 is not None
-                and revision.content_sha256 == row.recipe_revision_sha256
+                and revision.content_digest == row.recipe_revision_sha256
             ):
                 return True
             if row.model_version_sha256 is None:
                 continue
             document = revision.document
-            model = document.get("model") if isinstance(document, Mapping) else None
-            if (
-                isinstance(model, Mapping)
-                and model.get("content_sha256") == row.model_version_sha256
-            ):
-                return True
-            dependencies = (
-                document.get("dependencies", ())
-                if isinstance(document, Mapping)
-                else ()
-            )
-            if isinstance(dependencies, list) and any(
-                isinstance(reference, Mapping)
-                and reference.get("content_sha256") == row.model_version_sha256
-                for reference in dependencies
-            ):
+            if row.model_version_sha256 in _recipe_model_digests(document):
                 return True
         return False
 
@@ -2673,27 +2769,20 @@ class ModelCacheService:
         recipe_update = False
         ref = manifest.model_version_ref
         if isinstance(ref, Mapping):
-            entity = session.scalar(
-                select(CatalogEntity).where(
-                    CatalogEntity.kind == CatalogKind.MODEL_VERSION.value,
-                    CatalogEntity.publisher == ref.get("publisher"),
-                    CatalogEntity.slug == ref.get("slug"),
+            latest = session.scalar(
+                select(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.publisher == ref.get("publisher"),
+                    CatalogDocumentRevision.slug == ref.get("slug"),
+                    CatalogDocumentRevision.state == "active",
                 )
+                .order_by(CatalogDocumentRevision.revision_number.desc())
             )
-            if entity is not None:
-                latest = session.scalar(
-                    select(CatalogEntityRevision)
-                    .where(
-                        CatalogEntityRevision.entity_id == entity.id,
-                        CatalogEntityRevision.lifecycle == "resolved",
-                    )
-                    .order_by(CatalogEntityRevision.revision_number.desc())
-                )
-                model_update = bool(
-                    latest is not None
-                    and latest.content_sha256 is not None
-                    and latest.content_sha256 != row.model_version_sha256
-                )
+            model_update = bool(
+                latest is not None
+                and not _same_model_artifact_identity(latest, manifest)
+            )
         if row.recipe_revision_sha256 is not None:
             latest_recipe = self._latest_recipe_digest(
                 session, row.recipe_revision_sha256
@@ -2703,33 +2792,25 @@ class ModelCacheService:
 
     @staticmethod
     def _latest_recipe_digest(session: Session, digest: str) -> str | None:
-        local = session.scalar(
-            select(LocalRecipeRevision).where(
-                LocalRecipeRevision.content_sha256 == digest,
-                LocalRecipeRevision.lifecycle == "resolved",
+        current = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.content_digest == digest,
+                CatalogDocumentRevision.state == "active",
             )
         )
-        if local is not None:
-            latest = session.scalar(
-                select(LocalRecipeRevision)
-                .where(
-                    LocalRecipeRevision.recipe_id == local.recipe_id,
-                    LocalRecipeRevision.lifecycle == "resolved",
-                )
-                .order_by(LocalRecipeRevision.revision_number.desc())
-            )
-            return None if latest is None else latest.content_sha256
-        greenfield = session.scalar(
-            select(RecipeRevision).where(RecipeRevision.content_digest == digest)
-        )
-        if greenfield is None:
+        if current is None:
             return None
-        latest_greenfield = session.scalar(
-            select(RecipeRevision)
-            .where(RecipeRevision.recipe_id == greenfield.recipe_id)
-            .order_by(RecipeRevision.revision_number.desc())
+        latest = session.scalar(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.document_id == current.document_id,
+                CatalogDocumentRevision.state == "active",
+            )
+            .order_by(CatalogDocumentRevision.revision_number.desc())
         )
-        return None if latest_greenfield is None else latest_greenfield.content_digest
+        return None if latest is None else latest.content_digest
 
     def discover_updates(
         self,
@@ -2782,17 +2863,16 @@ class ModelCacheService:
                 latest_recipe = None
                 if model_update and isinstance(manifest.model_version_ref, Mapping):
                     latest = session.scalar(
-                        select(CatalogEntityRevision)
-                        .join(CatalogEntity)
+                        select(CatalogDocumentRevision)
                         .where(
-                            CatalogEntity.kind == CatalogKind.MODEL_VERSION.value,
-                            CatalogEntity.publisher == manifest.model_version_ref.get("publisher"),
-                            CatalogEntity.slug == manifest.model_version_ref.get("slug"),
-                            CatalogEntityRevision.lifecycle == "resolved",
+                            CatalogDocumentRevision.kind == "model",
+                            CatalogDocumentRevision.publisher == manifest.model_version_ref.get("publisher"),
+                            CatalogDocumentRevision.slug == manifest.model_version_ref.get("slug"),
+                            CatalogDocumentRevision.state == "active",
                         )
-                        .order_by(CatalogEntityRevision.revision_number.desc())
+                        .order_by(CatalogDocumentRevision.revision_number.desc())
                     )
-                    latest_model = latest.content_sha256 if latest is not None else None
+                    latest_model = latest.content_digest if latest is not None else None
                 if recipe_update and row.recipe_revision_sha256 is not None:
                     latest_recipe = self._latest_recipe_digest(
                         session, row.recipe_revision_sha256

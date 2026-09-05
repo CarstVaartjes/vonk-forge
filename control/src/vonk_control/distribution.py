@@ -10,17 +10,21 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from threading import RLock
-from typing import BinaryIO, Callable, Protocol
+from typing import BinaryIO, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-
-from vonk_agent_protocol import DistributionAssignment, DistributionObject, canonical_message
+from vonk_agent_protocol import (
+    DistributionAssignment,
+    DistributionObject,
+    canonical_message,
+)
 
 from .models import ArtifactDistributionAssignment, RecipeBuild
 
@@ -190,12 +194,7 @@ class ModelCacheVerifiedObjectSource:
     ) -> None:
         self._open_verified = open_verified
         self._manifests = dict(manifests)
-
-    def verify_artifact_set(
-        self, artifact_set_sha256: str, objects: tuple[DistributionObject, ...]
-    ) -> bool:
-        expected = tuple(item for item in objects if item.kind == "model")
-        return self._manifests.get(artifact_set_sha256) == expected
+        self._receipts: dict[str, tuple[dict[str, object], ...]] = {}
 
     def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
         return self._open_verified(digest, expected_bytes)
@@ -213,6 +212,7 @@ class ModelCacheVerifiedObjectSource:
         adapter = cls.__new__(cls)
         adapter._service = service
         adapter._manifests = {}
+        adapter._receipts = {}
         adapter._paths = {}
         adapter._open_verified = adapter._open_cache_object
         return adapter
@@ -228,6 +228,7 @@ class ModelCacheVerifiedObjectSource:
         except Exception as error:
             raise DistributionError("distribution.model_set_mismatch", "NAS cache manifest is unavailable") from error
         objects = []
+        receipts = []
         for descriptor in descriptors:
             try:
                 item = DistributionObject(
@@ -242,8 +243,25 @@ class ModelCacheVerifiedObjectSource:
                 raise DistributionError("distribution.model_set_mismatch", "NAS cache manifest is malformed") from error
             objects.append(item)
             self._paths[item.sha256] = (digest, item.name, path)
+            file_id = descriptor.get("file_id")
+            model_content_sha256 = descriptor.get("model_content_sha256")
+            roles = descriptor.get("roles")
+            if isinstance(file_id, str) and isinstance(model_content_sha256, str):
+                receipts.append(
+                    {
+                        "model_content_sha256": model_content_sha256,
+                        "file_id": file_id,
+                        "path": item.name,
+                        "sha256": item.sha256,
+                        "bytes": item.bytes,
+                        "roles": list(roles) if isinstance(roles, list) else [],
+                        "distribution_object": item.to_mapping(),
+                    }
+                )
         result = tuple(objects)
         self._manifests[digest] = result
+        if len(receipts) == len(result):
+            self._receipts[digest] = tuple(receipts)
         return result
 
     def _open_cache_object(self, digest: str, expected_bytes: int) -> VerifiedObject:
@@ -274,6 +292,33 @@ class ModelCacheVerifiedObjectSource:
         """Return the verified complete model manifest for assignment creation."""
         return self._manifests.get(artifact_set_sha256) or self._load_manifest(artifact_set_sha256)
 
+    def verified_model_objects_for_set(
+        self, artifact_set_sha256: str
+    ) -> tuple[dict[str, object], ...]:
+        """Return receipts keyed by canonical model identity and file ID."""
+        digest = artifact_set_sha256
+        if digest not in self._receipts:
+            if hasattr(self, "_service"):
+                try:
+                    self._load_manifest(digest)
+                except Exception as error:
+                    raise DistributionError(
+                        "distribution.model_set_identity_unavailable",
+                        "NAS cache manifest lacks canonical model-file identity",
+                    ) from error
+            else:
+                raise DistributionError(
+                    "distribution.model_set_identity_unavailable",
+                    "NAS cache manifest lacks canonical model-file identity",
+                )
+        receipts = self._receipts.get(digest)
+        if receipts is None:
+            raise DistributionError(
+                "distribution.model_set_identity_unavailable",
+                "NAS cache manifest lacks canonical model-file identity",
+            )
+        return receipts
+
 
 class CompositeVerifiedObjectSource:
     """Join the NAS model cache and Controller OCI archive boundaries."""
@@ -293,6 +338,17 @@ class CompositeVerifiedObjectSource:
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
         return self.oci_source.verify_runtime_image(image_digest, archive_sha256)
+
+    def verified_model_objects_for_set(
+        self, artifact_set_sha256: str
+    ) -> tuple[dict[str, object], ...]:
+        resolver = getattr(self.model_source, "verified_model_objects_for_set", None)
+        if resolver is None:
+            raise DistributionError(
+                "distribution.model_set_identity_unavailable",
+                "NAS cache source lacks canonical model-file identity",
+            )
+        return resolver(artifact_set_sha256)
 
     def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
         # Both sources are content addressed. Probe the model cache first so a
@@ -520,16 +576,16 @@ class DistributionService:
 
 
 __all__ = [
+    "CompositeVerifiedObjectSource",
     "DistributionError",
     "DistributionService",
-    "CompositeVerifiedObjectSource",
-    "artifact_set_sha256",
     "FilesystemVerifiedObjectSource",
     "MemoryVerifiedObjectSource",
     "ModelCacheVerifiedObjectSource",
     "RecipeBuildVerifiedObjectSource",
     "VerifiedObject",
     "VerifiedObjectSource",
+    "artifact_set_sha256",
     "build_distribution_service",
     "build_distribution_service_from_components",
 ]
