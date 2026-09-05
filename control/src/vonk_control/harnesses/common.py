@@ -23,6 +23,7 @@ from ..runtime_writable_paths import (
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
+_CANONICAL_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{} ,"<>-]{1,4096}$')
 _SAFE_ENGINE_OPTION_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 _RESERVED_ENGINE_OPTION_NAMES = frozenset(
     {
@@ -99,14 +100,16 @@ class ArgumentSpec:
     validate: Callable[[str], bool] = lambda _value: True
 
 
-def structured_command(value: object) -> tuple[str, ...]:
+def structured_command(value: object, *, canonical_argv: bool = False) -> tuple[str, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise HarnessCompileError("harness command must be a structured argv")
     command = tuple(value)
     if not command or len(command) > 256:
         raise HarnessCompileError("harness command size is invalid")
     if any(
-        type(item) is not str or _SAFE_ARGUMENT.fullmatch(item) is None
+        type(item) is not str
+        or ( _CANONICAL_ARGUMENT if canonical_argv else _SAFE_ARGUMENT ).fullmatch(item)
+        is None
         for item in command
     ):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
@@ -137,12 +140,12 @@ def custom_adapter_command(value: object) -> tuple[str, ...]:
     return command
 
 
-def validate_projection(projection: HarnessProjection) -> None:
+def validate_projection(projection: HarnessProjection, *, canonical_argv: bool = False) -> None:
     if type(projection.slug) is not str or not projection.slug:
         raise HarnessCompileError("harness projection slug is invalid")
     if type(projection.command) is not tuple:
         raise HarnessCompileError("harness command must use the exact tuple contract")
-    structured_command(projection.command)
+    structured_command(projection.command, canonical_argv=canonical_argv)
     if type(projection.contract_version) is not int or projection.contract_version != 1:
         raise HarnessCompileError("harness contract version is invalid")
     if type(projection.image) is not str or _IMAGE.fullmatch(projection.image) is None:
@@ -182,7 +185,7 @@ def validate_projection(projection: HarnessProjection) -> None:
             or type(item[0]) is not str
             or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", item[0])
             or type(item[1]) is not str
-            or _SAFE_ARGUMENT.fullmatch(item[1]) is None
+            or ( _CANONICAL_ARGUMENT if canonical_argv else _SAFE_ARGUMENT ).fullmatch(item[1]) is None
             for item in projection.environment
         )
         or len({name for name, _value in projection.environment})
@@ -257,9 +260,9 @@ def validate_projection(projection: HarnessProjection) -> None:
     if (
         type(binding) is not HarnessBinding
         or type(binding.harness_content_sha256) is not str
-        or type(binding.distribution_content_sha256) is not str
+        or type(binding.execution_content_sha256) is not str
         or not re.fullmatch(r"[a-f0-9]{64}", binding.harness_content_sha256)
-        or not re.fullmatch(r"[a-f0-9]{64}", binding.distribution_content_sha256)
+        or not re.fullmatch(r"[a-f0-9]{64}", binding.execution_content_sha256)
         or type(binding.topology_node_count) is not int
         or binding.topology_node_count < 1
         or type(binding.role) is not str

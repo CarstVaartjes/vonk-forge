@@ -22,7 +22,7 @@ class HarnessBinding:
     """Exact resolved identities bound after a compiler produces a projection."""
 
     harness_content_sha256: str
-    distribution_content_sha256: str
+    execution_content_sha256: str
     topology_node_count: int
     role: str
     rank: int
