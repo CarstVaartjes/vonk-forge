@@ -6,6 +6,9 @@ on:
       - CI
       - Installer publication source
     types: [completed]
+  schedule:
+    # Refresh only re-signs the already published immutable generation.
+    - cron: '17 3 * * *'
 
 permissions:
   actions: read
@@ -158,11 +161,10 @@ jobs:
                 "$(git rev-parse --verify refs/remotes/origin/main^{commit})"; then
                 not_ready
               fi
-              # The source anchor is intentionally tiny and can finish before
-              # GitHub has materialized changed producer runs. Pay one shared
-              # scheduler grace before inspecting every producer; an absent
-              # exact run after this point means its path filter omitted it.
-              sleep 60
+              # Producer completion is a workflow dependency. Do not use a
+              # wall-clock grace period as a substitute for it: an exact run
+              # must already be complete and successful before its artifacts
+              # can enter the candidate.
               IFS=$'\t' read -r package_run_id package_run_number package_source_sha \
                 < <(development_run agent-release.yml)
               metadata=$(
