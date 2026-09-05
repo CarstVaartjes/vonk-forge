@@ -2512,6 +2512,8 @@ class ModelCacheService:
                     "schema_version": SCHEMA_VERSION,
                     "artifact_set_sha256": digest,
                     "artifact_key": spec.key,
+                    "file_id": spec.artifact_id,
+                    "model_content_sha256": spec.model_version_sha256,
                     "path": spec.path,
                     "sha256": object_digest,
                     "bytes": size,

@@ -12,6 +12,10 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.distribution import (
+    CompositeVerifiedObjectSource,
+    ModelCacheVerifiedObjectSource,
+)
 from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheService,
@@ -139,6 +143,34 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         primary["sha256"],
         auxiliary["sha256"],
     }
+    assert {item["file_id"] for item in descriptors} == {"weights", "tokenizer"}
+    assert {item["model_content_sha256"] for item in descriptors} == {model_a}
+    model_source = ModelCacheVerifiedObjectSource.from_service(service)
+    receipts = model_source.verified_model_objects_for_set(
+        first.artifact_set_sha256 or ""
+    )
+    composed_source = CompositeVerifiedObjectSource(model_source, object())
+    assert composed_source.verified_model_objects_for_set(
+        first.artifact_set_sha256 or ""
+    ) == receipts
+    assert {
+        (
+            item["model_content_sha256"],
+            item["file_id"],
+            item["path"],
+            tuple(item["roles"]),
+        )
+        for item in receipts
+    } == {
+        (model_a, "weights", "weights.bin", ("model",)),
+        (model_a, "tokenizer", "tokenizer.json", ("auxiliary",)),
+    }
+    assert all(
+        item["distribution_object"]["sha256"] == item["sha256"]
+        and item["distribution_object"]["bytes"] == item["bytes"]
+        and item["distribution_object"]["name"] == item["path"]
+        for item in receipts
+    )
     assert service.read_verified_artifact(
         first.artifact_set_sha256 or "",
         str(primary["sha256"]),

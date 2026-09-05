@@ -23,6 +23,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -33,13 +34,14 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from vonk_agent_protocol import DistributionObject
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
 Identifier = Annotated[
     str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 ]
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+_WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 
 
 class CompiledExecutionPlanError(ValueError):
@@ -105,13 +107,64 @@ class DistributionObjectReceipt(_StrictModel):
 
     name: str = Field(min_length=1, max_length=512)
     sha256: Digest
-    bytes: int = Field(ge=1, le=16 * 1024**4)
+    bytes: int = Field(ge=0, le=16 * 1024**4)
     kind: Literal["model", "oci-archive"]
 
     @field_validator("name")
     @classmethod
     def name_is_safe(cls, value: str) -> str:
         return _safe_path(value, absolute=False)
+
+    @model_validator(mode="after")
+    def byte_count_matches_digest_kind(self) -> DistributionObjectReceipt:
+        if self.bytes == 0 and (self.kind != "model" or self.sha256 != EMPTY_SHA256):
+            raise ValueError("only an empty model support file may have zero bytes")
+        return self
+
+
+class VerifiedModelObject(_StrictModel):
+    """One cache-authorized model file before recipe mount selection.
+
+    The model content identity and file ID are part of the lookup key.  A
+    path alone is insufficient because different model versions legitimately
+    contain files with the same name, such as ``config.json``.
+    """
+
+    model_content_sha256: Digest
+    file_id: Identifier
+    path: str = Field(min_length=1, max_length=512)
+    sha256: Digest
+    bytes: int = Field(ge=0, le=16 * 1024**4)
+    roles: list[Identifier] = Field(min_length=1, max_length=32)
+    distribution_object: DistributionObjectReceipt
+
+    @field_validator("path")
+    @classmethod
+    def path_is_relative(cls, value: str) -> str:
+        return _safe_path(value, absolute=False)
+
+    @field_validator("roles")
+    @classmethod
+    def roles_are_canonical(cls, value: list[str]) -> list[str]:
+        if len(set(value)) != len(value):
+            raise ValueError("verified model object roles must be unique")
+        return sorted(value)
+
+    @model_validator(mode="after")
+    def exact_distribution_object_is_bound(self) -> VerifiedModelObject:
+        if self.distribution_object.kind != "model":
+            raise ValueError("verified model object kind is invalid")
+        if self.distribution_object.name != self.path:
+            raise ValueError("verified model object name does not match its path")
+        if self.distribution_object.sha256 != self.sha256:
+            raise ValueError("verified model object digest does not match its receipt")
+        if self.distribution_object.bytes != self.bytes:
+            raise ValueError("verified model object bytes do not match its receipt")
+        if self.bytes == 0 and any(
+            role.casefold() in _WEIGHT_ROLES for role in self.roles
+        ):
+            raise ValueError("only non-weight support artifacts may be empty")
+        return self
 
 
 class CompiledModelArtifact(_StrictModel):
@@ -122,9 +175,10 @@ class CompiledModelArtifact(_StrictModel):
     file_id: Identifier
     path: str = Field(min_length=1, max_length=512)
     sha256: Digest
-    bytes: int = Field(ge=1, le=16 * 1024**4)
+    bytes: int = Field(ge=0, le=16 * 1024**4)
     roles: list[Identifier] = Field(min_length=1, max_length=32)
     mount: ExecutionMount
+    materialized_path: str = Field(min_length=1, max_length=512)
     model: ModelCatalogIdentity
     distribution_object: DistributionObjectReceipt
 
@@ -132,6 +186,14 @@ class CompiledModelArtifact(_StrictModel):
     @classmethod
     def path_is_relative(cls, value: str) -> str:
         return _safe_path(value, absolute=False)
+
+    @field_validator("materialized_path")
+    @classmethod
+    def materialized_path_is_safe(cls, value: str) -> str:
+        value = _safe_path(value, absolute=True)
+        if not value.startswith("/run/vonk/models/"):
+            raise ValueError("materialized model path must be Controller-owned")
+        return value
 
     @field_validator("roles")
     @classmethod
@@ -158,11 +220,20 @@ class CompiledModelArtifact(_StrictModel):
             raise ValueError(
                 "model distribution object bytes do not match selected file"
             )
-        expected_source = f"/run/vonk/models/{self.selection_id}/{self.file_id}"
+        if self.bytes == 0 and any(
+            role.casefold() in _WEIGHT_ROLES for role in self.roles
+        ):
+            raise ValueError("only non-weight support artifacts may be empty")
+        expected_source = f"/run/vonk/models/{self.selection_id}"
         if self.mount.source != expected_source:
-            raise ValueError("model mount source does not match the selected file")
+            raise ValueError("model mount source must be the selection root")
         if not self.mount.read_only:
             raise ValueError("model mounts must be read-only")
+        expected_materialized = f"{expected_source}/{self.path}"
+        if self.materialized_path != expected_materialized:
+            raise ValueError(
+                "materialized path must preserve the original model file path"
+            )
         return self
 
 
@@ -203,7 +274,7 @@ class CompiledExecutionPlan(_StrictModel):
     harness_sha256: Digest
     execution_sha256: Digest
     model_artifact_set_sha256: Digest
-    model_artifact_set_bytes: int = Field(ge=1, le=16 * 1024**4)
+    model_artifact_set_bytes: int = Field(ge=0, le=16 * 1024**4)
     artifacts: list[CompiledModelArtifact] = Field(min_length=1, max_length=4096)
     runtime_image: CompiledRuntimeImage
 
@@ -244,6 +315,7 @@ class CompiledExecutionPlan(_StrictModel):
                     "bytes": item.bytes,
                     "roles": list(item.roles),
                     "mount": item.mount.model_dump(mode="json"),
+                    "materialized_path": item.materialized_path,
                     "distribution_object": item.distribution_object.model_dump(
                         mode="json"
                     ),
@@ -315,6 +387,95 @@ def _mapping(value: object, label: str) -> Mapping[str, object]:
     return value
 
 
+def _canonical_digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def execution_identity_document(
+    runtime_spec: Mapping[str, object],
+) -> dict[str, object]:
+    """Project every compiled launch-affecting fact into one identity.
+
+    The recipe revision remains provenance on ``CompiledExecutionPlan``.  This
+    projection instead covers the final runtime command, bound settings,
+    environment, security, mounts, lifecycle, interface, topology and exact
+    selected model files.  Editorial fields outside this projection do not
+    change the execution identity.
+    """
+
+    spec = _mapping(runtime_spec, "runtime spec")
+    identity = _mapping(spec.get("identity"), "runtime identity")
+    artifacts = spec.get("artifacts")
+    if not isinstance(artifacts, Sequence) or isinstance(artifacts, (str, bytes)):
+        raise CompiledExecutionPlanError("runtime spec model artifacts are missing")
+    selected: list[dict[str, object]] = []
+    for raw in artifacts:
+        item = _mapping(raw, "runtime model artifact")
+        model = _mapping(item.get("model"), "runtime model identity")
+        selected.append(
+            {
+                "selection_id": item.get("selection_id"),
+                "file_id": item.get("file_id"),
+                "path": item.get("path"),
+                "sha256": item.get("sha256"),
+                "bytes": item.get("bytes"),
+                "roles": item.get("roles"),
+                "mount": item.get("mount"),
+                "model": {
+                    "publisher": model.get("publisher"),
+                    "slug": model.get("slug"),
+                    "content_sha256": model.get("content_sha256"),
+                },
+            }
+        )
+    selected.sort(
+        key=lambda item: (
+            str(item["selection_id"]),
+            str(item["file_id"]),
+            str(item["path"]),
+        )
+    )
+    raw_dependencies = spec.get("model_dependencies", ())
+    if not isinstance(raw_dependencies, Sequence) or isinstance(
+        raw_dependencies, (str, bytes)
+    ):
+        raise CompiledExecutionPlanError("runtime model dependencies are invalid")
+    dependencies: list[dict[str, object]] = []
+    for raw in raw_dependencies:
+        dependency = _mapping(raw, "runtime model dependency")
+        dependencies.append(
+            {
+                "selection_id": dependency.get("selection_id"),
+                "publisher": dependency.get("publisher"),
+                "slug": dependency.get("slug"),
+                "content_sha256": dependency.get("content_sha256"),
+            }
+        )
+    dependencies.sort(key=lambda item: str(item["selection_id"]))
+    return {
+        "schema_version": 2,
+        "harness_sha256": identity.get("harness_sha256"),
+        "runtime": spec.get("runtime"),
+        "security": spec.get("security"),
+        "lifecycle": spec.get("lifecycle"),
+        "topology": spec.get("topology"),
+        "endpoint": spec.get("endpoint"),
+        "job": spec.get("job"),
+        "model_dependencies": dependencies,
+        "artifacts": selected,
+    }
+
+
+def execution_identity_sha256(runtime_spec: Mapping[str, object]) -> str:
+    """Return the canonical full launch identity, excluding editorial notes."""
+
+    return _canonical_digest(execution_identity_document(runtime_spec))
+
+
 def _digest(value: object, label: str, *, image: bool = False) -> str:
     if not isinstance(value, str):
         raise CompiledExecutionPlanError(f"{label} is missing")
@@ -324,18 +485,30 @@ def _digest(value: object, label: str, *, image: bool = False) -> str:
     return value
 
 
-def _distribution_object(value: object) -> DistributionObject:
-    if isinstance(value, DistributionObject):
-        result = value
-    else:
-        try:
-            result = DistributionObject.parse(value)
-        except Exception as error:
-            raise CompiledExecutionPlanError(
-                "verified distribution object is invalid"
-            ) from error
-    if result.kind != "model":
-        raise CompiledExecutionPlanError("model receipt includes a non-model object")
+def _verified_model_object(value: object) -> VerifiedModelObject:
+    if isinstance(value, VerifiedModelObject):
+        return value
+    try:
+        return VerifiedModelObject.model_validate(value)
+    except Exception as error:
+        raise CompiledExecutionPlanError(
+            "verified model object receipt is invalid"
+        ) from error
+
+
+def materialized_model_path(
+    models_root: Path | str, artifact: CompiledModelArtifact
+) -> Path:
+    """Resolve the original model file path below a selected models root."""
+
+    root = Path(models_root)
+    if not root.is_absolute():
+        raise ValueError("model materialization root must be absolute")
+    result = root / artifact.selection_id / artifact.path
+    try:
+        result.relative_to(root)
+    except ValueError as error:
+        raise ValueError("materialized model path escapes the selected root") from error
     return result
 
 
@@ -378,7 +551,15 @@ def compile_verified_execution_plan(
         identity.get("recipe_revision_sha256"), "recipe revision digest"
     )
     harness_sha256 = _digest(identity.get("harness_sha256"), "harness digest")
-    execution_sha256 = _digest(identity.get("execution_sha256"), "execution digest")
+    execution_sha256 = execution_identity_sha256(spec)
+    declared_execution_sha256 = identity.get("execution_sha256")
+    if (
+        declared_execution_sha256 is not None
+        and declared_execution_sha256 != execution_sha256
+    ):
+        raise CompiledExecutionPlanError(
+            "runtime execution identity does not cover the compiled launch facts"
+        )
     raw_artifacts = spec.get("artifacts")
     if not isinstance(raw_artifacts, Sequence) or isinstance(
         raw_artifacts, (str, bytes)
@@ -387,19 +568,33 @@ def compile_verified_execution_plan(
     if not raw_artifacts:
         raise CompiledExecutionPlanError("runtime spec has no selected model artifacts")
 
-    verified_objects = tuple(_distribution_object(value) for value in model_objects)
+    verified_objects = tuple(_verified_model_object(value) for value in model_objects)
     if not verified_objects:
         raise CompiledExecutionPlanError("verified model object sequence is empty")
-    by_name: dict[str, DistributionObject] = {}
+    by_identity: dict[tuple[str, str], VerifiedModelObject] = {}
     for item in verified_objects:
-        if item.name in by_name:
-            raise CompiledExecutionPlanError("verified model objects repeat a name")
-        by_name[item.name] = item
+        key = (item.model_content_sha256, item.file_id)
+        if key in by_identity:
+            raise CompiledExecutionPlanError(
+                "verified model objects repeat a model file identity"
+            )
+        by_identity[key] = item
 
     artifacts: list[CompiledModelArtifact] = []
+    selected_keys: set[tuple[str, str]] = set()
     for raw in raw_artifacts:
         item = _mapping(raw, "runtime model artifact")
-        allowed = {"id", "selection_id", "file_id", "path", "roles", "mount", "model"}
+        allowed = {
+            "id",
+            "selection_id",
+            "file_id",
+            "path",
+            "sha256",
+            "bytes",
+            "roles",
+            "mount",
+            "model",
+        }
         if set(item) != allowed:
             raise CompiledExecutionPlanError(
                 "runtime model artifact contains retired or unknown authority"
@@ -409,23 +604,44 @@ def compile_verified_execution_plan(
             raise CompiledExecutionPlanError(
                 "runtime model identity contains upstream authority"
             )
-        path = item.get("path")
-        if not isinstance(path, str) or path not in by_name:
+        model_identity = model.get("content_sha256")
+        file_id = item.get("file_id")
+        if not isinstance(model_identity, str) or not isinstance(file_id, str):
+            raise CompiledExecutionPlanError(
+                "runtime model artifact identity is incomplete"
+            )
+        source = by_identity.get((model_identity, file_id))
+        if source is None:
             raise CompiledExecutionPlanError(
                 "runtime model artifact is not covered by the verified cache objects"
             )
-        source = by_name[path]
+        path = item.get("path")
+        if (
+            path != source.path
+            or item.get("sha256") != source.sha256
+            or item.get("bytes") != source.bytes
+        ):
+            raise CompiledExecutionPlanError(
+                "runtime model file path, digest or size does not match the verified cache object"
+            )
+        selection_id = item.get("selection_id")
+        if not isinstance(selection_id, str):
+            raise CompiledExecutionPlanError(
+                "runtime model selection identity is invalid"
+            )
+        selected_keys.add((model_identity, file_id))
         artifact_data = {
             "id": item.get("id"),
-            "selection_id": item.get("selection_id"),
-            "file_id": item.get("file_id"),
+            "selection_id": selection_id,
+            "file_id": file_id,
             "path": path,
             "sha256": source.sha256,
             "bytes": source.bytes,
             "roles": item.get("roles"),
             "mount": item.get("mount"),
+            "materialized_path": f"/run/vonk/models/{selection_id}/{path}",
             "model": model,
-            "distribution_object": source.to_mapping(),
+            "distribution_object": source.distribution_object.model_dump(mode="json"),
         }
         try:
             artifacts.append(CompiledModelArtifact.model_validate(artifact_data))
@@ -433,6 +649,10 @@ def compile_verified_execution_plan(
             raise CompiledExecutionPlanError(
                 "canonical runtime artifact cannot bind the verified model object"
             ) from error
+    if selected_keys != set(by_identity):
+        raise CompiledExecutionPlanError(
+            "verified cache objects do not exactly cover the selected model files"
+        )
 
     try:
         image = (
@@ -465,6 +685,7 @@ def compile_verified_execution_plan(
 
 
 __all__ = [
+    "EMPTY_SHA256",
     "CompiledExecutionPlan",
     "CompiledExecutionPlanError",
     "CompiledModelArtifact",
@@ -472,5 +693,9 @@ __all__ = [
     "DistributionObjectReceipt",
     "ExecutionMount",
     "ModelCatalogIdentity",
+    "VerifiedModelObject",
     "compile_verified_execution_plan",
+    "execution_identity_document",
+    "execution_identity_sha256",
+    "materialized_model_path",
 ]
