@@ -25,7 +25,10 @@ def _valid(**overrides: str):
     }
     results = {
         "lint": "success",
-        "rust": "success",
+        "rust-umbrella": "success",
+        "rust-quality-gate": "success",
+        "rust-tests": "success",
+        "rust-platform": "success",
         "repository": "skipped",
         "control": "success",
         "web": "success",
@@ -43,12 +46,21 @@ def test_selected_jobs_must_succeed_and_unselected_jobs_may_skip() -> None:
     assert _module().verify("success", selected, results) == []
 
 
+def test_docs_only_change_allows_unselected_jobs_to_skip() -> None:
+    selected, results = _valid()
+    for area in selected:
+        selected[area] = "false"
+    for job in ("rust-quality-gate", "rust-tests", "rust-platform", "repository", "control", "web", "generated", "compose"):
+        results[job] = "skipped"
+    assert _module().verify("success", selected, results) == []
+
+
 def test_rejects_selector_failure_and_unexpected_skip() -> None:
     selected, results = _valid()
-    results["rust"] = "skipped"
+    results["rust-quality-gate"] = "skipped"
     errors = _module().verify("failure", selected, results)
     assert any("selector result" in error for error in errors)
-    assert any("rust result" in error for error in errors)
+    assert any("rust-quality-gate result" in error for error in errors)
 
 
 def test_rejects_failure_cancelled_and_unexpected_success() -> None:

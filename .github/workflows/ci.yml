@@ -80,7 +80,7 @@ jobs:
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             mapfile -t changed_python < <(
-              git diff --name-only --diff-filter=ACMRD "$GITHUB_BASE_SHA" "$GITHUB_SHA" -- '*.py'
+              git diff --name-only --diff-filter=ACMR "$GITHUB_BASE_SHA" "$GITHUB_SHA" -- '*.py'
             )
             if ((${#changed_python[@]} == 0)); then
               echo "No changed Python files; skipping Ruff"
@@ -534,11 +534,15 @@ jobs:
 
   ci-gate:
     name: CI gate
-    needs: [changes, lint, rust, generated-clients, compose-integration, repository-suite, control-suite, web-suite, catalog-runtime]
+    needs: [changes, lint, rust, rust-quality-gate, rust-tests, rust-platform, generated-clients, compose-integration, repository-suite, control-suite, web-suite, catalog-runtime]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Require selector and selected jobs
         shell: bash
         env:
@@ -550,7 +554,10 @@ jobs:
           SELECTED_GENERATED: ${{ needs.changes.outputs.generated }}
           SELECTED_COMPOSE: ${{ needs.changes.outputs.compose }}
           LINT_RESULT: ${{ needs.lint.result }}
-          RUST_RESULT: ${{ needs.rust.result }}
+          RUST_UMBRELLA_RESULT: ${{ needs.rust.result }}
+          RUST_QUALITY_RESULT: ${{ needs.rust-quality-gate.result }}
+          RUST_TESTS_RESULT: ${{ needs.rust-tests.result }}
+          RUST_PLATFORM_RESULT: ${{ needs.rust-platform.result }}
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           WEB_RESULT: ${{ needs.web-suite.result }}
@@ -568,7 +575,10 @@ jobs:
             --selected "generated=$SELECTED_GENERATED" \
             --selected "compose=$SELECTED_COMPOSE" \
             --result "lint=$LINT_RESULT" \
-            --result "rust=$RUST_RESULT" \
+            --result "rust-umbrella=$RUST_UMBRELLA_RESULT" \
+            --result "rust-quality-gate=$RUST_QUALITY_RESULT" \
+            --result "rust-tests=$RUST_TESTS_RESULT" \
+            --result "rust-platform=$RUST_PLATFORM_RESULT" \
             --result "repository=$REPOSITORY_RESULT" \
             --result "control=$CONTROL_RESULT" \
             --result "web=$WEB_RESULT" \

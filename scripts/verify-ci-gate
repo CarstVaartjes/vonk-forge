@@ -7,6 +7,14 @@ import argparse
 import sys
 
 AREAS = ("rust", "repository", "control", "web", "generated", "compose")
+AREA_JOBS = {
+    "rust": ("rust-quality-gate", "rust-tests", "rust-platform"),
+    "repository": ("repository",),
+    "control": ("control",),
+    "web": ("web",),
+    "generated": ("generated",),
+    "compose": ("compose",),
+}
 
 
 def _pairs(values: list[str], label: str) -> dict[str, str]:
@@ -24,19 +32,21 @@ def verify(selector_result: str, selected: dict[str, str], results: dict[str, st
     if selector_result != "success":
         errors.append(f"selector result is {selector_result!r}, expected 'success'")
 
-    required_success = {"lint", "rust", "catalog-runtime"}
+    required_success = {"lint", "rust-umbrella", "catalog-runtime"}
     for job in required_success:
         if results.get(job) != "success":
             errors.append(f"{job} result is {results.get(job)!r}, expected 'success'")
 
     for area in AREAS:
         selection = selected.get(area)
-        result = results.get(area)
         if selection not in {"true", "false"}:
             errors.append(f"{area} selection is {selection!r}, expected 'true' or 'false'")
-        elif result != ("success" if selection == "true" else "skipped"):
+        else:
             expected = "success" if selection == "true" else "skipped"
-            errors.append(f"{area} result is {result!r}, expected {expected!r}")
+            for job in AREA_JOBS[area]:
+                result = results.get(job)
+                if result != expected:
+                    errors.append(f"{job} result is {result!r}, expected {expected!r}")
     return errors
 
 
