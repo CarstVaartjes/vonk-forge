@@ -3,10 +3,16 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     CompiledExecutionPlan,
@@ -18,8 +24,22 @@ from vonk_control.compiled_execution_plan import (
     materialized_model_path,
     validate_compiled_launch_payload,
 )
+from vonk_control.agent_api import AgentApiServices
+from vonk_control.agent_jobs import AgentJobService
+from vonk_control.api import create_app
+from vonk_control.audit import MemoryAuditStore
+from vonk_control.auth import TokenCodec
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.models import (
+    AgentCertificate,
+    AgentNode,
+    Base,
+    InstallationNode,
+    RecipeInstallation,
+)
+from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_operations import _compiled_plan_for_start
+from vonk_control.source_bundles import SourceBundleStore
 
 
 def _spec(
@@ -294,6 +314,134 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
     assert started["runtime"]["placement"]["endpoint_address"] == "192.0.2.10"
     assert started["runtime"]["placement"]["reserved_memory_bytes"] == 4096
     assert validate_compiled_launch_payload(started)["schema_version"] == 2
+
+
+def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
+    tmp_path: Path,
+) -> None:
+    node_id = "spk_" + "a" * 32
+    serial = "serial-a"
+    fingerprint = "fingerprint-a"
+    now = datetime(2026, 9, 6, tzinfo=UTC)
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'agent-spec.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    presence = AgentPresenceService(
+        sessions,
+        ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=lambda: now,
+    )
+    operations = AgentJobService(sessions, clock=lambda: now)
+    operations.set_contact_consumer(presence.observe_in_session)
+    services = AgentApiServices(
+        enrollment=None,
+        operations=operations,
+        sessions=sessions,
+        clock=lambda: now,
+        presence=presence,
+        artifact_root=tmp_path / "artifacts",
+        source_bundles=SourceBundleStore(tmp_path / "bundles"),
+    )
+    services.artifact_root.mkdir()
+    spec = _spec()
+    payload = _compile(spec).to_compiled_launch_payload(
+        spec,
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    installation_id = str(uuid4())
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
+        session.add(
+            AgentCertificate(
+                serial=serial,
+                node_id=node_id,
+                fingerprint=fingerprint,
+                not_before=now - timedelta(days=1),
+                not_after=now + timedelta(days=1),
+                state="active",
+                generation=1,
+            )
+        )
+        session.add(
+            RecipeInstallation(
+                id=installation_id,
+                recipe_revision_id=str(uuid4()),
+                mapping_id=str(uuid4()),
+                mapping_generation=1,
+                recipe_build_id=str(uuid4()),
+                image_digest=payload["runtime_image"]["image_digest"],
+                plan_digest="a" * 64,
+                plan={"compiled_execution_plans": {node_id: payload}},
+                state="installed",
+                actor="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            InstallationNode(
+                installation_id=installation_id,
+                node_id=node_id,
+                rank=0,
+                role="entrypoint",
+                state="installed",
+                required_bytes=1,
+                installed_bytes=1,
+                updated_at=now,
+            )
+        )
+
+    class Jobs:
+        def list(self):
+            return []
+
+        def get(self, _job_id):
+            raise KeyError
+
+        def enqueue(self, *_args, **_kwargs):
+            raise AssertionError("the spec route must not enqueue work")
+
+    app = create_app(
+        jobs=Jobs(),
+        tokens=TokenCodec(b"k" * 32),
+        audits=MemoryAuditStore(),
+        fleet=dict,
+        now=lambda: 0,
+        agent=services,
+        trusted_agent_proxy_auth=b"p" * 32,
+    )
+    headers = {
+        "x-vonk-agent-node": node_id,
+        "x-vonk-agent-serial": serial,
+        "x-vonk-agent-fingerprint": fingerprint,
+        "x-vonk-agent-verified": "1",
+        "x-vonk-agent-proxy-auth": "p" * 32,
+        "x-vonk-agent-source": "10.0.0.42",
+    }
+    with TestClient(app) as client:
+        response = client.get(
+            f"/agent/v1/recipe-installations/{installation_id}/spec",
+            headers=headers,
+        )
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert response.json()["schema_version"] == 2
+    assert "model_version_sha256" not in response.text
+    assert "runtime_distribution_sha256" not in response.text
+    assert "patch_bundle_sha256" not in response.text
 
 
 def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
