@@ -7,7 +7,7 @@ use vonk_agent::workloads::{CompiledExecutionPlan, WorkloadError, materialized_m
 
 fn fixture() -> Value {
     serde_json::from_str(include_str!(
-        "../../../control/tests/fixtures/compiled_workload_v2.json"
+        "../../../../control/tests/fixtures/compiled_workload_v2.json"
     ))
     .unwrap()
 }

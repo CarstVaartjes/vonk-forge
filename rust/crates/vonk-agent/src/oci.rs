@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
-    net::{IpAddr, ToSocketAddrs},
+    net::IpAddr,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     time::Duration,
@@ -11,7 +11,6 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use url::Url;
 use vonk_agent_protocol::{
     RecipeRunInspectionBinding, canonical_json as canonical_protocol_json,
     hex_sha256 as protocol_sha256,
@@ -1118,150 +1117,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     }
 }
 
-struct PublicEndpoint {
-    hostname: String,
-    port: u16,
-    address: IpAddr,
-}
-
-fn public_https_endpoint(url: &Url) -> Result<PublicEndpoint, OciError> {
-    public_https_endpoint_with(url, |hostname, port| {
-        (hostname, port)
-            .to_socket_addrs()
-            .map_err(|_| OciError::Artifact)
-            .map(|addresses| addresses.map(|address| address.ip()).collect())
-    })
-}
-
-fn public_https_endpoint_with<F>(url: &Url, resolver: F) -> Result<PublicEndpoint, OciError>
-where
-    F: FnOnce(&str, u16) -> Result<Vec<IpAddr>, OciError>,
-{
-    if url.scheme() != "https"
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(OciError::Artifact);
-    }
-    let hostname = url.host_str().ok_or(OciError::Artifact)?.to_owned();
-    let port = url.port_or_known_default().ok_or(OciError::Artifact)?;
-    let addresses = resolver(&hostname, port)?;
-    if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(*address)) {
-        return Err(OciError::Artifact);
-    }
-    Ok(PublicEndpoint {
-        hostname,
-        port,
-        address: addresses[0],
-    })
-}
-
-fn oci_endpoint(repository: &str) -> Result<PublicEndpoint, OciError> {
-    if repository.contains("://")
-        || repository.contains('@')
-        || repository.contains('?')
-        || repository.contains('#')
-    {
-        return Err(OciError::Artifact);
-    }
-    let url = Url::parse(&format!("https://{repository}")).map_err(|_| OciError::Artifact)?;
-    if url.host_str() != Some("ghcr.io")
-        || url.path() == "/"
-        || url.path().contains("//")
-        || url.path().contains("..")
-    {
-        return Err(OciError::Artifact);
-    }
-    public_https_endpoint(&url)
-}
-
-fn is_public_ip(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => {
-            let octets = address.octets();
-            !address.is_private()
-                && !address.is_loopback()
-                && !address.is_link_local()
-                && !address.is_broadcast()
-                && !address.is_documentation()
-                && !address.is_multicast()
-                && !address.is_unspecified()
-                && octets[0] != 0
-                && !(octets[0] == 100 && (64..=127).contains(&octets[1]))
-                && !(octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
-                && !(octets[0] == 198 && matches!(octets[1], 18 | 19))
-                && octets[0] < 240
-        }
-        IpAddr::V6(address) => {
-            if let Some(mapped) = address.to_ipv4_mapped() {
-                return is_public_ip(IpAddr::V4(mapped));
-            }
-            let segments = address.segments();
-            // Fail closed to ordinary globally routed unicast space. Exclude
-            // the IETF special-purpose blocks at the start of 2001::/16,
-            // deprecated 6to4, and the documentation allocation.
-            segments[0] & 0xe000 == 0x2000
-                && !(segments[0] == 0x2001 && segments[1] < 0x0200)
-                && !(segments[0] == 0x2001 && segments[1] == 0x0db8)
-                && segments[0] != 0x2002
-                && segments[0] != 0x3ffe
-                && !(segments[0] == 0x3fff && segments[1] & 0xf000 == 0)
-        }
-    }
-}
-
-fn curl_arguments(
-    url: &Url,
-    destination: &Path,
-    maximum_bytes: u64,
-    endpoint: &PublicEndpoint,
-) -> Vec<String> {
-    let resolve_address = match endpoint.address {
-        IpAddr::V4(address) => address.to_string(),
-        IpAddr::V6(address) => format!("[{address}]"),
-    };
-    vec![
-        "--fail".to_owned(),
-        "--proto".to_owned(),
-        "=https".to_owned(),
-        "--tlsv1.3".to_owned(),
-        "--max-redirs".to_owned(),
-        "0".to_owned(),
-        "--max-filesize".to_owned(),
-        maximum_bytes.to_string(),
-        "--resolve".to_owned(),
-        format!(
-            "{}:{}:{}",
-            endpoint.hostname, endpoint.port, resolve_address
-        ),
-        "--connect-timeout".to_owned(),
-        "15".to_owned(),
-        "--retry".to_owned(),
-        "3".to_owned(),
-        "--retry-all-errors".to_owned(),
-        "--write-out".to_owned(),
-        "%{http_code}\t%{redirect_url}\n".to_owned(),
-        "--output".to_owned(),
-        destination.display().to_string(),
-        url.as_str().to_owned(),
-    ]
-}
-
-fn validate_curl_config(path: &Path) -> Result<(), OciError> {
-    let metadata = fs::symlink_metadata(path)?;
-    let effective_uid = rustix::process::geteuid().as_raw();
-    if !metadata.file_type().is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.len() > 4096
-        || !matches!(metadata.uid(), 0) && metadata.uid() != effective_uid
-        || metadata.permissions().mode() & 0o077 != 0
-    {
-        return Err(OciError::Artifact);
-    }
-    Ok(())
-}
-
 fn sha256_file(path: &Path) -> Result<String, OciError> {
     let mut file = File::open(path)?;
     let mut hasher = Sha256::new();
@@ -1299,13 +1154,6 @@ fn hook_arguments(main: &[String], image: &str, hook: &[String]) -> Result<Vec<S
     arguments.push(image.to_owned());
     arguments.extend(hook.iter().cloned());
     Ok(arguments)
-}
-
-fn lower_hex(value: &str, length: usize) -> bool {
-    value.len() == length
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 fn materialize_compiled_models(
@@ -1474,12 +1322,11 @@ fn canonical_uuid(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{OciError, is_public_ip, materialize_compiled_models, public_https_endpoint_with};
+    use super::{OciError, materialize_compiled_models};
     use serde_json::{Value, json};
     use sha2::Digest;
-    use std::{cell::RefCell, collections::VecDeque, fs, net::IpAddr, path::Path};
+    use std::{fs, path::Path};
     use tempfile::tempdir;
-    use url::Url;
 
     fn digest(value: &[u8]) -> String {
         hex::encode(sha2::Sha256::digest(value))
@@ -1551,6 +1398,7 @@ mod tests {
             },
             "security": {
                 "devices": [], "capabilities": [], "host_network": false,
+                "network_mode": "none",
                 "privileged": false, "user": "10001:10001",
                 "mounts": [
                     {"source": "model", "target": "/models", "read_only": true},
@@ -1569,35 +1417,6 @@ mod tests {
             },
             "job": null
         })
-    }
-
-    #[test]
-    fn only_globally_routable_ipv6_is_public() {
-        for value in [
-            "::1",
-            "fe80::1",
-            "fec0::1",
-            "fc00::1",
-            "2001:db8::1",
-            "3ffe::1",
-        ] {
-            assert!(!is_public_ip(value.parse::<IpAddr>().unwrap()), "{value}");
-        }
-        assert!(is_public_ip("2606:4700:4700::1111".parse().unwrap()));
-    }
-
-    #[test]
-    fn endpoint_validation_rejects_private_and_changed_dns_answers() {
-        let url = Url::parse("https://models.example/weights").unwrap();
-        let answers = RefCell::new(VecDeque::from([
-            vec!["93.184.216.34".parse().unwrap()],
-            vec!["127.0.0.1".parse().unwrap()],
-        ]));
-        let resolve = |_: &str, _: u16| answers.borrow_mut().pop_front().ok_or(OciError::Artifact);
-
-        let endpoint = public_https_endpoint_with(&url, resolve).unwrap();
-        assert_eq!(endpoint.address, "93.184.216.34".parse::<IpAddr>().unwrap());
-        assert!(public_https_endpoint_with(&url, resolve).is_err());
     }
 
     #[test]
