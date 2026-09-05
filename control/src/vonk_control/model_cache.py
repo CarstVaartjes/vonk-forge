@@ -1612,10 +1612,10 @@ class ModelCacheService:
                 "production cache HTTP clients must not follow redirects",
             )
         headers = {"Range": f"bytes={offset}-"} if offset else {}
-        response = client.stream("GET", spec.source, headers=headers)
-        response.__enter__()
+        response_context = client.stream("GET", spec.source, headers=headers)
+        response = response_context.__enter__()
         if response.status_code in {301, 302, 303, 307, 308}:
-            response.close()
+            response_context.__exit__(None, None, None)
             if owns_client:
                 client.close()
             raise ModelCacheStorageError(
@@ -1623,7 +1623,7 @@ class ModelCacheService:
             )
         if response.status_code not in {200, 206}:
             status_code = response.status_code
-            response.close()
+            response_context.__exit__(None, None, None)
             if owns_client:
                 client.close()
             raise ModelCacheStorageError(
@@ -1634,12 +1634,12 @@ class ModelCacheService:
         if offset and response.status_code == 200:
             # The server ignored the range request; restart safely rather than
             # appending a complete payload to a checkpoint.
-            response.close()
-            response = client.stream("GET", spec.source)
-            response.__enter__()
+            response_context.__exit__(None, None, None)
+            response_context = client.stream("GET", spec.source)
+            response = response_context.__enter__()
             if response.status_code != 200:
                 status_code = response.status_code
-                response.close()
+                response_context.__exit__(None, None, None)
                 if owns_client:
                     client.close()
                 raise ModelCacheStorageError(
@@ -1650,7 +1650,7 @@ class ModelCacheService:
         if response.status_code == 206:
             content_range = response.headers.get("content-range", "")
             if not content_range.startswith(f"bytes {effective_offset}-"):
-                response.close()
+                response_context.__exit__(None, None, None)
                 if owns_client:
                     client.close()
                 raise ModelCacheStorageError(
@@ -1659,7 +1659,10 @@ class ModelCacheService:
         return (
             response.iter_bytes(),
             effective_offset,
-            lambda: (response.close(), client.close() if owns_client else None),
+            lambda: (
+                response_context.__exit__(None, None, None),
+                client.close() if owns_client else None,
+            ),
         )
 
     def _verify_file(self, path: Path, spec: ArtifactSpec) -> bool:

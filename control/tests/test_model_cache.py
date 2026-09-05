@@ -238,34 +238,14 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
     _service, sessions = cache
     requests: list[httpx.Request] = []
 
-    class FixtureHttpClient:
-        follow_redirects = False
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request, content=b"")
 
-        class Response:
-            status_code = 200
-            headers: dict[str, str] = {}
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, _type, _value, _traceback) -> None:
-                return None
-
-            def iter_bytes(self):
-                yield b""
-
-            def close(self) -> None:
-                return None
-
-        def stream(self, _method: str, _url: str, *, headers: dict[str, str]):
-            request = httpx.Request("GET", _url, headers=headers)
-            requests.append(request)
-            return self.Response()
-
-        def close(self) -> None:
-            return None
-
-    http_client = FixtureHttpClient()
+    http_client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+    )
     service = ModelCacheService(
         sessions,
         tmp_path / "http-nas-cache",
@@ -285,16 +265,19 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
         "roles": ["auxiliary"],
         "model_version_sha256": "e" * 64,
     }
-    operation = _download(
-        service,
-        [artifact],
-        model_version_sha256="e" * 64,
-        request_key="00000000-0000-4000-8000-000000000018",
-    )
-    assert operation.state == "succeeded"
-    assert len(requests) == 1
-    assert requests[0].headers.get("range") is None
-    assert service.get_entry(operation.artifact_set_sha256 or "")["coverage"] == "complete"
+    try:
+        operation = _download(
+            service,
+            [artifact],
+            model_version_sha256="e" * 64,
+            request_key="00000000-0000-4000-8000-000000000018",
+        )
+        assert operation.state == "succeeded"
+        assert len(requests) == 1
+        assert requests[0].headers.get("range") is None
+        assert service.get_entry(operation.artifact_set_sha256 or "")["coverage"] == "complete"
+    finally:
+        http_client.close()
 
 
 def test_download_mutation_is_queued_until_the_controller_worker_runs(
