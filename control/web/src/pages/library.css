@@ -4271,7 +4271,8 @@
   background: var(--mint);
   display: block;
   height: 100%;
-  transition: width 180ms ease;
+  transform-origin: left;
+  transition: transform 180ms ease;
 }
 
 .library-profile-switch-panel {

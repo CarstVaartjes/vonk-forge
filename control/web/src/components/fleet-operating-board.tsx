@@ -60,7 +60,7 @@ function ApplicationProgress({application}: {application: FleetProfileApplicatio
     : undefined;
   return <section className={`fleet-profile-progress state-${application.state}`} aria-live="polite" aria-label="Profile switch progress">
     <div className="fleet-profile-progress-heading"><div><strong>{applicationPhase(application)}</strong><span>{application.state.replaceAll("-", " ")}</span></div>{completed && <span>{completed}{total ? ` of ${total}` : ""}</span>}</div>
-    <div className={`fleet-profile-progress-track${value === undefined ? " is-indeterminate" : ""}`} role="progressbar" aria-label="Profile switch progress" aria-valuemin={0} aria-valuemax={100} {...(value === undefined ? {"aria-valuetext": "Progress total unavailable"} : {"aria-valuenow": value})}><span style={value === undefined ? undefined : {width: `${value}%`}}/></div>
+    <div className={`fleet-profile-progress-track${value === undefined ? " is-indeterminate" : ""}`} role="progressbar" aria-label="Profile switch progress" aria-valuemin={0} aria-valuemax={100} {...(value === undefined ? {"aria-valuetext": "Progress total unavailable"} : {"aria-valuenow": value})}><span style={value === undefined ? undefined : {transform: `scaleX(${value / 100})`}}/></div>
     {members.length > 0 && <ul className="fleet-profile-progress-members" aria-label="Profile switch targets">{members.map(member => <li key={member.nodeId}><span>{member.nodeId}</span><small>{member.state}{member.completed ? ` · ${member.completed}${member.total ? ` of ${member.total}` : ""}` : ""}</small></li>)}</ul>}
     {application.status_reason && <p>{application.status_reason}</p>}
   </section>;
