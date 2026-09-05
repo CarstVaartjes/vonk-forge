@@ -142,6 +142,7 @@ fn model_files_with_the_same_relative_name_remain_selection_scoped() {
     second["file_id"] = json!("config");
     second["path"] = json!("config.json");
     second["sha256"] = json!("1".repeat(64));
+    second["mount"]["source"] = json!("/run/vonk/models/secondary");
     second["materialized_path"] = json!("/run/vonk/models/secondary/config.json");
     second["model"]["slug"] = json!("qwen3-8-flash-next");
     second["model"]["content_sha256"] = json!("2".repeat(64));
