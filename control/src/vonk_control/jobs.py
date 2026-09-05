@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -18,8 +17,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from .auth import CursorCodec
 from .logging import redact_text
 from .models import Job, JobAttempt
+from .operation_contract import is_secret_field
 
-_SENSITIVE = re.compile(r"(?i)(password|secret|token|private.?key|authorization)")
 _MAX_PAYLOAD = 65_536
 
 
@@ -116,7 +115,7 @@ def _canonical_payload(
                 if not isinstance(key, str):
                     raise TypeError("job payload keys must be strings")
                 child_path = path + (key,)
-                if _SENSITIVE.search(key) and child_path not in safe_quota_fields:
+                if is_secret_field(key) and child_path not in safe_quota_fields:
                     raise ValueError("job payload contains a sensitive field")
                 inspect(child, child_path)
         elif isinstance(value, list):
