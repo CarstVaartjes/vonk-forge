@@ -67,6 +67,7 @@ def _spec(
         "security": {
             "devices": [],
             "capabilities": [],
+            "network_mode": "none",
             "host_network": False,
             "privileged": False,
             "user": "10001:10001",
@@ -247,6 +248,8 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
         "target": "/models",
         "read_only": True,
     }
+    assert validated["security"]["network_mode"] == "none"
+    assert validated["security"]["host_network"] is False
     rendered = json.dumps(validated, sort_keys=True)
     assert "model_version_sha256" not in rendered
     assert "runtime_distribution_sha256" not in rendered
@@ -278,6 +281,33 @@ def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt
     mismatched["artifacts"][0]["distribution_object"]["bytes"] += 1
     with pytest.raises(CompiledExecutionPlanError, match="receipt is inconsistent"):
         validate_compiled_launch_payload(mismatched)
+
+
+def test_compiled_launch_payload_rejects_non_isolated_network_mode() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    polluted = copy.deepcopy(payload)
+    polluted["security"]["network_mode"] = "bridge"
+    with pytest.raises(CompiledExecutionPlanError, match="isolated network"):
+        validate_compiled_launch_payload(polluted)
+
+    polluted = copy.deepcopy(payload)
+    polluted["security"]["host_network"] = True
+    with pytest.raises(CompiledExecutionPlanError, match="isolated network"):
+        validate_compiled_launch_payload(polluted)
 
 
 def test_start_claim_binds_live_rank_placement_without_reintroducing_authority() -> None:
@@ -548,6 +578,55 @@ def test_controller_built_receipt_and_pulled_receipt_share_reusable_identity() -
     editorial = _compile(_spec(recipe_digest="9" * 64))
     assert editorial.recipe_revision_sha256 != prebuilt.recipe_revision_sha256
     assert editorial.reusable_identity_sha256 == prebuilt.reusable_identity_sha256
+
+
+def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> None:
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "compiled_workload_v2.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    validated = validate_compiled_launch_payload(fixture)
+    artifacts = validated["artifacts"]
+    assert [item["path"] for item in artifacts].count("config.json") == 2
+    assert {
+        (item["selection_id"], item["file_id"], item["sha256"], item["size_bytes"])
+        for item in artifacts
+    } >= {
+        (
+            "primary",
+            "config-66402a06352a",
+            """66402a06352ac861bc9012a26678e6d5e11a5fd22180165fc19c8a27d3a9e079""",
+            72897,
+        ),
+        (
+            "dependency-qwen3-8-27b-dspark-b3c99101",
+            "config-dd65fb1b01c2",
+            "dd65fb1b01c2adea69512ff2990a79d58eb7fe2c7ea97375aa66f657a29a5bfd",
+            2448,
+        ),
+    }
+    empty = next(item for item in artifacts if item["size_bytes"] == 0)
+    assert empty["sha256"] == EMPTY_SHA256
+    assert empty["roles"] == ["entrypoint"]
+    assert empty["path"] == "__init__.py"
+    assert validated["security"]["network_mode"] == "none"
+    assert validated["security"]["host_network"] is False
+    argv = validated["runtime"]["argv"]
+    assert "--served-model-name" in argv
+    assert argv[argv.index("--served-model-name") + 1] == "qwen3-8-27b-collision"
+    assert any(
+        item["name"] == "XDG_CACHE_HOME" and item["value"] == "/outputs/cache"
+        for item in validated["runtime"]["env"]
+    )
+    assert any(
+        item["name"] == "TMPDIR" and item["value"] == "/outputs/tmp"
+        for item in validated["runtime"]["env"]
+    )
+    assert {mount["source"] for mount in validated["security"]["mounts"]} >= {
+        "model",
+        "outputs",
+    }
 
 
 def test_mount_change_invalidates_reuse_identity_without_changing_bytes() -> None:

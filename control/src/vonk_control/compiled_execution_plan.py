@@ -493,6 +493,12 @@ class CompiledExecutionPlan(_StrictModel):
         if type(placement_doc["role"]) is not str or not placement_doc["role"]:
             raise CompiledExecutionPlanError("runtime role is invalid")
 
+        network_mode = security.get("network_mode")
+        if network_mode != "none" or security.get("host_network") is not False:
+            raise CompiledExecutionPlanError(
+                "compiled security must use isolated network mode with host networking disabled"
+            )
+
         artifacts = [
             {
                 "selection_id": item.selection_id,
@@ -533,6 +539,7 @@ class CompiledExecutionPlan(_StrictModel):
             "security": {
                 "devices": list(security.get("devices", ())),
                 "capabilities": list(security.get("capabilities", ())),
+                "network_mode": network_mode,
                 "host_network": security.get("host_network"),
                 "privileged": security.get("privileged"),
                 "user": security.get("user"),
@@ -1054,6 +1061,7 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
     security_required = {
         "devices",
         "capabilities",
+        "network_mode",
         "host_network",
         "privileged",
         "user",
@@ -1063,6 +1071,10 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
     }
     if set(security) != security_required:
         raise CompiledExecutionPlanError("compiled launch security fields are invalid")
+    if security.get("network_mode") != "none" or security.get("host_network") is not False:
+        raise CompiledExecutionPlanError(
+            "compiled launch security must use isolated network mode with host networking disabled"
+        )
     mounts = security.get("mounts")
     if not isinstance(mounts, list):
         raise CompiledExecutionPlanError("compiled launch security mounts are invalid")

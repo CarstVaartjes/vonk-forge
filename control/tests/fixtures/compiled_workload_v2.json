@@ -1,0 +1,246 @@
+{
+  "schema_version": 2,
+  "identity": {
+    "recipe_revision_sha256": "1c9974001189cb1e6c9266b7e97853f625a5f7a4835d2c8e5284af470cb869da",
+    "execution_sha256": "5785cb6843127cdd0db9918e24a560c57d8de1d83d95ff1554fd48bccaf6feb5",
+    "harness_sha256": "830a82426fa7d2c0e60b7f97ffb9dbb915cb3ca39ff223001e14680722ce3a21",
+    "build_input_sha256": null,
+    "model_artifact_set_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model_artifact_bytes": 75345
+  },
+  "runtime": {
+    "executable": "/opt/vonk/bin/vllm",
+    "argv": [
+      "serve",
+      "/models/target",
+      "--served-model-name",
+      "qwen3-8-27b-collision",
+      "--host",
+      "0.0.0.0",
+      "--port",
+      "8000"
+    ],
+    "env": [
+      {
+        "name": "HOME",
+        "value": "/outputs/cache/home"
+      },
+      {
+        "name": "XDG_CACHE_HOME",
+        "value": "/outputs/cache"
+      },
+      {
+        "name": "XDG_CONFIG_HOME",
+        "value": "/outputs/cache/config"
+      },
+      {
+        "name": "TMPDIR",
+        "value": "/outputs/tmp"
+      },
+      {
+        "name": "HF_HOME",
+        "value": "/outputs/cache/huggingface"
+      },
+      {
+        "name": "TRANSFORMERS_CACHE",
+        "value": "/outputs/cache/huggingface/transformers"
+      },
+      {
+        "name": "VLLM_CACHE_ROOT",
+        "value": "/outputs/cache/vllm"
+      },
+      {
+        "name": "TRITON_CACHE_DIR",
+        "value": "/outputs/cache/triton"
+      },
+      {
+        "name": "TORCH_HOME",
+        "value": "/outputs/cache/torch"
+      },
+      {
+        "name": "TORCH_EXTENSIONS_DIR",
+        "value": "/outputs/cache/torch_extensions"
+      },
+      {
+        "name": "TORCHINDUCTOR_CACHE_DIR",
+        "value": "/outputs/cache/torchinductor"
+      },
+      {
+        "name": "CUDA_CACHE_PATH",
+        "value": "/outputs/cache/cuda"
+      },
+      {
+        "name": "UV_CACHE_DIR",
+        "value": "/outputs/cache/uv"
+      },
+      {
+        "name": "HF_HUB_DISABLE_TELEMETRY",
+        "value": "1"
+      },
+      {
+        "name": "VLLM_NO_USAGE_STATS",
+        "value": "1"
+      }
+    ],
+    "image_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "placement": {
+      "endpoint_address": null,
+      "rank": 0,
+      "role": "entrypoint",
+      "world_size": 1,
+      "local_address": null,
+      "master_address": null,
+      "master_port": null,
+      "port": 8000,
+      "reserved_memory_bytes": 80000000
+    }
+  },
+  "artifacts": [
+    {
+      "selection_id": "primary",
+      "file_id": "config-66402a06352a",
+      "path": "config.json",
+      "sha256": "66402a06352ac861bc9012a26678e6d5e11a5fd22180165fc19c8a27d3a9e079",
+      "size_bytes": 72897,
+      "roles": [
+        "entrypoint"
+      ],
+      "mount": {
+        "target": "/models/target",
+        "read_only": true
+      },
+      "model": {
+        "publisher": "radixark",
+        "slug": "qwen3-8-27b-nvfp4-009632fe",
+        "content_sha256": "29b9d51b0a6dde0c2acae929c6d2a5651d19fb8a7572915f4c096e3b5bc5329b"
+      },
+      "distribution_object": {
+        "name": "config.json",
+        "sha256": "66402a06352ac861bc9012a26678e6d5e11a5fd22180165fc19c8a27d3a9e079",
+        "bytes": 72897,
+        "kind": "model"
+      }
+    },
+    {
+      "selection_id": "dependency-qwen3-8-27b-dspark-b3c99101",
+      "file_id": "config-dd65fb1b01c2",
+      "path": "config.json",
+      "sha256": "dd65fb1b01c2adea69512ff2990a79d58eb7fe2c7ea97375aa66f657a29a5bfd",
+      "size_bytes": 2448,
+      "roles": [
+        "entrypoint"
+      ],
+      "mount": {
+        "target": "/models/draft",
+        "read_only": true
+      },
+      "model": {
+        "publisher": "radixark",
+        "slug": "qwen3-8-27b-dspark-b3c99101",
+        "content_sha256": "4091ffe98645f39f163c52efe1228f5385970df1d631df050eea1628b6721888"
+      },
+      "distribution_object": {
+        "name": "config.json",
+        "sha256": "dd65fb1b01c2adea69512ff2990a79d58eb7fe2c7ea97375aa66f657a29a5bfd",
+        "bytes": 2448,
+        "kind": "model"
+      }
+    },
+    {
+      "selection_id": "support",
+      "file_id": "runtime-e3b0c44298fc",
+      "path": "__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size_bytes": 0,
+      "roles": [
+        "entrypoint"
+      ],
+      "mount": {
+        "target": "/models/support",
+        "read_only": true
+      },
+      "model": {
+        "publisher": "nvidia",
+        "slug": "nemotron-3-super-120b-a12b-nvfp4",
+        "content_sha256": "d3311444a9ef601e113c36063232145eac5f940edc914c861260174479e8c467"
+      },
+      "distribution_object": {
+        "name": "__init__.py",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0,
+        "kind": "model"
+      }
+    }
+  ],
+  "runtime_image": {
+    "image_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "oci_layout_sha256": "cb1ad25444624159339d22db3d98e41e8b4defd390797fca830bf95912fa72d0",
+    "image_bytes": 55,
+    "architecture": "linux-arm64",
+    "runtime_interface": "vonk.runtime.v1",
+    "source": "published",
+    "build_id": null,
+    "distribution_object": {
+      "name": "image.oci.tar",
+      "sha256": "cb1ad25444624159339d22db3d98e41e8b4defd390797fca830bf95912fa72d0",
+      "bytes": 55,
+      "kind": "oci-archive"
+    }
+  },
+  "security": {
+    "devices": [
+      "nvidia.com/gpu=all"
+    ],
+    "capabilities": [],
+    "network_mode": "none",
+    "host_network": false,
+    "privileged": false,
+    "user": "10001:10001",
+    "mounts": [
+      {
+        "source": "model",
+        "target": "/models/target",
+        "read_only": true
+      },
+      {
+        "source": "model",
+        "target": "/models/draft",
+        "read_only": true
+      },
+      {
+        "source": "model",
+        "target": "/models/support",
+        "read_only": true
+      },
+      {
+        "source": "outputs",
+        "target": "/outputs",
+        "read_only": false
+      }
+    ],
+    "read_only_root": true,
+    "no_new_privileges": true
+  },
+  "topology": {
+    "name": "solo",
+    "mode": "single",
+    "backend": "local",
+    "node_count": 1,
+    "world_size": 1,
+    "rank": 0,
+    "role": "entrypoint"
+  },
+  "lifecycle": {
+    "pre_start": [],
+    "post_stop": [],
+    "stop_timeout_seconds": 30
+  },
+  "endpoint": {
+    "protocol": "openai",
+    "port": 8000,
+    "model_aliases": [
+      "synthetic-tiny"
+    ],
+    "health_path": "/v1/models"
+  }
+}

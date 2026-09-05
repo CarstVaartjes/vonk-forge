@@ -480,10 +480,10 @@ def _latest_inventory(
 class DatabaseRunSwitchArtifactInspector:
     """Conservative Spark-side coverage inspector.
 
-    When a model-cache provider is bound, its exact manifest and download
-    preview are the authority for NAS coverage.  The database-only fallback
-    remains deliberately conservative for embedded/test callers: it never
-    treats a model revision digest as an artifact object digest.
+    The Controller model-cache provider is the sole authority for NAS
+    coverage.  A database row can describe target-local observations, but it
+    cannot identify the complete immutable model set or its NAS download
+    plan.  Construction without the provider therefore fails explicitly.
     """
 
     def __init__(self, model_cache: object | None = None) -> None:
@@ -504,100 +504,16 @@ class DatabaseRunSwitchArtifactInspector:
         retention: str,
         now: datetime,
     ) -> ArtifactInspection:
-        if self._model_cache is not None:
-            return self._inspect_model_cache(
-                session,
-                model_cache=self._model_cache,
-                model_version_sha256=model_version_sha256,
-                recipe_revision_id=recipe_revision_id,
-                node_ids=node_ids,
-                retention=retention,
-                now=now,
-            )
-        revision = session.get(LocalRecipeRevision, recipe_revision_id)
-        model_document: Mapping[str, object] | None = None
-        if revision is not None:
-            try:
-                resolved = resolve_recipe_entities(session, revision.document)
-                candidate = getattr(resolved.get("model_version"), "document", None)
-                if isinstance(candidate, Mapping):
-                    model_document = candidate
-            except (RecipeRuntimeSpecError, RuntimeError, TypeError, ValueError):
-                model_document = None
-        expected: list[tuple[str, int]] = []
-        if model_document is not None:
-            raw_artifacts = model_document.get("artifacts")
-            if isinstance(raw_artifacts, list):
-                for raw in raw_artifacts:
-                    if not isinstance(raw, Mapping):
-                        continue
-                    digest = raw.get("sha256")
-                    size = raw.get("installed_bytes")
-                    if (
-                        isinstance(digest, str)
-                        and len(digest) == 64
-                        and all(character in "0123456789abcdef" for character in digest)
-                        and type(size) is int
-                        and size >= 0
-                    ):
-                        expected.append((digest, size))
-        # A model version digest is not an artifact object digest.  When the
-        # immutable manifest is absent, retain unknown coverage and let the
-        # authoritative cache provider supply the exact artifact set.
-        artifact_set_sha256 = (
-            model_document.get("artifact_set_sha256")
-            if isinstance(model_document, Mapping)
-            else None
-        )
-        if not _is_hex_digest(artifact_set_sha256):
-            artifact_set_sha256 = None
-        required = sum(size for _digest_value, size in expected) if expected else None
-        reused = 0
-        missing = 0
-        reclaimable = 0
-        reclaimable_digests: set[str] = set()
-        for node_id in node_ids:
-            rows = tuple(
-                session.scalars(select(NodeArtifact).where(NodeArtifact.node_id == node_id))
-            )
-            by_digest = {row.digest: row for row in rows}
-            for digest, size in expected:
-                row = by_digest.get(digest)
-                if row is not None and row.state == "verified" and row.size_bytes >= size:
-                    reused += size
-                else:
-                    missing += size
-            if retention == "reclaim-unreferenced":
-                reclaimable += sum(
-                    row.size_bytes
-                    for row in rows
-                    if row.state == "verified" and row.ref_count == 0
-                )
-                reclaimable_digests.update(
-                    row.digest
-                    for row in rows
-                    if row.state == "verified" and row.ref_count == 0
-                )
-        if expected:
-            spark_coverage = "complete" if missing == 0 else "partial"
-            missing_spark: int | None = missing
-        else:
-            spark_coverage = "unknown"
-            missing_spark = None
-        return ArtifactInspection(
-            required_bytes=(None if required is None else required * len(node_ids)),
-            reused_bytes=reused,
-            copied_bytes=missing,
-            missing_nas_bytes=None,
-            missing_spark_bytes=missing_spark,
-            reclaimable_bytes=reclaimable,
-            nas_coverage="unknown",
-            spark_coverage=spark_coverage,
-            artifact_digests=tuple(digest for digest, _size in expected),
-            reclaimable_digests=tuple(sorted(reclaimable_digests)),
-            freshness=(),
-            artifact_set_sha256=artifact_set_sha256,
-            artifact_set_bytes=required,
+        if self._model_cache is None:
+            raise RuntimeError("model-cache manifest provider is unavailable")
+        return self._inspect_model_cache(
+            session,
+            model_cache=self._model_cache,
+            model_version_sha256=model_version_sha256,
+            recipe_revision_id=recipe_revision_id,
+            node_ids=node_ids,
+            retention=retention,
+            now=now,
         )
 
     def _inspect_model_cache(
