@@ -139,6 +139,39 @@ def stage_private_key(
     )
 
 
+def _stage_optional_private_key(
+    source: Path,
+    destination: Path,
+    *,
+    owner_uid: int = 0,
+    owner_gid: int = 0,
+    mode: int = 0o400,
+) -> None:
+    """Stage an optional secret, removing a stale projection when disabled."""
+    source = Path(source)
+    destination = Path(destination)
+    # Compose uses /dev/null as the bounded default for an unset optional
+    # secret. Treat only this exact character device as an absent secret.
+    source_is_absent = source == Path("/dev/null") or not source.exists()
+    if source.is_symlink() or (
+        not source_is_absent and not source.is_file()
+    ):
+        raise RuntimeSecretError("optional runtime secret source is unsafe")
+    if source_is_absent or source.stat().st_size == 0:
+        if destination.exists() or destination.is_symlink():
+            if destination.is_dir() and not destination.is_symlink():
+                raise RuntimeSecretError("optional runtime secret destination is unsafe")
+            destination.unlink()
+        return
+    stage_private_key(
+        source,
+        destination,
+        owner_uid=owner_uid,
+        owner_gid=owner_gid,
+        mode=mode,
+    )
+
+
 def stage_runtime_assets(
     source_root: Path = Path("/run/vonk-source-assets"),
     destination_root: Path = Path("/normalized/runtime-assets"),
@@ -252,6 +285,13 @@ def stage_compose_secrets(
                 owner_gid=10001,
                 mode=0o400,
             )
+    _stage_optional_private_key(
+        source_root / "hf-token",
+        destination_root / "hf-token",
+        owner_uid=10001,
+        owner_gid=10001,
+        mode=0o400,
+    )
     for name in (
         "step-ca-root-certificate",
         "agent-intermediate-certificate",

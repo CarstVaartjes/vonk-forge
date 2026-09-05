@@ -4,6 +4,25 @@ This runbook prepares the immutable DeepSeek-V4-Flash-0731 snapshot used by
 the Mia dual-GPU node runtime. Each GPU node keeps its own complete copy under
 `/srv/models`; the NAS and Hugging Face are not serving-time dependencies.
 
+The Controller-side cache downloader supports optional gated/private access
+through the [Hugging Face model-cache authentication guide](../model-cache-huggingface-auth.md).
+The default deployment has no `HF_TOKEN_FILE`, so public downloads remain
+anonymous. When enabled, create `secrets/hf-token` with owner-only permissions
+(`chmod 0400 secrets/hf-token`), set `HF_TOKEN_FILE=./secrets/hf-token` in the
+host `.env`, then recreate or restart the `control-api` and `control-worker`
+services so the normalized secret volume is refreshed:
+
+```bash
+docker compose up -d --force-recreate control-api control-worker
+```
+
+To rotate the credential, replace the file atomically with another owner-only
+file and run the same recreate command. The token is used only for a canonical
+Hugging Face gated response; the Controller verifies the resulting bytes once
+in the NAS cache, and Spark distribution remains tokenless. Missing access is
+reported as `model_cache.credentials_missing`; a rejected token is reported as
+`model_cache.credentials_denied`. Neither error contains the credential.
+
 ## Immutable inputs
 
 | Input | Pinned value |

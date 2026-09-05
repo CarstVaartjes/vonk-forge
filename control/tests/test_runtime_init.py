@@ -102,6 +102,41 @@ def test_compose_secret_staging_gives_step_ca_its_config(
     ) in staged
 
 
+def test_optional_huggingface_secret_is_normalized_only_when_present(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "normalized"
+    source.mkdir()
+    token = source / "hf-token"
+    token.write_text("hf_test_secret\n")
+
+    runtime_init._stage_optional_private_key(
+        source / "hf-token",
+        destination / "hf-token",
+        owner_uid=os.geteuid(),
+        owner_gid=os.getegid(),
+    )
+
+    projected = destination / "hf-token"
+    assert projected.read_bytes() == b"hf_test_secret\n"
+    assert projected.stat().st_mode & 0o777 == 0o400
+
+    token.unlink()
+    runtime_init._stage_optional_private_key(source / "hf-token", destination / "hf-token")
+    assert not projected.exists()
+
+
+def test_optional_huggingface_secret_treats_dev_null_as_absent(tmp_path: Path) -> None:
+    destination = tmp_path / "normalized" / "hf-token"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("stale token")
+
+    runtime_init._stage_optional_private_key(Path("/dev/null"), destination)
+
+    assert not destination.exists()
+
+
 def test_runtime_assets_are_staged_for_their_unprivileged_consumers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
