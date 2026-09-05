@@ -186,6 +186,7 @@ class RecipePackageClient:
         self._packages: dict[str, dict[str, object]] = {}
         self._prepared: dict[str, RecipeLibraryItem] = {}
         self._snapshot_path = self._cache_root / "snapshot.json"
+        self._candidate_path = self._cache_root / "snapshot.candidate.json"
 
     def close(self) -> None:
         self._client.close()
@@ -286,15 +287,24 @@ class RecipePackageClient:
 
     def _persist_index(self, raw: bytes, *, publication_commit: str | None) -> None:
         payload = {"index": raw.decode("utf-8"), "publication_commit": publication_commit}
-        temporary = self._snapshot_path.with_suffix(".tmp")
+        temporary = self._candidate_path.with_suffix(".tmp")
         try:
             temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
-            os.replace(temporary, self._snapshot_path)
+            os.replace(temporary, self._candidate_path)
         except OSError:
             try:
                 temporary.unlink()
             except OSError:
                 pass
+
+    def _promote_candidate(self) -> None:
+        try:
+            os.replace(self._candidate_path, self._snapshot_path)
+        except OSError as error:
+            raise RecipePackageError(
+                "recipe_package.cache_unavailable",
+                "recipe package snapshot could not be committed",
+            ) from error
 
     def _read_persisted_snapshot(self) -> RecipeLibrarySnapshot | None:
         try:
@@ -320,6 +330,7 @@ class RecipePackageClient:
             for item in snapshot.items
             if item.uri not in previous or previous[item.uri].content_sha256 != item.content_sha256
         }
+        self._promote_candidate()
 
     def fetch(self, uri: str) -> RecipeLibraryItem:
         match = re.fullmatch(r"vonk://catalog/([a-z0-9][a-z0-9-]{1,62})/([a-z0-9][a-z0-9-]{1,62})@sha256:([0-9a-f]{64})", uri)
