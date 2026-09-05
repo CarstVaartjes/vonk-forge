@@ -1952,6 +1952,31 @@ def test_simple_run_human_mode_reports_changed_operation_progress_to_stderr() ->
     assert "phase: copying | bytes: 10/100 | sparks: spk_1" in stderr.getvalue()
 
 
+def test_operation_progress_projects_run_switch_subphase_and_node_identity() -> None:
+    from cluster_profiles.controller_cli import _operation_progress_line
+
+    line = _operation_progress_line(
+        {
+            "progress": {
+                "phase": "transfer",
+                "subphase": "target-copy",
+                "completed_bytes": 16,
+                "total_bytes": 32,
+                "members": [
+                    {
+                        "node_id": "spk_0123456789abcdef0123456789abcdef",
+                        "state": "running",
+                    }
+                ],
+            }
+        }
+    )
+    assert line == (
+        "phase: transfer | subphase: target-copy | bytes: 16/32 | "
+        "sparks: spk_0123456789abcdef0123456789abcdef (running)"
+    )
+
+
 def test_uncertain_run_apply_error_preserves_request_key_for_reconciliation() -> None:
     from cluster_profiles.control_client import ControlTransportError
 

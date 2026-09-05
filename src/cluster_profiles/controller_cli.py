@@ -3163,6 +3163,9 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
     pieces: list[str] = []
     if isinstance(phase, str) and phase:
         pieces.append(f"phase: {phase}")
+    subphase = progress.get("subphase")
+    if isinstance(subphase, str) and subphase:
+        pieces.append(f"subphase: {subphase}")
     completed = progress.get("completed_bytes")
     total = progress.get("total_bytes")
     if isinstance(completed, int) and not isinstance(completed, bool):
@@ -3177,7 +3180,10 @@ def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
             if isinstance(member, Mapping):
                 label = (
                     member.get("display_name")
+                    or member.get("node_name")
+                    or member.get("node_id")
                     or member.get("member_id")
+                    or member.get("id")
                 )
                 if isinstance(label, str) and label:
                     detail = member.get("phase") or member.get("state")
