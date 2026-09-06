@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Protocol
@@ -428,6 +429,24 @@ class RequestKey(StrictModel):
     request_key: UuidId
 
 
+def _normalize_json(value: object) -> object:
+    """Project Python producer containers into JSON array/object containers."""
+
+    if isinstance(value, tuple):
+        return [_normalize_json(item) for item in value]
+    if isinstance(value, list):
+        return [_normalize_json(item) for item in value]
+    if isinstance(value, Mapping):
+        return {key: _normalize_json(item) for key, item in value.items()}
+    return value
+
+
+def _response(model: type[StrictModel], value: object) -> StrictModel:
+    """Validate a normalized producer projection before FastAPI serialization."""
+
+    return model.model_validate(_normalize_json(value))
+
+
 def install_recipe_operation_routes(
     app: FastAPI,
     *,
@@ -449,16 +468,19 @@ def install_recipe_operation_routes(
         if actor.role != "administrator":
             raise HTTPException(status_code=403, detail="insufficient role")
 
-    def operation(value: RecipeOperationView) -> dict[str, object]:
-        return {
-            "id": value.id,
-            "kind": value.kind,
-            "owner_id": value.owner_id,
-            "state": value.state,
-            "plan_digest": value.plan_digest,
-            "nodes": list(value.nodes),
-            "result": value.result,
-        }
+    def operation(value: RecipeOperationView) -> OperationResponse:
+        return _response(
+            OperationResponse,
+            {
+                "id": value.id,
+                "kind": value.kind,
+                "owner_id": value.owner_id,
+                "state": value.state,
+                "plan_digest": value.plan_digest,
+                "nodes": value.nodes,
+                "result": value.result,
+            },
+        )
 
     def conflict(request: Request, error: Exception) -> JSONResponse:
         return JSONResponse(
@@ -478,13 +500,16 @@ def install_recipe_operation_routes(
     def preview_mapping(body: MappingPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
         try:
-            return asdict(
-                recipes().preview_mapping(
-                    body.recipe_revision_id,
-                    tuple(body.node_ids),
-                    parameters=body.parameters,
-                    actor=actor.subject,
-                )
+            return _response(
+                MappingPlanResponse,
+                asdict(
+                    recipes().preview_mapping(
+                        body.recipe_revision_id,
+                        tuple(body.node_ids),
+                        parameters=body.parameters,
+                        actor=actor.subject,
+                    )
+                ),
             )
         except (KeyError, RecipeOperationConflict, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
@@ -522,11 +547,14 @@ def install_recipe_operation_routes(
                 (mapping_id, plan.placement_digest, *body.node_ids),
             )
         )
-        return {
-            "mapping_id": mapping_id,
-            "generation": plan.generation,
-            "placement_digest": plan.placement_digest,
-        }
+        return _response(
+            MappingResponse,
+            {
+                "mapping_id": mapping_id,
+                "generation": plan.generation,
+                "placement_digest": plan.placement_digest,
+            },
+        )
 
     @app.post(
         "/api/v1/recipes/source-checks",
@@ -536,7 +564,10 @@ def install_recipe_operation_routes(
     def check_source(body: SourceCheckRequest, actor: Actor = authenticated):
         administrator(actor)
         try:
-            return asdict(recipes().check_build_source(body.recipe_revision_id))
+            return _response(
+                SourcePolicyResponse,
+                asdict(recipes().check_build_source(body.recipe_revision_id)),
+            )
         except (KeyError, RecipeOperationConflict, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
@@ -553,9 +584,10 @@ def install_recipe_operation_routes(
             )
         except (KeyError, RecipeOperationConflict, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        return {
-            key: value for key, value in asdict(plan).items() if key != "agent_payload"
-        }
+        return _response(
+            BuildPlanResponse,
+            {key: value for key, value in asdict(plan).items() if key != "agent_payload"},
+        )
 
     @app.post(
         "/api/v1/recipes/builds",
@@ -606,7 +638,7 @@ def install_recipe_operation_routes(
             )
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        return asdict(value)
+        return _response(ImageDistributionPlanResponse, asdict(value))
 
     @app.post(
         "/api/v1/recipes/image-distributions",
@@ -659,7 +691,7 @@ def install_recipe_operation_routes(
             return conflict(request, error)
         value = asdict(plan)
         value["compiled_execution_plans"] = plan.compiled_plan_by_node
-        return value
+        return _response(InstallPlanResponse, value)
 
     @app.post(
         "/api/v1/recipes/installations",
@@ -697,7 +729,10 @@ def install_recipe_operation_routes(
     )
     def preview_run(body: RunPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
-        return asdict(recipes().preview_run(body.installation_id, body.alias))
+        return _response(
+            RunPlanResponse,
+            asdict(recipes().preview_run(body.installation_id, body.alias)),
+        )
 
     @app.post(
         "/api/v1/recipes/stop-plans/preview",
@@ -707,7 +742,10 @@ def install_recipe_operation_routes(
     def preview_stop(body: StopPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
         try:
-            return asdict(recipes().preview_stop(body.run_id))
+            return _response(
+                StopPlanResponse,
+                asdict(recipes().preview_stop(body.run_id)),
+            )
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
@@ -719,7 +757,10 @@ def install_recipe_operation_routes(
     def preview_uninstall(body: UninstallPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
         try:
-            return asdict(recipes().preview_uninstall(body.installation_id))
+            return _response(
+                UninstallPlanResponse,
+                asdict(recipes().preview_uninstall(body.installation_id)),
+            )
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
@@ -733,8 +774,9 @@ def install_recipe_operation_routes(
     ):
         administrator(actor)
         try:
-            return asdict(
-                recipes().preview_model_deletion(body.model_version_sha256)
+            return _response(
+                ModelDeletionPlanResponse,
+                asdict(recipes().preview_model_deletion(body.model_version_sha256)),
             )
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
@@ -821,7 +863,7 @@ def install_recipe_operation_routes(
             raise HTTPException(
                 status_code=404, detail="recipe run not found"
             ) from None
-        return asdict(value)
+        return _response(RunStatusResponse, asdict(value))
 
     @app.get(
         "/api/v1/recipes/operations/{operation_id}",
