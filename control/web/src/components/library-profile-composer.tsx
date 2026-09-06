@@ -41,6 +41,7 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
     [detail.placement, preferredNodeId],
   );
   const group = eligibleGroups[groupIndex];
+  const recipeRevisionId = detail.recipe.recipe_revision_id;
   useEffect(() => {
     if (!open || profiles.length > 0 || loadingProfiles) return;
     const controller = new AbortController();
@@ -56,15 +57,16 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
     return () => controller.abort();
   }, [loadingProfiles, open, profileApi, profiles.length]);
 
-  if (!detail.selected_revision || detail.selected_revision.lifecycle !== "resolved" || !detail.topology) return null;
+  const topology = detail.definition.topology;
+  if (!topology) return null;
 
   async function save() {
     if (!group || saving) return;
     setSaving(true);
     setError("");
     const assignment = {
-      recipe_revision_id: detail.selected_revision!.id,
-      topology_name: detail.topology!.name,
+      recipe_revision_id: recipeRevisionId,
+      topology_name: topology.name,
       desired_state: desiredState,
       alias: desiredState === "running" ? alias : null,
       nodes: group.nodes.map(node => ({
@@ -120,6 +122,6 @@ export function LibraryProfileComposer({api, detail, preferredNodeId}: {api: Con
     </div>
     {group && <ol className="profile-rank-preview" aria-label="Saved Spark rank order">{group.nodes.map(node => <li key={node.node_id}><span>Rank {node.rank}</span><strong>{nodeName(node.node_id)}</strong><small>{node.role}{node.endpoint_owner ? " · endpoint owner" : ""}</small></li>)}</ol>}
     {error && <p className="dialog-error" role="alert">{error}</p>}
-    <footer><span>{group?.nodes.length ?? 0} {group?.nodes.length === 1 ? "Spark" : "Sparks"} · immutable revision {detail.selected_revision.revision_number}</span><button type="button" disabled={!group || saving || (target === "new" && !name.trim()) || (desiredState === "running" && !alias.trim())} onClick={() => void save()}>{saving ? "Saving profile…" : target === "new" ? "Create Fleet Profile" : "Add workload"}</button></footer>
+    <footer><span>{group?.nodes.length ?? 0} {group?.nodes.length === 1 ? "Spark" : "Sparks"} · immutable revision {recipeRevisionId.slice(0, 12)}…</span><button type="button" disabled={!group || saving || (target === "new" && !name.trim()) || (desiredState === "running" && !alias.trim())} onClick={() => void save()}>{saving ? "Saving profile…" : target === "new" ? "Create Fleet Profile" : "Add workload"}</button></footer>
   </section>;
 }

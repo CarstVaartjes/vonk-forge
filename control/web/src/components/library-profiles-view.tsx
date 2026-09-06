@@ -98,28 +98,28 @@ function profileInput(draft: ProfileDraft): FleetProfileInput {
 }
 
 function roleList(record: LibraryRecipeRecord): string[] {
-  const roles = record.catalog?.topology_roles;
-  if (roles && roles.length > 0) return roles.flatMap(role => Array.from({length: role.count}, () => role.name));
-  const count = record.catalog?.node_count ?? (record.recipe?.topology_name?.includes("dual") || record.recipe?.topology_name?.includes("pair") ? 2 : 1);
-  return Array.from({length: count}, (_, index) => index === 0 ? "leader" : "worker");
+  const roles = record.recipe?.recipe_document.topology.roles ?? [];
+  return roles.flatMap(role => Array.from({length: role.count}, () => role.name));
 }
 
 function addAssignment(record: LibraryRecipeRecord, draft: ProfileDraft, fleet?: VisualFleetSnapshot): ProfileDraft {
-  const revision = record.recipe?.selected_revision;
-  if (!record.recipe || !revision || revision.lifecycle !== "resolved") return draft;
+  const recipe = record.recipe;
+  const recipeRevisionId = recipe?.recipe_revision_id;
+  if (!recipe || !recipe.recipe_document || !recipeRevisionId) return draft;
   const roles = roleList(record);
+  if (roles.length === 0) return draft;
   const available = draft.scopeNodeIds.length > 0 ? draft.scopeNodeIds : (fleet?.nodes.map(node => node.id) ?? []);
   const nodeIds = available.slice(0, roles.length);
   const nodes = nodeIds.map((nodeId, index) => ({node_id: nodeId, rank: index, role: roles[index] ?? `rank-${index}`, endpoint_owner: index === 0}));
   const assignment: AssignmentDraft = {
     key: `assignment-new-${crypto.randomUUID()}`,
-    recipeId: record.recipe.recipe_id,
+    recipeId: recipe.recipe_id,
     recipeTitle: record.title,
     modelTitle: record.modelTitle,
-    recipeRevisionId: revision.id,
-    topologyName: record.recipe.topology_name ?? record.catalog?.topology_name ?? "unknown",
+    recipeRevisionId,
+    topologyName: recipe.recipe_document.topology.name,
     desiredState: "running",
-    alias: record.recipe.slug,
+    alias: recipe.slug,
     nodes,
   };
   return {...draft, assignments: [...draft.assignments, assignment]};
@@ -308,7 +308,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
     return () => controller.abort();
   }, [api, fleet, initialCreate, initialProfileId, profilesAttempt]);
 
-  const matchingEntries = useMemo(() => entries.filter(entry => entry.recipe?.selected_revision?.lifecycle === "resolved" && entry.recipe.selected_revision.id && entry.recipe.topology_name), [entries]);
+  const matchingEntries = useMemo(() => entries.filter(entry => Boolean(entry.recipe?.recipe_document && entry.recipe.recipe_revision_id)), [entries]);
   const draftDirty = Boolean(draft && JSON.stringify(draft) !== savedDraftKey);
   const selectedProfile = profiles.find(profile => profile.id === selectedProfileId);
   const assignedNodeIds = new Set(draft?.assignments.flatMap(assignment => assignment.nodes.map(node => node.node_id)) ?? []);
