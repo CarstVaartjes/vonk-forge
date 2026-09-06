@@ -448,6 +448,17 @@ def add_controller_commands(
     _request_key(operation_retry)
     _apply(operation_retry)
     _add_json(operation_retry)
+    operation_check_access = operation_commands.add_parser(
+        "check-access",
+        aliases=["check-access-and-resume"],
+        help="Recheck Model access and resume its exact cache operation",
+    )
+    operation_check_access.add_argument("operation_id")
+    operation_check_access.add_argument("--artifact-set-sha256", required=True)
+    operation_check_access.add_argument("--plan-digest", required=True)
+    _request_key(operation_check_access)
+    _apply(operation_check_access)
+    _add_json(operation_check_access)
     run = library_commands.add_parser("run", help="Show a recipe run")
     run.add_argument("run_id")
     _add_json(run)
@@ -1995,6 +2006,16 @@ def _run_library(
             "compared_count": len(recipe_ids),
         }
     if command == "operation":
+        if args.operation_command == "check-access":
+            if _LOWER_SHA256.fullmatch(args.plan_digest) is None:
+                raise ValueError("plan digest must be a lowercase SHA-256 digest")
+            payload = {
+                "request_key": _request_key_value(args, request_id_factory),
+                "artifact_set_sha256": _artifact_set_sha256(args.artifact_set_sha256),
+                "plan_digest": args.plan_digest,
+            }
+            path = f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}/check-access-and-resume"
+            return _plan_or_request(args, client, "POST", path, payload)
         family = getattr(args, "family", "recipe")
         if family == "model-cache":
             path = f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}"

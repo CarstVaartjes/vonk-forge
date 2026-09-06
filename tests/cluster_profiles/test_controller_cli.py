@@ -1600,6 +1600,41 @@ def test_recipe_availability_retry_requires_apply_and_returns_json_plan() -> Non
     }
 
 
+def test_model_cache_check_access_and_resume_uses_exact_identity_and_json_plan() -> None:
+    client = _Client({
+        ("POST", "/api/v1/model-cache/operations/op-1/check-access-and-resume"): {
+            "schema_version": 2,
+            "id": "op-1",
+            "state": "queued",
+        }
+    })
+    artifact_set = "a" * 64
+    plan_digest = "b" * 64
+    result, payload = _invoke(
+        client,
+        "--json",
+        "library",
+        "operation",
+        "check-access",
+        "op-1",
+        "--artifact-set-sha256",
+        artifact_set,
+        "--plan-digest",
+        plan_digest,
+        "--request-key",
+        "request-1",
+        "--apply",
+    )
+    assert result == 0
+    assert payload["state"] == "queued"
+    assert client.calls == [(
+        "POST",
+        "/api/v1/model-cache/operations/op-1/check-access-and-resume",
+        {"request_key": "request-1", "artifact_set_sha256": artifact_set, "plan_digest": plan_digest},
+        None,
+    )]
+
+
 def test_operation_progress_projects_run_switch_subphase_and_node_identity() -> None:
     from cluster_profiles.controller_cli import _operation_progress_line
 
