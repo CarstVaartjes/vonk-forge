@@ -2071,7 +2071,7 @@ fn validate_docker_run_with_archive(
     let (uid, _gid) = user.ok_or(OperationError::InvalidOperation)?;
     let outputs = outputs.ok_or(OperationError::InvalidOperation)?;
     let cache_root = cache_root.ok_or(OperationError::InvalidOperation)?;
-    require_safe_directory(&cache_root, agent_data_owner_uid)?;
+    require_runtime_directory(&cache_root, agent_data_owner_uid, uid)?;
     let runtime_contract = runtime_contract.ok_or(OperationError::InvalidOperation)?;
     let state_run_id = outputs
         .parent()
@@ -2534,6 +2534,61 @@ fn require_safe_directory(
         return Err(OperationError::UnsafePath);
     }
     Ok(())
+}
+
+fn require_runtime_directory(
+    path: &Path,
+    required_owner_uid: Option<u32>,
+    runtime_uid: u32,
+) -> Result<(), OperationError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.mode() & 0o002 != 0
+        || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
+        || metadata.mode() & 0o020 != 0 && !exact_runtime_acl(path, runtime_uid)
+    {
+        return Err(OperationError::UnsafePath);
+    }
+    Ok(())
+}
+
+fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
+    const ACL_VERSION: u32 = 0x0002;
+    const USER_OBJ: u16 = 0x0001;
+    const USER: u16 = 0x0002;
+    const GROUP_OBJ: u16 = 0x0004;
+    const MASK: u16 = 0x0010;
+    const OTHER: u16 = 0x0020;
+    let Ok(Some(value)) = xattr::get(path, "system.posix_acl_access") else {
+        return false;
+    };
+    if value.len() < 4 || u32::from_le_bytes(value[..4].try_into().unwrap()) != ACL_VERSION {
+        return false;
+    }
+    let entries = &value[4..];
+    if entries.len() % 8 != 0 || entries.len() / 8 != 4 {
+        return false;
+    }
+    let mut user_object = false;
+    let mut runtime_user = false;
+    let mut group_object = false;
+    let mut mask = false;
+    let mut other = false;
+    for entry in entries.chunks_exact(8) {
+        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
+        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
+        let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+        match tag {
+            USER_OBJ => user_object = permissions == 0o7,
+            USER if identifier == runtime_uid => runtime_user = permissions == 0o7,
+            GROUP_OBJ => group_object = permissions == 0,
+            MASK => mask = permissions == 0o7,
+            OTHER => other = permissions == 0,
+            _ => return false,
+        }
+    }
+    user_object && runtime_user && group_object && mask && other
 }
 
 fn ensure_private_directory(

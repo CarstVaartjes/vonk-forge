@@ -17,6 +17,7 @@ thiserror.workspace = true
 uuid.workspace = true
 vonk-agent-protocol = { path = "../vonk-agent-protocol" }
 wait-timeout.workspace = true
+xattr.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

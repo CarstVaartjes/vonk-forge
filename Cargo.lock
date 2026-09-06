@@ -2294,6 +2294,7 @@ dependencies = [
  "uuid",
  "vonk-agent-protocol",
  "wait-timeout",
+ "xattr",
 ]
 
 [[package]]
