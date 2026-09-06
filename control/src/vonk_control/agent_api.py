@@ -35,6 +35,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
@@ -70,7 +71,9 @@ from .models import (
     AgentEnrollment,
     AgentNode,
     AgentOperation,
+    CatalogDocumentRevision,
     ClusterMapping,
+    ClusterMappingNode,
     InstallationNode,
     RecipeBuild,
     RecipeInstallation,
@@ -2035,10 +2038,48 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=404, detail="recipe specification does not exist"
                 )
+            revision = session.get(
+                CatalogDocumentRevision, installation.recipe_revision_id
+            )
+            mapping = session.get(ClusterMapping, installation.mapping_id)
+            mapping_node = session.scalar(
+                select(ClusterMappingNode).where(
+                    ClusterMappingNode.mapping_id == installation.mapping_id,
+                    ClusterMappingNode.node_id == identity.node_id,
+                )
+            )
             if installation.state not in {"installing", "installed", "partial"}:
                 raise HTTPException(
                     status_code=409,
                     detail="recipe specification installation is not ready",
+                )
+            if (
+                revision is None
+                or revision.kind != "recipe"
+                or revision.schema_version != 2
+                or revision.state != "active"
+                or mapping is None
+                or mapping_node is None
+                or mapping.state != "ready"
+                or mapping.generation != installation.mapping_generation
+                or placement.rank != mapping_node.rank
+                or placement.role != mapping_node.role
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification installation authority is stale",
+                )
+            try:
+                recipe = RecipeDefinition.model_validate(revision.document)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification installation authority is stale",
+                ) from None
+            if content_sha256(recipe) != revision.content_digest:
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification installation authority is stale",
                 )
             if not isinstance(installation.plan, Mapping):
                 raise HTTPException(
@@ -2057,6 +2098,23 @@ def install_agent_routes(
                     status_code=409,
                     detail="recipe specification compiled execution plan is unavailable",
                 )
+            build = session.get(RecipeBuild, installation.recipe_build_id)
+            build_id = build.id if build is not None else None
+            build_state = build.state if build is not None else None
+            build_recipe_revision_id = (
+                build.recipe_revision_id if build is not None else None
+            )
+            build_image_digest = build.image_digest if build is not None else None
+            build_oci_layout_sha256 = (
+                build.oci_layout_sha256 if build is not None else None
+            )
+            build_image_bytes = build.image_bytes if build is not None else None
+            build_input_sha256 = (
+                build.build_input_sha256 if build is not None else None
+            )
+            revision_id = revision.id
+            revision_content_digest = revision.content_digest
+            installation_image_digest = installation.image_digest
         try:
             spec = validate_compiled_launch_payload(candidate)
         except (CompiledExecutionPlanError, TypeError, ValueError) as error:
@@ -2072,6 +2130,45 @@ def install_agent_routes(
             raise HTTPException(
                 status_code=409,
                 detail="recipe specification placement does not match the installation",
+            )
+        identity_document = spec.get("identity")
+        runtime_image = spec.get("runtime_image")
+        if not isinstance(identity_document, Mapping) or not isinstance(
+            runtime_image, Mapping
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        if identity_document.get("recipe_revision_sha256") != revision_content_digest:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        if (
+            build_state != "succeeded"
+            or build_recipe_revision_id != revision_id
+            or build_image_digest != installation_image_digest
+            or runtime_image.get("image_digest") != installation_image_digest
+            or runtime_image.get("oci_layout_sha256") != build_oci_layout_sha256
+            or runtime_image.get("image_bytes") != build_image_bytes
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        build_input = identity_document.get("build_input_sha256")
+        if build_input is not None and build_input != build_input_sha256:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        if runtime_image.get("source") == "controller-build" and runtime_image.get(
+            "build_id"
+        ) != build_id:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
             )
         return _json_response(spec)
 
