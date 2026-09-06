@@ -2567,7 +2567,7 @@ fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
         return false;
     }
     let entries = &value[4..];
-    if entries.len() % 8 != 0 || entries.len() / 8 != 4 {
+    if entries.len() % 8 != 0 || entries.len() / 8 != 5 {
         return false;
     }
     let mut user_object = false;
