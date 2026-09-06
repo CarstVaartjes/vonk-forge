@@ -15,7 +15,6 @@ x-api-environment: &api-environment
   VONK_TOKEN_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/token-signing-key
   VONK_METRICS_TOKEN_FILE: /run/vonk-normalized-secrets/metrics-token
   VONK_STATE_PATH: /state
-  VONK_GLOBAL_CATALOG_URL: ${VONK_GLOBAL_CATALOG_URL:-https://vonkforge.ai}
   # The API remains on internal networks. Caddy relays only read-only requests
   # to the explicitly scoped public recipe and agent-release authorities.
   VONK_RECIPE_LIBRARY_API_URL: http://caddy:8083

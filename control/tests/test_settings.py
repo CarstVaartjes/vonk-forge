@@ -10,7 +10,6 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(secret))
     settings = Settings.from_env_and_secrets()
     assert settings.database_host == "postgres"
-    assert settings.global_catalog_url == "https://vonkforge.ai"
     assert settings.recipe_library_api_url == "https://api.github.com"
     assert settings.recipe_library_sync_interval_seconds == 900
     assert settings.agent_release_api_url == "https://install.vonkforge.ai"
@@ -53,20 +52,6 @@ def test_optional_huggingface_token_rejects_symlink(tmp_path: Path, monkeypatch)
     monkeypatch.setenv("VONK_HF_TOKEN_FILE", str(link))
 
     with pytest.raises(SettingsError, match="regular non-symlink"):
-        Settings.from_env_and_secrets()
-
-
-def test_global_catalog_origin_is_https_or_explicit_loopback(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_GLOBAL_CATALOG_URL", "http://127.0.0.1:9000")
-    assert Settings.from_env_and_secrets().global_catalog_url == "http://127.0.0.1:9000"
-
-    monkeypatch.setenv("VONK_GLOBAL_CATALOG_URL", "http://catalog.example")
-    with pytest.raises(SettingsError, match="global catalog URL"):
-        Settings.from_env_and_secrets()
-
-    monkeypatch.setenv("VONK_GLOBAL_CATALOG_URL", "https://user:secret@catalog.example")
-    with pytest.raises(SettingsError, match="global catalog URL"):
         Settings.from_env_and_secrets()
 
 

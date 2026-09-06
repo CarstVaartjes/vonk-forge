@@ -19,7 +19,7 @@ import httpx
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.resolver import validate_recipe_models
 
-from .recipe_library import (
+from .recipe_library_types import (
     RecipeLibraryChange,
     RecipeLibraryError,
     RecipeLibraryItem,

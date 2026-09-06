@@ -162,7 +162,6 @@ class Settings:
     package_helper_grant_private_key_path: Path | None = None
     package_helper_receipt_private_key_path: Path | None = None
     host_runtime_grant_private_key_path: Path | None = None
-    global_catalog_url: str = "https://vonkforge.ai"
     recipe_library_api_url: str = "https://api.github.com"
     # Optional immutable package channel.  An empty value keeps development
     # and existing installations on the GitHub reader until publication is
@@ -461,24 +460,6 @@ class Settings:
             if os.environ.get("VONK_HOST_RUNTIME_GRANT_PRIVATE_KEY_FILE")
             else None
         )
-        global_catalog_url = os.environ.get(
-            "VONK_GLOBAL_CATALOG_URL", "https://vonkforge.ai"
-        ).rstrip("/")
-        parsed_catalog = urlsplit(global_catalog_url)
-        catalog_loopback = parsed_catalog.hostname in {"localhost", "127.0.0.1", "::1"}
-        if (
-            (
-                parsed_catalog.scheme != "https"
-                and not (parsed_catalog.scheme == "http" and catalog_loopback)
-            )
-            or not parsed_catalog.hostname
-            or parsed_catalog.path not in {"", "/"}
-            or parsed_catalog.query
-            or parsed_catalog.fragment
-            or parsed_catalog.username is not None
-            or parsed_catalog.password is not None
-        ):
-            raise SettingsError("global catalog URL must be a fixed HTTPS origin")
         recipe_library_api_url = os.environ.get(
             "VONK_RECIPE_LIBRARY_API_URL", "https://api.github.com"
         ).rstrip("/")
@@ -557,7 +538,6 @@ class Settings:
             package_helper_grant_private_key_path=package_helper_grant_private_key_path,
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
-            global_catalog_url=global_catalog_url,
             recipe_library_api_url=recipe_library_api_url,
             recipe_library_package_url=recipe_library_package_url,
             recipe_library_sync_interval_seconds=recipe_library_sync_interval_seconds,
