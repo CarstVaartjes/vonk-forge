@@ -129,6 +129,12 @@ impl CompiledOciInvocation {
             "--init".to_owned(),
             "--pull".to_owned(),
             "never".to_owned(),
+            "--log-driver".to_owned(),
+            "local".to_owned(),
+            "--log-opt".to_owned(),
+            "max-size=10m".to_owned(),
+            "--log-opt".to_owned(),
+            "max-file=3".to_owned(),
             "--cap-drop=ALL".to_owned(),
             "--security-opt=no-new-privileges".to_owned(),
             "--user".to_owned(),
@@ -758,6 +764,22 @@ mod tests {
                 .podman_arguments()
                 .windows(2)
                 .any(|window| window == ["--network", "bridge"])
+        );
+        let podman = invocation.podman_arguments();
+        assert!(
+            podman
+                .windows(2)
+                .any(|window| window == ["--log-driver", "local"])
+        );
+        assert!(
+            podman
+                .windows(2)
+                .any(|window| window == ["--log-opt", "max-size=10m"])
+        );
+        assert!(
+            podman
+                .windows(2)
+                .any(|window| window == ["--log-opt", "max-file=3"])
         );
     }
 }

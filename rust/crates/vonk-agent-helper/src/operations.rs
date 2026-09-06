@@ -1188,7 +1188,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
         }
         self.prepare_runtime_access(&validated)?;
-        let mut compiled = validated.arguments.clone();
+        // The signed wire shape carries the executable once after the image as
+        // an explicit marker for validation. Docker already receives that
+        // executable through --entrypoint, so consume the marker here to keep
+        // the actual process argv from running it twice. Keep
+        // validated.arguments unchanged: the semantic receipt identity is
+        // bound to the exact signed request shape above.
+        let mut compiled = validated.docker_arguments()?;
         if validated.detached || validated.job_timeout_seconds.is_some() {
             compiled.splice(
                 validated.image_index..validated.image_index,
@@ -1661,6 +1667,7 @@ struct ValidatedDockerRun {
     platform_manifest_digest: String,
     archive_sha256: String,
     arguments: Vec<String>,
+    entrypoint: String,
     detached: bool,
     image_index: usize,
     run_id: String,
@@ -1674,6 +1681,21 @@ struct ValidatedDockerRun {
     runtime_contract: PathBuf,
     host_endpoint_port: Option<u16>,
     job_timeout_seconds: Option<u16>,
+}
+
+impl ValidatedDockerRun {
+    fn docker_arguments(&self) -> Result<Vec<String>, OperationError> {
+        let marker_index = self
+            .image_index
+            .checked_add(1)
+            .ok_or(OperationError::InvalidOperation)?;
+        if self.arguments.get(marker_index) != Some(&self.entrypoint) {
+            return Err(OperationError::InvalidOperation);
+        }
+        let mut arguments = self.arguments.clone();
+        arguments.remove(marker_index);
+        Ok(arguments)
+    }
 }
 
 fn validate_docker_run(
@@ -2190,6 +2212,7 @@ fn validate_docker_run_with_archive(
         platform_manifest_digest: embedded_digest,
         archive_sha256: archive_sha256.unwrap_or_default().to_owned(),
         arguments: compiled_arguments,
+        entrypoint,
         detached: detach,
         image_index: index,
         run_id: state_run_id.to_owned(),
@@ -3147,6 +3170,31 @@ mod tests {
             plan["runtime"]["image_digest"].as_str().unwrap()
         );
         assert_eq!(validated.arguments.last().unwrap(), "/opt/vonk/bin/vllm");
+    }
+
+    #[test]
+    fn runtime_consumes_post_image_entrypoint_marker_before_docker() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        fs::create_dir_all(&model).unwrap();
+        let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+        let image = arguments
+            .iter()
+            .position(|value| value.starts_with("localhost/vonk/"))
+            .unwrap();
+        arguments.insert(image + 2, "--once".to_owned());
+
+        let validated = validate_docker_run(&arguments, &roots, None).unwrap();
+        assert_eq!(
+            validated.arguments[validated.image_index + 1],
+            validated.entrypoint
+        );
+        let docker = validated.docker_arguments().unwrap();
+        let image = docker
+            .iter()
+            .position(|value| value.starts_with("localhost/vonk/"))
+            .unwrap();
+        assert_eq!(&docker[image + 1..], &["--once"]);
     }
 
     #[test]
