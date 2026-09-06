@@ -66,6 +66,11 @@ class ModelCacheRepairRequest(StrictModel):
     source_policy: Literal["nas-first"] = "nas-first"
 
 
+class ModelCacheRetryRequest(StrictModel):
+    schema_version: Literal[2] = 2
+    request_key: str = Field(pattern=UUID_PATTERN)
+
+
 class ModelCacheEvictionPreviewRequest(StrictModel):
     schema_version: Literal[2] = 2
     target_bytes: int = Field(gt=0)
@@ -267,6 +272,7 @@ __all__ = [
     "ModelCacheRepairPreviewRequest",
     "ModelCacheRepairPreviewResponse",
     "ModelCacheRepairRequest",
+    "ModelCacheRetryRequest",
     "ModelCacheUpdateResponse",
     "ModelCacheUpdatesResponse",
 ]

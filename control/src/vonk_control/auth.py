@@ -93,6 +93,9 @@ MUTATION_ROLES = {
         {"administrator"}
     ),
     ("POST", "/api/v1/recipes/run-switches"): frozenset({"administrator"}),
+    ("POST", "/api/v1/recipes/run-switches/{operation_id}/retry"): frozenset(
+        {"administrator"}
+    ),
     ("POST", "/api/v1/recipes/run-switch-stops/preview"): frozenset(
         {"administrator"}
     ),
@@ -122,6 +125,9 @@ MUTATION_ROLES = {
         {"administrator"}
     ),
     ("POST", "/api/v1/recipes/operations/{operation_id}/retry"): frozenset(
+        {"administrator"}
+    ),
+    ("POST", "/api/v1/model-cache/operations/{operation_id}/retry"): frozenset(
         {"administrator"}
     ),
     ("POST", "/api/v1/recipes/runs/{run_id}/stop"): frozenset({"administrator"}),

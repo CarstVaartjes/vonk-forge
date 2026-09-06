@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 from datetime import UTC, datetime
@@ -20,6 +21,7 @@ from vonk_control.distribution import (
 from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheService,
+    _retryable_failure,
 )
 from vonk_control.model_cache_api import (
     ModelCacheOperationProvider,
@@ -530,6 +532,110 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     assert restarted.get_entry(set_digest)["coverage"] == "complete"
 
 
+def test_transient_download_failure_requeues_with_exact_identity_and_bound(
+    cache, tmp_path: Path
+) -> None:
+    service, _sessions = cache
+    model = "e" * 64
+    data = b"retryable payload"
+    artifact = _artifact(tmp_path, data, model_version_sha256=model)
+    preview = service.download_preview(model_version_sha256=model, artifacts=[artifact])
+    original = service._open_source
+    calls = 0
+
+    def flaky_source(spec, offset):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError(errno.ETIMEDOUT, "network copy temporarily unavailable")
+        return original(spec, offset)
+
+    service._open_source = flaky_source
+    operation = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000019",
+        plan_digest=str(preview["plan_digest"]),
+        model_version_sha256=model,
+        artifacts=[artifact],
+    )
+    service.run_pending()
+    queued = service.get_operation(operation.id)
+    assert queued.state == "queued"
+    assert queued.attempt == 2
+    assert queued.plan_digest == preview["plan_digest"]
+    assert queued.artifact_set_sha256 == preview["artifact_set_sha256"]
+    assert queued.progress["downloaded_bytes"] == 0
+
+    service.run_pending()
+    completed = service.get_operation(operation.id)
+    assert completed.state == "succeeded"
+    assert completed.attempt == 2
+    assert completed.plan_digest == queued.plan_digest
+    assert completed.artifact_set_sha256 == queued.artifact_set_sha256
+
+
+def test_exhausted_transient_download_allows_bounded_operator_retry_after_restart(
+    cache, tmp_path: Path
+) -> None:
+    service, sessions = cache
+    model = "a" * 64
+    data = b"operator retry payload"
+    artifact = _artifact(tmp_path, data, model_version_sha256=model)
+    preview = service.download_preview(model_version_sha256=model, artifacts=[artifact])
+    original = service._open_source
+    calls = 0
+
+    def flaky_source(spec, offset):
+        nonlocal calls
+        calls += 1
+        if calls <= 3:
+            raise OSError(errno.ETIMEDOUT, "timed out")
+        return original(spec, offset)
+
+    service._open_source = flaky_source
+    operation = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000020",
+        plan_digest=str(preview["plan_digest"]),
+        model_version_sha256=model,
+        artifacts=[artifact],
+    )
+    for _ in range(3):
+        assert service.run_pending() == 1
+    exhausted = service.get_operation(operation.id)
+    assert exhausted.state == "failed"
+    assert exhausted.attempt == 3
+    retry = service.retry(
+        exhausted.id,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000000021",
+    )
+    assert retry.state == "queued"
+    assert retry.attempt == 1
+    assert retry.plan_digest == exhausted.plan_digest
+    assert retry.artifact_set_sha256 == exhausted.artifact_set_sha256
+
+    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    assert restarted.resume_operations() == 1
+    restarted.run_pending()
+    assert restarted.get_operation(retry.id).state == "succeeded"
+
+
+def test_model_cache_retry_classification_rejects_terminal_http_and_storage_errors() -> None:
+    request = httpx.Request("GET", "https://example.invalid/model")
+    for status in (401, 403, 404):
+        response = httpx.Response(status, request=request)
+        error = httpx.HTTPStatusError("request failed", request=request, response=response)
+        assert _retryable_failure(error) is False
+    for status in (429, 500, 503):
+        response = httpx.Response(status, request=request)
+        error = httpx.HTTPStatusError("request failed", request=request, response=response)
+        assert _retryable_failure(error) is True
+    assert _retryable_failure(OSError(errno.EACCES, "permission denied")) is False
+    assert _retryable_failure(OSError(errno.ENOSPC, "no space left")) is False
+    assert _retryable_failure(OSError(errno.ETIMEDOUT, "timed out")) is True
+
+
 def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -772,6 +878,7 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
         "/api/v1/model-cache/updates",
         "/api/v1/model-cache/operations",
         "/api/v1/model-cache/operations/{operation_id}",
+        "/api/v1/model-cache/operations/{operation_id}/retry",
     }
 
 

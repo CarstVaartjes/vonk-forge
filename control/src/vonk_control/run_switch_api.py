@@ -15,6 +15,7 @@ from .run_switch_contract import (
     RunSwitchOperation,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
+    RunSwitchRetryRequest,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
 )
@@ -33,6 +34,10 @@ RUN_SWITCH_OPERATION_IDS = {
         "get",
         "/api/v1/recipes/run-switches/{operation_id}",
     ): "getRecipeRunSwitchOperation",
+    (
+        "post",
+        "/api/v1/recipes/run-switches/{operation_id}/retry",
+    ): "retryRecipeRunSwitchOperation",
     (
         "post",
         "/api/v1/recipes/run-switch-stops/preview",
@@ -145,6 +150,43 @@ def install_run_switch_routes(
             raise HTTPException(status_code=404, detail="run/switch operation not found") from None
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             raise HTTPException(status_code=503, detail=f"run/switch operation unavailable: {error}") from None
+
+    @app.post(
+        "/api/v1/recipes/run-switches/{operation_id}/retry",
+        response_model=RunSwitchOperation,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        operation_id="retryRecipeRunSwitchOperation",
+    )
+    def retry_run_switch(
+        body: RunSwitchRetryRequest,
+        request: Request,
+        operation_id: str = Path(pattern=_UUID),
+        actor: Actor = authenticated,
+    ) -> RunSwitchOperation:
+        administrator(actor)
+        try:
+            result = runs().retry(
+                operation_id,
+                actor=actor.subject,
+                request_key=body.request_key,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="run/switch operation not found") from None
+        except RunSwitchOperationConflict as error:
+            return conflict(request, error)
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            raise HTTPException(status_code=503, detail=f"run/switch retry unavailable: {error}") from None
+        audits.append(
+            AuditRecord(
+                request.state.request_id,
+                actor.subject,
+                "recipe.run-switch.retry",
+                None,
+                (operation_id, result.operation_id, result.plan_digest),
+            )
+        )
+        return result
 
     @app.post(
         "/api/v1/recipes/run-switch-stops/preview",

@@ -8,6 +8,7 @@ its manifest has an on-disk object with the expected length and SHA-256.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import ipaddress
 import json
@@ -46,6 +47,8 @@ _MAX_ARTIFACTS = 128
 _MAX_MANIFEST_BYTES = 1_048_576
 _CHUNK_BYTES = 1024 * 1024
 _MAX_HTTP_REDIRECTS = 3
+_MAX_OPERATION_ATTEMPTS = 3
+_MAX_OPERATOR_RETRIES = 3
 _HF_CANONICAL_HOST = "huggingface.co"
 _USE_MANIFEST_BYTES = object()
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
@@ -75,6 +78,58 @@ class ModelCacheResolutionError(ModelCacheError):
 
 class ModelCacheStorageError(ModelCacheError):
     pass
+
+
+_TERMINAL_FAILURE_MARKERS = (
+    "digest",
+    "integrity",
+    "credential",
+    "auth",
+    "permission",
+    "denied",
+    "revoked",
+    "identity_conflict",
+)
+
+
+def _retryable_failure(error: BaseException | str) -> bool:
+    """Classify transport uncertainty without retrying identity failures."""
+
+    code = getattr(error, "code", "")
+    detail = getattr(error, "detail", str(error))
+    text = f"{code} {detail}".casefold()
+    if any(marker in text for marker in _TERMINAL_FAILURE_MARKERS):
+        return False
+    if isinstance(error, httpx.HTTPError):
+        response = getattr(error, "response", None)
+        status = getattr(response, "status_code", None)
+        if type(status) is int:
+            return status == 429 or status >= 500
+        return isinstance(error, (httpx.TimeoutException, httpx.ConnectError))
+    if isinstance(error, OSError):
+        return error.errno in {
+            errno.ECONNRESET,
+            errno.ECONNREFUSED,
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+            errno.ETIMEDOUT,
+            errno.EPIPE,
+        }
+    return any(
+        marker in text
+        for marker in (
+            "source_unavailable",
+            "source_truncated",
+            "timeout",
+            "timed out",
+            "connection",
+            "network",
+            "temporarily",
+            "transport",
+            "copy",
+            "uncertain",
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +344,7 @@ class CacheOperationView:
     created_at: str
     updated_at: str
     completed_at: str | None
+    retryable: bool = False
 
 
 def _sha256_json(value: object) -> str:
@@ -1044,7 +1100,7 @@ class ModelCacheService:
                         "model_cache.request_key_reused",
                         "request key was already used for another cache operation",
                     )
-                return self.get_operation(existing.id)
+                return self._operation_view(existing)
         preview = self._download_preview_for_manifest(manifest)
         if preview["plan_digest"] != requested_plan:
             raise ModelCacheConflict("model_cache.stale_plan", "download preview is stale")
@@ -1063,6 +1119,7 @@ class ModelCacheService:
             "manifest": manifest.document(),
             "plan_digest": requested_plan,
             "transfer": dict(transfer),
+            "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
@@ -2005,10 +2062,124 @@ class ModelCacheService:
                 row.last_error = detail[:512]
             operation = session.get(ModelCacheOperation, operation_id)
             if operation is not None:
-                operation.state = "failed"
+                retryable = _retryable_failure(error)
+                raw_retry = operation.payload.get("retry", {})
+                retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
+                automatic_attempts = retry.get("automatic_attempts")
+                automatic_attempts = (
+                    automatic_attempts
+                    if type(automatic_attempts) is int and automatic_attempts >= 1
+                    else int(operation.attempt)
+                )
+                operator_retries = retry.get("operator_retries")
+                operator_retries = (
+                    operator_retries
+                    if type(operator_retries) is int and operator_retries >= 0
+                    else 0
+                )
+                bounded_retry = retryable and automatic_attempts < _MAX_OPERATION_ATTEMPTS
+                operation.state = "queued" if bounded_retry else "failed"
                 operation.last_error = detail[:512]
+                retry.update(
+                    automatic_attempts=automatic_attempts,
+                    operator_retries=operator_retries,
+                )
+                operation.payload = dict(operation.payload) | {
+                    "failure": {
+                        "code": getattr(error, "code", type(error).__name__),
+                        "retryable": retryable,
+                        "automatic_exhausted": retryable and not bounded_retry,
+                    },
+                    "retry": retry,
+                }
+                if bounded_retry:
+                    # The queued row represents the next bounded attempt.  Its
+                    # manifest, plan digest, and transfer ledger remain intact.
+                    operation.attempt = int(operation.attempt) + 1
+                    retry["automatic_attempts"] = automatic_attempts + 1
+                    operation.payload = dict(operation.payload) | {"retry": retry}
+                    operation.completed_at = None
+                else:
+                    operation.completed_at = now
                 operation.updated_at = now
-                operation.completed_at = now
+
+    def retry(
+        self,
+        operation_id: str,
+        *,
+        actor: str,
+        request_key: str,
+    ) -> CacheOperationView:
+        """Queue one operator retry from the persisted exact cache operation."""
+
+        request_key = _request_key(request_key)
+        with self._lock, self._session(write=True) as session:
+            previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            if previous is None:
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            existing = session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key
+                )
+            )
+            if existing is not None:
+                if (
+                    existing.kind != previous.kind
+                    or existing.plan_digest != previous.plan_digest
+                    or existing.artifact_set_sha256 != previous.artifact_set_sha256
+                ):
+                    raise ModelCacheConflict(
+                        "model_cache.request_key_reused",
+                        "request key was already used for another cache operation",
+                    )
+                return self._operation_view(existing)
+            failure = previous.payload.get("failure", {})
+            retryable = (
+                isinstance(failure, Mapping)
+                and failure.get("retryable") is True
+            )
+            raw_retry = previous.payload.get("retry", {})
+            retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
+            operator_retries = retry.get("operator_retries")
+            operator_retries = (
+                operator_retries
+                if type(operator_retries) is int and operator_retries >= 0
+                else 0
+            )
+            if (
+                previous.kind not in {"download", "repair"}
+                or previous.state != "failed"
+                or not retryable
+                or operator_retries >= _MAX_OPERATOR_RETRIES
+            ):
+                raise ModelCacheConflict(
+                    "model_cache.operation_not_retryable",
+                    "cache operation is not retryable",
+                )
+            now = self._clock()
+            retry.update(automatic_attempts=1, operator_retries=operator_retries + 1)
+            payload = dict(previous.payload) | {"retry": retry}
+            operation = ModelCacheOperation(
+                request_key=request_key,
+                schema_version=2,
+                kind=previous.kind,
+                state="queued",
+                attempt=1,
+                artifact_set_sha256=previous.artifact_set_sha256,
+                plan_digest=previous.plan_digest,
+                payload=payload,
+                progress=dict(previous.progress),
+                actor=actor,
+                current_artifact_key=previous.current_artifact_key,
+                created_at=now,
+                updated_at=now,
+            )
+            operation.payload["retry_of"] = previous.id
+            session.add(operation)
+            session.flush()
+            return self._operation_view(operation)
 
     def _set_operation_state(
         self,
@@ -2147,6 +2318,11 @@ class ModelCacheService:
             created_at=_iso(operation.created_at) or "",
             updated_at=_iso(operation.updated_at) or "",
             completed_at=_iso(operation.completed_at),
+            retryable=(
+                isinstance(operation.payload, Mapping)
+                and isinstance(operation.payload.get("failure"), Mapping)
+                and operation.payload["failure"].get("retryable") is True
+            ),
         )
 
     def resume_operations(self, *, limit: int = 16) -> int:
@@ -2257,6 +2433,7 @@ class ModelCacheService:
             "manifest": manifest.document(),
             "plan_digest": requested_plan,
             "transfer": transfer,
+            "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
         with self._lock, self._session(write=True) as session:
             existing = session.scalar(
