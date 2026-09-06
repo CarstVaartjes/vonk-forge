@@ -13,7 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from sqlalchemy import create_engine, event, select, text, update
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     RecipeRunObservationReceiptClaims,
@@ -49,8 +49,6 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     InstallationNode,
     Job,
-    LocalRecipe,
-    LocalRecipeRevision,
     NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
@@ -168,7 +166,7 @@ class _CanonicalModelCache:
     """Small exact cache authority used by the canonical operation fixture."""
 
     artifact_set_sha256 = "f" * 64
-    model_content_sha256 = "7b5431cb5c3f062afa8cc3e7013610cd1fa52fad35c53b5dd0f57482649c4202"
+    model_content_sha256 = "e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c"
     file_sha256 = "c" * 64
 
     def resolve_artifact_set(self, **_kwargs):
@@ -236,7 +234,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
             "recipe_content_sha256": payload["recipe_content_sha256"],
             "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
             "artifact_set_digest": "b" * 64,
-            "model_identity": "vonk-forge/synthetic-tiny-fp16/7b5431cb5c3f062afa8cc3e7013610cd1fa52fad35c53b5dd0f57482649c4202",
+            "model_identity": "vonk-forge/synthetic-tiny-fp16/e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
             "rank": payload["rank"],
             "role": payload["role"],
             "world_size": payload["world_size"],
@@ -264,7 +262,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
         "recipe_content_sha256": payload["recipe_content_sha256"],
         "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
         "artifact_set_digest": "b" * 64,
-        "model_identity": "vonk-forge/synthetic-tiny-fp16/7b5431cb5c3f062afa8cc3e7013610cd1fa52fad35c53b5dd0f57482649c4202",
+        "model_identity": "vonk-forge/synthetic-tiny-fp16/e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
         "rank": payload["rank"],
         "world_size": payload["world_size"],
         "endpoint": f"http://{payload['endpoint_address']}:{payload['port']}",
@@ -457,29 +455,6 @@ def setup_services(
     )
     recipe_revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
-        recipe = LocalRecipe(
-            slug="qwen3-vllm",
-            title="Qwen 3 vLLM",
-            description="Operation test runtime projection",
-            source_kind="local",
-            created_by="admin",
-            created_at=NOW,
-            updated_at=NOW,
-        )
-        session.add(recipe)
-        session.flush()
-        revision = LocalRecipeRevision(
-            id=recipe_revision_id,
-            recipe_id=recipe.id,
-            revision_number=1,
-            lifecycle="resolved",
-            schema_version=2,
-            document=document,
-            content_sha256=recipe_digest,
-            created_by="admin",
-            created_at=NOW,
-        )
-        session.add(revision)
         recipe_catalog = CatalogDocument(
             kind="recipe",
             publisher=document["identity"]["publisher"],
@@ -491,23 +466,22 @@ def setup_services(
         )
         session.add(recipe_catalog)
         session.flush()
-        session.add(
-            CatalogDocumentRevision(
-                id=recipe_revision_id,
-                document_id=recipe_catalog.id,
-                kind="recipe",
-                publisher=recipe_catalog.publisher,
-                slug=recipe_catalog.slug,
-                revision_number=1,
-                schema_version=2,
-                state="active",
-                document=canonical_recipe_document,
-                content_digest=recipe_digest,
-                projected={},
-                created_by="admin",
-                created_at=NOW,
-            )
+        revision = CatalogDocumentRevision(
+            id=recipe_revision_id,
+            document_id=recipe_catalog.id,
+            kind="recipe",
+            publisher=recipe_catalog.publisher,
+            slug=recipe_catalog.slug,
+            revision_number=1,
+            schema_version=2,
+            state="active",
+            document=canonical_recipe_document,
+            content_digest=recipe_digest,
+            projected={},
+            created_by="admin",
+            created_at=NOW,
         )
+        session.add(revision)
         model_catalog = CatalogDocument(
             kind="model",
             publisher=model_document["identity"]["publisher"],
@@ -2560,9 +2534,12 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         installation = session.get(RecipeInstallation, install.owner_id)
         assert installation is not None
         assert installation.state == "uninstalled"
-        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        revision = session.get(
+            CatalogDocumentRevision, installation.recipe_revision_id
+        )
         assert revision is not None
-        assert session.get(LocalRecipe, revision.recipe_id) is not None
+        assert revision.kind == "recipe"
+        assert revision.state == "active"
 
 
 def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
@@ -2605,18 +2582,6 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
         assert revision is not None
         assert first.installation_authority_digest == revision.content_digest
         assert first.recipe_content == revision.document
-
-    with sessions.begin() as session:
-        session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == first.recipe_revision_id)
-            .values(document={**first.recipe_content, "description": "changed"})
-        )
-    # A stale legacy local-revision row cannot change the canonical uninstall
-    # authority used by the operation service.
-    assert service.preview_uninstall(installation.owner_id).plan_digest == (
-        first.plan_digest
-    )
 
 
 def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
@@ -2974,13 +2939,13 @@ def test_uninstall_rejects_stale_bytes_before_transactional_full_group_queue(
             )
         )
         revision = session.get(
-            LocalRecipeRevision,
+            CatalogDocumentRevision,
             session.get(RecipeInstallation, installation.owner_id).recipe_revision_id,
         )
         assert len(children) == 2
         assert revision is not None
         assert {child.authority_revision for child in children} == {
-            revision.content_sha256
+            revision.content_digest
         }
         assert {child.payload["plan_digest"] for child in children} == {
             installation.plan_digest
