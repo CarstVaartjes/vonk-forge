@@ -53,8 +53,6 @@ class _RoutineControlClient(Protocol):
 def _runs_without_controller(args: argparse.Namespace) -> bool:
     if args.command == "admin" and args.admin_command == "deploy":
         return not args.apply
-    if args.command == "library" and args.library_command == "template":
-        return True
     if (
         args.command == "library"
         and args.library_command == "job"
@@ -100,19 +98,6 @@ def _parser() -> argparse.ArgumentParser:
     _add_json(deploy)
     add_controller_commands(commands)
     return parser
-
-
-def _normalize_legacy_telemetry_args(argv: tuple[str, ...]) -> tuple[str, ...]:
-    """Map the pre-group ``fleet telemetry NODE`` spelling to history."""
-    commands = {"current", "capabilities", "history", "workloads"}
-    for index in range(len(argv) - 2):
-        if argv[index : index + 2] != ("fleet", "telemetry"):
-            continue
-        candidate = argv[index + 2]
-        if candidate.startswith("-") or candidate in commands:
-            continue
-        return argv[: index + 2] + ("history",) + argv[index + 2 :]
-    return argv
 
 
 def _sanitize_text(value: object) -> str:
@@ -393,12 +378,6 @@ def _emit(
     if args.global_json or getattr(args, "json", False):
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
         return
-    if (
-        getattr(args, "command", None) == "library"
-        and getattr(args, "library_command", None) == "template"
-    ):
-        print(json.dumps(safe, sort_keys=True, indent=2))
-        return
     if _emit_agent_upgrade_detail(safe):
         return
     if _emit_list_table(safe):
@@ -513,7 +492,6 @@ def main(
     """Run the API-backed CLI."""
     del root
     raw_argv = tuple(argv) if argv is not None else tuple(sys.argv[1:])
-    raw_argv = _normalize_legacy_telemetry_args(raw_argv)
     try:
         args = _parser().parse_args(raw_argv)
     except _UsageError as error:
@@ -546,6 +524,7 @@ def main(
             "library",
             "activity",
             "models",
+            "recipes",
             "cache",
             "profiles",
             "operations",
@@ -565,7 +544,7 @@ def main(
             result,
             args,
             exact_structure=args.command
-            not in {"admin", "fleet", "library", "activity"},
+            not in {"admin", "fleet", "library", "activity", "recipes"},
         )
         return 0
     except (

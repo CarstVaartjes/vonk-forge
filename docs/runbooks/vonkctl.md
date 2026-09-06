@@ -158,15 +158,6 @@ for an uncertain-response retry.
 `models --recipe-capability` when the question is whether a recipe exposes a
 capability; the CLI keeps these two sources separate.
 
-Advanced automation can prepare a saved profile ahead of switching with the
-separate plan-bound commands:
-
-```bash
-vonkctl profiles prepare preview PROFILE_ID --json
-vonkctl profiles prepare apply PROFILE_ID \
-  --plan-digest DIGEST --request-key REQUEST_UUID --apply --json
-```
-
 ## Operations and recovery
 
 Operations return durable IDs that remain inspectable after the invoking
@@ -181,82 +172,27 @@ vonkctl operations wait OPERATION_ID --timeout-seconds 60 --json
 vonkctl operations evidence OPERATION_ID --json
 ```
 
-## Library and public catalog
+## Library
 
-Local Library browsing uses the same bounded server pagination. Public catalog
-filter values match the browser, including model type, Spark count,
-qualification, execution readiness, local status, capability, and sort order.
+Library browsing uses the same bounded server pagination. Models and Recipes are
+read from the canonical Controller projections. Recipes are authored in the
+reviewed `vonk-forge-recipes` checkout and exposed through the canonical
+Controller library routes.
 
 ```bash
+vonkctl models list --search qwen --all --json
+vonkctl models show MODEL_ID --json
+vonkctl recipes list --search qwen --all --json
+vonkctl recipes show RECIPE_ID --json
 vonkctl library list --search qwen --all --json
 vonkctl library show RECIPE_ID --json
 vonkctl library compare RECIPE_ID RECIPE_ID --json
-vonkctl library public list --model-type language --capability chat \
-  --qualification cataloged --readiness executable --sort download --json
-vonkctl library public facets --source-owner Qwen --json
-vonkctl library public compare URI URI --json
-vonkctl library public preview 'vonk://catalog/PUBLISHER/SLUG@sha256:DIGEST' --json
-vonkctl library public import URI --expected-content-sha256 DIGEST
-vonkctl library public import URI --expected-content-sha256 DIGEST --apply
 ```
 
-Local and public comparisons accept two or three distinct recipes, matching the
-browser comparison tray. `public facets` reports the available values and
-counts after applying the other selected filters.
-
-Custom recipe creation consumes the same canonical recipe document accepted by
-the browser builder and server schema. `library template` emits the browser's
-authoritative Custom, vLLM, or Diffusers starting document. Keeping the result
-in a file makes a draft reviewable and reproducible.
-
-```bash
-vonkctl library template --preset vllm > recipe.json
-vonkctl library template --preset diffusers --json
-vonkctl library create --slug my-model --document recipe.json
-vonkctl library create --slug my-model --document recipe.json --apply
-vonkctl library update RECIPE_ID --expected-revision 3 --document recipe.json --apply
-vonkctl library resolve RECIPE_ID --expected-revision 4 --apply
-vonkctl library fork RECIPE_ID --revision 4 --slug my-model-experiment --apply
-```
-
-Operational changes retain the browser's preview/apply boundary:
-
-```bash
-vonkctl library map preview --recipe-revision-id REVISION_ID --node-id SPARK_ID --json
-vonkctl library map apply --recipe-revision-id REVISION_ID --node-id SPARK_ID \
-  --placement-digest DIGEST --apply
-
-vonkctl library build preview --recipe-revision-id REVISION_ID \
-  --builder-node-id SPARK_ID --json
-vonkctl library build apply --recipe-revision-id REVISION_ID \
-  --builder-node-id SPARK_ID --build-input-sha256 DIGEST --apply
-
-vonkctl library distribute preview --recipe-build-id BUILD_ID \
-  --mapping-id MAPPING_ID --mapping-generation GENERATION --json
-vonkctl library distribute apply --recipe-build-id BUILD_ID \
-  --mapping-id MAPPING_ID --mapping-generation GENERATION \
-  --plan-digest DIGEST --apply
-
-vonkctl library install preview --mapping-id MAPPING_ID --recipe-build-id BUILD_ID --json
-vonkctl library install apply --mapping-id MAPPING_ID --recipe-build-id BUILD_ID \
-  --plan-digest DIGEST --apply
-
-vonkctl library load preview --installation-id INSTALLATION_ID --alias qwen-chat --json
-vonkctl library load apply --installation-id INSTALLATION_ID --alias qwen-chat \
-  --plan-digest DIGEST --apply
-
-vonkctl library stop preview RUN_ID --json
-vonkctl library stop apply RUN_ID --plan-digest DIGEST --apply
-vonkctl library uninstall preview INSTALLATION_ID --json
-vonkctl library uninstall apply INSTALLATION_ID --plan-digest DIGEST --apply
-```
-
-Apply commands generate an idempotency UUID automatically. Supply
-`--request-key UUID` when a caller needs to retain and reuse it after an
-uncertain outcome. The build apply command consumes `build_input_sha256` from
-its preview; distribution apply consumes `plan_digest` from its preview and
-must reuse the previewed mapping generation. Use `library operation show`,
-`library operation retry`, and `library run` to follow progress and recovery.
+Normal Download, Run, and Switch workflows coordinate required Controller
+work automatically and expose one durable operation. Use `models download`,
+`models run`, and `profiles switch`; inspect progress with `operations show`,
+`operations wait`, or `operations evidence`.
 
 ## Artifact-producing recipe jobs
 
