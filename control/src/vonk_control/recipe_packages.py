@@ -83,8 +83,15 @@ def _sha256(value: bytes) -> str:
 
 
 def _safe_path(value: str) -> bool:
+    if not value or "\0" in value or "\\" in value:
+        return False
     path = PurePosixPath(value)
-    return bool(path.parts) and not path.is_absolute() and all(part not in {"", ".", ".."} for part in path.parts)
+    return (
+        bool(path.parts)
+        and value == path.as_posix()
+        and not path.is_absolute()
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
 
 
 def _json(raw: bytes) -> object:
@@ -336,7 +343,7 @@ class RecipePackageClient:
             publisher, slug, digest = package_entry.get("publisher"), package_entry.get("slug"), package_entry.get("recipe_content_sha256")
             package_digest, location, size, source_path = package_entry.get("package_sha256"), package_entry.get("location"), package_entry.get("size"), package_entry.get("source_path")
             location_url = urlsplit(str(location))
-            if not all(isinstance(value, str) for value in (publisher, slug, digest, package_digest, location, source_path)) or source_path != f"recipes/{slug}.json" or not _SLUG.fullmatch(str(publisher)) or not _SLUG.fullmatch(str(slug)) or not _SHA256.fullmatch(str(digest)) or not _SHA256.fullmatch(str(package_digest)) or not _safe_path(str(location)) or str(location).startswith("/") or location_url.scheme or location_url.netloc or location_url.query or location_url.fragment or not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= MAX_PACKAGE_BYTES:
+            if not all(isinstance(value, str) for value in (publisher, slug, digest, package_digest, location, source_path)) or not _safe_path(str(source_path)) or not _SLUG.fullmatch(str(publisher)) or not _SLUG.fullmatch(str(slug)) or not _SHA256.fullmatch(str(digest)) or not _SHA256.fullmatch(str(package_digest)) or not _safe_path(str(location)) or str(location).startswith("/") or location_url.scheme or location_url.netloc or location_url.query or location_url.fragment or not isinstance(size, int) or isinstance(size, bool) or not 1 <= size <= MAX_PACKAGE_BYTES:
                 raise RecipePackageError("recipe_package.response_invalid", "recipe package entry identity is invalid")
             key = f"{publisher}/{slug}"
             if key in packages:

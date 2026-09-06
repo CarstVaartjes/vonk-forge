@@ -3,8 +3,9 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import os
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -156,6 +157,53 @@ def test_synthetic_device_fixture_supports_the_arm64_spark_runner() -> None:
     for platform in ("linux-amd64", "linux-riscv64"):
         with pytest.raises(lifecycle.LifecycleError, match="platform"):
             lifecycle._synthetic_device_fixture(platform)
+
+
+def test_canonical_canary_package_ancestors_are_traversable_with_private_umask(
+    tmp_path: Path,
+) -> None:
+    lifecycle = _module()
+    bundle = tmp_path / "bundle"
+    (bundle / "secrets/runtime-configs").mkdir(parents=True)
+    (bundle / "secrets/runtime-configs/caddyfile").write_text(
+        "header_up X-Vonk-Agent-Source {http.request.remote.host}\n"
+    )
+    (bundle / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  control-api:\n"
+        "    environment: {}\n"
+        "  caddy:\n"
+        "    configs:\n"
+        "      - source: caddyfile\n"
+        "        target: /etc/caddy/Caddyfile\n"
+    )
+    fixture = lifecycle.CanonicalCanaryFixture(
+        index_path=Path("index.json"),
+        index_bytes=b"{}",
+        package_path=PurePosixPath(
+            "tests/fixtures/canonical-synthetic-canary/package/canary.tar.gz"
+        ),
+        package_bytes=b"package",
+        source_commit="a" * 40,
+        publisher="vonk-forge-test",
+        slug="canonical-synthetic-canary",
+        recipe_content_sha256="b" * 64,
+        model_version_sha256="c" * 64,
+        role="entrypoint",
+        serving_check={},
+        recipe={},
+    )
+    previous_umask = os.umask(0o077)
+    try:
+        lifecycle._configure_canonical_canary_library(bundle, fixture)
+    finally:
+        os.umask(previous_umask)
+
+    serving_root = bundle / "secrets/synthetic-recipe-library"
+    package_target = serving_root / Path(*fixture.package_path.parts)
+    for directory in package_target.parents:
+        if directory.is_relative_to(serving_root):
+            assert directory.stat().st_mode & 0o777 == 0o755
 
 
 def test_synthetic_device_is_resolved_by_the_native_docker_daemon(
