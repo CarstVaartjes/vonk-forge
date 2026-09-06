@@ -17,6 +17,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -52,7 +53,6 @@ SHA1 = re.compile(r"^[0-9a-f]{40}$")
 EVIDENCE_ENV = "VONK_CATALOG_CORPUS_EVIDENCE"
 FROZEN_ROOT_ENV = "VONK_FROZEN_CONTRACTS_ROOT"
 FROZEN_COMMIT_ENV = "VONK_FROZEN_CONTRACTS_COMMIT"
-FROZEN_CANDIDATE = "fcf601339bc726af5f1a41f5abe1e331ccf32af4"
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,26 @@ class FrozenCorpus:
     package_root: Path
     publication_commit: str | None
     source: str
+
+
+def _require_sha1(value: object, *, label: str) -> str:
+    if not isinstance(value, str) or SHA1.fullmatch(value) is None:
+        pytest.fail(f"{label} must be a full lowercase SHA-1")
+    return value
+
+
+def _checkout_head(package_root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(package_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        pytest.fail(f"frozen contracts checkout has no immutable Git HEAD: {error}")
+    return _require_sha1(result.stdout.strip(), label="frozen contracts checkout HEAD")
 
 
 def _load_frozen_corpus() -> FrozenCorpus:
@@ -84,6 +104,28 @@ def _load_frozen_corpus() -> FrozenCorpus:
         publication = evidence.get("publication_commit") or snapshot.get(
             "publication_commit"
         )
+        receipt_frozen_commit = evidence.get("frozen_contracts_commit") or snapshot.get(
+            "frozen_contracts_commit"
+        )
+        if receipt_frozen_commit is not None:
+            receipt_frozen_commit = _require_sha1(
+                receipt_frozen_commit, label="frozen contracts receipt commit"
+            )
+            supplied_commit = os.environ.get(FROZEN_COMMIT_ENV)
+            if supplied_commit is not None and _require_sha1(
+                supplied_commit, label=FROZEN_COMMIT_ENV
+            ) != receipt_frozen_commit:
+                pytest.fail(
+                    f"{FROZEN_COMMIT_ENV} does not match the frozen contracts receipt"
+                )
+        elif os.environ.get(FROZEN_COMMIT_ENV) is not None:
+            pytest.fail(
+                f"{FROZEN_COMMIT_ENV} has no frozen contracts binding in the receipt"
+            )
+        if publication is None and receipt_frozen_commit is None:
+            pytest.fail(
+                "frozen catalog receipt has no immutable publication or frozen contracts identity"
+            )
         source = f"receipt:{evidence_path}"
         package_root = cache_root
         evidence_value = evidence
@@ -94,10 +136,13 @@ def _load_frozen_corpus() -> FrozenCorpus:
             pytest.skip(f"frozen catalog index is unavailable: {index_path}")
         index = json.loads(index_path.read_text(encoding="utf-8"))
         publication = index.get("publication_commit")
-        candidate = os.environ.get(FROZEN_COMMIT_ENV)
-        if candidate != FROZEN_CANDIDATE:
-            pytest.skip(
-                f"frozen contracts input must identify candidate {FROZEN_CANDIDATE}"
+        candidate = _require_sha1(
+            os.environ.get(FROZEN_COMMIT_ENV), label=FROZEN_COMMIT_ENV
+        )
+        checkout_head = _checkout_head(package_root)
+        if candidate != checkout_head:
+            pytest.fail(
+                f"{FROZEN_COMMIT_ENV} does not match checkout HEAD {checkout_head}"
             )
         source = f"contracts:{package_root}"
         evidence_value = {"frozen_contracts_commit": candidate}
@@ -122,10 +167,8 @@ def _load_frozen_corpus() -> FrozenCorpus:
         assert evidence_value["models"] == len(index["catalog_entities"])
     if isinstance(evidence_value.get("recipes"), int):
         assert evidence_value["recipes"] == len(index["recipes"])
-    if publication is not None and (
-        not isinstance(publication, str) or SHA1.fullmatch(publication) is None
-    ):
-        pytest.fail("frozen catalog publication identity is invalid")
+    if publication is not None:
+        _require_sha1(publication, label="frozen catalog publication identity")
     source_commit = index.get("source_commit")
     if not isinstance(source_commit, str) or SHA1.fullmatch(source_commit) is None:
         pytest.fail("frozen catalog source commit is invalid")
@@ -296,6 +339,53 @@ def _app(
     return client
 
 
+def _api_page_limit(api: TestClient, path: str) -> int:
+    parameters = api.app.openapi()["paths"][path]["get"]["parameters"]
+    for parameter in parameters:
+        if parameter.get("name") != "limit":
+            continue
+        maximum = parameter.get("schema", {}).get("maximum")
+        if type(maximum) is int and maximum >= 1:
+            return maximum
+    pytest.fail(f"{path} does not publish a bounded maximum page size")
+
+
+def _library_models(api: TestClient) -> list[Any]:
+    limit = _api_page_limit(api, "/api/v1/library")
+    cursor: str | None = None
+    models: list[Any] = []
+    while True:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = api.get("/api/v1/library", params=params)
+        assert response.status_code == 200, response.text
+        page = LibrarySnapshot.model_validate_json(response.content)
+        models.extend(page.models)
+        if page.next_cursor is None:
+            return models
+        assert page.next_cursor != cursor, "library pagination cursor did not advance"
+        cursor = page.next_cursor
+
+
+def _library_recipes(api: TestClient) -> list[Any]:
+    limit = _api_page_limit(api, "/api/v1/library/recipes")
+    cursor: str | None = None
+    recipes: list[Any] = []
+    while True:
+        params: dict[str, Any] = {"limit": limit}
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = api.get("/api/v1/library/recipes", params=params)
+        assert response.status_code == 200, response.text
+        page = LibraryRecipeList.model_validate_json(response.content)
+        recipes.extend(page.recipes)
+        if page.next_cursor is None:
+            return recipes
+        assert page.next_cursor != cursor, "recipe pagination cursor did not advance"
+        cursor = page.next_cursor
+
+
 def test_frozen_corpus_closure_is_dynamic_and_keeps_unlinked_models() -> None:
     corpus = _load_frozen_corpus()
     models = corpus.index["catalog_entities"]
@@ -314,6 +404,36 @@ def test_frozen_corpus_closure_is_dynamic_and_keeps_unlinked_models() -> None:
         assert archive.stat().st_size == package["expected_bytes"]
         assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest
     assert model_keys - selected
+
+
+def test_frozen_checkout_rejects_mismatched_supplied_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    package_root = tmp_path / "frozen-contracts"
+    package_root.mkdir()
+    (package_root / "catalog-index.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "kind": "recipe-library-index",
+                "repository": REPOSITORY,
+                "catalog_entities": [],
+                "recipes": [],
+                "source_commit": "c" * 40,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv(EVIDENCE_ENV, raising=False)
+    monkeypatch.setenv(FROZEN_ROOT_ENV, str(package_root))
+    monkeypatch.setenv(FROZEN_COMMIT_ENV, "b" * 40)
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout=f"{'a' * 40}\n"),
+    )
+    with pytest.raises(pytest.fail.Exception, match="does not match checkout HEAD"):
+        _load_frozen_corpus()
 
 
 def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
@@ -404,34 +524,33 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
         sync=sync,
         sessions=sessions,
     )
-    library_response = api.get("/api/v1/library?limit=100")
-    assert library_response.status_code == 200, library_response.text
-    library = LibrarySnapshot.model_validate(library_response.json())
-    assert len(library.models) == len(corpus.index["catalog_entities"])
-    assert {
+    library_models = _library_models(api)
+    library_model_keys = {
         (item.model.publisher, item.model.slug, item.model.content_sha256)
-        for item in library.models
-    } == {_model_key(row) for row in corpus.index["catalog_entities"]}
+        for item in library_models
+    }
+    assert len(library_model_keys) == len(library_models)
+    assert library_model_keys == {
+        _model_key(row) for row in corpus.index["catalog_entities"]
+    }
     actual_unlinked = {
         (item.model.publisher, item.model.slug, item.model.content_sha256)
-        for item in library.models
+        for item in library_models
         if not item.recipes
     }
     assert actual_unlinked == {
         _model_key(row) for row in corpus.index["catalog_entities"]
     } - _selected_model_keys(corpus.index)
 
-    recipes_response = api.get("/api/v1/library/recipes?limit=100")
-    assert recipes_response.status_code == 200, recipes_response.text
-    recipes = LibraryRecipeList.model_validate(recipes_response.json())
-    assert len(recipes.recipes) == len(corpus.index["recipes"])
-    by_digest = {item.content_sha256: item for item in recipes.recipes}
+    library_recipes = _library_recipes(api)
+    by_digest = {item.content_sha256: item for item in library_recipes}
+    assert len(by_digest) == len(library_recipes)
     assert set(by_digest) == {_recipe_key(row)[2] for row in corpus.index["recipes"]}
     for row in corpus.index["recipes"]:
         digest = _recipe_key(row)[2]
         detail_response = api.get(f"/api/v1/library/recipes/{by_digest[digest].recipe_id}")
         assert detail_response.status_code == 200, detail_response.text
-        detail = LibraryRecipeDetail.model_validate(detail_response.json())
+        detail = LibraryRecipeDetail.model_validate_json(detail_response.content)
         assert detail.recipe.content_sha256 == digest
         assert detail.recipe.slug == row["document"]["identity"]["slug"]
         reference = row["document"]["models"][0]["model"]
