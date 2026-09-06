@@ -44,7 +44,7 @@ _UNSAFE_PARAMETER_KEY = re.compile(
     r"^(?:apikey|passwordhash)$|"
     r"(?:^|[_-])(?:password|secret|authorization|command|shell|environment)"
     r"(?:$|[_-])|"
-    r"(?:^|[_-])(?:api|access|auth|bearer|hf|huggingface)[_-]?token$|"
+    r"(?:^|[_-])(?:api|access|auth|bearer|github|hf|huggingface)[_-]?token$|"
     r"(?:^|[_-])private[_-]?key$|"
     r"^token$|"
     r"(?:^|[_-])(?:path|file|filename|filepath|directory|folder)(?:$|[_-])",

@@ -1615,12 +1615,12 @@ def test_builtin_harness_passes_unknown_engine_flags_to_pinned_runtime(
     assert projection.command[index + 1] == "preserve-me"
 
 
-def test_builtin_harness_rejects_platform_owned_engine_flags() -> None:
+def test_builtin_harness_preserves_platform_shaped_engine_flags() -> None:
     recipe = _recipe("vllm")
     recipe["runtime"]["arguments"].append({"name": "privileged", "value": True})
 
-    with pytest.raises(HarnessCompileError, match="platform-owned"):
-        _compile("vllm", recipe=recipe)
+    projection = _compile("vllm", recipe=recipe)
+    assert "--privileged" in projection.command
 
 
 @pytest.mark.parametrize(

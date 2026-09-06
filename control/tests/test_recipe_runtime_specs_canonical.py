@@ -19,6 +19,7 @@ from vonk_control.harnesses.canonical import (  # noqa: E402
     _scalar,
     _validate_argv_size,
 )
+from vonk_control.harnesses.common import structured_command  # noqa: E402
 
 
 def _example(name: str) -> dict[str, object]:
@@ -123,6 +124,47 @@ def test_canonical_argv_preserves_empty_and_repeated_options(model: object) -> N
     argv = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)["runtime"]["entrypoint"]
     first = argv.index("--repeated_option")
     assert argv[first : first + 4] == ["--repeated_option", "", "--repeated_option", "second"]
+
+
+def test_canonical_argv_preserves_post_executable_platform_shaped_data(model: object) -> None:
+    raw = _example("recipe-image.json")
+    raw["runtime"]["arguments"] = [  # type: ignore[index]
+        {"name": "device", "value": "/dev/nvidia0"},
+        {"name": "network", "value": "host"},
+        {"name": "user", "value": "10001:10001"},
+        {"name": "mount", "value": ""},
+        {"name": "volume", "value": {"source": "/data", "target": "/data"}},
+        {"name": "device", "value": "second"},
+        {"name": "option", "value": "-c"},
+        {"name": "opaque", "value": "--option=-c"},
+    ]
+    recipe = contracts.RecipeDefinition.model_validate(raw)
+    argv = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)[
+        "runtime"
+    ]["entrypoint"]
+    start = argv.index("--device")
+    assert argv[start : start + 16] == [
+        "--device",
+        "/dev/nvidia0",
+        "--network",
+        "host",
+        "--user",
+        "10001:10001",
+        "--mount",
+        "",
+        "--volume",
+        '{"source":"/data","target":"/data"}',
+        "--device",
+        "second",
+        "--option",
+        "-c",
+        "--opaque",
+        "--option=-c",
+    ]
+    assert structured_command(("/opt/vonk/bin/argv-check", "--option=-c", "-c"), canonical_argv=True)[1:] == (
+        "--option=-c",
+        "-c",
+    )
 
 
 def test_canonical_argv_json_and_utf8_bounds() -> None:

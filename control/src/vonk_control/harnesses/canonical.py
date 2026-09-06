@@ -70,23 +70,6 @@ _MAX_ARGV_BYTES = 1_048_576
 _SAFE_ARG_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{0,63}$")
 _SAFE_ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
-_PLATFORM_ARG_NAMES = frozenset(
-    {
-        "cap-add",
-        "cap-drop",
-        "device",
-        "init",
-        "mount",
-        "network",
-        "privileged",
-        "publish",
-        "read-only",
-        "security-opt",
-        "tmpfs",
-        "user",
-        "volume",
-    }
-)
 _PLATFORM_ENV_NAMES = frozenset(
     {
         "PATH",
@@ -268,9 +251,8 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
         raise HarnessCompileError("recipe has too many runtime arguments")
     for argument in recipe.runtime.arguments:
         name = argument.name[2:] if argument.name.startswith("--") else argument.name
-        normalized = name.replace("_", "-")
-        if _SAFE_ARG_NAME.fullmatch(name) is None or normalized in _PLATFORM_ARG_NAMES:
-            raise HarnessCompileError(f"recipe argument is platform-owned or invalid: {argument.name}")
+        if _SAFE_ARG_NAME.fullmatch(name) is None:
+            raise HarnessCompileError(f"recipe argument name is invalid: {argument.name}")
         # Preserve engine option spelling exactly; argv is not shell text.
         flag = f"--{name}"
         value = argument.value if argument.setting is None else settings[argument.setting]
