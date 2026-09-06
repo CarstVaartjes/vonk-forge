@@ -35,7 +35,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
 )
-from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
@@ -46,6 +45,10 @@ from .auth import (
     AgentSource,
     agent_identity_from_scope,
     agent_source_from_scope,
+)
+from .compiled_execution_plan import (
+    CompiledExecutionPlanError,
+    validate_compiled_launch_payload,
 )
 from .distribution import DistributionError, DistributionService
 from .enrollment import (
@@ -67,7 +70,6 @@ from .models import (
     AgentEnrollment,
     AgentNode,
     AgentOperation,
-    CatalogDocumentRevision,
     ClusterMapping,
     InstallationNode,
     RecipeBuild,
@@ -82,11 +84,6 @@ from .recipe_operations import (
     RecipeRunObservation,
     prepare_exact_recipe_run_observation_nodes,
     record_recipe_run_observations,
-)
-from .recipe_runtime_specs import (
-    RecipeRuntimeSpecError,
-    compile_runtime_spec,
-    resolve_recipe_entities,
 )
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .telemetry import (
@@ -2038,65 +2035,44 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=404, detail="recipe specification does not exist"
                 )
-            revision = session.get(
-                CatalogDocumentRevision, installation.recipe_revision_id
-            )
-            mapping = session.get(ClusterMapping, installation.mapping_id)
-            build = session.get(RecipeBuild, installation.recipe_build_id)
-            if (
-                revision is None
-                or revision.kind != "recipe"
-                or revision.schema_version != 2
-                or revision.state != "active"
-                or mapping is None
-                or mapping.state != "ready"
-                or mapping.generation != installation.mapping_generation
-                or build is None
-                or build.state != "succeeded"
-                or build.image_digest != installation.image_digest
-                or build.recipe_revision_id != revision.id
-            ):
-                raise HTTPException(
-                    status_code=409, detail="recipe specification authority is stale"
-                )
-            try:
-                recipe = RecipeDefinition.model_validate(revision.document)
-            except (TypeError, ValueError):
-                raise HTTPException(
-                    status_code=409, detail="recipe specification authority is stale"
-                ) from None
-            if content_sha256(recipe) != revision.content_digest:
-                raise HTTPException(
-                    status_code=409, detail="recipe specification authority is stale"
-                )
-            document = recipe.model_dump(mode="json")
-            parameters = mapping.parameters
-            try:
-                resolved_entities = resolve_recipe_entities(session, document)
-            except RecipeRuntimeSpecError:
+            if installation.state not in {"installing", "installed", "partial"}:
                 raise HTTPException(
                     status_code=409,
-                    detail="recipe specification dependencies are stale",
-                ) from None
-            package = dict(revision.projected or {})
-            package["image_digest"] = build.image_digest
-            package["image_reference"] = (
-                f"localhost/vonk/recipe-build@{build.image_digest}"
-                if build.image_digest is not None
-                else None
-            )
-            package["build_input_sha256"] = build.build_input_sha256
+                    detail="recipe specification installation is not ready",
+                )
+            if not isinstance(installation.plan, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            compiled_plans = installation.plan.get("compiled_execution_plans")
+            if not isinstance(compiled_plans, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            candidate = compiled_plans.get(identity.node_id)
+            if not isinstance(candidate, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
         try:
-            spec = compile_runtime_spec(
-                document,
-                resolved_entities=resolved_entities,
-                parameters=parameters,
-                role=placement.role,
-                rank=placement.rank,
-                package_handle=package,
+            spec = validate_compiled_launch_payload(candidate)
+        except (CompiledExecutionPlanError, TypeError, ValueError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail=f"recipe specification compiled execution plan is invalid: {error}",
+            ) from None
+        topology = spec.get("topology")
+        if not isinstance(topology, Mapping) or (
+            topology.get("rank") != placement.rank
+            or topology.get("role") != placement.role
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification placement does not match the installation",
             )
-        except RecipeRuntimeSpecError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
         return _json_response(spec)
 
     def workload_helper_service() -> WorkloadHelperAuthorityService:
