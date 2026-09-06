@@ -38,9 +38,8 @@ getent group vonk-agent >/dev/null || groupadd --system --gid 10001 vonk-agent
 getent passwd vonk-agent >/dev/null || useradd --system --uid 10001 --gid vonk-agent --no-create-home --shell /usr/sbin/nologin vonk-agent
 install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper /var/lib/vonk-forge/helper/requests
-install -d -o root -g root -m 0700 /var/lib/vonk-forge/oci-archives
 install -d -o root -g root -m 0755 /run/vonk-forge-agent /run/vonk-forge-package-helper
-install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent /run/vonk-forge-agent/runtime-requests
+install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent /var/lib/vonk-forge-agent/oci-archives /run/vonk-forge-agent/runtime-requests
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/models
 runtime_probe=/run/vonk-forge-agent/privileged_oci_process_probe
 runtime_fixture=/run/vonk-forge-agent/compiled_workload_v2.json
@@ -91,9 +90,9 @@ docker image inspect "$image_ref" >"$report_root/source-image-ref-inspect.json"
 docker save --output "$fixture_dir/image.oci.tar" "$image_ref"
 archive_sha=$(sha256sum "$fixture_dir/image.oci.tar" | awk '{print $1}')
 archive_bytes=$(stat -c '%s' "$fixture_dir/image.oci.tar")
-cp "$fixture_dir/image.oci.tar" "/var/lib/vonk-forge/oci-archives/$archive_sha"
-chown vonk-agent:vonk-agent "/var/lib/vonk-forge/oci-archives/$archive_sha"
-chmod 0600 "/var/lib/vonk-forge/oci-archives/$archive_sha"
+cp "$fixture_dir/image.oci.tar" "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
+chown vonk-agent:vonk-agent "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
+chmod 0600 "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
 
 install -d -o vonk-agent -g vonk-agent -m 0700 \
   /var/lib/vonk-forge/models/primary \
