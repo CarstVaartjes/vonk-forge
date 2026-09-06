@@ -1722,26 +1722,37 @@ fn runtime_image_identity_matches(
 }
 
 fn runtime_archive_config_digest(path: &Path) -> Result<String, OperationError> {
+    let manifest = read_runtime_archive_member(path, Path::new("manifest.json"))?;
+    let entries: Vec<DockerSaveManifestEntry> =
+        serde_json::from_slice(&manifest).map_err(|_| OperationError::InvalidArtifact)?;
+    if entries.len() != 1 {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let config_path = Path::new(&entries[0].config);
+    let config = config_member_name(config_path).ok_or(OperationError::InvalidArtifact)?;
+    let bytes = read_runtime_archive_member(path, config_path)?;
+    if hex_sha256(&bytes) != config {
+        return Err(OperationError::InvalidArtifact);
+    }
+    Ok(format!("sha256:{config}"))
+}
+
+fn read_runtime_archive_member(path: &Path, target: &Path) -> Result<Vec<u8>, OperationError> {
     let file = File::open(path).map_err(|_| OperationError::InvalidArtifact)?;
     let mut archive = tar::Archive::new(file);
-    let mut manifest = None;
-    let mut config_member = None;
+    let mut found = None;
+    // A Docker-save archive can contain many layer and manifest blobs. Read
+    // only the exact member selected by manifest.json, seeking past payloads
+    // so config verification does not reread every multi-gigabyte layer.
     for entry in archive
-        .entries()
+        .entries_with_seek()
         .map_err(|_| OperationError::InvalidArtifact)?
     {
         let mut entry = entry.map_err(|_| OperationError::InvalidArtifact)?;
-        let entry_path = entry
-            .path()
-            .map_err(|_| OperationError::InvalidArtifact)?
-            .into_owned();
-        let is_manifest = entry_path == Path::new("manifest.json");
-        let config_name = config_member_name(&entry_path);
-        if !is_manifest && config_name.is_none() {
+        if entry.path().map_err(|_| OperationError::InvalidArtifact)? != target {
             continue;
         }
-        if (is_manifest && manifest.is_some())
-            || (config_name.is_some() && config_member.is_some())
+        if found.is_some()
             || !entry.header().entry_type().is_file()
             || entry.size() > MAX_RUNTIME_CONFIG_BYTES as u64
         {
@@ -1755,28 +1766,9 @@ fn runtime_archive_config_digest(path: &Path) -> Result<String, OperationError> 
         if bytes.len() != size {
             return Err(OperationError::InvalidArtifact);
         }
-        if is_manifest {
-            manifest = Some(bytes);
-        } else {
-            config_member = Some((entry_path, config_name.unwrap(), bytes));
-        }
+        found = Some(bytes);
     }
-    let manifest = manifest.ok_or(OperationError::InvalidArtifact)?;
-    let entries: Vec<DockerSaveManifestEntry> =
-        serde_json::from_slice(&manifest).map_err(|_| OperationError::InvalidArtifact)?;
-    if entries.len() != 1 {
-        return Err(OperationError::InvalidArtifact);
-    }
-    let expected_config =
-        config_member_name(Path::new(&entries[0].config)).ok_or(OperationError::InvalidArtifact)?;
-    let (config_path, config, bytes) = config_member.ok_or(OperationError::InvalidArtifact)?;
-    if config_path != Path::new(&entries[0].config) || config != expected_config {
-        return Err(OperationError::InvalidArtifact);
-    }
-    if hex_sha256(&bytes) != config {
-        return Err(OperationError::InvalidArtifact);
-    }
-    Ok(format!("sha256:{config}"))
+    found.ok_or(OperationError::InvalidArtifact)
 }
 
 fn config_member_name(path: &Path) -> Option<String> {
@@ -3247,6 +3239,20 @@ mod tests {
         } else {
             format!("blobs/sha256/{config_digest}")
         };
+        let unrelated_blob = format!("blobs/sha256/{}", "d".repeat(64));
+        let other_manifest = format!("blobs/sha256/{}", "e".repeat(64));
+        let archive = docker_config_archive(
+            &config_member,
+            &[
+                (&unrelated_blob, b"layer payload"),
+                (&config_member, config),
+                (&other_manifest, b"unrelated OCI manifest"),
+            ],
+        );
+        (archive, format!("sha256:{config_digest}"))
+    }
+
+    fn docker_config_archive(config_member: &str, members: &[(&str, &[u8])]) -> Vec<u8> {
         let manifest = serde_json::to_vec(&serde_json::json!([
             {
                 "Config": config_member,
@@ -3263,34 +3269,54 @@ mod tests {
         builder
             .append_data(&mut header, "manifest.json", manifest.as_slice())
             .unwrap();
-        let config_path = if root_config {
-            format!("{config_digest}.json")
-        } else {
-            format!("blobs/sha256/{config_digest}")
-        };
-        let mut header = tar::Header::new_gnu();
-        header.set_size(config.len() as u64);
-        header.set_mode(0o600);
-        header.set_cksum();
-        builder
-            .append_data(&mut header, config_path, &config[..])
-            .unwrap();
-        (
-            builder.into_inner().unwrap(),
-            format!("sha256:{config_digest}"),
-        )
+        for (name, bytes) in members {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o600);
+            header.set_cksum();
+            builder.append_data(&mut header, name, *bytes).unwrap();
+        }
+        builder.into_inner().unwrap()
     }
 
     #[test]
-    fn runtime_archive_config_digest_accepts_classic_root_member() {
+    fn runtime_archive_config_digest_selects_exact_config_in_both_docker_layouts() {
         let temp = tempfile::tempdir().unwrap();
-        let (payload, config_id) = docker_save_archive(true);
         let archive = temp.path().join("image.tar");
-        fs::write(&archive, payload).unwrap();
-        assert_eq!(
-            super::runtime_archive_config_digest(&archive).unwrap(),
-            config_id
-        );
+        for root_config in [true, false] {
+            let (payload, config_id) = docker_save_archive(root_config);
+            fs::write(&archive, payload).unwrap();
+            assert_eq!(
+                super::runtime_archive_config_digest(&archive).unwrap(),
+                config_id
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_archive_config_digest_rejects_ambiguous_or_tampered_members() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("image.tar");
+        let config = b"{}";
+        let config_name = format!("{}.json", hex_sha256(config));
+        let valid_member = (config_name.as_str(), config.as_slice());
+        let duplicate_config = [valid_member, valid_member];
+        let duplicate_manifest = [valid_member, ("manifest.json", b"[]".as_slice())];
+        let tampered_config = [(config_name.as_str(), b"changed".as_slice())];
+        for members in [
+            duplicate_config.as_slice(),
+            duplicate_manifest.as_slice(),
+            tampered_config.as_slice(),
+        ] {
+            fs::write(&archive, docker_config_archive(&config_name, members)).unwrap();
+            assert!(super::runtime_archive_config_digest(&archive).is_err());
+        }
+        fs::write(
+            &archive,
+            docker_config_archive(&format!("../{config_name}"), &[valid_member]),
+        )
+        .unwrap();
+        assert!(super::runtime_archive_config_digest(&archive).is_err());
     }
 
     fn runtime_arguments(roots: &ManagedRoots, mounts: &[(PathBuf, &str, bool)]) -> Vec<String> {
