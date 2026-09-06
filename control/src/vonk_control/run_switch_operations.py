@@ -52,15 +52,27 @@ from .preparation_contract import (
 )
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
+from .resource_planning import (
+    CapacitySnapshot,
+    PlannedStopRelease,
+    ResourceDemand,
+    ResourceEvidence,
+    plan_capacity,
+    resolve_effective_settings,
+    resource_demand,
+)
 from .run_switch_contract import (
     ArtifactStorageImpact,
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
     CapabilityEvidence,
+    EffectiveParallelism,
+    EffectiveSettingsSelection,
     FreshnessEvidence,
     InvocationMetadata,
     MappingSelection,
     RecipeBuildEvidence,
+    ResourceDemandEvidence,
     RunSwitchApplyRequest,
     RunSwitchMemberProgress,
     RunSwitchOperation,
@@ -315,6 +327,146 @@ def _manifest_artifact_size(manifest: object, digest: str) -> int:
 
 def _required_int(value: object) -> int | None:
     return value if type(value) is int and value >= 0 else None
+
+
+def _resource_reason(reason: object, *, node_ids: Sequence[str] = ()) -> RunSwitchReason:
+    node_id = getattr(reason, "node_id", None)
+    return _as_reason(
+        f"run-switch.{getattr(reason, 'code', 'resource.evidence_unknown')}",
+        str(getattr(reason, "detail", "Resource planning evidence is unavailable.")),
+        scope="node" if isinstance(node_id, str) else "operation",
+        severity=str(getattr(reason, "severity", "blocker")),
+        node_ids=(node_id,) if isinstance(node_id, str) else node_ids,
+    )
+
+
+def _settings_view(settings: object) -> EffectiveSettingsSelection:
+    resolution = resolve_effective_settings(settings)
+    if resolution.settings is None:
+        raise ValueError("effective settings are invalid")
+    resolved = resolution.settings
+    return EffectiveSettingsSelection(
+        kind=resolved.kind,
+        context_tokens=resolved.context_tokens,
+        concurrency=resolved.concurrency,
+        max_batch_tokens=resolved.batch_tokens,
+        parallelism=EffectiveParallelism(
+            world_size=resolved.parallelism.world_size,
+            tensor=resolved.parallelism.tensor,
+            pipeline=resolved.parallelism.pipeline,
+            data=resolved.parallelism.data,
+            backend=resolved.parallelism.backend,
+        ),
+        knobs=dict(resolved.knobs),
+        change_effects=dict(resolved.change_effects),
+        identity_sha256=resolved.identity_digest,
+    )
+
+
+def _selected_model_bytes(
+    recipe_document: Mapping[str, object],
+    model_document: Mapping[str, object] | None,
+    role_name: str,
+) -> int | None:
+    if model_document is None:
+        return None
+    files = model_document.get("files")
+    selections = recipe_document.get("models")
+    if not isinstance(files, Sequence) or isinstance(files, (str, bytes)):
+        return None
+    if not isinstance(selections, Sequence) or isinstance(selections, (str, bytes)):
+        return None
+    by_id = {
+        str(file.get("id")): file
+        for file in files
+        if isinstance(file, Mapping) and isinstance(file.get("id"), str)
+    }
+    selected_ids: set[str] = set()
+    for selection in selections:
+        if not isinstance(selection, Mapping):
+            return None
+        raw_files = selection.get("files")
+        if not isinstance(raw_files, Sequence) or isinstance(raw_files, (str, bytes)):
+            return None
+        for item in raw_files:
+            if not isinstance(item, Mapping):
+                return None
+            roles = item.get("roles", ())
+            if isinstance(roles, Sequence) and role_name in roles:
+                file_id = item.get("file_id")
+                if not isinstance(file_id, str) or file_id not in by_id:
+                    return None
+                selected_ids.add(file_id)
+    total = 0
+    for file_id in selected_ids:
+        size = by_id[file_id].get("size_bytes")
+        if type(size) is not int or size < 0:
+            return None
+        total += size
+    return total if selected_ids else None
+
+
+def _resource_evidence(
+    recipe_document: Mapping[str, object],
+    memory: Mapping[str, object],
+    role_name: str,
+    model_document: Mapping[str, object] | None,
+    declared_total_bytes: int,
+    settings: object | None,
+) -> ResourceEvidence:
+    del memory
+    model_bytes = _selected_model_bytes(recipe_document, model_document, role_name)
+    return ResourceEvidence(
+        weights_bytes=model_bytes,
+        runtime_overhead_bytes=None,
+        declared_total_bytes=declared_total_bytes if model_bytes is not None else None,
+        baseline_context_tokens=getattr(settings, "context_tokens", None),
+        baseline_concurrency=getattr(settings, "concurrency", None),
+        baseline_batch_tokens=getattr(settings, "batch_tokens", None),
+        evidence_state="declared" if model_bytes is not None else "unknown",
+    )
+
+
+def _resource_evidence_digest(
+    recipe_document: Mapping[str, object], role_name: str
+) -> str | None:
+    del role_name
+    digest = recipe_document.get("identity_sha256")
+    return digest if isinstance(digest, str) and len(digest) == 64 else None
+
+
+def _planned_stop_releases(
+    session: Session,
+    node_id: str,
+    reservation_kind: str | None,
+    stops: Sequence[StopImpact],
+) -> tuple[PlannedStopRelease, ...]:
+    if reservation_kind is None:
+        return ()
+    releases: list[PlannedStopRelease] = []
+    for stop in stops:
+        if node_id not in stop.node_ids:
+            continue
+        amount = session.scalar(
+            select(func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)).where(
+                ResourceReservation.node_id == node_id,
+                ResourceReservation.kind == reservation_kind,
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == stop.run_id,
+                ResourceReservation.state == "active",
+            )
+        )
+        releases.append(
+            PlannedStopRelease(
+                stop.run_id,
+                node_id,
+                reservation_kind,
+                int(amount or 0),
+                True,
+                stop.plan_digest,
+            )
+        )
+    return tuple(releases)
 
 
 def _capability_facts(document: Mapping[str, object] | None) -> list[CapabilityEvidence]:
@@ -1531,6 +1683,16 @@ class RunSwitchOperationService:
                 requested_recipe_digest=revision.content_digest,
             )
             blockers.extend(document_blockers)
+            settings_resolution = resolve_effective_settings(revision.document)
+            effective_settings = settings_resolution.settings
+            effective_settings_view = None
+            if effective_settings is None:
+                blockers.extend(
+                    _resource_reason(reason, node_ids=node_ids)
+                    for reason in settings_resolution.reasons
+                )
+            else:
+                effective_settings_view = _settings_view(effective_settings)
             mapping, mapping_selection, mapping_blockers = self._resolve_mapping(
                 session,
                 revision,
@@ -1551,6 +1713,8 @@ class RunSwitchOperationService:
                 group,
                 now=now,
                 excluded_run_ids=(),
+                effective_settings=effective_settings,
+                model_document=_model_document,
             )
             fit_after_stop = None
             after_fit_blockers: list[RunSwitchReason] = []
@@ -1562,6 +1726,9 @@ class RunSwitchOperationService:
                     group,
                     now=now,
                     excluded_run_ids=stopped_run_ids,
+                    effective_settings=effective_settings,
+                    model_document=_model_document,
+                    planned_stops=stops,
                 )
                 # A current capacity failure caused only by the workload that
                 # will be stopped is an ordering decision, not a blocker.  A
@@ -1717,6 +1884,7 @@ class RunSwitchOperationService:
                 and fit_after_stop.allowed
                 and any(
                     reason.code.startswith("run-switch.insufficient-memory")
+                    or reason.code.startswith("run-switch.resource.insufficient")
                     for reason in current_fit_blockers
                 )
             )
@@ -1833,6 +2001,7 @@ class RunSwitchOperationService:
                 "fit_current": fit_current,
                 "fit_after_stop": fit_after_stop,
                 "fit": fit_current,
+                "effective_settings": effective_settings_view,
                 "storage": storage,
                 "runtime_storage": runtime_storage,
                 "build": build_evidence,
@@ -2901,6 +3070,9 @@ class RunSwitchOperationService:
         *,
         now: datetime,
         excluded_run_ids: Sequence[str],
+        effective_settings: object | None = None,
+        model_document: Mapping[str, object] | None = None,
+        planned_stops: Sequence[StopImpact] = (),
     ) -> tuple[list[FreshnessEvidence], SparkFit, list[RunSwitchReason], list[RunSwitchReason]]:
         freshness: list[FreshnessEvidence] = []
         nodes: list[SparkFitNode] = []
@@ -2963,6 +3135,7 @@ class RunSwitchOperationService:
             required_disk: int | None = None
             disk_free: int | None = None
             disk_free_after: int | None = None
+            demand: ResourceDemand | None = None
             if not isinstance(memory, Mapping) or not isinstance(disk, Mapping):
                 node_blockers.append(
                     _as_reason(
@@ -3018,17 +3191,77 @@ class RunSwitchOperationService:
                             session,
                             item.node_id,
                             reservation_kind,
-                            excluded,
+                            set(),
                         )
-                        memory_free_after = memory_available - reserved - required_memory
-                        if memory_free_after < max(self._memory_floor, reserve):
-                            node_blockers.append(
-                                _as_reason(
-                                    "run-switch.insufficient-memory",
-                                    f"The run would leave {memory_free_after} bytes below the memory floor.",
-                                    scope="node",
-                                    node_ids=(item.node_id,),
-                                )
+                        evidence = _resource_evidence(
+                            revision.document if revision is not None else {},
+                            memory,
+                            item.role,
+                            model_document,
+                            required_memory,
+                            effective_settings,
+                        )
+                        if effective_settings is not None:
+                            demand = resource_demand(
+                                effective_settings,
+                                evidence,
+                                node_id=item.node_id,
+                            )
+                            node_blockers.extend(
+                                _resource_reason(reason, node_ids=(item.node_id,))
+                                for reason in demand.reasons
+                            )
+                        else:
+                            demand = ResourceDemand(
+                                None, None, None, None, None, None, "unknown", ()
+                            )
+                        releases = _planned_stop_releases(
+                            session,
+                            item.node_id,
+                            reservation_kind,
+                            planned_stops,
+                        )
+                        total_memory = (
+                            snapshot.host_memory_total_bytes
+                            if memory_kind == "host"
+                            else snapshot.gpu_memory_total_bytes
+                            if memory_kind == "accelerator"
+                            else min(
+                                snapshot.host_memory_total_bytes,
+                                snapshot.gpu_memory_total_bytes,
+                            )
+                        ) if snapshot is not None else None
+                        occupied_memory = (
+                            snapshot.host_memory_total_bytes - snapshot.host_memory_free_bytes
+                            if memory_kind == "host"
+                            else snapshot.gpu_memory_total_bytes - snapshot.gpu_memory_free_bytes
+                            if memory_kind == "accelerator"
+                            else max(
+                                snapshot.host_memory_total_bytes - snapshot.host_memory_free_bytes,
+                                snapshot.gpu_memory_total_bytes - snapshot.gpu_memory_free_bytes,
+                            )
+                        ) if snapshot is not None else None
+                        if demand is not None:
+                            fit_capacity = plan_capacity(
+                                {item.node_id: demand},
+                                [CapacitySnapshot(
+                                    item.node_id,
+                                    str(memory_kind),
+                                    total_memory,
+                                    occupied_memory,
+                                    reserved,
+                                    "fresh" if snapshot is not None and evidence.evidence_state != "unknown" else "unknown",
+                                    snapshot.evidence_digest if snapshot is not None else None,
+                                )],
+                                releases,
+                                memory_floor_bytes=max(self._memory_floor, reserve),
+                            )
+                            fit_node = fit_capacity.nodes[0]
+                            memory_free_after = fit_node.selected_free_after_bytes
+                            node_blockers.extend(
+                                _resource_reason(reason, node_ids=(item.node_id,))
+                                for reason in fit_node.reasons
+                                if reason.code.startswith("resource.insufficient")
                             )
                 disk_parts = [
                     _required_int(disk.get(name))
@@ -3078,6 +3311,23 @@ class RunSwitchOperationService:
                     memory_required_bytes=required_memory,
                     memory_available_bytes=memory_available,
                     memory_free_after_bytes=memory_free_after,
+                    resource_demand=(
+                        ResourceDemandEvidence(
+                            weights_bytes=demand.weights_bytes,
+                            runtime_overhead_bytes=demand.runtime_overhead_bytes,
+                            context_bytes=demand.context_bytes,
+                            concurrency_bytes=demand.concurrency_bytes,
+                            batch_bytes=demand.batch_bytes,
+                            total_bytes=demand.total_bytes,
+                            evidence_state=demand.evidence_state,
+                            evidence_digest=_resource_evidence_digest(
+                                revision.document if revision is not None else {},
+                                item.role,
+                            ),
+                        )
+                        if demand is not None
+                        else None
+                    ),
                     blockers=node_blockers,
                     warnings=node_warnings,
                 )
