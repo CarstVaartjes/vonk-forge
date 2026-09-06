@@ -4,7 +4,9 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
@@ -16,12 +18,12 @@ from vonk_control.litellm import LiteLlmPolicyError, LiteLlmPublisher
 from vonk_control.models import (
     AgentNode,
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
     Job,
-    LocalRecipe,
-    LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -40,6 +42,7 @@ from vonk_control.recipe_routes import (
     RecipeRouteService,
 )
 from vonk_control.route_runtime import AtomicRouteBundlePublisher
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 
@@ -119,37 +122,139 @@ def setup(
             )
             for node in nodes
         )
-        recipe = LocalRecipe(
-            slug="qwen",
-            title="Qwen",
-            description="Qwen",
-            source_kind="local",
-            created_by="admin",
-            created_at=NOW,
-            updated_at=NOW,
+        model = ModelDefinition.model_validate(
+            json.loads(
+                files("vonk_forge_contracts")
+                .joinpath("examples", "model-definition.json")
+                .read_text(encoding="utf-8")
+            )
         )
-        session.add(recipe)
-        session.flush()
-        revision = LocalRecipeRevision(
-            recipe_id=recipe.id,
-            revision_number=1,
-            lifecycle="resolved",
-            schema_version=1,
-            document={
-                "interfaces": interfaces
-                if interfaces is not None
-                else [
+        recipe_document = json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-image.json")
+            .read_text(encoding="utf-8")
+        )
+        recipe_document["identity"]["slug"] = "qwen"
+        recipe_document["metadata"]["title"] = "Qwen"
+        recipe_document["models"][0]["model"]["content_sha256"] = content_sha256(model)
+        if interfaces is None:
+            recipe_document["interfaces"] = [
+                {
+                    "adapter": "openai",
+                    "port": 8000,
+                    "model_aliases": list(runtime_model_aliases) or ["invalid alias"],
+                    "health_path": "/v1/models",
+                }
+            ]
+        elif interfaces == [{"adapter": "video-job"}]:
+            recipe_document["interfaces"] = [
+                {
+                    "adapter": "video-job",
+                    "path": "/outputs",
+                    "output": {
+                        "path": "/outputs",
+                        "max_total_bytes": 1,
+                        "slots": [
+                            {
+                                "id": "output",
+                                "label": "Output",
+                                "description": "Rendered output",
+                                "media_types": ["video/mp4"],
+                                "extensions": [".mp4"],
+                                "min_files": 1,
+                                "max_files": 1,
+                                "max_file_bytes": 1,
+                                "max_total_bytes": 1,
+                            }
+                        ],
+                    },
+                }
+            ]
+            recipe_document["settings"] = {"kind": "job", "knobs": {}}
+            recipe_document["validation"]["serving"] = {
+                "interface": "video-job",
+                "checks": [
                     {
-                        "adapter": "openai",
-                        "model_aliases": list(runtime_model_aliases),
+                        "name": "output",
+                        "kind": "video-job.output",
+                        "request": {
+                            "transport": "job",
+                            "fixture": "fixture",
+                            "output_path": "/outputs",
+                            "output_slot": "output",
+                        },
+                        "assertions": ["artifact.output"],
                     }
-                ]
-            },
-            content_sha256="a" * 64,
+                ],
+            }
+        else:
+            recipe_document["interfaces"] = interfaces
+        recipe = RecipeDefinition.model_validate(recipe_document)
+        recipe_document = recipe.model_dump(mode="json")
+        recipe_id = str(uuid4())
+        revision_id = str(uuid4())
+        model_id = str(uuid4())
+        model_revision_id = str(uuid4())
+        session.add_all(
+            [
+                CatalogDocument(
+                    id=recipe_id,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    title=recipe.metadata.title,
+                    created_by="admin",
+                    created_at=NOW,
+                    updated_at=NOW,
+                ),
+                CatalogDocument(
+                    id=model_id,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    title=model.identity.model.title,
+                    created_by="admin",
+                    created_at=NOW,
+                    updated_at=NOW,
+                ),
+            ]
+        )
+        session.flush()
+        revision = CatalogDocumentRevision(
+            id=revision_id,
+            document_id=recipe_id,
+            kind="recipe",
+            publisher=recipe.identity.publisher,
+            slug=recipe.identity.slug,
+            revision_number=1,
+            schema_version=2,
+            state="active",
+            document=recipe_document,
+            content_digest=content_sha256(recipe),
+            projected={},
             created_by="admin",
             created_at=NOW,
         )
-        session.add(revision)
+        session.add_all(
+            [
+                revision,
+                CatalogDocumentRevision(
+                    id=model_revision_id,
+                    document_id=model_id,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=model.model_dump(mode="json"),
+                    content_digest=content_sha256(model),
+                    projected={},
+                    created_by="admin",
+                    created_at=NOW,
+                ),
+            ]
+        )
         session.flush()
         mapping = ClusterMapping(
             recipe_revision_id=revision.id,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from types import SimpleNamespace
 
 import pytest
@@ -22,12 +24,12 @@ from vonk_control.models import (
     AgentNodeProfile,
     AgentPresence,
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     FleetEventCursor,
     InstallationNode,
-    LocalRecipe,
-    LocalRecipeRevision,
     NodeInventorySnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
@@ -37,6 +39,7 @@ from vonk_control.models import (
     ResourceReservation,
     RunNode,
 )
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 COMMIT = "a" * 64
@@ -46,6 +49,94 @@ NODE_C = "spk_" + "3" * 32
 NODE_D = "spk_" + "4" * 32
 EXTRA_NODE = "spk_" + "f" * 32
 NON_RFC_BOOT_ID = "00000000-0000-0000-0000-000000000001"
+
+
+def _canonical_catalog_documents(
+    recipe_id: str,
+    revision_id: str,
+    model_id: str,
+    model_revision_id: str,
+    *,
+    slug: str,
+    title: str,
+    interfaces: list[dict[str, object]] | None = None,
+) -> tuple[list[CatalogDocument], list[CatalogDocumentRevision]]:
+    model = ModelDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "model-definition.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    recipe_document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-image.json")
+        .read_text(encoding="utf-8")
+    )
+    recipe_document["identity"]["slug"] = slug
+    recipe_document["metadata"]["title"] = title
+    recipe_document["models"][0]["model"]["content_sha256"] = content_sha256(model)
+    if interfaces is not None:
+        recipe_document["interfaces"] = interfaces
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    model_document = model.model_dump(mode="json")
+    canonical_recipe = recipe.model_dump(mode="json")
+    return (
+        [
+            CatalogDocument(
+                id=recipe_id,
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                title=recipe.metadata.title,
+                created_by="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+            CatalogDocument(
+                id=model_id,
+                kind="model",
+                publisher=model.identity.publisher,
+                slug=model.identity.slug,
+                title=model.identity.model.title,
+                created_by="admin",
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+        ],
+        [
+            CatalogDocumentRevision(
+                id=revision_id,
+                document_id=recipe_id,
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=canonical_recipe,
+                content_digest=content_sha256(recipe),
+                projected={},
+                created_by="admin",
+                created_at=NOW,
+            ),
+            CatalogDocumentRevision(
+                id=model_revision_id,
+                document_id=model_id,
+                kind="model",
+                publisher=model.identity.publisher,
+                slug=model.identity.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=model_document,
+                content_digest=content_sha256(model),
+                projected={},
+                created_by="admin",
+                created_at=NOW,
+            ),
+        ],
+    )
 
 
 class Repository:
@@ -1034,26 +1125,13 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
                 _certificate(NODE_B, "groups-b"),
             ]
         )
-        recipe = LocalRecipe(
-            id=recipe_id,
+        documents, revisions = _canonical_catalog_documents(
+            recipe_id,
+            revision_id,
+            "00000000-0000-4000-8000-000000000305",
+            "00000000-0000-4000-8000-000000000306",
             slug="pair-recipe",
             title="Pair Recipe",
-            description="Two ranks",
-            source_kind="local",
-            created_by="admin",
-            created_at=NOW,
-            updated_at=NOW,
-        )
-        revision = LocalRecipeRevision(
-            id=revision_id,
-            recipe_id=recipe_id,
-            revision_number=1,
-            lifecycle="resolved",
-            schema_version=1,
-            document={},
-            content_sha256="1" * 64,
-            created_by="admin",
-            created_at=NOW,
         )
         mapping = ClusterMapping(
             id=mapping_id,
@@ -1084,7 +1162,9 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank() -> None:
             created_at=NOW,
             updated_at=NOW,
         )
-        session.add_all([recipe, revision, mapping, build])
+        session.add_all(documents)
+        session.flush()
+        session.add_all([*revisions, mapping, build])
         session.flush()
         session.add_all(
             [
@@ -1620,31 +1700,17 @@ def test_projection_selects_only_the_latest_512_current_installation_groups() ->
                 last_seen_at=NOW,
             )
         )
-        session.add(
-            LocalRecipe(
-                id=recipe_id,
-                slug="bounded-recipe",
-                title="Bounded Recipe",
-                description="Bounded groups",
-                source_kind="local",
-                created_by="admin",
-                created_at=NOW,
-                updated_at=NOW,
-            )
+        documents, revisions = _canonical_catalog_documents(
+            recipe_id,
+            revision_id,
+            "00000000-0000-4000-8000-000000000306",
+            "00000000-0000-4000-8000-000000000307",
+            slug="bounded-recipe",
+            title="Bounded Recipe",
         )
-        session.add(
-            LocalRecipeRevision(
-                id=revision_id,
-                recipe_id=recipe_id,
-                revision_number=1,
-                lifecycle="resolved",
-                schema_version=1,
-                document={},
-                content_sha256="1" * 64,
-                created_by="admin",
-                created_at=NOW,
-            )
-        )
+        session.add_all(documents)
+        session.flush()
+        session.add_all(revisions)
         session.add(
             ClusterMapping(
                 id=mapping_id,

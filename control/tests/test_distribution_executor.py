@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import hashlib
+import json
 import uuid
+from datetime import UTC, datetime
+from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -21,21 +23,22 @@ from vonk_control.distribution_executor import (
     CompositeDistributionPhaseExecutor,
     DurableDistributionPhaseExecutor,
 )
+from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache_api import model_cache_operation_provider
 from vonk_control.models import (
     AgentOperation,
     AgentOperationAttempt,
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     Job,
-    LocalRecipe,
-    LocalRecipeRevision,
     RecipeBuild,
 )
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.model_cache_api import model_cache_operation_provider
 from vonk_control.operation_api import merge_operation_providers
 from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system
+from .test_agent_api import NODE_A, NODE_B, agent_headers
 
 
 def _target(node: str, *, image: bool = False) -> SimpleNamespace:
@@ -369,8 +372,24 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         reserve_bytes=0,
         fixture_sources=True,
     )
-    model_version = "a" * 64
-    recipe_digest = "b" * 64
+    model = ModelDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "model-definition.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    model_version = content_sha256(model)
+    recipe_document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-image.json")
+        .read_text(encoding="utf-8")
+    )
+    recipe_document["identity"]["slug"] = "production-composite"
+    recipe_document["models"][0]["model"]["content_sha256"] = model_version
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    recipe_document = recipe.model_dump(mode="json")
+    recipe_digest = content_sha256(recipe)
     model_payload = b"model weights"
     auxiliary_payload = b"tokenizer auxiliary"
     model_source = tmp_path / "weights.source"
@@ -429,33 +448,69 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     image_digest = "sha256:" + "d" * 64
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
+    model_id = str(uuid.uuid4())
+    model_revision_id = str(uuid.uuid4())
     build_id = str(uuid.uuid4())
     now = clock.now
     with services.sessions.begin() as session:
-        session.add(
-            LocalRecipe(
-                id=recipe_id,
-                slug="production-composite",
-                title="Production composite",
-                description="fixture",
-                source_kind="local",
-                created_by="test",
-                created_at=now,
-                updated_at=now,
-            )
+        session.add_all(
+            [
+                CatalogDocument(
+                    id=recipe_id,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    title=recipe.metadata.title,
+                    created_by="test",
+                    created_at=now,
+                    updated_at=now,
+                ),
+                CatalogDocument(
+                    id=model_id,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    title=model.identity.model.title,
+                    created_by="test",
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
         )
-        session.add(
-            LocalRecipeRevision(
-                id=revision_id,
-                recipe_id=recipe_id,
-                revision_number=1,
-                lifecycle="resolved",
-                schema_version=2,
-                document={"model": {"content_sha256": model_version}},
-                content_sha256=recipe_digest,
-                created_by="test",
-                created_at=now,
-            )
+        session.flush()
+        session.add_all(
+            [
+                CatalogDocumentRevision(
+                    id=revision_id,
+                    document_id=recipe_id,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=recipe_document,
+                    content_digest=recipe_digest,
+                    projected={},
+                    created_by="test",
+                    created_at=now,
+                ),
+                CatalogDocumentRevision(
+                    id=model_revision_id,
+                    document_id=model_id,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=model.model_dump(mode="json"),
+                    content_digest=model_version,
+                    projected={},
+                    created_by="test",
+                    created_at=now,
+                ),
+            ]
         )
         session.add(
             RecipeBuild(
