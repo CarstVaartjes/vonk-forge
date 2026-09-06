@@ -38,13 +38,18 @@ def canonical_distributed_readiness(
     )
     if len(owners) != 1 or owners[0].get("count") != 1:
         raise DistributedLifecycleError("distributed endpoint topology is invalid")
-    if len(interfaces) != 1 or not isinstance(interfaces[0], Mapping):
+    openai_interfaces = tuple(
+        interface
+        for interface in interfaces
+        if isinstance(interface, Mapping) and interface.get("adapter") == "openai"
+    )
+    if len(openai_interfaces) > 1:
         raise DistributedLifecycleError("distributed readiness interface is invalid")
-    interface = interfaces[0]
-    if interface.get("adapter") != "openai":
+    if not openai_interfaces:
         # Job interfaces have filesystem completion semantics and do not
         # expose an HTTP endpoint for collective readiness.
         return None
+    interface = openai_interfaces[0]
     path = interface.get("health_path")
     if not isinstance(path, str) or not path.startswith("/"):
         raise DistributedLifecycleError("distributed readiness path is invalid")
@@ -81,6 +86,8 @@ def _await_ranks(
 def recover_distributed_runtime(
     *,
     lifecycle: Mapping[str, object],
+    topology: Mapping[str, object],
+    interfaces: Sequence[object],
     roles: Mapping[int, str],
     failed_rank: int,
     withdraw: Callable[[], None],
@@ -94,13 +101,17 @@ def recover_distributed_runtime(
     """Withdraw, restart in the declared order, and publish after all ranks recover."""
 
     failure = _mapping(lifecycle.get("failure"), "rank-loss")
-    readiness = _mapping(lifecycle.get("readiness"), "readiness")
+    readiness = canonical_distributed_readiness(
+        topology=topology,
+        interfaces=interfaces,
+        lifecycle=lifecycle,
+    )
+    if readiness is None:
+        raise DistributedLifecycleError("distributed readiness policy is unavailable")
     if failure.get("rank_loss") != "withdraw-endpoint":
         raise DistributedLifecycleError("distributed rank-loss policy is invalid")
     if failure.get("recovery") != "restart-worker-then-entrypoint":
         raise DistributedLifecycleError("distributed recovery policy is invalid")
-    if readiness.get("strategy") != "endpoint-owner-after-all-ranks":
-        raise DistributedLifecycleError("distributed readiness policy is invalid")
     timeout = readiness.get("timeout_seconds")
     stop_timeout = lifecycle.get("stop_timeout_seconds")
     if (
