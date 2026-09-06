@@ -82,13 +82,22 @@ def _start(service: ModelCacheService, artifacts: list[dict[str, object]], key: 
     )
 
 
-def _drain(service: ModelCacheService, operation_id: str, *, limit: int = 200) -> None:
-    for _ in range(limit):
+def _drain(
+    service: ModelCacheService, operation_id: str, *, timeout_seconds: float = 10
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
         service.tick()
-        if service.get_operation(operation_id).state in {"succeeded", "failed"}:
+        observed = service.get_operation(operation_id)
+        if observed.state in {"succeeded", "failed"}:
             return
-        time.sleep(0.002)
-    raise AssertionError("background operation did not settle")
+        # Let the transfer thread commit without a CPU-speed-dependent poll cap.
+        time.sleep(0.01)
+    raise AssertionError(
+        f"background operation did not settle: state={observed.state}, "
+        f"completed={observed.progress.get('completed_artifacts')}/"
+        f"{observed.progress.get('total_artifacts')}"
+    )
 
 
 def test_single_job_saturates_all_controller_transfer_slots(tmp_path: Path) -> None:
@@ -389,7 +398,7 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
         artifacts,
         "00000000-0000-4000-8000-000000000309",
     )
-    _drain(service, operation.id, limit=500)
+    _drain(service, operation.id, timeout_seconds=30)
     result = service.get_operation(operation.id)
     assert result.state == "succeeded"
     parsed = ModelCacheOperationProgress.model_validate(result.progress)
