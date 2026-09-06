@@ -3,7 +3,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     net::IpAddr,
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -477,6 +477,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let outputs = state.join("outputs");
         fs::create_dir_all(&outputs)?;
         fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
+        reset_runtime_tmp(&outputs)?;
         self.ensure_runtime_cache(installation_id)?;
         if spec.job.is_some() {
             let inputs = state.join("inputs");
@@ -609,6 +610,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         {
             return Err(OciError::Runtime);
         }
+        reset_runtime_tmp(&managed_path(self.data_root, "runs", run_id)?.join("outputs"))?;
         Ok(RuntimeStartPlan {
             image_digest: spec.runtime_image.image_digest.clone(),
             registry_index_digest: spec
@@ -1359,6 +1361,38 @@ fn atomic_write(root: &Path, name: &str, value: &[u8]) -> Result<(), OciError> {
     Ok(())
 }
 
+/// Reset the per-run temporary tree before handing the writable output mount
+/// to the container. The helper grants the compiled runtime UID access to this
+/// tree, while the agent owns its lifecycle and ensures stale temporary files
+/// cannot survive a retained or retried start. The persistent cache remains a
+/// separate bind mount and is deliberately untouched.
+fn reset_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
+    let output_metadata = fs::symlink_metadata(outputs)?;
+    if output_metadata.file_type().is_symlink() || !output_metadata.is_dir() {
+        return Err(OciError::Artifact);
+    }
+    let temporary = outputs.join("tmp");
+    match fs::symlink_metadata(&temporary) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(OciError::Artifact);
+            }
+            fs::remove_dir_all(&temporary)?;
+            fs::create_dir(&temporary)?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(&temporary)?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o700))?;
+    let metadata = fs::symlink_metadata(&temporary)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() || metadata.mode() & 0o077 != 0 {
+        return Err(OciError::Artifact);
+    }
+    Ok(())
+}
+
 fn read_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, OciError> {
     let mut file = OpenOptions::new()
         .read(true)
@@ -1384,10 +1418,14 @@ fn canonical_uuid(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{OciError, materialize_compiled_models};
+    use super::{OciError, materialize_compiled_models, reset_runtime_tmp};
     use serde_json::{Value, json};
     use sha2::Digest;
-    use std::{fs, path::Path};
+    use std::{
+        fs,
+        os::unix::fs::{MetadataExt, symlink},
+        path::Path,
+    };
     use tempfile::tempdir;
 
     fn digest(value: &[u8]) -> String {
@@ -1484,6 +1522,39 @@ mod tests {
             },
             "job": null
         })
+    }
+
+    #[test]
+    fn runtime_tmp_is_reset_and_kept_private_between_starts() {
+        let data = tempdir().unwrap();
+        let outputs = data.path().join("outputs");
+        fs::create_dir_all(outputs.join("tmp")).unwrap();
+        fs::write(outputs.join("tmp").join("stale.marker"), b"stale").unwrap();
+
+        reset_runtime_tmp(&outputs).unwrap();
+
+        let temporary = outputs.join("tmp");
+        assert!(!temporary.join("stale.marker").exists());
+        let metadata = fs::symlink_metadata(temporary).unwrap();
+        assert!(metadata.is_dir());
+        assert!(!metadata.file_type().is_symlink());
+        assert_eq!(metadata.mode() & 0o777, 0o700);
+    }
+
+    #[test]
+    fn runtime_tmp_refuses_symlink_replacement_targets() {
+        let data = tempdir().unwrap();
+        let outputs = data.path().join("outputs");
+        fs::create_dir(&outputs).unwrap();
+        let target = data.path().join("outside");
+        fs::create_dir(&target).unwrap();
+        symlink(&target, outputs.join("tmp")).unwrap();
+
+        assert!(matches!(
+            reset_runtime_tmp(&outputs),
+            Err(OciError::Artifact)
+        ));
+        assert!(target.is_dir());
     }
 
     #[test]
