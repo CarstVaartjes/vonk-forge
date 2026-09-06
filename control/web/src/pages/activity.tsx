@@ -35,8 +35,6 @@ const ACTION_LABELS: Record<string, string> = {
   "catalog.recipe_library.import": "Imported recipe library",
   "catalog.source_bundle.upload": "Uploaded source bundle",
   "catalog.test_report.attach": "Attached validation report",
-  "catalog.workload_run.import": "Imported workload recipe",
-  "catalog.workload_run.resolve": "Resolved workload recipe",
   "fleet.revoke": "Revoked Spark access",
   "job.resume": "Resumed operation",
   "recipe.build": "Built recipe image",

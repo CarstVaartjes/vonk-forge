@@ -59,7 +59,7 @@ NODE = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 ADMIN_TOKEN = "admin-secret-marker"
 INFERENCE_TOKEN = "inference-secret-marker"
-RECIPE_DIGEST = "2b631974b1c835dfe6be2b9bc1c22c83e7df7198115e1fe023788d78b983485d"
+RECIPE_DIGEST = "e379aab81e646b094af249caad7d049d458d7b3178e5aa88fa151e015a06c8a0"
 
 
 class SliceServer(ThreadingHTTPServer):
@@ -69,9 +69,6 @@ class SliceServer(ThreadingHTTPServer):
         self.fail_once_path: str | None = None
         self.requests: list[tuple[str, str, str]] = []
         self.request_bodies: list[tuple[str, str, bytes]] = []
-        self.recipe_created = False
-        self.recipe_digest = RECIPE_DIGEST
-        self.recipe_revision = 1
         self.source_digest = (
             "a7b9ac9c971d0746a91420546fd44cee9ac4bf90d8066bd3f1bb15cc52267af8"
         )
@@ -381,30 +378,32 @@ class SliceHandler(BaseHTTPRequestHandler):
             serialized = snapshot.model_dump(mode="json")
             self.server.last_fleet_document = serialized
             self._json(200, serialized)
-        elif self.path == (
-            "/api/v1/catalog/recipes/10000000-0000-4000-8000-000000000001"
-        ):
-            self._json(
-                200,
-                {
-                    "recipe_id": "10000000-0000-4000-8000-000000000001",
-                    "id": "10000000-0000-4000-8000-000000000002",
-                    "revision_number": self.server.recipe_revision,
-                    "lifecycle": "resolved",
-                    "content_sha256": self.server.recipe_digest,
-                    "source_bundle_sha256": self.server.source_digest,
-                },
-            )
-        elif self.path.startswith("/api/v1/catalog/recipes"):
+        elif self.path == "/api/v1/library/recipes":
             recipes = []
-            if self.server.recipe_created:
+            for index, path in enumerate(
+                (
+                    ROOT / "control/tests/fixtures/recipes/dev-http-smoke/recipe.json",
+                    ROOT / "config/recipes/deepseek-v4-flash-0731-ds4-single.json",
+                    ROOT / "config/recipes/deepseek-v4-flash-0731-mia-dual.json",
+                ),
+                start=1,
+            ):
+                document = json.loads(path.read_text(encoding="utf-8"))
+                identity = document["identity"]
                 recipes.append(
                     {
-                        "recipe_id": "10000000-0000-4000-8000-000000000001",
-                        "slug": self.server.slug,
-                        "revision_number": self.server.recipe_revision,
-                        "lifecycle": "resolved",
-                        "content_sha256": self.server.recipe_digest,
+                        "recipe_id": f"10000000-0000-4000-8000-{index:012d}",
+                        "recipe_revision_id": f"10000000-0000-4000-8001-{index:012d}",
+                        "publisher": identity["publisher"],
+                        "slug": identity["slug"],
+                        "content_sha256": hashlib.sha256(
+                            json.dumps(
+                                document,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ).encode()
+                        ).hexdigest(),
+                        "recipe_document": document,
                     }
                 )
             self._json(200, {"recipes": recipes, "next_cursor": None})
@@ -530,29 +529,6 @@ class SliceHandler(BaseHTTPRequestHandler):
             body = self._record()
         except RuntimeError:
             return
-        if self.path.endswith("/draft"):
-            payload = json.loads(body)
-            if payload.get("expected_revision") != self.server.recipe_revision:
-                self._json(409, {"detail": "stale revision"})
-                return
-            document = payload["document"]
-            self.server.recipe_revision += 1
-            self.server.recipe_digest = hashlib.sha256(
-                json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest()
-            self.server.source_digest = document["build"]["context"]["sha256"]
-            self._json(
-                200,
-                {
-                    "recipe_id": "10000000-0000-4000-8000-000000000001",
-                    "id": "10000000-0000-4000-8000-000000000003",
-                    "revision_number": self.server.recipe_revision,
-                    "lifecycle": "draft",
-                    "content_sha256": None,
-                    "source_bundle_sha256": self.server.source_digest,
-                },
-            )
-            return
         digest = self.path.rsplit("/", 1)[-1]
         with tarfile.open(fileobj=io.BytesIO(body), mode="r:") as archive:
             files = [member for member in archive.getmembers() if member.isfile()]
@@ -616,39 +592,6 @@ class SliceHandler(BaseHTTPRequestHandler):
                 ).encode()
             ).hexdigest()
             self._json(200, self._entity_response(record))
-        elif path == "/api/v1/catalog/recipes":
-            self.server.recipe_created = True
-            document = payload["document"]
-            self.server.slug = payload["slug"]
-            self.server.recipe_digest = hashlib.sha256(
-                json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest()
-            self.server.source_digest = document["build"]["context"]["sha256"]
-            self._json(
-                201,
-                {
-                    "recipe_id": "10000000-0000-4000-8000-000000000001",
-                    "id": "10000000-0000-4000-8000-000000000002",
-                    "revision_number": self.server.recipe_revision,
-                    "lifecycle": "draft",
-                    "content_sha256": None,
-                    "source_bundle_sha256": payload["document"]["build"]["context"][
-                        "sha256"
-                    ],
-                },
-            )
-        elif path.endswith("/resolve"):
-            self._json(
-                200,
-                {
-                    "recipe_id": "10000000-0000-4000-8000-000000000001",
-                    "id": "10000000-0000-4000-8000-000000000002",
-                    "revision_number": self.server.recipe_revision,
-                    "lifecycle": "resolved",
-                    "content_sha256": self.server.recipe_digest,
-                    "source_bundle_sha256": self.server.source_digest,
-                },
-            )
         elif path == "/api/v1/recipes/source-checks":
             self._json(
                 200,
@@ -1340,7 +1283,7 @@ def test_runner_help_exposes_restart_and_failure_checkpoints() -> None:
     assert "Pause after an accepted state" in result.stdout
 
 
-def test_runner_authors_exact_entities_in_dependency_order_before_recipe(
+def test_runner_authors_exact_entities_before_reading_canonical_recipe(
     tmp_path: Path, server: SliceServer
 ) -> None:
     result, _evidence = _run(tmp_path, server, "--stop-after", "recipe-resolved")
@@ -1358,27 +1301,36 @@ def test_runner_authors_exact_entities_in_dependency_order_before_recipe(
         "execution-harness",
         "runtime-distribution",
     ]
-    recipe_index = next(
+    library_index = next(
         index
-        for index, (method, path, _body) in enumerate(server.request_bodies)
-        if method == "POST" and path == "/api/v1/catalog/recipes"
+        for index, (method, path, _authorization) in enumerate(server.requests)
+        if method == "GET" and path == "/api/v1/library/recipes"
     )
-    assert all(index < recipe_index for index, _payload in entity_creates)
+    entity_request_indices = [
+        index
+        for index, (method, path, _authorization) in enumerate(server.requests)
+        if method == "POST" and path == "/api/v1/catalog/entities"
+    ]
+    assert entity_request_indices and max(entity_request_indices) < library_index
     entity_resolves = [
         index
-        for index, (method, path, _body) in enumerate(server.request_bodies)
+        for index, (method, path, _authorization) in enumerate(server.requests)
         if method == "POST"
         and path.startswith("/api/v1/catalog/entities/")
         and path.endswith("/resolve")
     ]
     assert len(entity_resolves) == 5
-    assert all(index < recipe_index for index in entity_resolves)
+    assert all(index < library_index for index in entity_resolves)
     assert all(
         not _contains_sensitive_key(payload) for _index, payload in entity_creates
     )
     encoded_entities = json.dumps([payload for _index, payload in entity_creates])
     assert ADMIN_TOKEN not in encoded_entities
     assert INFERENCE_TOKEN not in encoded_entities
+    assert all(
+        "/api/v1/catalog/recipes" not in path
+        for _method, path, _authorization in server.requests
+    )
 
 
 def test_runner_entity_authoring_is_idempotent(
@@ -1402,7 +1354,7 @@ def test_runner_entity_authoring_is_idempotent(
     assert len(entity_creates) == 5
 
 
-def test_runner_refuses_mismatched_existing_entity_before_recipe(
+def test_runner_refuses_mismatched_existing_entity_before_library_read(
     tmp_path: Path, server: SliceServer
 ) -> None:
     server.entity_mismatch = True
@@ -1414,7 +1366,7 @@ def test_runner_refuses_mismatched_existing_entity_before_recipe(
         "development slice failed: existing catalog entity does not match checked-in input"
     )
     assert not any(
-        path.startswith("/api/v1/catalog/recipes")
+        path == "/api/v1/library/recipes"
         for _method, path, _authorization in server.requests
     )
 
@@ -1432,25 +1384,14 @@ def test_model_phases_select_native_single_and_pair_recipes(
         single_root, server, "--stop-after", "recipe-resolved"
     )
     assert single.returncode == 0, single.stderr
-    single_document = next(
-        json.loads(body)["document"]
-        for method, path, body in server.request_bodies
-        if method == "POST" and path == "/api/v1/catalog/recipes"
-    )
-    assert single_document["topology"]["node_count"] == 1
+    assert ("GET", "/api/v1/library/recipes", f"Bearer {ADMIN_TOKEN}") in server.requests
 
     server.requests.clear()
     server.request_bodies.clear()
-    server.recipe_created = False
     server.nodes = [NODE, NODE_2]
     pair, _ = _run_model(pair_root, server, "--stop-after", "recipe-resolved")
     assert pair.returncode == 0, pair.stderr
-    pair_document = next(
-        json.loads(body)["document"]
-        for method, path, body in server.request_bodies
-        if method == "POST" and path == "/api/v1/catalog/recipes"
-    )
-    assert pair_document["topology"]["node_count"] == 2
+    assert ("GET", "/api/v1/library/recipes", f"Bearer {ADMIN_TOKEN}") in server.requests
 
 
 def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
@@ -2369,26 +2310,6 @@ def test_runner_requires_fresh_spark_runtime_inventory(
     assert result.returncode == 1
     assert "required development inventory is not ready" in result.stderr
     assert json.loads(evidence_path.read_text())["completed_states"] == []
-
-
-def test_runner_revises_an_existing_same_slug_recipe_with_different_content(
-    tmp_path: Path, server: SliceServer
-) -> None:
-    server.recipe_created = True
-    server.recipe_digest = "9" * 64
-
-    result, evidence_path = _run(tmp_path, server, "--stop-after", "recipe-resolved")
-
-    assert result.returncode == 0, result.stderr
-    evidence = json.loads(evidence_path.read_text())
-    assert evidence["completed_states"] == STATES[:2]
-    assert evidence["outputs"]["recipe_revision"] == 2
-    assert evidence["outputs"]["recipe_content_sha256"] == RECIPE_DIGEST
-    assert (
-        "PUT",
-        "/api/v1/catalog/recipes/10000000-0000-4000-8000-000000000001/draft",
-        f"Bearer {ADMIN_TOKEN}",
-    ) in server.requests
 
 
 def test_runner_rejects_plain_http_to_a_non_loopback_host(tmp_path: Path) -> None:

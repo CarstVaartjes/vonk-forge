@@ -970,14 +970,17 @@ class Runner:
 
     def recipe_resolved(self) -> None:
         self._ensure_catalog_entities()
-        _, listed_payload = self.control.request("GET", "/api/v1/catalog/recipes")
-        listed = _object(listed_payload, "recipe catalog").get("recipes")
+        _, listed_payload = self.control.request("GET", "/api/v1/library/recipes")
+        listed = _object(listed_payload, "library recipe list").get("recipes")
         existing = (
             next(
                 (
                     item
                     for item in listed
-                    if isinstance(item, dict) and item.get("slug") == self.slug
+                    if isinstance(item, dict)
+                    and item.get("slug") == self.slug
+                    and item.get("publisher")
+                    == self.recipe.get("identity", {}).get("publisher")
                 ),
                 None,
             )
@@ -985,66 +988,20 @@ class Runner:
             else None
         )
         if existing is None:
-            _, created_payload = self.control.request(
-                "POST",
-                "/api/v1/catalog/recipes",
-                {"slug": self.slug, "document": self.recipe},
-            )
-            created = _object(created_payload, "recipe creation")
-        else:
-            recipe_id = existing.get("recipe_id")
-            if not isinstance(recipe_id, str):
-                raise SliceError("recipe catalog response is invalid")
-            _, created_payload = self.control.request(
-                "GET", f"/api/v1/catalog/recipes/{recipe_id}"
-            )
-            created = _object(created_payload, "recipe lookup")
-            current_digest = created.get("content_sha256")
-            current_document = created.get("document")
-            if not isinstance(current_digest, str) and isinstance(
-                current_document, dict
-            ):
-                current_digest = _recipe_content_digest(current_document)
-            if current_digest != self.recipe_digest:
-                revision_number = created.get("revision_number")
-                if not isinstance(revision_number, int):
-                    raise SliceError("recipe catalog response is invalid")
-                _, draft_payload = self.control.request(
-                    "PUT",
-                    f"/api/v1/catalog/recipes/{recipe_id}/draft",
-                    {
-                        "expected_revision": revision_number,
-                        "document": self.recipe,
-                    },
-                )
-                created = _object(draft_payload, "recipe revision")
-        if created.get("lifecycle") == "resolved":
-            resolved = created
-        else:
-            recipe_id = created.get("recipe_id")
-            revision_number = created.get("revision_number")
-            if not isinstance(recipe_id, str) or not isinstance(revision_number, int):
-                raise SliceError("recipe creation response is invalid")
-            _, resolved_payload = self.control.request(
-                "POST",
-                f"/api/v1/catalog/recipes/{recipe_id}/resolve",
-                {"expected_revision": revision_number},
-            )
-            resolved = _object(resolved_payload, "recipe resolution")
+            raise SliceError("canonical library recipe is unavailable")
+        resolved = existing
         fields = {
             "recipe_id": resolved.get("recipe_id"),
-            "recipe_revision_id": resolved.get("id"),
-            "recipe_revision": resolved.get("revision_number"),
+            "recipe_revision_id": resolved.get("recipe_revision_id"),
             "recipe_content_sha256": resolved.get("content_sha256"),
         }
         if not all(
-            isinstance(fields[key], str) for key in fields if key != "recipe_revision"
-        ) or not isinstance(fields["recipe_revision"], int):
+            isinstance(fields[key], str) for key in fields
+        ):
             raise SliceError("recipe resolution response is invalid")
-        expected_source = self.recipe.get("build", {}).get("context", {}).get("sha256")
         if (
             fields["recipe_content_sha256"] != self.recipe_digest
-            or resolved.get("source_bundle_sha256") != expected_source
+            or resolved.get("recipe_document") != self.recipe
         ):
             raise SliceError("resolved recipe does not match acceptance input")
         self.complete("recipe-resolved", fields)
