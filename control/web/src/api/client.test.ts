@@ -312,6 +312,28 @@ it("binds the one-click run switch, NAS cache, and rich telemetry routes", async
   expect(requests.slice(0, 2).every(request => request.headers.get("Content-Type"))).toBe(true);
 });
 
+it("uses the durable retry endpoints for Run and NAS cache operations", async () => {
+  const requests: Request[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request.clone());
+    return new Response(JSON.stringify({}), {headers: {"Content-Type": "application/json"}, status: 202});
+  });
+  const api = new ApiClient();
+  const runKey = "00000000-0000-4000-8000-000000000402";
+  const cacheKey = "00000000-0000-4000-8000-000000000403";
+
+  await api.retryRecipeRunSwitch("run-operation", {schema_version: 2, request_key: runKey});
+  await api.retryModelCacheOperation("cache-operation", {schema_version: 2, request_key: cacheKey});
+
+  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
+    ["POST", "/api/v1/recipes/run-switches/run-operation/retry"],
+    ["POST", "/api/v1/model-cache/operations/cache-operation/retry"],
+  ]);
+  expect(await requests[0]!.clone().json()).toEqual({schema_version: 2, request_key: runKey});
+  expect(await requests[1]!.clone().json()).toEqual({schema_version: 2, request_key: cacheKey});
+});
+
 it("uses the durable artifact-job routes and preserves raw upload authority", async () => {
   const requests: Request[] = [];
   let uploadBody: BodyInit | null | undefined;

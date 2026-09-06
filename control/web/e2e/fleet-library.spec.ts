@@ -960,6 +960,34 @@ test("Library uses the schema 2 one-click Run path when the Controller exposes r
   await expect(progress.getByRole("progressbar", {name: "Run progress"})).toHaveAttribute("aria-valuetext", "Total bytes unavailable");
 });
 
+test("Library retries a transient Run through the durable retry route", async ({page}) => {
+  const failedOperation = {...libraryRunSwitchOperation("00000000-0000-4000-8000-000000000708", "failed"), status_reason: "temporary Spark transfer failure", result: {retryable: true}};
+  const replacementId = "00000000-0000-4000-8000-000000000808";
+  const replacementKey = "00000000-0000-4000-8000-000000000809";
+  const replacement = {...libraryRunSwitchOperation(replacementKey, "queued"), operation_id: replacementId};
+  const complete = {...replacement, state: "succeeded", result: {retryable: false}, progress: {...replacement.progress, state: "succeeded", phase: "final_verify", phase_index: 2, completed_bytes: 100, total_bytes: 100, total_bytes_known: true, members: replacement.progress.members.map(member => ({...member, phase: "final_verify", state: "succeeded", completed_bytes: 100, total_bytes: 100}))}};
+  let applyCalls = 0;
+  let retryBody: Record<string, unknown> | undefined;
+  await page.unroute("**/api/v1/recipes/run-switches");
+  await page.unroute("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707");
+  await page.route("**/api/v1/recipes/run-switches", async route => { applyCalls += 1; return route.fulfill({status: 202, json: failedOperation}); });
+  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707", route => route.fulfill({json: failedOperation}));
+  await page.route("**/api/v1/recipes/run-switches/00000000-0000-4000-8000-000000000707/retry", async route => { retryBody = await route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({status: 202, json: replacement}); });
+  await page.route(`**/api/v1/recipes/run-switches/${replacementId}`, route => route.fulfill({json: complete}));
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto(`/library/recipes/${pairedRecipeId}`);
+
+  const authority = page.locator(".library-recipe-detail");
+  await authority.getByRole("button", {name: "Run", exact: true}).first().click();
+  const progress = authority.getByRole("region", {name: `${pairedRecipeTitle} progress`});
+  await expect(progress.getByRole("button", {name: "Retry run"})).toBeVisible();
+  await progress.getByRole("button", {name: "Retry run"}).click();
+  await expect.poll(() => retryBody).toMatchObject({schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  expect(applyCalls).toBe(1);
+  await expect(progress).toContainText("succeeded");
+  await expect(progress.getByRole("button", {name: "Retry run"})).toHaveCount(0);
+});
+
 test("Library keeps partial Run progress visible for each Spark", async ({page}) => {
   await page.goto(`/library/recipes/${pairedRecipeId}`);
   const authority = page.locator(".library-recipe-detail");
@@ -1088,4 +1116,35 @@ test("Library pairs exact model selection with matching recipes and downloads an
   await orphanRow.getByRole("button", {name: "Download to NAS"}).click();
   expect((await previewRequest).postDataJSON()).toMatchObject({schema_version: 2, model_version_sha256: unlinked.model.content_sha256});
   await expect(page.getByText(/Downloading to NAS/)).toBeVisible();
+});
+
+test("Library retries a transient Model cache operation without restarting its transfer", async ({page}) => {
+  const model = librarySnapshot.models.find(item => item.recipes.length > 0)!;
+  const modelKey = `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}`;
+  const failedId = "model-download-failed";
+  const replacementId = "model-download-retry";
+  const failed = {
+    schema_version: 2, id: failedId, attempt: 1, request_key: "00000000-0000-4000-8000-000000000811", kind: "download", state: "failed", artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan",
+    progress: {schema_version: 2, phase: "failed", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 100, expected_bytes: 200, current_artifact_key: "weights"}, result: {retryable: true}, last_error: "temporary transfer failure", created_at: "2026-09-06T00:00:00Z", updated_at: "2026-09-06T00:00:01Z", completed_at: "2026-09-06T00:00:01Z",
+  };
+  const replacement = {...failed, id: replacementId, state: "succeeded", request_key: "00000000-0000-4000-8000-000000000812", result: {retryable: false}, last_error: null, progress: {...failed.progress, phase: "completed", completed_artifacts: 2, downloaded_bytes: 200}, updated_at: "2026-09-06T00:00:02Z", completed_at: "2026-09-06T00:00:02Z"};
+  let downloadCalls = 0;
+  let retryBody: Record<string, unknown> | undefined;
+  await page.unroute("**/api/v1/model-cache/download");
+  await page.unroute("**/api/v1/model-cache/operations/*");
+  await page.route("**/api/v1/model-cache/download-preview", route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 100, new_bytes: 100, blockers: [], warnings: []}}));
+  await page.route("**/api/v1/model-cache/download", async route => { downloadCalls += 1; return route.fulfill({status: 202, json: failed}); });
+  await page.route(`**/api/v1/model-cache/operations/${failedId}/retry`, async route => { retryBody = await route.request().postDataJSON() as Record<string, unknown>; return route.fulfill({status: 202, json: replacement}); });
+  await page.route(`**/api/v1/model-cache/operations/${failedId}`, route => route.fulfill({json: failed}));
+  await page.route(`**/api/v1/model-cache/operations/${replacementId}`, route => route.fulfill({json: replacement}));
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto(`/library?view=models&model=${encodeURIComponent(modelKey)}`);
+
+  const row = page.getByLabel("Exact model inventory").locator(".library-model-row").first();
+  await row.getByRole("button", {name: "Download to NAS"}).click();
+  await expect(row.getByRole("button", {name: "Retry download"})).toBeVisible();
+  await row.getByRole("button", {name: "Retry download"}).click();
+  await expect.poll(() => retryBody).toMatchObject({schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  expect(downloadCalls).toBe(1);
+  await expect(row.getByRole("button", {name: "Downloaded to NAS"})).toBeVisible();
 });

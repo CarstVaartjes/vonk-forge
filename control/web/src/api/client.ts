@@ -41,6 +41,8 @@ import type {
   ModelCacheRepairPreviewInput,
   ModelCacheRepairPreviewResponse,
   ModelCacheUpdatesResponse,
+  ModelCacheRetryInput,
+  RunSwitchRetryInput,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
@@ -304,6 +306,14 @@ export class ApiClient implements ControlApi {
     }));
   }
 
+  async retryRecipeRunSwitch(operationId: string, input: RunSwitchRetryInput, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switches/{operation_id}/retry", {
+      params: {path: {operation_id: operationId}},
+      body: input,
+      signal,
+    }));
+  }
+
   async modelCacheInventory(cursor?: string, signal?: AbortSignal): Promise<ModelCacheInventoryResponse> {
     return resultData(await this.generated.GET("/api/v1/model-cache", {params: {query: {limit: 100, cursor}}, signal}));
   }
@@ -350,6 +360,14 @@ export class ApiClient implements ControlApi {
   async modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
     return resultData(await this.generated.GET("/api/v1/model-cache/operations/{operation_id}", {
       params: {path: {operation_id: operationId}},
+      signal,
+    }));
+  }
+
+  async retryModelCacheOperation(operationId: string, input: ModelCacheRetryInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/operations/{operation_id}/retry", {
+      params: {path: {operation_id: operationId}},
+      body: input,
       signal,
     }));
   }

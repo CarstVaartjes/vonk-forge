@@ -3,7 +3,7 @@ import type {ControlApi, RunSwitchOperation, RunSwitchPhaseKind} from "../api/ty
 import {formatBytes} from "../lib/fleet";
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled", "partially_succeeded", "blocked"]);
-export type RunSwitchApi = Pick<ControlApi, "getRecipeRunSwitchOperation">;
+export type RunSwitchApi = Pick<ControlApi, "getRecipeRunSwitchOperation" | "retryRecipeRunSwitch">;
 
 function errorMessage(value: unknown): string {
   return (value instanceof Error ? value.message : "The Controller did not return run progress.").slice(0, 256);
@@ -35,16 +35,18 @@ function byteDetail(completed: number, total: number | null | undefined, known: 
   return completed > 0 ? `${formatBytes(completed)} transferred · total unavailable` : "Total bytes unavailable";
 }
 
-export function LibraryRunSwitchProgress({api, nodeNames, onChange, onRefresh, onRetry, operation, title}: {
+export function LibraryRunSwitchProgress({api, nodeNames, onChange, onRefresh, operation, title}: {
   api: RunSwitchApi;
   nodeNames: Record<string, string>;
   onChange(operation: RunSwitchOperation): void;
   onRefresh?(): void;
-  onRetry(): void;
   operation: RunSwitchOperation;
   title: string;
 }) {
   const [pollError, setPollError] = useState("");
+  const [retryError, setRetryError] = useState("");
+  const [retrying, setRetrying] = useState(false);
+  const [pollAttempt, setPollAttempt] = useState(0);
   const progress = operation.progress;
   const totalBytes = progress.total_bytes;
   const totalKnown = progress.total_bytes_known && typeof totalBytes === "number";
@@ -67,12 +69,28 @@ export function LibraryRunSwitchProgress({api, nodeNames, onChange, onRefresh, o
         });
     }, 900);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [api, onChange, operation.operation_id, operation.state]);
+  }, [api, onChange, operation.operation_id, operation.state, pollAttempt]);
 
   useEffect(() => {
     if (!TERMINAL_STATES.has(operation.state)) return;
     onRefresh?.();
   }, [onRefresh, operation.state]);
+
+  async function retry() {
+    setRetrying(true);
+    setRetryError("");
+    try {
+      const next = await api.retryRecipeRunSwitch(operation.operation_id, {schema_version: 2, request_key: crypto.randomUUID()});
+      setPollError("");
+      onChange(next);
+    } catch (value) {
+      setRetryError(errorMessage(value));
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  const canRetry = failed && operation.state === "failed" && operation.result?.retryable === true;
 
   return <section className={`library-run-switch-progress state-${operation.state}`} aria-label={`${title} progress`} aria-live="polite">
     <header>
@@ -96,8 +114,9 @@ export function LibraryRunSwitchProgress({api, nodeNames, onChange, onRefresh, o
       })}
     </ul>
     {operation.status_reason && <p className={failed ? "is-error" : "library-run-switch-reason"} role={failed ? "alert" : "status"}>{operation.status_reason}</p>}
-    {pollError && <div className="library-run-switch-error" role="alert"><span>{pollError}</span><button type="button" className="button secondary" onClick={() => { setPollError(""); onRetry(); }}>Retry progress</button></div>}
-    {failed && <div className="library-run-switch-recovery"><span>Completed Spark copies are retained. Retry reconciles the remaining phases.</span><button type="button" className="button secondary" onClick={onRetry}>Retry run</button></div>}
+    {pollError && <div className="library-run-switch-error" role="alert"><span>{pollError}</span><button type="button" className="button secondary" onClick={() => { setPollError(""); setPollAttempt(value => value + 1); }}>Retry progress</button></div>}
+    {retryError && <p className="library-run-switch-error" role="alert">{retryError}</p>}
+    {canRetry && <div className="library-run-switch-recovery"><span>Completed Spark copies are retained. Retry reconciles the remaining phases.</span><button type="button" className="button secondary" disabled={retrying} onClick={() => void retry()}>{retrying ? "Retrying run…" : "Retry run"}</button></div>}
     <details className="library-run-switch-advanced"><summary>Operation details</summary><dl><div><dt>Operation</dt><dd><code>{operation.operation_id}</code></dd></div><div><dt>Plan digest</dt><dd><code>{operation.plan_digest}</code></dd></div><div><dt>Request key</dt><dd><code>{operation.request_key}</code></dd></div></dl></details>
   </section>;
 }

@@ -191,6 +191,8 @@ export type ModelCacheEvictionPreviewResponse = components["schemas"]["ModelCach
 export type ModelCacheUpdateResponse = components["schemas"]["ModelCacheUpdateResponse"];
 export type ModelCacheUpdatesResponse = components["schemas"]["ModelCacheUpdatesResponse"];
 export type ModelCacheOperationsResponse = components["schemas"]["ModelCacheOperationsResponse"];
+export type ModelCacheRetryInput = components["schemas"]["ModelCacheRetryRequest"];
+export type RunSwitchRetryInput = components["schemas"]["RunSwitchRetryRequest"];
 export type LibraryPlacementPreviewInput = components["schemas"]["LibraryPlacementPreviewRequest"];
 export type LibraryPlacementPreview = components["schemas"]["LibraryPlacementPreview"];
 export type LibraryPlacementApplyInput = components["schemas"]["LibraryPlacementApplyRequest"];
@@ -247,6 +249,7 @@ export interface ControlApi extends LibraryApi {
   previewRecipeRunSwitch(input: RunSwitchPreviewRequest, signal?: AbortSignal): Promise<RunSwitchPlan>;
   applyRecipeRunSwitch(input: RunSwitchApplyRequest, signal?: AbortSignal): Promise<RunSwitchOperation>;
   getRecipeRunSwitchOperation(operationId: string, signal?: AbortSignal): Promise<RunSwitchOperation>;
+  retryRecipeRunSwitch(operationId: string, input: RunSwitchRetryInput, signal?: AbortSignal): Promise<RunSwitchOperation>;
   captureCurrentFleetProfile(input: FleetProfileCaptureInput, signal?: AbortSignal): Promise<FleetProfile>;
   duplicateFleetProfile(profileId: string, input: FleetProfileDuplicateInput, signal?: AbortSignal): Promise<FleetProfile>;
   fleetProfileStatus(profileId: string, signal?: AbortSignal): Promise<FleetProfileStatus>;
@@ -261,6 +264,7 @@ export interface ControlApi extends LibraryApi {
   modelCacheUpdates(signal?: AbortSignal): Promise<ModelCacheUpdatesResponse>;
   modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;
+  retryModelCacheOperation(operationId: string, input: ModelCacheRetryInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
   nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse>;

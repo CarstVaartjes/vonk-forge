@@ -1,6 +1,7 @@
-import {render, screen} from "@testing-library/react";
+import {act, fireEvent, render, screen} from "@testing-library/react";
+import type {ModelCacheOperationResponse} from "../api/types";
 import {librarySnapshot} from "../test-fixtures/library";
-import {LibraryCacheView, aggregateCacheEntries} from "./library-cache-view";
+import {LibraryCacheView, LibraryModelDownloadAction, aggregateCacheEntries} from "./library-cache-view";
 
 test("aggregates the complete canonical Model file set", () => {
   const entries = aggregateCacheEntries(librarySnapshot.models);
@@ -20,4 +21,51 @@ test("unions multiple cache sets before reporting a complete no-Recipe Model", (
   const result = aggregateCacheEntries([model], {entries: [entry(first!, "a"), entry(second!, "b")] as never});
   expect(result[0]!.status).toBe("cached");
   expect(result[0]!.verifiedBytes).toBeGreaterThan(0);
+});
+
+function cacheOperation(overrides: Partial<ModelCacheOperationResponse> = {}): ModelCacheOperationResponse {
+  return {
+    schema_version: 2,
+    id: "cache-operation-1",
+    kind: "download",
+    state: "failed",
+    attempt: 1,
+    request_key: "00000000-0000-4000-8000-000000000401",
+    artifact_set_sha256: "a".repeat(64),
+    plan_digest: "b".repeat(64),
+    progress: {schema_version: 2, phase: "failed", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 10, expected_bytes: 20, current_artifact_key: "second"},
+    created_at: "2026-09-06T12:00:00Z",
+    completed_at: "2026-09-06T12:01:00Z",
+    last_error: "temporary transfer failure",
+    result: null,
+    updated_at: "2026-09-06T12:01:00Z",
+    ...overrides,
+  };
+}
+
+test("retries a transient cache operation in place with retained progress", async () => {
+  const model = librarySnapshot.models[0]!;
+  const failed = cacheOperation({result: {retryable: true}});
+  const replacement = cacheOperation({id: "cache-operation-2", state: "running", result: {retryable: false}, attempt: 1, progress: {...failed.progress, phase: "downloading", downloaded_bytes: 10}});
+  const previewModelCacheDownload = vi.fn(async () => ({schema_version: 2 as const, artifact_set_sha256: "a".repeat(64), plan_digest: "b".repeat(64), source_policy: "nas-first" as const, artifact_count: 2, expected_bytes: 20, already_cached_bytes: 10, new_bytes: 10, blockers: [], warnings: []}));
+  const downloadModelCache = vi.fn(async () => failed);
+  const retryModelCacheOperation = vi.fn(async () => replacement);
+  render(<LibraryModelDownloadAction api={{previewModelCacheDownload, downloadModelCache, retryModelCacheOperation} as never} model={model}/>);
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Download to NAS"})); });
+  expect(await screen.findByRole("button", {name: "Retry download"})).toBeVisible();
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Retry download"})); });
+  expect(retryModelCacheOperation).toHaveBeenCalledWith(failed.id, {schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  expect(previewModelCacheDownload).toHaveBeenCalledTimes(1);
+  expect(downloadModelCache).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("1 of 2 files · 10 B")).toBeVisible();
+});
+
+test("does not offer cache retry for terminal integrity failures", async () => {
+  const model = librarySnapshot.models[0]!;
+  const failed = cacheOperation({last_error: "artifact digest mismatch", result: {retryable: false}});
+  render(<LibraryModelDownloadAction api={{previewModelCacheDownload: vi.fn(async () => ({schema_version: 2 as const, artifact_set_sha256: "a".repeat(64), plan_digest: "b".repeat(64), source_policy: "nas-first" as const, artifact_count: 2, expected_bytes: 20, already_cached_bytes: 10, new_bytes: 10, blockers: [], warnings: []})), downloadModelCache: vi.fn(async () => failed)} as never} model={model}/>);
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Download to NAS"})); });
+  expect(screen.queryByRole("button", {name: "Retry download"})).not.toBeInTheDocument();
 });
