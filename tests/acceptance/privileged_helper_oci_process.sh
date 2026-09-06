@@ -77,15 +77,18 @@ for _ in {1..30}; do
 done
 docker manifest annotate "$image_name" "$image_platform" --os linux --arch arm64 >"$report_root/manifest-annotate.log"
 for _ in {1..30}; do
-  docker manifest push --insecure "$image_name" >"$report_root/manifest-push.log" 2>&1 && break
+  if manifest_push_output=$(docker manifest push --insecure "$image_name" 2>&1); then
+    printf '%s\n' "$manifest_push_output" >"$report_root/manifest-push.log"
+    break
+  fi
+  printf '%s\n' "$manifest_push_output" >"$report_root/manifest-push.log"
   sleep 1
 done
 platform_ref=$(docker image inspect "$image_platform" --format '{{index .RepoDigests 0}}')
 platform_digest=${platform_ref##*@}
-registry_digest=$(curl --fail --silent --show-error --head \
-  -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
-  "http://localhost:5001/v2/vonk/helper-tiny/manifests/v1" \
-  | awk -F': ' 'tolower($1) == "docker-content-digest" {gsub("\r", "", $2); print $2; exit}')
+registry_digest=$(printf '%s\n' "$manifest_push_output" \
+  | grep -Eo 'sha256:[0-9a-f]{64}' \
+  | tail -n 1)
 test -n "$registry_digest"
 test "$registry_digest" != "$platform_digest"
 config_id=$(docker image inspect "$image_platform" --format '{{.Id}}')
@@ -108,7 +111,9 @@ install -d -o vonk-agent -g vonk-agent -m 0700 \
   /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache
 for path in \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary/config.json \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/primary/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf \
   /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/support/LICENSE \
   /var/lib/vonk-forge-agent/installations/proof-install/models/support/__init__.py; do
   printf 'helper-process-proof\n' >"$path"
   chown vonk-agent:vonk-agent "$path"

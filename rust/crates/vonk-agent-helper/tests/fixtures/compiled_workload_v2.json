@@ -6,7 +6,7 @@
     "harness_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "build_input_sha256": null,
     "model_artifact_set_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "model_artifact_bytes": 15
+    "model_artifact_bytes": 26
   },
   "runtime": {
     "executable": "/opt/vonk/bin/vllm",
@@ -70,6 +70,46 @@
         "name": "config.json",
         "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "bytes": 8,
+        "kind": "model"
+      }
+    },
+    {
+      "selection_id": "primary",
+      "file_id": "deepseek-long-gguf",
+      "path": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+      "sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+      "size_bytes": 11,
+      "roles": [],
+      "mount": {"target": "/models/primary", "read_only": true},
+      "model": {
+        "publisher": "vonk-forge",
+        "slug": "primary-model",
+        "content_sha256": "1212121212121212121212121212121212121212121212121212121212121212"
+      },
+      "distribution_object": {
+        "name": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+        "sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+        "bytes": 11,
+        "kind": "model"
+      }
+    },
+    {
+      "selection_id": "support",
+      "file_id": "license",
+      "path": "LICENSE",
+      "sha256": "1313131313131313131313131313131313131313131313131313131313131313",
+      "size_bytes": 7,
+      "roles": [],
+      "mount": {"target": "/models/support", "read_only": true},
+      "model": {
+        "publisher": "vonk-forge",
+        "slug": "support-model",
+        "content_sha256": "1313131313131313131313131313131313131313131313131313131313131313"
+      },
+      "distribution_object": {
+        "name": "LICENSE",
+        "sha256": "1313131313131313131313131313131313131313131313131313131313131313",
+        "bytes": 7,
         "kind": "model"
       }
     }

@@ -2322,7 +2322,7 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
         || (target != "/models"
             && (!target.starts_with("/models/")
                 || target.ends_with('/')
-                || !target.split('/').skip(1).all(valid_artifact_id)))
+                || !target.split('/').skip(1).all(valid_model_path_component)))
     {
         return false;
     }
@@ -2337,14 +2337,10 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
     let new_layout = components.len() >= 3
         && matches!(components[0], Component::Normal(value) if lower_hex(&value.to_string_lossy(), 64))
         && matches!(components[1], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()))
-        && components[2..]
-            .iter()
-            .all(|component| matches!(component, Component::Normal(value) if valid_artifact_id(&value.to_string_lossy())));
+        && valid_model_path_components(&components[2..]);
     let selection_layout = components.len() >= 2
         && matches!(components[0], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()) && value != "sha256")
-        && components[1..]
-            .iter()
-            .all(|component| matches!(component, Component::Normal(value) if valid_artifact_id(&value.to_string_lossy())));
+        && valid_model_path_components(&components[1..]);
     let legacy_layout = components.len() == 2
         && matches!(components[0], Component::Normal(value) if value == "sha256")
         && matches!(components[1], Component::Normal(value) if lower_hex(&value.to_string_lossy(), 64));
@@ -2356,7 +2352,29 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
     }
     target
         .strip_prefix("/models/")
-        .is_some_and(|value| value.split('/').all(valid_artifact_id))
+        .is_some_and(|value| value.split('/').all(valid_model_path_component))
+}
+
+fn valid_model_path_components(components: &[Component<'_>]) -> bool {
+    let mut bytes = 0_usize;
+    components.iter().all(|component| {
+        let Component::Normal(value) = component else {
+            return false;
+        };
+        let Some(value) = value.to_str() else {
+            return false;
+        };
+        bytes = bytes.saturating_add(value.len().saturating_add(1));
+        bytes <= MAX_COMPILED_MODEL_PATH_BYTES && valid_model_path_component(value)
+    })
+}
+
+fn valid_model_path_component(value: &str) -> bool {
+    !value.is_empty()
+        && !matches!(value, "." | "..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn valid_runtime_cache_mount(source: &Path, roots: &ManagedRoots) -> bool {
@@ -3305,6 +3323,25 @@ mod tests {
     }
 
     #[test]
+    fn runtime_accepts_mixed_case_long_model_filename() {
+        let (_temp, roots) = runtime_fixture_with_separate_agent_data();
+        let filename =
+            "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf";
+        let source = runtime_models(&roots).join("primary").join(filename);
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, b"model fixture").unwrap();
+        let target = format!("/models/primary/{filename}");
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(source, &target, true)]),
+                &roots,
+                None,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn compiled_workload_fixture_reaches_helper_validation_with_scoped_receipts() {
         let plan: serde_json::Value =
             serde_json::from_str(include_str!("../tests/fixtures/compiled_workload_v2.json"))
@@ -3743,7 +3780,7 @@ mod tests {
             (model.clone(), "/model", true),
             (model.clone(), "/models/..", true),
             (model.clone(), "/models/model/", true),
-            (model.clone(), "/models/Model", true),
+            (model.clone(), "/models/model name", true),
         ];
         for mount in invalid_single_mounts {
             assert!(
