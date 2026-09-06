@@ -1,111 +1,115 @@
-# Launch evidence ledger: interface and platform integration
+# Launch implementation and evidence
 
-Review date: 2026-09-05. This ledger records the evidence available at the
-current integration head and keeps repository implementation, local checks,
-CI, publication/deployment, and physical Spark acceptance separate. The
-platform base is `codex/interface-integration` at
-`8930f9fbef2bd3bb2889450bf0dfb46c0edbcd4e`. The detailed acceptance and issue
-mapping remain in the [interface contract ledger](interface-contract-ledger-2026-09-04.md).
+Updated 2026-09-06. This replaces the earlier status snapshot. Platform
+integration is `codex/interface-integration` at
+`ee73608b8cc4f4df4e7c01c0fd49a29f61a48aad`. Local checks, publication,
+Controller deployment and physical Spark execution remain separate results.
+No local result below claims a deployed Controller or NVIDIA workload.
 
-## Evidence boundaries
+## Published results
 
-| Gate | Implemented in source | Locally verified | CI | Published or deployed | Physical hardware |
-|---|---|---|---|---|---|
-| Recipe authority | Canonical Model/Recipe schema 2 consumer and package/index closure are integrated in the platform. | Recipes `10db3c7a73a18319f81103448ddaeada50334bb2` (`v1.0.1`) is schema 2 with 92 Models and 84 Recipes; 79 Models are referenced directly by a Recipe and 13 have no direct Recipe. | Recipe release CI workflow `33991938855` is recorded for `v1.0.1`; it is not a CI result for this platform integration head. | `v1.0.1` is the current recipe release; platform integration has not republished it. | No model or recipe has physical acceptance from this ledger. |
-| Public web | Public catalog pages consume exact publication snapshots; compact model/recipe lists are implemented in the web merge. | Web merge `7eb783d63c5ea87d2efea8834467ddcda52decfd` is the reviewed source identity. | Production workflow `33985962484` is the recorded CI evidence. | Cloudflare deployment `https://abd3b57b.vonk-forge-web.pages.dev` is the recorded web deployment. This does not prove Controller or Spark deployment. | None. |
-| Controller catalog and Library | Canonical catalog persistence/projection and Library cutover are present in local integration (`fb627731`, `bce3a410`, `8930f9fb`). | P9 owner evidence for `8930f9fb` records 4 OrbStack checks passed and 3 PostgreSQL checks passed (`5168777d`). | No CI result is claimed for this integration head. | No Controller or NAS deployment is claimed. | None. |
-| Profiles, NAS cache and Run/Switch (P5) | Local merges cover profile scope, NAS cache/progress, automatic Run/Switch composition and receipts (`4ab865e6`, `a25b5d38`, `1cdbe531`). | Focused local tests cover durable progress, cache identity and canonical execution projections. They do not establish a connected two-Spark journey. | No CI result is claimed for these local-only merges. | No Controller/NAS rollout is claimed. | No Spark run or cache transfer is claimed. |
-| Runtime wire and OCI delivery | Runtime compilation and receipt validation are integrated locally, but the final single schema-2 workload wire to the Rust OCI importer remains pending. Pending agent work is `665916b1` plus `d2a3fa92`; neither is in `8930f9fb`. | Existing protocol/unit fixtures prove serialization and validation boundaries only. | No CI result is claimed for the pending wire/import work. | No workload image publication or agent deployment is claimed. | OCI import, image start and model execution remain unverified. |
-| Telemetry | Native/rich telemetry contracts, typed clients, history and truthful availability handling are implemented locally. | Exactly 25 Rust telemetry tests passed at `1aeeb310`; adapter/helper tests prove contract behavior and explicit unavailable states, not physical sensor coverage or a 25-metric requirement. | No CI result is claimed for the current integration head. | No deployed telemetry observation is claimed. | NVIDIA sensor accuracy, latency and power history remain unverified. |
+| Component | Verified result |
+|---|---|
+| Recipes | [PR72](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/72) merged at `32b4c094ba0bf6376d419cb06357fe76b160d944`; [v1.0.2](https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v1.0.2) published with 92 Models, 85 Recipes and 85 archives. |
+| Recipe checks | PR workflow `34021339495` and publication workflow `34021548983` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 358 passed, including 307 subtests. |
+| Public website | PR58 merged at `7eb783d63c5ea87d2efea8834467ddcda52decfd`; workflow `33985962484` deployed canonical compact lists and documentation to `https://abd3b57b.vonk-forge-web.pages.dev`. |
+| Controller / Spark packages | Current platform integration is not yet published or deployed. |
 
-The platform rows above are local-only integration evidence. A passing fixture,
-helper or unit test is not publication, deployment or hardware evidence.
-OrbStack is root-verified as running with the `orbstack` context and an
-`aarch64` engine. A sandbox-side Docker permission error is an access boundary
-for this worker, not an engine-down claim; container checks must use the
-verified OrbStack lane and their results must be recorded separately.
+The v1.0.2 annotated tag points to the exact main commit above. GitHub reports
+it as unsigned; the publication job name is not signature evidence. The
+release includes the Mia Qwen3.8 Flash Next dual-Spark vLLM Recipe and the
+first source-refresh batch: six changed/new archives and 79 retained archives.
+Audit reports record retained pins and follow-ups. Publication and structural
+validation do not establish that every engine accepts its options or runs on
+Spark hardware.
 
-## Current catalog and audit facts
+## Product and work packet
 
-The current recipe authority is `CarstVaartjes/vonk-forge-recipes` at
-`10db3c7a73a18319f81103448ddaeada50334bb2`, tag `v1.0.1`. Its schema-2 index
-contains all 92 Model documents and all 84 Recipe documents. The direct
-relationship set contains 79 Model identities, leaving 13 valid Models with no
-direct Recipe reference. That distinction is intentional: a Model can be a
-companion, source, or catalog-only candidate and must not be presented as an
-executable Recipe.
+The [launch work packet](launch-work-packet-2026-09-05.md) remains the full
+scope. The interface uses compact interacting Model/Recipe lists, one Run
+action with automatic preparation and progress, complete fleet profiles with
+explicit Idle Sparks, and observed Fleet state. CLI and web share Controller
+actions. NAS model/image caching and Controller distribution retain reusable
+artifacts. The recipe repository owns the two authored Pydantic contracts.
+This is a fresh launch with one current contract and no legacy catalog path.
 
-The Qwen candidate `radixark/qwen3-8-27b-dspark-85ef153b` (`85ef153b`) is one
-of the 13 no-direct-Recipe Models. No Recipe package was generated or published
-for it, so the platform must not claim an installable Qwen85 workload.
-
-All 84 published Recipes are included in the package/index closure. That is
-coverage of the release inventory, not proof that every runtime, upstream pin,
-container, serving path or physical target has passed acceptance. The committed
-DeepSeek source audit reports `132 current`, `44 advanced`, and `0 errors` for
-its audited source set; it names stale published-image refreshes as concrete
-blockers. A complete all-84 audit status still needs a per-Recipe evidence
-record, including missing release notes, stale or private image pins, missing
-runtime/source bundles, and unperformed serving or Spark checks. Do not turn
-the package count into an acceptance count.
-
-The approved safety boundary remains active: denied engine arguments and denied
-build-network access stay denied unless a source-backed exception is explicitly
-approved and tested. Approval questions for mutable-contract-main and the
-argument-name blacklist/distributed-bridge changes remain pending. A
-mutable-main channel is not a publication authority; its promotion requires
-the recorded CI and release approvals. No such approval is inferred from a
-branch merge or a helper-only test.
-
-## Checks already available
-
-These are the actual recorded checks carried by the integrated workstreams:
-
-- Connected P9 evidence at `8930f9fb`: 4 OrbStack checks passed and 3 PostgreSQL
-  checks passed; owner evidence summary `5168777d`. This is connected local
-  acceptance, not CI, publication/deployment, or physical Spark evidence.
-- Controller integration evidence before the final Library cutover: the frozen
-  suite collected 2,039 cases (`1,935 passed`, `103 skipped`, one macOS-only
-  `os.setresgid` failure). This is historical evidence at `571f30bd`, not a
-  result for `8930f9fb`.
-- Protocol evidence at `571f30bd`: 449 passed and 2 skipped, with 75 focused
-  Controller cases and supply-chain verification recorded. This proves the
-  tracked wheel boundary, not final workload OCI import.
-- Web evidence: build, 251 Vitest tests and 22 Chromium journeys passed at the
-  accepted web head, with one optional screenshot capture skip. The exact
-  current web CI/deployment identity is the `7eb783d6` / workflow
-  `33985962484` / Cloudflare deployment tuple above.
-- Recipe package consumer fixtures: 88 passing tests covering changed-only,
-  restart, failure, offline and fork behavior. The fixture count is not the
-  84-release acceptance count and does not prove publication or hardware.
-- Rust/NAS setup evidence: the ranged distribution consumer and 30-case NAS
-  setup suite passed in their designated Linux/OrbStack workstreams. They use
-  representative bytes and do not prove OCI import, physical LAN performance,
-  sensor accuracy or model quality.
-
-## Issue status mapping
-
-The open platform issues map to the current evidence as follows. “Local” means
-implemented or exercised in the integration worktree; it does not mean the
-issue is closed.
-
-| Issue | Scope | Current evidence and blocker |
+| Packet | Integrated or published work | Remaining evidence |
 |---|---|---|
-| [#593](https://github.com/CarstVaartjes/vonk-forge/issues/593) | NAS pre-cache | Local cache identity, download, verification, reuse and protection work exists. Connected NAS sync, deployed storage/retention and an offline-Spark journey remain unverified. |
-| [#594](https://github.com/CarstVaartjes/vonk-forge/issues/594) | Reliable progress and ETA | Durable phase/progress projections and restart fixtures exist locally. Browser evolution, cross-client parity and deployed observations remain open; unknown totals must stay unknown. |
-| [#595](https://github.com/CarstVaartjes/vonk-forge/issues/595) | Deployment provenance | Exact local source and recipe identities are recorded. Published Controller/agent image digests and deployed provenance are absent from this platform ledger. |
-| [#596](https://github.com/CarstVaartjes/vonk-forge/issues/596) | Runtime preflight | Local planning and canonical runtime checks exist. The single schema-2 workload wire/Rust OCI import remains pending, so preflight cannot be called connected or executable. |
-| [#597](https://github.com/CarstVaartjes/vonk-forge/issues/597) | Durable/resumable lifecycle | Request keys, checkpoints and receipt projections are locally covered. End-to-end restart/retry with real OCI import and target observation remains open. |
-| [#598](https://github.com/CarstVaartjes/vonk-forge/issues/598) | Failure evidence | Bounded typed failure/progress projections exist locally. Deployed sanitized evidence, recovery actions and a physical partial-failure journey remain unverified. |
+| P1 producer | Model/Recipe definitions, author guide, schemas/examples, changed-only catalog and exact archives published in v1.0.2. | Engine verification below; source-refresh follow-ups. |
+| P2 independent validator | Published validator reads the canonical contract. v1.0.2 validation passed against platform `0ab88b4f`. | Recheck final combined consumer revision. |
+| P3 catalog / database | Canonical persistence, typed lists/details, all-page pagination and ordered multi-Model details integrated. | Fresh OrbStack PostgreSQL imported 92 Models / 85 Recipes and retained 13 unlinked Models; [exact evidence](evidence/fresh-launch-catalog-postgres-acceptance-2026-09-06.md). Recheck final database additions. |
+| P4 downloads / secrets | Optional Controller/worker HF token, anonymous public downloads and [documentation](model-cache-huggingface-auth.md) integrated. | Deployed gated-download observation. |
+| P5 cache / Run / profiles | NAS caches, explicit profile scope/Idle, durable preparation/distribution phases and artifact receipts integrated locally. | Final Rust/helper OCI path, current-Recipe receipt authorization, real image import/start, reuse and failure/retry. |
+| P6 website | Canonical compact catalog and plain-language explanation deployed. | Recipe refresh propagation; website evidence does not establish Controller behavior. |
+| P7 Controller web / API / CLI | Paired lists, Model NAS download, Recipe placement, profiles, artifact jobs and rich Fleet surfaces integrated. Retired routes and generated clients removed. | Final UI branch: 195 Vitest tests, 22 Playwright journeys and one optional skip. Root layout repair passed its desktop/mobile journey. Route cleanup: 49 API/client tests and web build passed. CLI records 97 focused and 23 connected parity tests. New retries require matching API/CLI/web coverage. |
+| P8 upstream refresh | Reviewed first batch and reports published in v1.0.2. | GLM, LTX and adapter follow-ups are being composed for the next release; all-Recipe engine checks are active. |
+| P9 acceptance / cleanup | Fresh catalog/PostgreSQL checks and independent UI review recorded. | Residual retired configuration/modules, actual Controller image/helper checks, combined CI, compatible consumer publication/deployment, then physical Spark observations. |
 
-These issue rows are a status map only. This documentation refresh does not
-close, edit or reinterpret the issues.
+Root UI repair: `f8ee3122`. Route cleanup: `d6e7e188`, integrated at
+`a251a7b5`; generated clients: `56e7d955`. Artifact settings and finite-number
+handling: `a33c3a56` plus `56caa0ae`, integrated at `e6e3268e`. Final precise
+credential and ordinary engine-argument follow-ups are still being checked.
 
-## Release boundary and next evidence
+## Fault tolerance
 
-The next evidence step is to finish and test the single schema-2 workload wire
-through Rust OCI import, then run the connected P9 catalog/API and Run/Switch
-journeys in the verified OrbStack lane. After that, record compatible
-Controller/agent publication and deployment identities, and only then record
-physical Spark observations. Recipe publication, web deployment, Controller
-deployment and physical acceptance remain separate gates.
+Unknown ordinary engine options pass unchanged. Credential isolation,
+container policy, structural resource bounds and artifact integrity remain
+enforced. Actual engine errors stay visible; missing telemetry or changelogs
+do not block a run. Transient failures preserve verified progress for retry.
+
+The partial catalog-sync bug is fixed by `4ca70fff`, integrated at `ee73608b`.
+Only a same-commit result explicitly marked current is reused. A partial sync
+retries missing items without refetching successful immutable imports. Seven
+focused tests passed, including fail-once recovery; pinned Ruff 0.16.1 passed.
+
+Bounded model-cache and Run/Switch retries are under implementation. They must
+reuse the persisted plan/artifact digest, verified bytes and completed-node
+receipts. Authentication and integrity failures must not become retry loops
+or false success. Catalog withdrawal needs separate review: a partial remote
+snapshot must never remove previously valid entries or immutable revisions.
+
+## Every-Recipe engine verification
+
+The complete v1.0.2 inventory is assigned to four groups: vLLM 34, SGLang/DS4
+7, ComfyUI/Diffusers 23, and PyTorch pipeline 21. Total: 85 Recipes.
+Each per-Recipe result must bind the exact source and distinguish:
+
+1. Pydantic, Model/file selection and package closure.
+2. Actual Controller compilation of every role and default setting.
+3. Real wrapper parsing and child argv, including order, repeated options,
+   empty values, structured JSON and setting bindings.
+4. Actual pinned engine parser acceptance where executable source/runtime is
+   available.
+5. Container start and physical Spark execution, when performed.
+
+Intercepting a child process proves wrapper argument routing, not engine
+acceptance or inference. Missing parser/container/hardware evidence remains
+unverified. Proven defects feed the sole producer integration branch and are
+rechecked before publication.
+
+## Remaining runtime and deployment checks
+
+The user explicitly approved post-executable engine arguments, bridge access
+on up to two selected serving/rendezvous mappings, and only the NVIDIA CDI
+selector `nvidia.com/gpu=all`. UID10001, read-only root, dropped capabilities,
+no-new-privileges and declared mounts remain enforced; host networking is
+excluded. Authorization is not evidence that the implementation works.
+
+The composed check must carry one real image through Controller inspect/copy/
+export, immutable storage, local distribution, import and helper start.
+Registry index, platform manifest, local config ID, imported reference and
+archive SHA/size must each be verified at their own boundary. Test nonempty
+ENTRYPOINT, writable UID10001 HOME/temp/cache, retained cache, reset temporary
+output, restart and tamper failures.
+
+OrbStack was verified on 2026-09-06: context orbstack, server 29.4.0, OS
+OrbStack, architecture aarch64. It is available for container-backed checks.
+GPU/NCCL/fabric behavior, sensor accuracy and model quality require physical
+Sparks. The [metrics specification](interface-metrics-spec-2026-09-04.md)
+remains the coverage requirement; the recorded 25 Rust telemetry tests are
+implementation evidence, not physical sensor acceptance.
+
+Issues #593–#598 and #551 remain tracked. Local fixtures do not close deployed
+cache, progress, provenance, preflight, recovery and sanitized-failure
+journeys. After combined checks, publish/deploy compatible consumers through
+the authorized Controller-managed Spark path, preserving secrets and volumes.
