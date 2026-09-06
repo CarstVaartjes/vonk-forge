@@ -32,12 +32,11 @@ pytest.importorskip("vonk_control.recipe_packages")
 from vonk_control.catalog_api import install_catalog_routes
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.library_api import install_library_routes
+from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    LocalRecipe,
-    ManagedRecipeLibraryLink,
-    RecipeImport,
 )
 from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
@@ -172,8 +171,15 @@ def _app(
         actor_dependency=Depends(actor),
         audits=MemoryAuditStore(),
         service=catalog,
-        recipe_library=reader,
         managed_sync=sync,
+    )
+    install_library_routes(
+        app,
+        actor_dependency=Depends(actor),
+        projection=LibraryProjection(
+            catalog._sessions,
+            cursors=codec.cursor_codec(),
+        ),
     )
     token = codec.issue(
         Actor("acceptance", "administrator"),
@@ -212,9 +218,9 @@ def test_fresh_orbstack_postgres_imports_exact_published_corpus_and_survives_off
     index, cache_root = _corpus()
     models = [row["document"] for row in index["catalog_entities"]]
     recipes = index["recipes"]
-    assert len(models) == 92
+    expected_model_count = len(models)
+    expected_recipe_count = len(recipes)
     assert all(document["kind"] == "model" for document in models)
-    assert len(recipes) == 84
 
     _upgrade_fresh_database(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -235,7 +241,7 @@ def test_fresh_orbstack_postgres_imports_exact_published_corpus_and_survives_off
     snapshot = reader.list()
     assert snapshot.repository == REPOSITORY
     assert snapshot.commit == index["source_commit"]
-    assert len(snapshot.items) == 84
+    assert len(snapshot.items) == expected_recipe_count
     reader.prepare(snapshot)
 
     sync = ManagedRecipeCatalogSyncService(
@@ -248,7 +254,7 @@ def test_fresh_orbstack_postgres_imports_exact_published_corpus_and_survives_off
         expected_commit=snapshot.commit,
     )
     assert result.state == "current"
-    assert result.imported_count == 84
+    assert result.imported_count == expected_recipe_count
 
     model_keys = {
         (
@@ -266,31 +272,41 @@ def test_fresh_orbstack_postgres_imports_exact_published_corpus_and_survives_off
             f"{row['document']['identity']['slug']}@sha256:{row['content_sha256']}"
         )
         package_model_keys.update(item.package_handle.model_identities)
-    assert len(package_model_keys) == 81
-    assert len(model_keys - package_model_keys) == 11
+    assert package_model_keys <= model_keys
+    assert len(package_model_keys | (model_keys - package_model_keys)) == expected_model_count
 
     with sessions() as session:
-        assert session.scalar(
+        active_model_count = session.scalar(
             select(func.count()).select_from(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "model",
                 CatalogDocumentRevision.state == "active",
             )
-        ) == 92
-        assert session.scalar(
+        )
+        active_recipe_count = session.scalar(
             select(func.count()).select_from(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
                 CatalogDocumentRevision.state == "active",
             )
-        ) == 84
-        assert session.scalar(select(func.count()).select_from(LocalRecipe)) == 84
-        assert session.scalar(select(func.count()).select_from(ManagedRecipeLibraryLink)) == 84
-        receipts = session.scalars(select(RecipeImport)).all()
-        assert len(receipts) == 84
+        )
+        assert active_model_count == expected_model_count
+        assert active_recipe_count == expected_recipe_count
+        recipe_revisions = session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        ).all()
+        receipts = [
+            revision.projected or {}
+            for revision in recipe_revisions
+            if isinstance(revision.projected, dict)
+        ]
+        assert len(receipts) == expected_recipe_count
         assert {
-            receipt.redacted_source["commit"] for receipt in receipts
+            receipt["publication_commit"] for receipt in receipts
         } == {index["source_commit"]}
         assert {
-            receipt.redacted_source["package_handle"]["publication_commit"]
+            receipt["package_handle"]["publication_commit"]
             for receipt in receipts
         } == {PUBLICATION_COMMIT}
 
@@ -334,23 +350,13 @@ def test_fresh_orbstack_postgres_imports_exact_published_corpus_and_survives_off
     api = _app(
         TokenCodec(b"a" * 32), catalog=catalog, reader=reader, sync=sync
     )
-    response = api.get("/api/v1/catalog/public-recipes")
+    response = api.get("/api/v1/library")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["repository"] == REPOSITORY
-    assert payload["commit"] == snapshot.commit
-    assert len(payload["recipes"]) == 84
-    assert {
-        (item["publisher"], item["slug"], item["content_sha256"])
-        for item in payload["recipes"]
-    } == {
-        (
-            row["document"]["identity"]["publisher"],
-            row["document"]["identity"]["slug"],
-            row["content_sha256"],
-        )
-        for row in recipes
-    }
+    assert len(payload["models"]) == expected_model_count
+    recipe_overview = api.get("/api/v1/library/recipes")
+    assert recipe_overview.status_code == 200
+    assert len(recipe_overview.json()["recipes"]) == expected_recipe_count
     api.close()
     reader.close()
 
@@ -372,7 +378,7 @@ def test_fresh_orbstack_postgres_imports_exact_published_corpus_and_survives_off
     offline_snapshot = restarted.list()
     restarted.prepare(offline_snapshot)
     assert offline_snapshot.commit == snapshot.commit
-    assert len(offline_snapshot.items) == 84
+    assert len(offline_snapshot.items) == expected_recipe_count
     assert offline_calls == ["/v1/recipe-library/index.json"]
     restarted.close()
 

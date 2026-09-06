@@ -88,16 +88,7 @@ MUTATION_ROLES = {
         {"administrator"}
     ),
     ("POST", "/api/v1/catalog/imports/workload_run"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/public/preview"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/public"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/recipe-library"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/managed-recipes/sync"): frozenset({"administrator"}),
-    ("PUT", "/api/v1/catalog/recipes/{recipe_id}/publication-report"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/catalog/recipes/{recipe_id}/publication-export"): frozenset(
-        {"administrator"}
-    ),
     ("POST", "/api/v1/catalog/recipes/{recipe_id}/resolve-import"): frozenset(
         {"administrator"}
     ),

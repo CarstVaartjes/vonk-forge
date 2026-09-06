@@ -18,7 +18,8 @@ from .contracts import AgentProtocolError, _fields, _mapping, _uuid
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _OCI_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
-_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,511}\Z")
+_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._/-]{0,511}\Z")
+_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
 def _digest(value: Any, name: str) -> str:
@@ -75,10 +76,19 @@ class DistributionObject:
         kind = item["kind"]
         if kind not in {"model", "oci-archive", "oci-layer"}:
             raise AgentProtocolError("distribution object kind is invalid")
+        size = item["bytes"]
+        if (
+            not isinstance(size, int)
+            or isinstance(size, bool)
+            or size < 0
+            or size > 16 * 1024**4
+            or (size == 0 and (kind != "model" or item["sha256"] != _EMPTY_SHA256))
+        ):
+            raise AgentProtocolError("distribution object bytes are invalid")
         return cls(
             name=_name(item["name"], "distribution object name"),
             sha256=_digest(item["sha256"], "distribution object sha256"),
-            bytes=_bytes(item["bytes"], "distribution object bytes", positive=True),
+            bytes=size,
             kind=kind,
         )
 

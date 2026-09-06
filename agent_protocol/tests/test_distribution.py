@@ -58,3 +58,26 @@ def test_distribution_assignment_rejects_unsafe_object_name() -> None:
 
     with pytest.raises(AgentProtocolError):
         DistributionAssignment.parse(wire)
+
+
+def test_distribution_allows_only_the_canonical_empty_model_support_file() -> None:
+    empty_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    accepted = DistributionObject.parse(
+        {
+            "name": "__init__.py",
+            "sha256": empty_sha256,
+            "bytes": 0,
+            "kind": "model",
+        }
+    )
+    assert accepted.bytes == 0
+
+    with pytest.raises(AgentProtocolError):
+        DistributionObject.parse(
+            {
+                "name": "empty.oci.tar",
+                "sha256": empty_sha256,
+                "bytes": 0,
+                "kind": "oci-archive",
+            }
+        )

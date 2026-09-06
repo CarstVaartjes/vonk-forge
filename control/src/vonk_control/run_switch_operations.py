@@ -27,11 +27,11 @@ from .cluster_mappings import (
 )
 from .models import (
     AgentNode,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
     Job,
-    LocalRecipeRevision,
     NodeArtifact,
     NodeInventorySnapshot,
     RecipeBuild,
@@ -40,6 +40,7 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
     RunNode,
+    RuntimeImageReceipt,
 )
 from .preparation_contract import (
     ControllerAssetState,
@@ -51,15 +52,27 @@ from .preparation_contract import (
 )
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
+from .resource_planning import (
+    CapacitySnapshot,
+    PlannedStopRelease,
+    ResourceDemand,
+    ResourceEvidence,
+    plan_capacity,
+    resolve_effective_settings,
+    resource_demand,
+)
 from .run_switch_contract import (
     ArtifactStorageImpact,
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
     CapabilityEvidence,
+    EffectiveParallelism,
+    EffectiveSettingsSelection,
     FreshnessEvidence,
     InvocationMetadata,
     MappingSelection,
     RecipeBuildEvidence,
+    ResourceDemandEvidence,
     RunSwitchApplyRequest,
     RunSwitchMemberProgress,
     RunSwitchOperation,
@@ -82,6 +95,23 @@ from .run_switch_contract import (
 
 class RunSwitchOperationConflict(RuntimeError):
     """The selected outcome is stale, unsupported, or unsafe to execute."""
+
+
+def _active_recipe_revision(
+    session: Session,
+    revision_id: str | None,
+) -> CatalogDocumentRevision | None:
+    """Load only an active canonical Recipe revision for Run/Switch."""
+
+    if not isinstance(revision_id, str) or not revision_id:
+        return None
+    return session.scalar(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.id == revision_id,
+            CatalogDocumentRevision.kind == "recipe",
+            CatalogDocumentRevision.state == "active",
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,6 +329,153 @@ def _required_int(value: object) -> int | None:
     return value if type(value) is int and value >= 0 else None
 
 
+def _resource_reason(reason: object, *, node_ids: Sequence[str] = ()) -> RunSwitchReason:
+    node_id = getattr(reason, "node_id", None)
+    return _as_reason(
+        f"run-switch.{getattr(reason, 'code', 'resource.evidence_unknown')}",
+        str(getattr(reason, "detail", "Resource planning evidence is unavailable.")),
+        scope="node" if isinstance(node_id, str) else "operation",
+        severity=str(getattr(reason, "severity", "blocker")),
+        node_ids=(node_id,) if isinstance(node_id, str) else node_ids,
+    )
+
+
+def _settings_view(settings: object) -> EffectiveSettingsSelection:
+    resolution = resolve_effective_settings(settings)
+    if resolution.settings is None:
+        raise ValueError("effective settings are invalid")
+    resolved = resolution.settings
+    return EffectiveSettingsSelection(
+        kind=resolved.kind,
+        context_tokens=resolved.context_tokens,
+        concurrency=resolved.concurrency,
+        max_batch_tokens=resolved.batch_tokens,
+        parallelism=EffectiveParallelism(
+            world_size=resolved.parallelism.world_size,
+            tensor=resolved.parallelism.tensor,
+            pipeline=resolved.parallelism.pipeline,
+            data=resolved.parallelism.data,
+            backend=resolved.parallelism.backend,
+        ),
+        knobs=dict(resolved.knobs),
+        change_effects=dict(resolved.change_effects),
+        identity_sha256=resolved.identity_digest,
+    )
+
+
+def _selected_model_bytes(
+    recipe_document: Mapping[str, object],
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    role_name: str,
+) -> int | None:
+    if not model_documents:
+        return None
+    selections = recipe_document.get("models")
+    if not isinstance(selections, Sequence) or isinstance(selections, (str, bytes)):
+        return None
+    total = 0
+    selected_any = False
+    for selection in selections:
+        if not isinstance(selection, Mapping):
+            return None
+        model_ref = selection.get("model")
+        if not isinstance(model_ref, Mapping):
+            return None
+        reference = tuple(model_ref.get(name) for name in ("publisher", "slug", "content_sha256"))
+        if any(not isinstance(value, str) or not value for value in reference):
+            return None
+        model_document = model_documents.get(reference)
+        if model_document is None:
+            return None
+        files = model_document.get("files")
+        if not isinstance(files, Sequence) or isinstance(files, (str, bytes)):
+            return None
+        by_id = {
+            str(file.get("id")): file
+            for file in files
+            if isinstance(file, Mapping) and isinstance(file.get("id"), str)
+        }
+        raw_files = selection.get("files")
+        if not isinstance(raw_files, Sequence) or isinstance(raw_files, (str, bytes)):
+            return None
+        selected_ids: set[str] = set()
+        for item in raw_files:
+            if not isinstance(item, Mapping):
+                return None
+            roles = item.get("roles", ())
+            if isinstance(roles, Sequence) and not isinstance(roles, (str, bytes)) and role_name in roles:
+                file_id = item.get("file_id")
+                if not isinstance(file_id, str) or file_id not in by_id:
+                    return None
+                selected_ids.add(file_id)
+        for file_id in selected_ids:
+            size = by_id[file_id].get("size_bytes")
+            if type(size) is not int or size < 0:
+                return None
+            total += size
+            selected_any = True
+    return total if selected_any else None
+
+
+def _resource_evidence(
+    recipe_document: Mapping[str, object],
+    memory: Mapping[str, object],
+    role_name: str,
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
+    declared_total_bytes: int,
+    settings: object | None,
+) -> ResourceEvidence:
+    del memory
+    model_bytes = _selected_model_bytes(recipe_document, model_documents, role_name)
+    return ResourceEvidence(
+        weights_bytes=model_bytes,
+        runtime_overhead_bytes=None,
+        declared_total_bytes=declared_total_bytes if model_bytes is not None else None,
+        baseline_context_tokens=getattr(settings, "context_tokens", None),
+        baseline_concurrency=getattr(settings, "concurrency", None),
+        baseline_batch_tokens=getattr(settings, "batch_tokens", None),
+        evidence_state="declared" if model_bytes is not None else "unknown",
+    )
+
+
+def _resource_evidence_digest(revision_digest: str | None) -> str | None:
+    return revision_digest if isinstance(revision_digest, str) and len(revision_digest) == 64 else None
+
+
+def _planned_stop_releases(
+    session: Session,
+    node_id: str,
+    reservation_kind: str | None,
+    stops: Sequence[StopImpact],
+) -> tuple[PlannedStopRelease, ...]:
+    if reservation_kind is None:
+        return ()
+    releases: list[PlannedStopRelease] = []
+    for stop in stops:
+        if node_id not in stop.node_ids:
+            continue
+        amount = session.scalar(
+            select(func.coalesce(func.sum(ResourceReservation.amount_bytes), 0)).where(
+                ResourceReservation.node_id == node_id,
+                ResourceReservation.kind == reservation_kind,
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == stop.run_id,
+                ResourceReservation.state == "active",
+            )
+        )
+        releases.append(
+            PlannedStopRelease(
+                stop.run_id,
+                node_id,
+                reservation_kind,
+                int(amount or 0),
+                True,
+                stop.plan_digest,
+            )
+        )
+    return tuple(releases)
+
+
 def _capability_facts(document: Mapping[str, object] | None) -> list[CapabilityEvidence]:
     """Read only explicit capability metadata from one immutable document."""
 
@@ -480,10 +657,10 @@ def _latest_inventory(
 class DatabaseRunSwitchArtifactInspector:
     """Conservative Spark-side coverage inspector.
 
-    When a model-cache provider is bound, its exact manifest and download
-    preview are the authority for NAS coverage.  The database-only fallback
-    remains deliberately conservative for embedded/test callers: it never
-    treats a model revision digest as an artifact object digest.
+    The Controller model-cache provider is the sole authority for NAS
+    coverage.  A database row can describe target-local observations, but it
+    cannot identify the complete immutable model set or its NAS download
+    plan.  Construction without the provider therefore fails explicitly.
     """
 
     def __init__(self, model_cache: object | None = None) -> None:
@@ -504,100 +681,16 @@ class DatabaseRunSwitchArtifactInspector:
         retention: str,
         now: datetime,
     ) -> ArtifactInspection:
-        if self._model_cache is not None:
-            return self._inspect_model_cache(
-                session,
-                model_cache=self._model_cache,
-                model_version_sha256=model_version_sha256,
-                recipe_revision_id=recipe_revision_id,
-                node_ids=node_ids,
-                retention=retention,
-                now=now,
-            )
-        revision = session.get(LocalRecipeRevision, recipe_revision_id)
-        model_document: Mapping[str, object] | None = None
-        if revision is not None:
-            try:
-                resolved = resolve_recipe_entities(session, revision.document)
-                candidate = getattr(resolved.get("model_version"), "document", None)
-                if isinstance(candidate, Mapping):
-                    model_document = candidate
-            except (RecipeRuntimeSpecError, RuntimeError, TypeError, ValueError):
-                model_document = None
-        expected: list[tuple[str, int]] = []
-        if model_document is not None:
-            raw_artifacts = model_document.get("artifacts")
-            if isinstance(raw_artifacts, list):
-                for raw in raw_artifacts:
-                    if not isinstance(raw, Mapping):
-                        continue
-                    digest = raw.get("sha256")
-                    size = raw.get("installed_bytes")
-                    if (
-                        isinstance(digest, str)
-                        and len(digest) == 64
-                        and all(character in "0123456789abcdef" for character in digest)
-                        and type(size) is int
-                        and size >= 0
-                    ):
-                        expected.append((digest, size))
-        # A model version digest is not an artifact object digest.  When the
-        # immutable manifest is absent, retain unknown coverage and let the
-        # authoritative cache provider supply the exact artifact set.
-        artifact_set_sha256 = (
-            model_document.get("artifact_set_sha256")
-            if isinstance(model_document, Mapping)
-            else None
-        )
-        if not _is_hex_digest(artifact_set_sha256):
-            artifact_set_sha256 = None
-        required = sum(size for _digest_value, size in expected) if expected else None
-        reused = 0
-        missing = 0
-        reclaimable = 0
-        reclaimable_digests: set[str] = set()
-        for node_id in node_ids:
-            rows = tuple(
-                session.scalars(select(NodeArtifact).where(NodeArtifact.node_id == node_id))
-            )
-            by_digest = {row.digest: row for row in rows}
-            for digest, size in expected:
-                row = by_digest.get(digest)
-                if row is not None and row.state == "verified" and row.size_bytes >= size:
-                    reused += size
-                else:
-                    missing += size
-            if retention == "reclaim-unreferenced":
-                reclaimable += sum(
-                    row.size_bytes
-                    for row in rows
-                    if row.state == "verified" and row.ref_count == 0
-                )
-                reclaimable_digests.update(
-                    row.digest
-                    for row in rows
-                    if row.state == "verified" and row.ref_count == 0
-                )
-        if expected:
-            spark_coverage = "complete" if missing == 0 else "partial"
-            missing_spark: int | None = missing
-        else:
-            spark_coverage = "unknown"
-            missing_spark = None
-        return ArtifactInspection(
-            required_bytes=(None if required is None else required * len(node_ids)),
-            reused_bytes=reused,
-            copied_bytes=missing,
-            missing_nas_bytes=None,
-            missing_spark_bytes=missing_spark,
-            reclaimable_bytes=reclaimable,
-            nas_coverage="unknown",
-            spark_coverage=spark_coverage,
-            artifact_digests=tuple(digest for digest, _size in expected),
-            reclaimable_digests=tuple(sorted(reclaimable_digests)),
-            freshness=(),
-            artifact_set_sha256=artifact_set_sha256,
-            artifact_set_bytes=required,
+        if self._model_cache is None:
+            raise RuntimeError("model-cache manifest provider is unavailable")
+        return self._inspect_model_cache(
+            session,
+            model_cache=self._model_cache,
+            model_version_sha256=model_version_sha256,
+            recipe_revision_id=recipe_revision_id,
+            node_ids=node_ids,
+            retention=retention,
+            now=now,
         )
 
     def _inspect_model_cache(
@@ -932,6 +1025,26 @@ class RecipeLifecyclePhaseExecutor:
             if execution.operation_id is None:
                 _validate_artifact_execution(plan, phase, execution.result)
             return execution
+        if phase.kind == "prepare" and phase.subphase == "runtime-image":
+            if self._artifact_executor is None:
+                raise RunSwitchOperationConflict(
+                    "run-switch.runtime-image-executor-unavailable"
+                )
+            execution = self._artifact_executor.execute(
+                plan,
+                phase,
+                item_index=item_index,
+                actor=actor,
+                request_key=request_key,
+                progress=progress,
+            )
+            if execution.operation_id is None and execution.waiting:
+                raise RunSwitchOperationConflict(
+                    "run-switch.runtime-image-waiting-without-child"
+                )
+            if execution.operation_id is None:
+                _validate_artifact_execution(plan, phase, execution.result)
+            return execution
         if phase.kind == "stop":
             if item_index >= len(plan.stops):
                 return PhaseExecution()
@@ -950,10 +1063,11 @@ class RecipeLifecyclePhaseExecutor:
                 actor=actor,
                 request_key=request_key,
             )
-        if phase.kind == "prepare":
-            # A new mapping and installation are created through the existing
-            # lifecycle primitives.  The resulting installation identity is
-            # returned as durable phase evidence for the later start phase.
+        if phase.kind == "prepare" and phase.subphase == "runtime-plan":
+            # Bind and persist the exact schema-2 launch plan at the
+            # Controller boundary.  This phase deliberately does not enqueue
+            # Spark work: target-copy must verify every model/image receipt
+            # before the agent install child can start.
             mapping_id = plan.mapping.mapping_id if plan.mapping is not None else None
             phase_results = progress.get("phase_results")
             if isinstance(phase_results, list):
@@ -977,10 +1091,6 @@ class RecipeLifecyclePhaseExecutor:
                 )
             if mapping_id is None:
                 return PhaseExecution(result={"prepared": True})
-            if plan.recipe_build_id is None:
-                raise RunSwitchOperationConflict(
-                    "run-switch.recipe-build-unavailable"
-                )
             try:
                 install_plan = self._lifecycle.preview_install(
                     mapping_id, plan.recipe_build_id
@@ -989,15 +1099,82 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     f"run-switch.install-plan-unavailable: {error}"
                 ) from error
-            value = self._lifecycle.install(
-                install_plan,
-                plan_digest=install_plan.plan_digest,
-                actor=actor,
-                request_id=str(uuid.uuid5(uuid.UUID(request_key), "prepare-install")),
+            prepare_installation = getattr(
+                self._lifecycle, "prepare_installation", None
+            )
+            if not callable(prepare_installation):
+                raise RunSwitchOperationConflict(
+                    "run-switch.install-preparation-unavailable"
+                )
+            try:
+                installation_id = prepare_installation(
+                    install_plan,
+                    actor=actor,
+                )
+            except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
+                raise RunSwitchOperationConflict(
+                    f"run-switch.install-preparation-failed: {error}"
+                ) from error
+            compiled = install_plan.compiled_plan_by_node
+            first_compiled = next(iter(compiled.values()), {})
+            identity = (
+                first_compiled.get("identity")
+                if isinstance(first_compiled, Mapping)
+                else None
             )
             return PhaseExecution(
+                result={
+                    "installation_id": installation_id,
+                    "mapping_id": mapping_id,
+                    "install_plan_digest": install_plan.plan_digest,
+                    "model_artifact_set_sha256": (
+                        identity.get("model_artifact_set_sha256")
+                        if isinstance(identity, Mapping)
+                        else None
+                    ),
+                    "model_artifact_set_bytes": (
+                        identity.get("model_artifact_bytes")
+                        if isinstance(identity, Mapping)
+                        else None
+                    ),
+                    "compiled_plan_persisted": True,
+                }
+            )
+        if phase.kind == "prepare" and phase.subphase == "runtime-install":
+            installation_id = plan.installation_id
+            phase_results = progress.get("phase_results")
+            if installation_id is None and isinstance(phase_results, list):
+                for result in reversed(phase_results):
+                    if isinstance(result, Mapping):
+                        installation_id = _string_or_none(result.get("installation_id"))
+                        if installation_id is not None:
+                            break
+            if installation_id is None:
+                raise RunSwitchOperationConflict(
+                    "run-switch.installation-preparation-unavailable"
+                )
+            start_installation = getattr(self._lifecycle, "start_installation", None)
+            if not callable(start_installation):
+                raise RunSwitchOperationConflict(
+                    "run-switch.install-executor-unavailable"
+                )
+            try:
+                value = start_installation(
+                    installation_id,
+                    actor=actor,
+                    request_id=str(uuid.uuid5(uuid.UUID(request_key), "runtime-install")),
+                )
+            except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
+                raise RunSwitchOperationConflict(
+                    f"run-switch.install-start-failed: {error}"
+                ) from error
+            return PhaseExecution(
                 value.id,
-                {"installation_id": value.owner_id, "mapping_id": mapping_id},
+                {"installation_id": installation_id},
+            )
+        if phase.kind == "prepare":
+            raise RunSwitchOperationConflict(
+                "run-switch.prepare-subphase-unsupported"
             )
         if phase.kind == "start":
             installation_id = plan.installation_id
@@ -1170,7 +1347,9 @@ class RunSwitchOperationService:
             if run is None:
                 raise KeyError(run_id)
             installation = session.get(RecipeInstallation, run.installation_id)
-            revision = session.get(LocalRecipeRevision, run.plan.get("recipe_revision_id"))
+            revision = _active_recipe_revision(
+                session, run.plan.get("recipe_revision_id")
+            )
             mapping = session.get(ClusterMapping, run.mapping_id)
             mapping_nodes = tuple(
                 session.scalars(
@@ -1195,8 +1374,8 @@ class RunSwitchOperationService:
                 if installation is not None
                 else _string_or_none(run.plan.get("model_version_sha256"))
             )
-            recipe_digest = revision.content_sha256 if revision is not None else None
-            _model_document, model_caps, recipe_caps, _document_blockers = self._resolve_documents(
+            recipe_digest = revision.content_digest if revision is not None else None
+            _model_document, _model_documents, model_caps, recipe_caps, _document_blockers = self._resolve_documents(
                 session,
                 revision,
                 model_digest,
@@ -1219,7 +1398,7 @@ class RunSwitchOperationService:
             )
             build = (
                 session.get(RecipeBuild, installation.recipe_build_id)
-                if installation is not None
+                if installation is not None and installation.recipe_build_id is not None
                 else None
             )
             build_candidate = build or (
@@ -1467,12 +1646,12 @@ class RunSwitchOperationService:
         group = request.spark_group
         node_ids = tuple(node.node_id for node in group.nodes)
         with self._sessions() as session:
-            revision = session.get(LocalRecipeRevision, request.recipe_revision_id)
+            revision = _active_recipe_revision(session, request.recipe_revision_id)
             if revision is None:
                 raise KeyError(request.recipe_revision_id)
             blockers: list[RunSwitchReason] = []
             warnings: list[RunSwitchReason] = []
-            if revision.lifecycle != "resolved" or revision.content_sha256 is None:
+            if revision.state != "active" or revision.content_digest is None:
                 blockers.append(
                     _as_reason(
                         "run-switch.recipe_unresolved",
@@ -1480,7 +1659,19 @@ class RunSwitchOperationService:
                         scope="recipe",
                     )
                 )
-            model_ref = revision.document.get("model")
+            selections = revision.document.get("models")
+            model_selection = (
+                selections[0]
+                if isinstance(selections, Sequence)
+                and not isinstance(selections, (str, bytes))
+                and selections
+                else None
+            )
+            model_ref = (
+                model_selection.get("model")
+                if isinstance(model_selection, Mapping)
+                else None
+            )
             recipe_model_digest = (
                 model_ref.get("content_sha256") if isinstance(model_ref, Mapping) else None
             )
@@ -1492,13 +1683,23 @@ class RunSwitchOperationService:
                         scope="model",
                     )
                 )
-            _model_document, model_caps, recipe_caps, document_blockers = self._resolve_documents(
+            _model_document, model_documents, model_caps, recipe_caps, document_blockers = self._resolve_documents(
                 session,
                 revision,
                 request.model_version_sha256,
-                requested_recipe_digest=revision.content_sha256,
+                requested_recipe_digest=revision.content_digest,
             )
             blockers.extend(document_blockers)
+            settings_resolution = resolve_effective_settings(revision.document)
+            effective_settings = settings_resolution.settings
+            effective_settings_view = None
+            if effective_settings is None:
+                blockers.extend(
+                    _resource_reason(reason, node_ids=node_ids)
+                    for reason in settings_resolution.reasons
+                )
+            else:
+                effective_settings_view = _settings_view(effective_settings)
             mapping, mapping_selection, mapping_blockers = self._resolve_mapping(
                 session,
                 revision,
@@ -1519,6 +1720,9 @@ class RunSwitchOperationService:
                 group,
                 now=now,
                 excluded_run_ids=(),
+                effective_settings=effective_settings,
+                model_documents=model_documents,
+                revision_digest=revision.content_digest if revision is not None else None,
             )
             fit_after_stop = None
             after_fit_blockers: list[RunSwitchReason] = []
@@ -1530,6 +1734,10 @@ class RunSwitchOperationService:
                     group,
                     now=now,
                     excluded_run_ids=stopped_run_ids,
+                    effective_settings=effective_settings,
+                    model_documents=model_documents,
+                    revision_digest=revision.content_digest if revision is not None else None,
+                    planned_stops=stops,
                 )
                 # A current capacity failure caused only by the workload that
                 # will be stopped is an ordering decision, not a blocker.  A
@@ -1600,7 +1808,11 @@ class RunSwitchOperationService:
                 and build_candidate.state in {"planned", "building"}
                 else None
             )
-            image_digest = build.image_digest if build is not None else None
+            image_digest = (
+                build.image_digest
+                if build is not None
+                else runtime_storage.image_digest
+            )
             if installation is None:
                 if self._phase_executor is None:
                     blockers.append(
@@ -1681,6 +1893,7 @@ class RunSwitchOperationService:
                 and fit_after_stop.allowed
                 and any(
                     reason.code.startswith("run-switch.insufficient-memory")
+                    or reason.code.startswith("run-switch.resource.insufficient")
                     for reason in current_fit_blockers
                 )
             )
@@ -1724,13 +1937,17 @@ class RunSwitchOperationService:
                 and self._artifact_phase_executor is None
                 and any(
                     phase.kind in {"transfer", "verify", "cleanup"}
+                    or (
+                        phase.kind == "prepare"
+                        and phase.subphase == "runtime-image"
+                    )
                     for phase in phases
                 )
             ):
                 blockers.append(
                     _as_reason(
                         "run-switch.artifact-phase-executor-unavailable",
-                        "Artifact transfer, verification, or Spark-local cleanup requires an injected cache boundary.",
+                        "Artifact transfer, verification, Spark-local cleanup, or Controller image preparation requires an injected cache boundary.",
                         scope="artifact",
                         node_ids=node_ids,
                     )
@@ -1777,7 +1994,7 @@ class RunSwitchOperationService:
                 "action": request.action,
                 "model_version_sha256": request.model_version_sha256,
                 "recipe_revision_id": revision.id,
-                "recipe_content_sha256": revision.content_sha256,
+                "recipe_content_sha256": revision.content_digest,
                 "alias": request.alias,
                 "run_id": None,
                 "spark_group": group,
@@ -1793,6 +2010,7 @@ class RunSwitchOperationService:
                 "fit_current": fit_current,
                 "fit_after_stop": fit_after_stop,
                 "fit": fit_current,
+                "effective_settings": effective_settings_view,
                 "storage": storage,
                 "runtime_storage": runtime_storage,
                 "build": build_evidence,
@@ -1818,23 +2036,25 @@ class RunSwitchOperationService:
     def _resolve_documents(
         self,
         session: Session,
-        revision: LocalRecipeRevision | None,
+        revision: CatalogDocumentRevision | None,
         model_digest: str | None,
         *,
         requested_recipe_digest: str | None,
     ) -> tuple[
         Mapping[str, object] | None,
+        Mapping[tuple[str, str, str], Mapping[str, object]],
         list[CapabilityEvidence],
         list[CapabilityEvidence],
         list[RunSwitchReason],
     ]:
         blockers: list[RunSwitchReason] = []
         model_document: Mapping[str, object] | None = None
+        model_documents: dict[tuple[str, str, str], Mapping[str, object]] = {}
         recipe_caps = _recipe_capability_facts(revision.document if revision is not None else None)
         model_caps: list[CapabilityEvidence] = []
         if revision is None:
-            return None, [], recipe_caps, blockers
-        if requested_recipe_digest is not None and revision.content_sha256 != requested_recipe_digest:
+            return None, {}, [], recipe_caps, blockers
+        if requested_recipe_digest is not None and revision.content_digest != requested_recipe_digest:
             blockers.append(
                 _as_reason(
                     "run-switch.recipe_digest_changed",
@@ -1845,7 +2065,25 @@ class RunSwitchOperationService:
             )
         try:
             resolved = resolve_recipe_entities(session, revision.document)
-            resolved_model = resolved.get("model_version")
+            resolved_models = resolved.get("models")
+            resolved_model_items = (
+                tuple(resolved_models)
+                if isinstance(resolved_models, Sequence)
+                and not isinstance(resolved_models, (str, bytes))
+                else ()
+            )
+            resolved_model = resolved_model_items[0] if resolved_model_items else None
+            for resolved_item in resolved_model_items:
+                candidate_item = getattr(resolved_item, "document", None)
+                if not isinstance(candidate_item, Mapping):
+                    continue
+                reference = (
+                    getattr(resolved_item, "publisher", None),
+                    getattr(resolved_item, "slug", None),
+                    getattr(resolved_item, "content_digest", None),
+                )
+                if all(isinstance(value, str) and value for value in reference):
+                    model_documents[reference] = candidate_item
             candidate = getattr(resolved_model, "document", None)
             if isinstance(candidate, Mapping):
                 model_document = candidate
@@ -1860,7 +2098,7 @@ class RunSwitchOperationService:
                     model_caps = _summary_capability_facts(summary)
                 except (KeyError, RuntimeError, TypeError, ValueError):
                     model_caps = []
-            if model_digest is None or getattr(resolved_model, "content_sha256", None) != model_digest:
+            if model_digest is None or getattr(resolved_model, "content_digest", None) != model_digest:
                 blockers.append(
                     _as_reason(
                         "run-switch.model_revision_unavailable",
@@ -1876,12 +2114,12 @@ class RunSwitchOperationService:
                     scope="recipe",
                 )
             )
-        return model_document, model_caps, recipe_caps, blockers
+        return model_document, model_documents, model_caps, recipe_caps, blockers
 
     def _resolve_mapping(
         self,
         session: Session,
-        revision: LocalRecipeRevision,
+        revision: CatalogDocumentRevision,
         group: SparkGroup,
         *,
         actor: str,
@@ -2006,8 +2244,15 @@ class RunSwitchOperationService:
         revision_id: str,
         installation: RecipeInstallation | None,
     ) -> RecipeBuild | None:
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        if revision is not None and not _is_source_build(revision.document):
+            return None
         if installation is not None:
-            build = session.get(RecipeBuild, installation.recipe_build_id)
+            build = (
+                session.get(RecipeBuild, installation.recipe_build_id)
+                if installation.recipe_build_id is not None
+                else None
+            )
             if (
                 build is not None
                 and build.recipe_revision_id == revision_id
@@ -2040,7 +2285,7 @@ class RunSwitchOperationService:
     def _select_build(
         self,
         session: Session,
-        revision: LocalRecipeRevision,
+        revision: CatalogDocumentRevision,
         build: RecipeBuild | None,
         candidate: RecipeBuild | None,
         group: SparkGroup,
@@ -2058,6 +2303,12 @@ class RunSwitchOperationService:
         receipt; bytes are produced by ``recipe.build.v1`` during apply.
         """
 
+        if not _is_source_build(revision.document):
+            # Published images are selected by the canonical recipe and a
+            # verified RuntimeImageReceipt.  Creating a synthetic RecipeBuild
+            # would change the authority boundary and make a direct install
+            # depend on source availability.
+            return _BuildSelection(build=None, candidate=None)
         if build is not None:
             return _BuildSelection(build=build, candidate=build)
 
@@ -2196,7 +2447,7 @@ class RunSwitchOperationService:
     @staticmethod
     def _build_evidence(
         session: Session,
-        revision: LocalRecipeRevision | None,
+        revision: CatalogDocumentRevision | None,
         build: RecipeBuild | None,
         candidate: RecipeBuild | None,
         group: SparkGroup,
@@ -2211,9 +2462,44 @@ class RunSwitchOperationService:
         blockers: list[RunSwitchReason] = []
         warnings: list[RunSwitchReason] = []
         document = revision.document if revision is not None else {}
-        raw_build = document.get("build") if isinstance(document, Mapping) else None
-        raw_platform = raw_build.get("platform") if isinstance(raw_build, Mapping) else None
-        expected_architecture = str(raw_platform) if isinstance(raw_platform, str) and raw_platform else "unknown"
+        execution = document.get("execution") if isinstance(document, Mapping) else None
+        source_build = _is_source_build(document)
+        published_digest = _published_manifest_digest(document)
+        direct_receipt = None
+        if not source_build and revision is not None and published_digest is not None:
+            # Preview has not yet compiled mapping parameters into the
+            # effective execution key. Reuse the same immutable published
+            # image identity across parameter-only keys; compile/install
+            # resolves and persists the exact effective key before planning.
+            direct_receipt = session.scalar(
+                select(RuntimeImageReceipt)
+                .where(
+                    RuntimeImageReceipt.recipe_revision_id == revision.id,
+                    RuntimeImageReceipt.source == "published",
+                    RuntimeImageReceipt.original_content_digest == revision.content_digest,
+                    RuntimeImageReceipt.registry_manifest_digest == published_digest,
+                    RuntimeImageReceipt.architecture == "linux-arm64",
+                    RuntimeImageReceipt.runtime_interface == "vonk.runtime.v1",
+                    RuntimeImageReceipt.state == "verified",
+                )
+                .order_by(RuntimeImageReceipt.verified_at.desc(), RuntimeImageReceipt.id.desc())
+                .limit(1)
+            )
+        raw_build = execution.get("build") if isinstance(execution, Mapping) else None
+        raw_platform = None
+        if isinstance(raw_build, Mapping):
+            base_image = raw_build.get("base_image")
+            if isinstance(base_image, Mapping):
+                raw_platform = base_image.get("platform")
+            if raw_platform is None:
+                raw_platform = raw_build.get("platform")
+        expected_architecture = (
+            str(raw_platform)
+            if isinstance(raw_platform, str) and raw_platform
+            else "linux/arm64"
+            if not source_build
+            else "unknown"
+        )
         source_digest = (
             candidate.source_bundle_sha256
             if candidate is not None
@@ -2230,6 +2516,8 @@ class RunSwitchOperationService:
             else None
         )
         source_state = "available" if source_row is not None else "missing"
+        if not source_build:
+            source_state = "available"
         source = BuildSourceEvidence(
             state=source_state,
             source_bundle_sha256=(
@@ -2253,6 +2541,8 @@ class RunSwitchOperationService:
                 builder = session.get(AgentNode, candidate.builder_node_id)
                 if builder is not None and isinstance(builder.architecture, str):
                     observed_architecture = _normalise_architecture(builder.architecture)
+        elif direct_receipt is not None:
+            observed_architecture = _normalise_architecture(direct_receipt.architecture)
         node_architectures = tuple(
             _normalise_architecture(node.architecture)
             for node in session.scalars(
@@ -2298,9 +2588,27 @@ class RunSwitchOperationService:
                 else "The built image or selected Spark group does not match the recipe platform."
             ),
         )
-        image_digest = build.image_digest if build is not None else None
-        image_bytes = build.image_bytes if build is not None else None
-        oci_layout = build.oci_layout_sha256 if build is not None else None
+        image_digest = (
+            build.image_digest
+            if build is not None
+            else direct_receipt.platform_manifest_digest
+            if direct_receipt is not None
+            else published_digest
+        )
+        image_bytes = (
+            build.image_bytes
+            if build is not None
+            else direct_receipt.image_bytes
+            if direct_receipt is not None
+            else None
+        )
+        oci_layout = (
+            build.oci_layout_sha256
+            if build is not None
+            else direct_receipt.oci_archive_sha256
+            if direct_receipt is not None
+            else None
+        )
         runtime_reused = 0
         runtime_missing = 0
         runtime_reclaimable = 0
@@ -2346,6 +2654,7 @@ class RunSwitchOperationService:
                 else None
             ),
             image_digest=image_digest,
+            oci_layout_sha256=oci_layout,
             image_bytes=image_bytes,
             required_bytes=(
                 image_bytes * len(group.nodes)
@@ -2364,7 +2673,13 @@ class RunSwitchOperationService:
             reclaimable_bytes=runtime_reclaimable,
             reclaimable_digests=sorted(runtime_reclaimable_digests),
         )
-        state = "missing" if candidate is None else str(candidate.state)
+        state = (
+            "available"
+            if direct_receipt is not None
+            else "missing"
+            if candidate is None
+            else str(candidate.state)
+        )
         detail: str | None = None
         if build is not None:
             state = "available"
@@ -2373,10 +2688,12 @@ class RunSwitchOperationService:
                 detail = "The successful build has no verified OCI layout identity."
         elif candidate is not None:
             detail = candidate.error
+        elif not source_build and direct_receipt is None:
+            detail = "No verified published runtime image receipt is available for this recipe revision."
         if compatibility_state == "incompatible":
             state = "incompatible"
         if require_available:
-            if build is None:
+            if source_build and build is None:
                 pending = candidate is not None and candidate.state in {
                     "planned",
                     "building",
@@ -2404,6 +2721,16 @@ class RunSwitchOperationService:
                             node_ids=[node.node_id for node in group.nodes],
                         )
                     )
+            elif not source_build and direct_receipt is None:
+                warnings.append(
+                    _as_reason(
+                        "run-switch.runtime-image-preparation-required",
+                        detail or "The pinned published image will be pulled and verified before install admission.",
+                        scope="operation",
+                        severity="warning",
+                        node_ids=[node.node_id for node in group.nodes],
+                    )
+                )
             if compatibility_state == "incompatible":
                 blockers.append(
                     _as_reason(
@@ -2457,7 +2784,7 @@ class RunSwitchOperationService:
     @staticmethod
     def _preparation(
         *,
-        revision: LocalRecipeRevision | None,
+        revision: CatalogDocumentRevision | None,
         group: SparkGroup,
         inspection: ArtifactInspection,
         build: RecipeBuild | None,
@@ -2468,9 +2795,12 @@ class RunSwitchOperationService:
     ) -> RolloutPreparation | None:
         """Normalize model and runtime asset readiness for shared callers."""
 
-        if revision is None or build is None:
+        if revision is None or (
+            build is None and runtime_storage.image_digest is None
+        ):
             # There is no honest immutable runtime image identity to place in
-            # RolloutPreparation until a successful build receipt exists.
+            # RolloutPreparation until a successful build or published receipt
+            # exists.
             return None
         primary_model_digest = _primary_model_digest(revision.document)
         if primary_model_digest is None:
@@ -2557,7 +2887,7 @@ class RunSwitchOperationService:
         model = ModelArtifactPreparation(
             artifact_set_sha256=artifact_set_digest,
             model_version_sha256=primary_model_digest,
-            recipe_revision_sha256=revision.content_sha256,
+            recipe_revision_sha256=revision.content_digest,
             artifact_count=max(1, len(model_digests)),
             artifact_set_bytes=artifact_set_bytes,
             dependency_model_version_sha256=sorted(
@@ -2567,9 +2897,13 @@ class RunSwitchOperationService:
             controller=model_controller,
             targets=model_targets,
         )
-        image_digest = build.image_digest
-        image_bytes = build.image_bytes
-        layout_digest = build.oci_layout_sha256
+        image_digest = build.image_digest if build is not None else runtime_storage.image_digest
+        image_bytes = build.image_bytes if build is not None else runtime_storage.image_bytes
+        layout_digest = (
+            build.oci_layout_sha256
+            if build is not None
+            else runtime_storage.oci_layout_sha256
+        )
         if (
             not _is_oci_digest(image_digest)
             or image_bytes is None
@@ -2583,7 +2917,7 @@ class RunSwitchOperationService:
             missing_bytes=0,
             verified_sha256=layout_digest,
             verified_at=now,
-            source="controller-build",
+            source=("controller-build" if build is not None else "published"),
         )
         runtime_targets = [
             TargetAssetState(
@@ -2633,7 +2967,7 @@ class RunSwitchOperationService:
             image_bytes=image_bytes,
             architecture="linux-arm64",
             runtime_interface=_runtime_interface(revision.document),
-            build_id=build.id,
+            build_id=build.id if build is not None else None,
             controller=runtime_controller,
             targets=runtime_targets,
         )
@@ -2753,11 +3087,15 @@ class RunSwitchOperationService:
     def _fit(
         self,
         session: Session,
-        revision: LocalRecipeRevision | None,
+        revision: CatalogDocumentRevision | None,
         group: SparkGroup,
         *,
         now: datetime,
         excluded_run_ids: Sequence[str],
+        effective_settings: object | None = None,
+        model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None = None,
+        revision_digest: str | None = None,
+        planned_stops: Sequence[StopImpact] = (),
     ) -> tuple[list[FreshnessEvidence], SparkFit, list[RunSwitchReason], list[RunSwitchReason]]:
         freshness: list[FreshnessEvidence] = []
         nodes: list[SparkFitNode] = []
@@ -2820,6 +3158,7 @@ class RunSwitchOperationService:
             required_disk: int | None = None
             disk_free: int | None = None
             disk_free_after: int | None = None
+            demand: ResourceDemand | None = None
             if not isinstance(memory, Mapping) or not isinstance(disk, Mapping):
                 node_blockers.append(
                     _as_reason(
@@ -2875,17 +3214,77 @@ class RunSwitchOperationService:
                             session,
                             item.node_id,
                             reservation_kind,
-                            excluded,
+                            set(),
                         )
-                        memory_free_after = memory_available - reserved - required_memory
-                        if memory_free_after < max(self._memory_floor, reserve):
-                            node_blockers.append(
-                                _as_reason(
-                                    "run-switch.insufficient-memory",
-                                    f"The run would leave {memory_free_after} bytes below the memory floor.",
-                                    scope="node",
-                                    node_ids=(item.node_id,),
-                                )
+                        evidence = _resource_evidence(
+                            revision.document if revision is not None else {},
+                            memory,
+                            item.role,
+                            model_documents,
+                            required_memory,
+                            effective_settings,
+                        )
+                        if effective_settings is not None:
+                            demand = resource_demand(
+                                effective_settings,
+                                evidence,
+                                node_id=item.node_id,
+                            )
+                            node_blockers.extend(
+                                _resource_reason(reason, node_ids=(item.node_id,))
+                                for reason in demand.reasons
+                            )
+                        else:
+                            demand = ResourceDemand(
+                                None, None, None, None, None, None, "unknown", ()
+                            )
+                        releases = _planned_stop_releases(
+                            session,
+                            item.node_id,
+                            reservation_kind,
+                            planned_stops,
+                        )
+                        total_memory = (
+                            snapshot.host_memory_total_bytes
+                            if memory_kind == "host"
+                            else snapshot.gpu_memory_total_bytes
+                            if memory_kind == "accelerator"
+                            else min(
+                                snapshot.host_memory_total_bytes,
+                                snapshot.gpu_memory_total_bytes,
+                            )
+                        ) if snapshot is not None else None
+                        occupied_memory = (
+                            snapshot.host_memory_total_bytes - snapshot.host_memory_free_bytes
+                            if memory_kind == "host"
+                            else snapshot.gpu_memory_total_bytes - snapshot.gpu_memory_free_bytes
+                            if memory_kind == "accelerator"
+                            else max(
+                                snapshot.host_memory_total_bytes - snapshot.host_memory_free_bytes,
+                                snapshot.gpu_memory_total_bytes - snapshot.gpu_memory_free_bytes,
+                            )
+                        ) if snapshot is not None else None
+                        if demand is not None:
+                            fit_capacity = plan_capacity(
+                                {item.node_id: demand},
+                                [CapacitySnapshot(
+                                    item.node_id,
+                                    str(memory_kind),
+                                    total_memory,
+                                    occupied_memory,
+                                    reserved,
+                                    "fresh" if snapshot is not None and evidence.evidence_state != "unknown" else "unknown",
+                                    snapshot.evidence_digest if snapshot is not None else None,
+                                )],
+                                releases,
+                                memory_floor_bytes=max(self._memory_floor, reserve),
+                            )
+                            fit_node = fit_capacity.nodes[0]
+                            memory_free_after = fit_node.selected_free_after_bytes
+                            node_blockers.extend(
+                                _resource_reason(reason, node_ids=(item.node_id,))
+                                for reason in fit_node.reasons
+                                if reason.code.startswith("resource.insufficient")
                             )
                 disk_parts = [
                     _required_int(disk.get(name))
@@ -2935,6 +3334,22 @@ class RunSwitchOperationService:
                     memory_required_bytes=required_memory,
                     memory_available_bytes=memory_available,
                     memory_free_after_bytes=memory_free_after,
+                    resource_demand=(
+                        ResourceDemandEvidence(
+                            weights_bytes=demand.weights_bytes,
+                            runtime_overhead_bytes=demand.runtime_overhead_bytes,
+                            context_bytes=demand.context_bytes,
+                            concurrency_bytes=demand.concurrency_bytes,
+                            batch_bytes=demand.batch_bytes,
+                            total_bytes=demand.total_bytes,
+                            evidence_state=demand.evidence_state,
+                            evidence_digest=_resource_evidence_digest(
+                                revision_digest,
+                            ),
+                        )
+                        if demand is not None
+                        else None
+                    ),
                     blockers=node_blockers,
                     warnings=node_warnings,
                 )
@@ -3146,6 +3561,23 @@ class RunSwitchOperationService:
                 and runtime_storage.missing_image_distribution_bytes not in (None, 0)
             )
         )
+        # Image preparation is a Controller-side phase.  It must complete
+        # before install admission compiles and persists the schema-2 agent
+        # payload, even when the selected Spark already has a copy.  A pending
+        # source build has no image identity at preview time, so it is also an
+        # explicit preparation input for the same durable phase sequence.
+        needs_runtime_image_prepare = (
+            build_required
+            or (
+                runtime_storage is not None
+                and runtime_storage.missing_image_distribution_bytes not in (None, 0)
+            )
+            or (
+                runtime_storage is not None
+                and runtime_storage.image_digest is not None
+                and runtime_storage.oci_layout_sha256 is None
+            )
+        )
         needs_prepare = (
             build_required
             or installation_id is None
@@ -3200,17 +3632,6 @@ class RunSwitchOperationService:
                 "Download the exact model artifact set into Controller/NAS cache before Spark distribution.",
                 subphase="model-download",
             )
-        if needs_target_copy:
-            add(
-                "transfer",
-                "Copy missing model artifacts and runtime images while retaining reusable verified content.",
-                subphase="target-copy",
-            )
-            add(
-                "verify",
-                "Verify every transferred artifact against its immutable model set and OCI identity.",
-                subphase="target-copy",
-            )
         if stops and stop_before_prepare and not stop_added:
             add("stop", "Stop conflicting workloads before memory-consuming runtime preparation.")
             stop_added = True
@@ -3223,10 +3644,33 @@ class RunSwitchOperationService:
                 "Build the exact linux-arm64 runtime container in Controller storage before target transfer.",
                 subphase="container-build",
             )
+        if needs_runtime_image_prepare:
+            add(
+                "prepare",
+                "Prepare and verify the exact Controller OCI runtime image before install admission.",
+                subphase="runtime-image",
+            )
         if needs_prepare:
             add(
                 "prepare",
-                "Prepare the exact runtime and installation for this recipe revision.",
+                "Compile and persist the exact schema-2 launch plan before target transfer.",
+                subphase="runtime-plan",
+            )
+        if needs_target_copy:
+            add(
+                "transfer",
+                "Copy missing model artifacts and runtime images after the verified schema-2 payload is persisted.",
+                subphase="target-copy",
+            )
+            add(
+                "verify",
+                "Verify every transferred artifact against its immutable model set and OCI identity.",
+                subphase="target-copy",
+            )
+        if needs_prepare:
+            add(
+                "prepare",
+                "Start the prepared installation after target copy and verification complete.",
                 subphase="runtime-install",
             )
         if needs_cleanup:
@@ -3521,7 +3965,9 @@ class RunSwitchOperationService:
                     ):
                         results.append(receipt)
                         progress["phase_results"] = results
-                if phase.kind in {"transfer", "verify", "cleanup"}:
+                if phase.kind in {"transfer", "verify", "cleanup"} or (
+                    phase.kind == "prepare" and phase.subphase == "runtime-image"
+                ):
                     try:
                         _validate_artifact_execution(
                             persisted_plan,
@@ -3596,6 +4042,19 @@ class RunSwitchOperationService:
         if execution.waiting and execution.operation_id is None:
             self._fail(operation_id, f"run-switch.{phase.kind}-waiting-without-child")
             return True
+        if (
+            execution.operation_id is None
+            and execution.result is not None
+            and (
+                phase.kind in {"transfer", "verify", "cleanup"}
+                or (phase.kind == "prepare" and phase.subphase == "runtime-image")
+            )
+        ):
+            try:
+                _validate_artifact_execution(plan, phase, execution.result)
+            except RunSwitchOperationConflict as error:
+                self._fail(operation_id, str(error))
+                return True
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None:
@@ -3623,6 +4082,10 @@ class RunSwitchOperationService:
                     results.append(dict(execution.result))
                     progress["phase_results"] = results
             else:
+                if execution.result is not None:
+                    results = list(progress.get("phase_results", []))
+                    results.append(dict(execution.result))
+                    progress["phase_results"] = results
                 if phase.subphase == "container-build":
                     try:
                         receipt = _build_receipt_in_session(session, plan)
@@ -4307,6 +4770,8 @@ def _progress_view(
         if subphase not in {
             "container-build",
             "model-download",
+            "runtime-image",
+            "runtime-plan",
             "target-copy",
             "runtime-install",
         }:
@@ -4412,6 +4877,36 @@ def _validate_artifact_execution(
         raise RunSwitchOperationConflict(
             f"run-switch.{phase.kind}-returned-invalid-evidence"
         )
+    if phase.kind == "prepare" and phase.subphase == "runtime-image":
+        raw_receipt = result.get("runtime_image")
+        receipt = raw_receipt if isinstance(raw_receipt, Mapping) else result
+        image_digest = receipt.get("image_digest")
+        layout_digest = receipt.get("oci_layout_sha256", receipt.get("oci_archive_sha256"))
+        image_bytes = receipt.get("image_bytes")
+        if (
+            not _is_oci_digest(image_digest)
+            or not _is_hex_digest(layout_digest)
+            or type(image_bytes) is not int
+            or image_bytes < 1
+        ):
+            raise RunSwitchOperationConflict(
+                "run-switch.runtime-image-preparation-evidence-invalid"
+            )
+        registry_digest = receipt.get("registry_manifest_digest")
+        if (
+            plan.image_digest is not None
+            and image_digest != plan.image_digest
+            and registry_digest != plan.image_digest
+        ):
+            raise RunSwitchOperationConflict(
+                "run-switch.runtime-image-preparation-digest-mismatch"
+            )
+        expected_layout = plan.build.oci_layout_sha256
+        if expected_layout is not None and layout_digest != expected_layout:
+            raise RunSwitchOperationConflict(
+                "run-switch.runtime-image-preparation-layout-mismatch"
+            )
+        return
     if phase.kind == "transfer" and phase.subphase == "model-download":
         preparation = plan.preparation
         expected_set = (
@@ -4472,7 +4967,12 @@ def _validate_artifact_execution(
                     "run-switch.artifact-digest-verification-mismatch"
                 )
         if plan.image_digest is not None:
-            if result.get("verified_image_digest") != plan.image_digest:
+            verified_image = result.get("verified_image_digest")
+            verified_registry = result.get("verified_registry_manifest_digest")
+            if (
+                verified_image != plan.image_digest
+                and verified_registry != plan.image_digest
+            ):
                 raise RunSwitchOperationConflict(
                     "run-switch.runtime-image-verification-mismatch"
                 )
@@ -4562,10 +5062,34 @@ def _is_oci_digest(value: object) -> bool:
     return isinstance(value, str) and value.startswith("sha256:") and _is_hex_digest(value[7:])
 
 
+def _is_source_build(document: Mapping[str, object]) -> bool:
+    execution = document.get("execution")
+    return isinstance(execution, Mapping) and execution.get("mode") == "build"
+
+
+def _published_manifest_digest(document: Mapping[str, object]) -> str | None:
+    execution = document.get("execution")
+    image = execution.get("image") if isinstance(execution, Mapping) else None
+    digest = image.get("digest") if isinstance(image, Mapping) else None
+    if isinstance(digest, str) and _is_oci_digest(digest):
+        return digest
+    if isinstance(digest, str) and _is_hex_digest(digest):
+        return f"sha256:{digest}"
+    return None
+
+
 def _primary_model_digest(document: object) -> str | None:
     if not isinstance(document, Mapping):
         return None
-    model = document.get("model")
+    selections = document.get("models")
+    selection = (
+        selections[0]
+        if isinstance(selections, Sequence)
+        and not isinstance(selections, (str, bytes))
+        and selections
+        else None
+    )
+    model = selection.get("model") if isinstance(selection, Mapping) else None
     value = model.get("content_sha256") if isinstance(model, Mapping) else None
     return value if _is_hex_digest(value) else None
 

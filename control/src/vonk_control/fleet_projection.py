@@ -15,6 +15,7 @@ from pydantic import (
 )
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .models import (
@@ -23,12 +24,12 @@ from .models import (
     AgentNodeProfile,
     AgentPresence,
     ArtifactJob,
+    CatalogDocument,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
     Job,
-    LocalRecipe,
-    LocalRecipeRevision,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -68,6 +69,20 @@ _MAX_TELEMETRY_BYTES = 16 * 1024**4
 _MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
 _MAX_TELEMETRY_RUNS = 32
 _MAX_TELEMETRY_WORKLOADS = 128
+
+
+def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | None:
+    if (
+        revision.kind != "recipe"
+        or revision.schema_version != 2
+        or revision.state != "active"
+    ):
+        return None
+    try:
+        recipe = RecipeDefinition.model_validate(revision.document)
+    except (TypeError, ValueError):
+        return None
+    return recipe if content_sha256(recipe) == revision.content_digest else None
 _RUNTIME_CAPABILITY_LEDGER = (
     ("runtime.decode_tokens_per_second", "tokens/s", "derived"),
     ("runtime.prefill_tokens_per_second", "tokens/s", "derived"),
@@ -1322,8 +1337,8 @@ class FleetProjection:
                     InstallationNode,
                     RecipeInstallation,
                     ClusterMapping,
-                    LocalRecipeRevision,
-                    LocalRecipe,
+                    CatalogDocumentRevision,
+                    CatalogDocument,
                 )
                 .join(
                     RecipeInstallation,
@@ -1333,10 +1348,18 @@ class FleetProjection:
                     ClusterMapping, ClusterMapping.id == RecipeInstallation.mapping_id
                 )
                 .join(
-                    LocalRecipeRevision,
-                    LocalRecipeRevision.id == RecipeInstallation.recipe_revision_id,
+                    CatalogDocumentRevision,
+                    CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id,
                 )
-                .join(LocalRecipe, LocalRecipe.id == LocalRecipeRevision.recipe_id)
+                .join(
+                    CatalogDocument,
+                    CatalogDocument.id == CatalogDocumentRevision.document_id,
+                )
+                .where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.schema_version == 2,
+                    CatalogDocumentRevision.state == "active",
+                )
                 .where(InstallationNode.installation_id.in_(selected))
                 .order_by(InstallationNode.installation_id, InstallationNode.rank)
                 .limit(_MAX_GROUP_MEMBER_ROWS)
@@ -1404,6 +1427,8 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][3]
             recipe = group[0][4]
+            if _canonical_recipe(revision) is None:
+                continue
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
             reason = self._exact_group_reason(
                 expected_count=mapping.node_count,
@@ -1469,6 +1494,8 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][4]
             recipe = group[0][5]
+            if _canonical_recipe(revision) is None:
+                continue
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
             reason = self._exact_group_reason(
                 expected_count=mapping.node_count,
@@ -1546,8 +1573,8 @@ class FleetProjection:
                     RecipeRun,
                     ClusterMapping,
                     RecipeInstallation,
-                    LocalRecipeRevision,
-                    LocalRecipe,
+                    CatalogDocumentRevision,
+                    CatalogDocument,
                 )
                 .join(RecipeRun, RecipeRun.id == RunNode.run_id)
                 .join(ClusterMapping, ClusterMapping.id == RecipeRun.mapping_id)
@@ -1556,10 +1583,18 @@ class FleetProjection:
                     RecipeInstallation.id == RecipeRun.installation_id,
                 )
                 .join(
-                    LocalRecipeRevision,
-                    LocalRecipeRevision.id == RecipeInstallation.recipe_revision_id,
+                    CatalogDocumentRevision,
+                    CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id,
                 )
-                .join(LocalRecipe, LocalRecipe.id == LocalRecipeRevision.recipe_id)
+                .join(
+                    CatalogDocument,
+                    CatalogDocument.id == CatalogDocumentRevision.document_id,
+                )
+                .where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.schema_version == 2,
+                    CatalogDocumentRevision.state == "active",
+                )
                 .where(RunNode.run_id.in_(selected))
                 .order_by(RunNode.run_id, RunNode.rank)
                 .limit(_MAX_GROUP_MEMBER_ROWS)

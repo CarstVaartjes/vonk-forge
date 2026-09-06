@@ -139,7 +139,7 @@ it("uses distinct digest-bound Library action operations", async () => {
     requests.push(request);
     const path = new URL(request.url).pathname;
     if (path === "/api/v1/library") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
-    if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", slug: "one", title: "One", description: "", source_kind: "local"}, selected_revision: null, visual_recipe: null, topology: null, operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: []}), {status: 200});
+    if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", publisher: "vonk-forge", slug: "one", title: "One", description: "", content_sha256: "a".repeat(64)}, definition: {}, model_documents: [], operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: [], topology: null}), {status: 200});
     if (path.startsWith("/api/v1/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", authority_revision: "a".repeat(64), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
     return new Response(JSON.stringify({
       id: "operation-1", kind: "recipe.install", owner_id: "owner-1", state: "queued",
@@ -505,18 +505,6 @@ it("sends an explicit node-bound re-enrollment grant request", async () => {
   });
 });
 
-it("surfaces bounded stable API guidance for local catalog workflows", async () => {
-  vi.stubGlobal("fetch", async () => new Response(JSON.stringify({
-    code: "global.revision_changed",
-    detail: "The immutable revision no longer matches; review it again.",
-    request_id: "10000000-0000-4000-8000-000000000001",
-  }), {headers: {"Content-Type": "application/problem+json"}, status: 409}));
-
-  await expect(new ApiClient().previewGlobalRecipe(
-    `vonk://catalog/vonk/qwen@sha256:${"a".repeat(64)}`,
-  )).rejects.toThrow("global.revision_changed: The immutable revision no longer matches; review it again.");
-});
-
 it.each(["nonce=", "nonce==", "nonce=middle=="]) (
   "preserves the complete padded CSRF cookie value %s among multiple cookies",
   async csrfValue => {
@@ -573,31 +561,6 @@ it("does not expose orphaned package and deployment helpers after the Fleet/Libr
   ]) {
     expect(name in api).toBe(false);
   }
-});
-
-it("starts managed recipe synchronization with a fresh idempotency key", async () => {
-  document.cookie = "vonk_csrf=catalog-csrf; path=/";
-  let capturedPath = "";
-  let capturedInit: RequestInit | undefined;
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    capturedPath = String(input);
-    capturedInit = init;
-    return new Response(JSON.stringify({state: "current"}), {
-      headers: {"Content-Type": "application/json"},
-      status: 200,
-    });
-  });
-
-  const result = await new ApiClient().syncManagedRecipeCatalog();
-
-  expect(result.state).toBe("current");
-  expect(capturedPath).toBe("/api/v1/catalog/managed-recipes/sync");
-  expect(capturedInit?.method).toBe("POST");
-  expect(new Headers(capturedInit?.headers).get("X-CSRF-Token")).toBe("catalog-csrf");
-  const body = JSON.parse(String(capturedInit?.body)) as {request_key: string};
-  expect(body.request_key).toMatch(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-  );
 });
 
 it("previews, applies, and reads one durable atomic Library placement", async () => {

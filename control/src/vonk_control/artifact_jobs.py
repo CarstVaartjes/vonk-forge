@@ -25,6 +25,7 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .artifact_blob_store import (
     ArtifactBlobStore,
@@ -36,8 +37,8 @@ from .models import (
     ArtifactJob,
     ArtifactJobBlob,
     ArtifactJobFile,
+    CatalogDocumentRevision,
     Job,
-    LocalRecipeRevision,
     RecipeInstallation,
     RecipeRun,
     RunNode,
@@ -53,6 +54,26 @@ _EXTENSION = re.compile(r"\.[a-z0-9][a-z0-9._-]{0,15}\Z")
 
 class ArtifactJobError(ValueError):
     pass
+
+
+def _active_recipe_revision(
+    session: Session, revision_id: str
+) -> tuple[CatalogDocumentRevision, RecipeDefinition] | None:
+    revision = session.get(CatalogDocumentRevision, revision_id)
+    if (
+        revision is None
+        or revision.kind != "recipe"
+        or revision.schema_version != 2
+        or revision.state != "active"
+    ):
+        return None
+    try:
+        recipe = RecipeDefinition.model_validate(revision.document)
+    except (TypeError, ValueError):
+        return None
+    if content_sha256(recipe) != revision.content_digest:
+        return None
+    return revision, recipe
 
 
 @dataclass(frozen=True, slots=True)
@@ -785,19 +806,21 @@ class ArtifactJobService:
         if run is None or existing is None and run.state != "running":
             raise ArtifactJobError("recipe run is not accepting jobs")
         installation = session.get(RecipeInstallation, run.installation_id)
-        revision = (
-            session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        resolved = (
+            _active_recipe_revision(session, installation.recipe_revision_id)
             if installation is not None
             else None
         )
-        if revision is None or revision.lifecycle != "resolved":
+        if resolved is None:
             raise ArtifactJobError("recipe revision is unavailable")
-        if _recipe_interface(revision.document) != interface or interface == "openai":
+        _revision, recipe = resolved
+        document = recipe.model_dump(mode="json")
+        if _recipe_interface(document) != interface or interface == "openai":
             if existing is not None:
                 raise ArtifactJobError("request key was already used differently")
             raise ArtifactJobError("artifact job interface does not match the run")
         try:
-            contract = _compile_contract(revision.document, interface)
+            contract = _compile_contract(document, interface)
             contract_digest = _contract_sha256(contract)
             parameters_copy = _effective_parameters(contract, supplied_parameters)
             limits = _effective_output_limits(contract, output_limits)
@@ -1023,17 +1046,17 @@ class ArtifactJobService:
                     "another artifact job already owns this run reservation"
                 )
             installation = session.get(RecipeInstallation, run.installation_id)
-            revision = (
-                session.get(LocalRecipeRevision, installation.recipe_revision_id)
+            resolved = (
+                _active_recipe_revision(session, installation.recipe_revision_id)
                 if installation is not None
                 else None
             )
             if (
                 installation is None
-                or revision is None
-                or revision.content_sha256 is None
+                or resolved is None
             ):
                 raise ArtifactJobError("recipe job workload identity is unavailable")
+            revision, _recipe = resolved
             node = self._job_node_in_session(session, run)
             raw_files = artifact_job.input_manifest["files"]
             payload = {
@@ -1042,7 +1065,7 @@ class ArtifactJobService:
                 "run_id": run.id,
                 "installation_id": installation.id,
                 "recipe_revision_id": revision.id,
-                "recipe_content_sha256": revision.content_sha256,
+                "recipe_content_sha256": revision.content_digest,
                 "image_digest": installation.image_digest,
                 "plan_digest": run.plan_digest,
                 "interface": artifact_job.interface,
@@ -1067,7 +1090,7 @@ class ArtifactJobService:
                 payload=payload,
                 actor=actor,
                 request_id=request_id,
-                authority_digest=revision.content_sha256,
+                authority_digest=revision.content_digest,
                 now=now,
             )
             artifact_job.operation_id = operation.id

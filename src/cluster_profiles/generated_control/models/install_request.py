@@ -6,6 +6,9 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..types import UNSET, Unset
+from typing import cast, Union
+from typing import Union
 
 
 
@@ -22,14 +25,14 @@ class InstallRequest:
         Attributes:
             mapping_id (str):
             plan_digest (str):
-            recipe_build_id (str):
             request_key (str):
+            recipe_build_id (Union[None, Unset, str]):
      """
 
     mapping_id: str
     plan_digest: str
-    recipe_build_id: str
     request_key: str
+    recipe_build_id: Union[None, Unset, str] = UNSET
 
 
 
@@ -40,9 +43,13 @@ class InstallRequest:
 
         plan_digest = self.plan_digest
 
-        recipe_build_id = self.recipe_build_id
-
         request_key = self.request_key
+
+        recipe_build_id: Union[None, Unset, str]
+        if isinstance(self.recipe_build_id, Unset):
+            recipe_build_id = UNSET
+        else:
+            recipe_build_id = self.recipe_build_id
 
 
         field_dict: dict[str, Any] = {}
@@ -50,9 +57,10 @@ class InstallRequest:
         field_dict.update({
             "mapping_id": mapping_id,
             "plan_digest": plan_digest,
-            "recipe_build_id": recipe_build_id,
             "request_key": request_key,
         })
+        if recipe_build_id is not UNSET:
+            field_dict["recipe_build_id"] = recipe_build_id
 
         return field_dict
 
@@ -65,15 +73,23 @@ class InstallRequest:
 
         plan_digest = d.pop("plan_digest")
 
-        recipe_build_id = d.pop("recipe_build_id")
-
         request_key = d.pop("request_key")
+
+        def _parse_recipe_build_id(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        recipe_build_id = _parse_recipe_build_id(d.pop("recipe_build_id", UNSET))
+
 
         install_request = cls(
             mapping_id=mapping_id,
             plan_digest=plan_digest,
-            recipe_build_id=recipe_build_id,
             request_key=request_key,
+            recipe_build_id=recipe_build_id,
         )
 
         return install_request

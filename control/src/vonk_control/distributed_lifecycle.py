@@ -2,12 +2,65 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 
 class DistributedLifecycleError(RuntimeError):
     pass
+
+
+DEFAULT_DISTRIBUTED_READINESS_TIMEOUT_SECONDS = 60
+
+
+def canonical_distributed_readiness(
+    *,
+    topology: Mapping[str, object],
+    interfaces: Sequence[object],
+    lifecycle: Mapping[str, object],
+) -> dict[str, object] | None:
+    """Derive collective readiness from the canonical Recipe document.
+
+    Readiness is an execution property of a distributed endpoint.  It is
+    therefore derived from the topology owner and the interface health path;
+    it is not an authoring field under ``runtime.lifecycle``.
+    """
+
+    if topology.get("mode") != "distributed":
+        return None
+    roles = topology.get("roles")
+    if not isinstance(roles, Sequence) or isinstance(roles, (str, bytes)):
+        raise DistributedLifecycleError("distributed endpoint topology is invalid")
+    owners = tuple(
+        role
+        for role in roles
+        if isinstance(role, Mapping) and role.get("endpoint_owner") is True
+    )
+    if len(owners) != 1 or owners[0].get("count") != 1:
+        raise DistributedLifecycleError("distributed endpoint topology is invalid")
+    openai_interfaces = tuple(
+        interface
+        for interface in interfaces
+        if isinstance(interface, Mapping) and interface.get("adapter") == "openai"
+    )
+    if len(openai_interfaces) > 1:
+        raise DistributedLifecycleError("distributed readiness interface is invalid")
+    if not openai_interfaces:
+        # Job interfaces have filesystem completion semantics and do not
+        # expose an HTTP endpoint for collective readiness.
+        return None
+    interface = openai_interfaces[0]
+    path = interface.get("health_path")
+    if not isinstance(path, str) or not path.startswith("/"):
+        raise DistributedLifecycleError("distributed readiness path is invalid")
+    stop_timeout = lifecycle.get("stop_timeout_seconds")
+    if type(stop_timeout) is not int or not 1 <= stop_timeout <= 600:
+        raise DistributedLifecycleError("distributed readiness timeout is invalid")
+    return {
+        "strategy": "endpoint-owner-after-all-ranks",
+        "path": path,
+        "timeout_seconds": DEFAULT_DISTRIBUTED_READINESS_TIMEOUT_SECONDS,
+    }
 
 
 def _mapping(value: object, label: str) -> Mapping[str, Any]:
@@ -33,6 +86,8 @@ def _await_ranks(
 def recover_distributed_runtime(
     *,
     lifecycle: Mapping[str, object],
+    topology: Mapping[str, object],
+    interfaces: Sequence[object],
     roles: Mapping[int, str],
     failed_rank: int,
     withdraw: Callable[[], None],
@@ -46,13 +101,17 @@ def recover_distributed_runtime(
     """Withdraw, restart in the declared order, and publish after all ranks recover."""
 
     failure = _mapping(lifecycle.get("failure"), "rank-loss")
-    readiness = _mapping(lifecycle.get("readiness"), "readiness")
+    readiness = canonical_distributed_readiness(
+        topology=topology,
+        interfaces=interfaces,
+        lifecycle=lifecycle,
+    )
+    if readiness is None:
+        raise DistributedLifecycleError("distributed readiness policy is unavailable")
     if failure.get("rank_loss") != "withdraw-endpoint":
         raise DistributedLifecycleError("distributed rank-loss policy is invalid")
     if failure.get("recovery") != "restart-worker-then-entrypoint":
         raise DistributedLifecycleError("distributed recovery policy is invalid")
-    if readiness.get("strategy") != "endpoint-owner-after-all-ranks":
-        raise DistributedLifecycleError("distributed readiness policy is invalid")
     timeout = readiness.get("timeout_seconds")
     stop_timeout = lifecycle.get("stop_timeout_seconds")
     if (
@@ -107,4 +166,9 @@ def recover_distributed_runtime(
     }
 
 
-__all__ = ["DistributedLifecycleError", "recover_distributed_runtime"]
+__all__ = [
+    "DEFAULT_DISTRIBUTED_READINESS_TIMEOUT_SECONDS",
+    "DistributedLifecycleError",
+    "canonical_distributed_readiness",
+    "recover_distributed_runtime",
+]

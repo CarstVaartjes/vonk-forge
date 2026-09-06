@@ -13,6 +13,7 @@ from typing import Union
 
 if TYPE_CHECKING:
   from ..models.run_switch_reason import RunSwitchReason
+  from ..models.resource_demand_evidence import ResourceDemandEvidence
 
 
 
@@ -37,6 +38,7 @@ class SparkFitNode:
             memory_available_bytes (Union[None, Unset, int]):
             memory_free_after_bytes (Union[None, Unset, int]):
             memory_required_bytes (Union[None, Unset, int]):
+            resource_demand (Union['ResourceDemandEvidence', None, Unset]):
             warnings (Union[Unset, list['RunSwitchReason']]):
      """
 
@@ -51,6 +53,7 @@ class SparkFitNode:
     memory_available_bytes: Union[None, Unset, int] = UNSET
     memory_free_after_bytes: Union[None, Unset, int] = UNSET
     memory_required_bytes: Union[None, Unset, int] = UNSET
+    resource_demand: Union['ResourceDemandEvidence', None, Unset] = UNSET
     warnings: Union[Unset, list['RunSwitchReason']] = UNSET
 
 
@@ -59,6 +62,7 @@ class SparkFitNode:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.run_switch_reason import RunSwitchReason
+        from ..models.resource_demand_evidence import ResourceDemandEvidence
         allowed = self.allowed
 
         node_id = self.node_id
@@ -112,6 +116,14 @@ class SparkFitNode:
         else:
             memory_required_bytes = self.memory_required_bytes
 
+        resource_demand: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.resource_demand, Unset):
+            resource_demand = UNSET
+        elif isinstance(self.resource_demand, ResourceDemandEvidence):
+            resource_demand = self.resource_demand.to_dict()
+        else:
+            resource_demand = self.resource_demand
+
         warnings: Union[Unset, list[dict[str, Any]]] = UNSET
         if not isinstance(self.warnings, Unset):
             warnings = []
@@ -144,6 +156,8 @@ class SparkFitNode:
             field_dict["memory_free_after_bytes"] = memory_free_after_bytes
         if memory_required_bytes is not UNSET:
             field_dict["memory_required_bytes"] = memory_required_bytes
+        if resource_demand is not UNSET:
+            field_dict["resource_demand"] = resource_demand
         if warnings is not UNSET:
             field_dict["warnings"] = warnings
 
@@ -154,6 +168,7 @@ class SparkFitNode:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.run_switch_reason import RunSwitchReason
+        from ..models.resource_demand_evidence import ResourceDemandEvidence
         d = dict(src_dict)
         allowed = d.pop("allowed")
 
@@ -233,6 +248,26 @@ class SparkFitNode:
         memory_required_bytes = _parse_memory_required_bytes(d.pop("memory_required_bytes", UNSET))
 
 
+        def _parse_resource_demand(data: object) -> Union['ResourceDemandEvidence', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                resource_demand_type_0 = ResourceDemandEvidence.from_dict(data)
+
+
+
+                return resource_demand_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['ResourceDemandEvidence', None, Unset], data)
+
+        resource_demand = _parse_resource_demand(d.pop("resource_demand", UNSET))
+
+
         warnings = []
         _warnings = d.pop("warnings", UNSET)
         for warnings_item_data in (_warnings or []):
@@ -255,6 +290,7 @@ class SparkFitNode:
             memory_available_bytes=memory_available_bytes,
             memory_free_after_bytes=memory_free_after_bytes,
             memory_required_bytes=memory_required_bytes,
+            resource_demand=resource_demand,
             warnings=warnings,
         )
 

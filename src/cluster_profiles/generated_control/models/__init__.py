@@ -22,8 +22,13 @@ from .artifact_storage_impact_retention import ArtifactStorageImpactRetention
 from .artifact_storage_impact_running_coverage import ArtifactStorageImpactRunningCoverage
 from .artifact_storage_impact_spark_coverage import ArtifactStorageImpactSparkCoverage
 from .bounded_error_response import BoundedErrorResponse
+from .build_argument import BuildArgument
 from .build_compatibility_evidence import BuildCompatibilityEvidence
 from .build_compatibility_evidence_state import BuildCompatibilityEvidenceState
+from .build_context import BuildContext
+from .build_network import BuildNetwork
+from .build_network_mode import BuildNetworkMode
+from .build_patch import BuildPatch
 from .build_plan_response import BuildPlanResponse
 from .build_preview_input import BuildPreviewInput
 from .build_preview_request import BuildPreviewRequest
@@ -43,11 +48,6 @@ from .capability_evidence import CapabilityEvidence
 from .capability_evidence_evidence import CapabilityEvidenceEvidence
 from .capability_evidence_support import CapabilityEvidenceSupport
 from .capacity_reservations import CapacityReservations
-from .catalog_entity_list_response import CatalogEntityListResponse
-from .catalog_entity_revision_response import CatalogEntityRevisionResponse
-from .catalog_entity_revision_response_document import CatalogEntityRevisionResponseDocument
-from .catalog_entity_revision_response_kind import CatalogEntityRevisionResponseKind
-from .catalog_entity_revision_response_lifecycle import CatalogEntityRevisionResponseLifecycle
 from .catalog_problem import CatalogProblem
 from .change_request import ChangeRequest
 from .compatibility_identity import CompatibilityIdentity
@@ -59,10 +59,12 @@ from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
 from .create_artifact_job_response_createartifactjob import CreateArtifactJobResponseCreateartifactjob
-from .create_catalog_entity_request import CreateCatalogEntityRequest
-from .create_catalog_entity_request_document import CreateCatalogEntityRequestDocument
-from .create_recipe_request import CreateRecipeRequest
-from .create_recipe_request_document import CreateRecipeRequestDocument
+from .effective_parallelism import EffectiveParallelism
+from .effective_settings_selection import EffectiveSettingsSelection
+from .effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
+from .effective_settings_selection_change_effects_additional_property import EffectiveSettingsSelectionChangeEffectsAdditionalProperty
+from .effective_settings_selection_kind import EffectiveSettingsSelectionKind
+from .effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs
 from .endpoint_response import EndpointResponse
 from .enrollment_grant_response import EnrollmentGrantResponse
 from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInstallerUrl
@@ -114,7 +116,6 @@ from .fleet_profile_view_installation_policy import FleetProfileViewInstallation
 from .fleet_profile_view_labels import FleetProfileViewLabels
 from .fleet_snapshot import FleetSnapshot
 from .fleet_status_response import FleetStatusResponse
-from .fork_recipe_request import ForkRecipeRequest
 from .freshness_evidence import FreshnessEvidence
 from .freshness_evidence_state import FreshnessEvidenceState
 from .freshness_policy import FreshnessPolicy
@@ -124,10 +125,6 @@ from .get_artifact_job_result_response_getartifactjobresult import GetArtifactJo
 from .get_artifact_job_status_response_getartifactjobstatus import GetArtifactJobStatusResponseGetartifactjobstatus
 from .get_authority_response_authority_view_api_v1_authority_get import GetAuthorityResponseAuthorityViewApiV1AuthorityGet
 from .get_node_telemetry_history_resolution import GetNodeTelemetryHistoryResolution
-from .global_import_preview_request import GlobalImportPreviewRequest
-from .global_import_request import GlobalImportRequest
-from .global_revision_response import GlobalRevisionResponse
-from .global_revision_response_document import GlobalRevisionResponseDocument
 from .grant_request import GrantRequest
 from .grant_request_purpose import GrantRequestPurpose
 from .http_validation_error import HTTPValidationError
@@ -138,6 +135,8 @@ from .image_distribution_preview_target import ImageDistributionPreviewTarget
 from .image_distribution_request import ImageDistributionRequest
 from .install_node_plan_response import InstallNodePlanResponse
 from .install_plan_response import InstallPlanResponse
+from .install_plan_response_compiled_execution_plans import InstallPlanResponseCompiledExecutionPlans
+from .install_plan_response_compiled_execution_plans_additional_property import InstallPlanResponseCompiledExecutionPlansAdditionalProperty
 from .install_preview_input import InstallPreviewInput
 from .install_preview_request import InstallPreviewRequest
 from .install_preview_target import InstallPreviewTarget
@@ -155,6 +154,7 @@ from .job_progress import JobProgress
 from .job_resume_response import JobResumeResponse
 from .job_summary import JobSummary
 from .jobs_response import JobsResponse
+from .json_value import JsonValue
 from .library_capability_fact import LibraryCapabilityFact
 from .library_capability_fact_evidence_status import LibraryCapabilityFactEvidenceStatus
 from .library_capability_fact_support import LibraryCapabilityFactSupport
@@ -162,27 +162,10 @@ from .library_capability_inventory import LibraryCapabilityInventory
 from .library_capability_inventory_state import LibraryCapabilityInventoryState
 from .library_capability_provenance import LibraryCapabilityProvenance
 from .library_capability_provenance_source_kind import LibraryCapabilityProvenanceSourceKind
-from .library_catalog_reference import LibraryCatalogReference
-from .library_catalog_reference_kind import LibraryCatalogReferenceKind
 from .library_installation_summary import LibraryInstallationSummary
 from .library_installation_summary_state import LibraryInstallationSummaryState
 from .library_model import LibraryModel
-from .library_model_artifact import LibraryModelArtifact
-from .library_model_artifact_kind import LibraryModelArtifactKind
-from .library_model_definition import LibraryModelDefinition
-from .library_model_family import LibraryModelFamily
-from .library_model_format import LibraryModelFormat
-from .library_model_format_container import LibraryModelFormatContainer
-from .library_model_limits import LibraryModelLimits
-from .library_model_lineage import LibraryModelLineage
-from .library_model_lineage_relation import LibraryModelLineageRelation
-from .library_model_metadata import LibraryModelMetadata
-from .library_model_parameters import LibraryModelParameters
-from .library_model_sizes import LibraryModelSizes
-from .library_model_source import LibraryModelSource
-from .library_model_version_facts import LibraryModelVersionFacts
-from .library_model_version_facts_availability_type_0 import LibraryModelVersionFactsAvailabilityType0
-from .library_model_version_facts_state import LibraryModelVersionFactsState
+from .library_model_identity import LibraryModelIdentity
 from .library_placement_application import LibraryPlacementApplication
 from .library_placement_application_desired_state import LibraryPlacementApplicationDesiredState
 from .library_placement_application_progress import LibraryPlacementApplicationProgress
@@ -206,9 +189,9 @@ from .library_projection_reason import LibraryProjectionReason
 from .library_projection_reason_severity import LibraryProjectionReasonSeverity
 from .library_recipe_detail import LibraryRecipeDetail
 from .library_recipe_identity import LibraryRecipeIdentity
-from .library_recipe_identity_source_kind import LibraryRecipeIdentitySourceKind
+from .library_recipe_list import LibraryRecipeList
+from .library_recipe_model import LibraryRecipeModel
 from .library_recipe_summary import LibraryRecipeSummary
-from .library_recipe_summary_source_kind import LibraryRecipeSummarySourceKind
 from .library_run_summary import LibraryRunSummary
 from .library_run_summary_route_state import LibraryRunSummaryRouteState
 from .library_run_summary_state import LibraryRunSummaryState
@@ -237,6 +220,9 @@ from .mapping_response import MappingResponse
 from .mapping_selection import MappingSelection
 from .mapping_selection_action import MappingSelectionAction
 from .mapping_selection_parameters import MappingSelectionParameters
+from .model_access import ModelAccess
+from .model_access_authentication import ModelAccessAuthentication
+from .model_access_visibility import ModelAccessVisibility
 from .model_artifact_preparation import ModelArtifactPreparation
 from .model_artifact_preparation_completeness import ModelArtifactPreparationCompleteness
 from .model_cache_download_preview_request import ModelCacheDownloadPreviewRequest
@@ -260,11 +246,35 @@ from .model_cache_repair_preview_response_current_state import ModelCacheRepairP
 from .model_cache_repair_request import ModelCacheRepairRequest
 from .model_cache_update_response import ModelCacheUpdateResponse
 from .model_cache_updates_response import ModelCacheUpdatesResponse
+from .model_capabilities import ModelCapabilities
+from .model_capability_fact import ModelCapabilityFact
+from .model_capability_fact_capability import ModelCapabilityFactCapability
+from .model_capability_fact_evidence_status import ModelCapabilityFactEvidenceStatus
+from .model_capability_fact_support import ModelCapabilityFactSupport
+from .model_capability_provenance import ModelCapabilityProvenance
+from .model_definition import ModelDefinition
+from .model_definition_modalities_item import ModelDefinitionModalitiesItem
 from .model_deletion_installation_impact_response import ModelDeletionInstallationImpactResponse
 from .model_deletion_node_impact_response import ModelDeletionNodeImpactResponse
 from .model_deletion_plan_response import ModelDeletionPlanResponse
 from .model_deletion_preview_request import ModelDeletionPreviewRequest
-from .model_version_identity import ModelVersionIdentity
+from .model_family import ModelFamily
+from .model_file import ModelFile
+from .model_format import ModelFormat
+from .model_format_container import ModelFormatContainer
+from .model_identity import ModelIdentity
+from .model_license import ModelLicense
+from .model_limits import ModelLimits
+from .model_lineage import ModelLineage
+from .model_lineage_relation import ModelLineageRelation
+from .model_lineage_source import ModelLineageSource
+from .model_metadata import ModelMetadata
+from .model_parameters import ModelParameters
+from .model_provenance import ModelProvenance
+from .model_record import ModelRecord
+from .model_reference import ModelReference
+from .model_source import ModelSource
+from .model_territorial_restrictions import ModelTerritorialRestrictions
 from .node_connection import NodeConnection
 from .node_connection_agent_state import NodeConnectionAgentState
 from .node_connection_certificate_state import NodeConnectionCertificateState
@@ -316,69 +326,83 @@ from .projection_reason_severity import ProjectionReasonSeverity
 from .proposal_change_request import ProposalChangeRequest
 from .proposal_change_request_document import ProposalChangeRequestDocument
 from .proposal_request import ProposalRequest
-from .public_import_request import PublicImportRequest
-from .public_recipe_artifact_identity import PublicRecipeArtifactIdentity
-from .public_recipe_change import PublicRecipeChange
-from .public_recipe_change_kind import PublicRecipeChangeKind
-from .public_recipe_disk_requirements import PublicRecipeDiskRequirements
-from .public_recipe_fabric import PublicRecipeFabric
-from .public_recipe_fabric_connectivity import PublicRecipeFabricConnectivity
-from .public_recipe_list_item import PublicRecipeListItem
-from .public_recipe_list_item_alignment import PublicRecipeListItemAlignment
-from .public_recipe_list_item_capabilities_item import PublicRecipeListItemCapabilitiesItem
-from .public_recipe_list_item_execution_readiness import PublicRecipeListItemExecutionReadiness
-from .public_recipe_list_item_execution_readiness_basis import PublicRecipeListItemExecutionReadinessBasis
-from .public_recipe_list_item_qualification import PublicRecipeListItemQualification
-from .public_recipe_list_item_qualification_basis import PublicRecipeListItemQualificationBasis
-from .public_recipe_list_response import PublicRecipeListResponse
-from .public_recipe_local_state import PublicRecipeLocalState
-from .public_recipe_local_state_status import PublicRecipeLocalStateStatus
-from .public_recipe_preview_response import PublicRecipePreviewResponse
-from .public_recipe_preview_response_alignment import PublicRecipePreviewResponseAlignment
-from .public_recipe_preview_response_capabilities_item import PublicRecipePreviewResponseCapabilitiesItem
-from .public_recipe_preview_response_execution_readiness import PublicRecipePreviewResponseExecutionReadiness
-from .public_recipe_preview_response_execution_readiness_basis import PublicRecipePreviewResponseExecutionReadinessBasis
-from .public_recipe_preview_response_qualification import PublicRecipePreviewResponseQualification
-from .public_recipe_preview_response_qualification_basis import PublicRecipePreviewResponseQualificationBasis
-from .public_recipe_preview_response_source import PublicRecipePreviewResponseSource
-from .public_recipe_release import PublicRecipeRelease
-from .public_recipe_release_upgrade_effect import PublicRecipeReleaseUpgradeEffect
-from .public_recipe_topology_role import PublicRecipeTopologyRole
-from .publication_export_request import PublicationExportRequest
+from .recipe_benchmark import RecipeBenchmark
+from .recipe_benchmark_configuration import RecipeBenchmarkConfiguration
+from .recipe_build_definition import RecipeBuildDefinition
 from .recipe_build_evidence import RecipeBuildEvidence
 from .recipe_build_evidence_state import RecipeBuildEvidenceState
-from .recipe_disk_requirements import RecipeDiskRequirements
+from .recipe_build_execution import RecipeBuildExecution
+from .recipe_definition import RecipeDefinition
+from .recipe_disk_resources import RecipeDiskResources
+from .recipe_embedding_settings import RecipeEmbeddingSettings
+from .recipe_embedding_settings_knobs import RecipeEmbeddingSettingsKnobs
 from .recipe_fabric import RecipeFabric
 from .recipe_fabric_connectivity import RecipeFabricConnectivity
-from .recipe_library_import_request import RecipeLibraryImportRequest
-from .recipe_library_import_request_document import RecipeLibraryImportRequestDocument
-from .recipe_list_response import RecipeListResponse
-from .recipe_memory_requirements import RecipeMemoryRequirements
-from .recipe_memory_requirements_kind import RecipeMemoryRequirementsKind
+from .recipe_failure_policy import RecipeFailurePolicy
+from .recipe_failure_policy_rank_loss import RecipeFailurePolicyRankLoss
+from .recipe_failure_policy_recovery import RecipeFailurePolicyRecovery
+from .recipe_generation_settings import RecipeGenerationSettings
+from .recipe_generation_settings_knobs import RecipeGenerationSettingsKnobs
+from .recipe_http_serving_request import RecipeHttpServingRequest
+from .recipe_http_serving_request_body_type_0 import RecipeHttpServingRequestBodyType0
+from .recipe_http_serving_request_method import RecipeHttpServingRequestMethod
+from .recipe_identity import RecipeIdentity
+from .recipe_image import RecipeImage
+from .recipe_image_execution import RecipeImageExecution
+from .recipe_input_slot import RecipeInputSlot
+from .recipe_integer_setting import RecipeIntegerSetting
+from .recipe_integer_setting_change_effect import RecipeIntegerSettingChangeEffect
+from .recipe_job_input import RecipeJobInput
+from .recipe_job_interface import RecipeJobInterface
+from .recipe_job_interface_adapter import RecipeJobInterfaceAdapter
+from .recipe_job_output import RecipeJobOutput
+from .recipe_job_serving_request import RecipeJobServingRequest
+from .recipe_job_serving_request_input_slots import RecipeJobServingRequestInputSlots
+from .recipe_job_settings import RecipeJobSettings
+from .recipe_job_settings_knobs import RecipeJobSettingsKnobs
+from .recipe_lifecycle import RecipeLifecycle
+from .recipe_memory_resources import RecipeMemoryResources
+from .recipe_memory_resources_kind import RecipeMemoryResourcesKind
+from .recipe_metadata import RecipeMetadata
+from .recipe_metadata_alignment_type_0 import RecipeMetadataAlignmentType0
+from .recipe_model_file import RecipeModelFile
+from .recipe_model_selection import RecipeModelSelection
+from .recipe_mount import RecipeMount
+from .recipe_open_ai_interface import RecipeOpenAIInterface
+from .recipe_output_slot import RecipeOutputSlot
 from .recipe_parallelism import RecipeParallelism
 from .recipe_presence import RecipePresence
 from .recipe_presence_degraded_reason_type_0 import RecipePresenceDegradedReasonType0
 from .recipe_presence_group_state import RecipePresenceGroupState
 from .recipe_presence_rank_state import RecipePresenceRankState
-from .recipe_revision_response import RecipeRevisionResponse
-from .recipe_revision_response_document import RecipeRevisionResponseDocument
-from .recipe_revision_response_lifecycle import RecipeRevisionResponseLifecycle
-from .recipe_revision_response_origin import RecipeRevisionResponseOrigin
-from .recipe_revision_summary import RecipeRevisionSummary
-from .recipe_revision_summary_lifecycle import RecipeRevisionSummaryLifecycle
-from .recipe_role import RecipeRole
-from .recipe_summary_response import RecipeSummaryResponse
-from .recipe_summary_response_lifecycle import RecipeSummaryResponseLifecycle
-from .recipe_summary_response_origin import RecipeSummaryResponseOrigin
+from .recipe_provenance import RecipeProvenance
+from .recipe_provenance_source_kind import RecipeProvenanceSourceKind
+from .recipe_release import RecipeRelease
+from .recipe_release_change import RecipeReleaseChange
+from .recipe_release_change_kind import RecipeReleaseChangeKind
+from .recipe_release_history_entry import RecipeReleaseHistoryEntry
+from .recipe_release_history_entry_upgrade_effect import RecipeReleaseHistoryEntryUpgradeEffect
+from .recipe_role_resources import RecipeRoleResources
+from .recipe_runtime import RecipeRuntime
+from .recipe_runtime_argument import RecipeRuntimeArgument
+from .recipe_runtime_environment import RecipeRuntimeEnvironment
+from .recipe_serving_validation import RecipeServingValidation
+from .recipe_serving_validation_interface import RecipeServingValidationInterface
+from .recipe_setting import RecipeSetting
+from .recipe_setting_change_effect import RecipeSettingChangeEffect
 from .recipe_topology import RecipeTopology
+from .recipe_topology_mode import RecipeTopologyMode
+from .recipe_topology_role import RecipeTopologyRole
+from .recipe_validation import RecipeValidation
+from .recipe_validation_check import RecipeValidationCheck
+from .recipe_validation_check_assertions_item import RecipeValidationCheckAssertionsItem
+from .recipe_validation_check_kind import RecipeValidationCheckKind
 from .rejected_node import RejectedNode
 from .request_key import RequestKey
-from .resolve_catalog_entity_request import ResolveCatalogEntityRequest
 from .resolve_import_request import ResolveImportRequest
 from .resolve_import_request_overlays import ResolveImportRequestOverlays
-from .resolve_recipe_request import ResolveRecipeRequest
-from .revise_catalog_entity_request import ReviseCatalogEntityRequest
-from .revise_catalog_entity_request_document import ReviseCatalogEntityRequestDocument
+from .resource_demand_evidence import ResourceDemandEvidence
+from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
 from .rollout_preparation import RolloutPreparation
 from .run_node_plan_response import RunNodePlanResponse
 from .run_plan_response import RunPlanResponse
@@ -424,6 +448,7 @@ from .run_switch_reason_scope import RunSwitchReasonScope
 from .run_switch_reason_severity import RunSwitchReasonSeverity
 from .run_switch_stop_apply_request import RunSwitchStopApplyRequest
 from .run_switch_stop_preview_request import RunSwitchStopPreviewRequest
+from .runtime_argument_value import RuntimeArgumentValue
 from .runtime_image_preparation import RuntimeImagePreparation
 from .runtime_image_storage_impact import RuntimeImageStorageImpact
 from .runtime_image_storage_impact_nas_coverage import RuntimeImageStorageImpactNasCoverage
@@ -479,8 +504,6 @@ from .telemetry_workload import TelemetryWorkload
 from .telemetry_workload_state import TelemetryWorkloadState
 from .telemetry_workloads_response import TelemetryWorkloadsResponse
 from .telemetry_workloads_response_freshness import TelemetryWorkloadsResponseFreshness
-from .test_report_request import TestReportRequest
-from .test_report_request_report import TestReportRequestReport
 from .topology_placement import TopologyPlacement
 from .uninstall_active_run_response import UninstallActiveRunResponse
 from .uninstall_consequences_response import UninstallConsequencesResponse
@@ -490,38 +513,7 @@ from .uninstall_plan_response import UninstallPlanResponse
 from .uninstall_plan_response_recipe_content import UninstallPlanResponseRecipeContent
 from .uninstall_preview_request import UninstallPreviewRequest
 from .uninstall_request import UninstallRequest
-from .update_recipe_draft_request import UpdateRecipeDraftRequest
-from .update_recipe_draft_request_document import UpdateRecipeDraftRequestDocument
 from .validation_error import ValidationError
-from .visual_artifact import VisualArtifact
-from .visual_build import VisualBuild
-from .visual_build_additional_context import VisualBuildAdditionalContext
-from .visual_build_context import VisualBuildContext
-from .visual_build_option_value import VisualBuildOptionValue
-from .visual_build_options import VisualBuildOptions
-from .visual_build_options_format import VisualBuildOptionsFormat
-from .visual_build_options_layer_compression import VisualBuildOptionsLayerCompression
-from .visual_build_options_squash import VisualBuildOptionsSquash
-from .visual_catalog_identity import VisualCatalogIdentity
-from .visual_catalog_identity_kind import VisualCatalogIdentityKind
-from .visual_execution import VisualExecution
-from .visual_identity import VisualIdentity
-from .visual_input_slot import VisualInputSlot
-from .visual_interface import VisualInterface
-from .visual_interface_input import VisualInterfaceInput
-from .visual_interface_output import VisualInterfaceOutput
-from .visual_metadata import VisualMetadata
-from .visual_model_license import VisualModelLicense
-from .visual_output_slot import VisualOutputSlot
-from .visual_provenance import VisualProvenance
-from .visual_provenance_source_kind import VisualProvenanceSourceKind
-from .visual_recipe_document import VisualRecipeDocument
-from .visual_recipe_parameter import VisualRecipeParameter
-from .visual_recipe_parameter_change_effect import VisualRecipeParameterChangeEffect
-from .visual_recipe_parameter_type import VisualRecipeParameterType
-from .visual_runtime import VisualRuntime
-from .visual_territorial_restrictions import VisualTerritorialRestrictions
-from .visual_validation import VisualValidation
 
 __all__ = (
     "AgentRepairManifestRequest",
@@ -546,8 +538,13 @@ __all__ = (
     "ArtifactStorageImpactRunningCoverage",
     "ArtifactStorageImpactSparkCoverage",
     "BoundedErrorResponse",
+    "BuildArgument",
     "BuildCompatibilityEvidence",
     "BuildCompatibilityEvidenceState",
+    "BuildContext",
+    "BuildNetwork",
+    "BuildNetworkMode",
+    "BuildPatch",
     "BuildPlanResponse",
     "BuildPreviewInput",
     "BuildPreviewRequest",
@@ -567,11 +564,6 @@ __all__ = (
     "CapabilityEvidenceEvidence",
     "CapabilityEvidenceSupport",
     "CapacityReservations",
-    "CatalogEntityListResponse",
-    "CatalogEntityRevisionResponse",
-    "CatalogEntityRevisionResponseDocument",
-    "CatalogEntityRevisionResponseKind",
-    "CatalogEntityRevisionResponseLifecycle",
     "CatalogProblem",
     "ChangeRequest",
     "CompatibilityIdentity",
@@ -583,10 +575,12 @@ __all__ = (
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
     "CreateArtifactJobResponseCreateartifactjob",
-    "CreateCatalogEntityRequest",
-    "CreateCatalogEntityRequestDocument",
-    "CreateRecipeRequest",
-    "CreateRecipeRequestDocument",
+    "EffectiveParallelism",
+    "EffectiveSettingsSelection",
+    "EffectiveSettingsSelectionChangeEffects",
+    "EffectiveSettingsSelectionChangeEffectsAdditionalProperty",
+    "EffectiveSettingsSelectionKind",
+    "EffectiveSettingsSelectionKnobs",
     "EndpointResponse",
     "EnrollmentGrantResponse",
     "EnrollmentGrantResponseInstallerUrl",
@@ -638,7 +632,6 @@ __all__ = (
     "FleetProfileViewLabels",
     "FleetSnapshot",
     "FleetStatusResponse",
-    "ForkRecipeRequest",
     "FreshnessEvidence",
     "FreshnessEvidenceState",
     "FreshnessPolicy",
@@ -648,10 +641,6 @@ __all__ = (
     "GetArtifactJobStatusResponseGetartifactjobstatus",
     "GetAuthorityResponseAuthorityViewApiV1AuthorityGet",
     "GetNodeTelemetryHistoryResolution",
-    "GlobalImportPreviewRequest",
-    "GlobalImportRequest",
-    "GlobalRevisionResponse",
-    "GlobalRevisionResponseDocument",
     "GrantRequest",
     "GrantRequestPurpose",
     "HTTPValidationError",
@@ -662,6 +651,8 @@ __all__ = (
     "ImageDistributionRequest",
     "InstallNodePlanResponse",
     "InstallPlanResponse",
+    "InstallPlanResponseCompiledExecutionPlans",
+    "InstallPlanResponseCompiledExecutionPlansAdditionalProperty",
     "InstallPreviewInput",
     "InstallPreviewRequest",
     "InstallPreviewTarget",
@@ -679,6 +670,7 @@ __all__ = (
     "JobResumeResponse",
     "JobsResponse",
     "JobSummary",
+    "JsonValue",
     "LibraryCapabilityFact",
     "LibraryCapabilityFactEvidenceStatus",
     "LibraryCapabilityFactSupport",
@@ -686,27 +678,10 @@ __all__ = (
     "LibraryCapabilityInventoryState",
     "LibraryCapabilityProvenance",
     "LibraryCapabilityProvenanceSourceKind",
-    "LibraryCatalogReference",
-    "LibraryCatalogReferenceKind",
     "LibraryInstallationSummary",
     "LibraryInstallationSummaryState",
     "LibraryModel",
-    "LibraryModelArtifact",
-    "LibraryModelArtifactKind",
-    "LibraryModelDefinition",
-    "LibraryModelFamily",
-    "LibraryModelFormat",
-    "LibraryModelFormatContainer",
-    "LibraryModelLimits",
-    "LibraryModelLineage",
-    "LibraryModelLineageRelation",
-    "LibraryModelMetadata",
-    "LibraryModelParameters",
-    "LibraryModelSizes",
-    "LibraryModelSource",
-    "LibraryModelVersionFacts",
-    "LibraryModelVersionFactsAvailabilityType0",
-    "LibraryModelVersionFactsState",
+    "LibraryModelIdentity",
     "LibraryPlacementApplication",
     "LibraryPlacementApplicationDesiredState",
     "LibraryPlacementApplicationProgress",
@@ -730,9 +705,9 @@ __all__ = (
     "LibraryProjectionReasonSeverity",
     "LibraryRecipeDetail",
     "LibraryRecipeIdentity",
-    "LibraryRecipeIdentitySourceKind",
+    "LibraryRecipeList",
+    "LibraryRecipeModel",
     "LibraryRecipeSummary",
-    "LibraryRecipeSummarySourceKind",
     "LibraryRunSummary",
     "LibraryRunSummaryRouteState",
     "LibraryRunSummaryState",
@@ -761,6 +736,9 @@ __all__ = (
     "MappingSelection",
     "MappingSelectionAction",
     "MappingSelectionParameters",
+    "ModelAccess",
+    "ModelAccessAuthentication",
+    "ModelAccessVisibility",
     "ModelArtifactPreparation",
     "ModelArtifactPreparationCompleteness",
     "ModelCacheDownloadPreviewRequest",
@@ -784,11 +762,35 @@ __all__ = (
     "ModelCacheRepairRequest",
     "ModelCacheUpdateResponse",
     "ModelCacheUpdatesResponse",
+    "ModelCapabilities",
+    "ModelCapabilityFact",
+    "ModelCapabilityFactCapability",
+    "ModelCapabilityFactEvidenceStatus",
+    "ModelCapabilityFactSupport",
+    "ModelCapabilityProvenance",
+    "ModelDefinition",
+    "ModelDefinitionModalitiesItem",
     "ModelDeletionInstallationImpactResponse",
     "ModelDeletionNodeImpactResponse",
     "ModelDeletionPlanResponse",
     "ModelDeletionPreviewRequest",
-    "ModelVersionIdentity",
+    "ModelFamily",
+    "ModelFile",
+    "ModelFormat",
+    "ModelFormatContainer",
+    "ModelIdentity",
+    "ModelLicense",
+    "ModelLimits",
+    "ModelLineage",
+    "ModelLineageRelation",
+    "ModelLineageSource",
+    "ModelMetadata",
+    "ModelParameters",
+    "ModelProvenance",
+    "ModelRecord",
+    "ModelReference",
+    "ModelSource",
+    "ModelTerritorialRestrictions",
     "NodeConnection",
     "NodeConnectionAgentState",
     "NodeConnectionCertificateState",
@@ -840,69 +842,83 @@ __all__ = (
     "ProposalChangeRequest",
     "ProposalChangeRequestDocument",
     "ProposalRequest",
-    "PublicationExportRequest",
-    "PublicImportRequest",
-    "PublicRecipeArtifactIdentity",
-    "PublicRecipeChange",
-    "PublicRecipeChangeKind",
-    "PublicRecipeDiskRequirements",
-    "PublicRecipeFabric",
-    "PublicRecipeFabricConnectivity",
-    "PublicRecipeListItem",
-    "PublicRecipeListItemAlignment",
-    "PublicRecipeListItemCapabilitiesItem",
-    "PublicRecipeListItemExecutionReadiness",
-    "PublicRecipeListItemExecutionReadinessBasis",
-    "PublicRecipeListItemQualification",
-    "PublicRecipeListItemQualificationBasis",
-    "PublicRecipeListResponse",
-    "PublicRecipeLocalState",
-    "PublicRecipeLocalStateStatus",
-    "PublicRecipePreviewResponse",
-    "PublicRecipePreviewResponseAlignment",
-    "PublicRecipePreviewResponseCapabilitiesItem",
-    "PublicRecipePreviewResponseExecutionReadiness",
-    "PublicRecipePreviewResponseExecutionReadinessBasis",
-    "PublicRecipePreviewResponseQualification",
-    "PublicRecipePreviewResponseQualificationBasis",
-    "PublicRecipePreviewResponseSource",
-    "PublicRecipeRelease",
-    "PublicRecipeReleaseUpgradeEffect",
-    "PublicRecipeTopologyRole",
+    "RecipeBenchmark",
+    "RecipeBenchmarkConfiguration",
+    "RecipeBuildDefinition",
     "RecipeBuildEvidence",
     "RecipeBuildEvidenceState",
-    "RecipeDiskRequirements",
+    "RecipeBuildExecution",
+    "RecipeDefinition",
+    "RecipeDiskResources",
+    "RecipeEmbeddingSettings",
+    "RecipeEmbeddingSettingsKnobs",
     "RecipeFabric",
     "RecipeFabricConnectivity",
-    "RecipeLibraryImportRequest",
-    "RecipeLibraryImportRequestDocument",
-    "RecipeListResponse",
-    "RecipeMemoryRequirements",
-    "RecipeMemoryRequirementsKind",
+    "RecipeFailurePolicy",
+    "RecipeFailurePolicyRankLoss",
+    "RecipeFailurePolicyRecovery",
+    "RecipeGenerationSettings",
+    "RecipeGenerationSettingsKnobs",
+    "RecipeHttpServingRequest",
+    "RecipeHttpServingRequestBodyType0",
+    "RecipeHttpServingRequestMethod",
+    "RecipeIdentity",
+    "RecipeImage",
+    "RecipeImageExecution",
+    "RecipeInputSlot",
+    "RecipeIntegerSetting",
+    "RecipeIntegerSettingChangeEffect",
+    "RecipeJobInput",
+    "RecipeJobInterface",
+    "RecipeJobInterfaceAdapter",
+    "RecipeJobOutput",
+    "RecipeJobServingRequest",
+    "RecipeJobServingRequestInputSlots",
+    "RecipeJobSettings",
+    "RecipeJobSettingsKnobs",
+    "RecipeLifecycle",
+    "RecipeMemoryResources",
+    "RecipeMemoryResourcesKind",
+    "RecipeMetadata",
+    "RecipeMetadataAlignmentType0",
+    "RecipeModelFile",
+    "RecipeModelSelection",
+    "RecipeMount",
+    "RecipeOpenAIInterface",
+    "RecipeOutputSlot",
     "RecipeParallelism",
     "RecipePresence",
     "RecipePresenceDegradedReasonType0",
     "RecipePresenceGroupState",
     "RecipePresenceRankState",
-    "RecipeRevisionResponse",
-    "RecipeRevisionResponseDocument",
-    "RecipeRevisionResponseLifecycle",
-    "RecipeRevisionResponseOrigin",
-    "RecipeRevisionSummary",
-    "RecipeRevisionSummaryLifecycle",
-    "RecipeRole",
-    "RecipeSummaryResponse",
-    "RecipeSummaryResponseLifecycle",
-    "RecipeSummaryResponseOrigin",
+    "RecipeProvenance",
+    "RecipeProvenanceSourceKind",
+    "RecipeRelease",
+    "RecipeReleaseChange",
+    "RecipeReleaseChangeKind",
+    "RecipeReleaseHistoryEntry",
+    "RecipeReleaseHistoryEntryUpgradeEffect",
+    "RecipeRoleResources",
+    "RecipeRuntime",
+    "RecipeRuntimeArgument",
+    "RecipeRuntimeEnvironment",
+    "RecipeServingValidation",
+    "RecipeServingValidationInterface",
+    "RecipeSetting",
+    "RecipeSettingChangeEffect",
     "RecipeTopology",
+    "RecipeTopologyMode",
+    "RecipeTopologyRole",
+    "RecipeValidation",
+    "RecipeValidationCheck",
+    "RecipeValidationCheckAssertionsItem",
+    "RecipeValidationCheckKind",
     "RejectedNode",
     "RequestKey",
-    "ResolveCatalogEntityRequest",
     "ResolveImportRequest",
     "ResolveImportRequestOverlays",
-    "ResolveRecipeRequest",
-    "ReviseCatalogEntityRequest",
-    "ReviseCatalogEntityRequestDocument",
+    "ResourceDemandEvidence",
+    "ResourceDemandEvidenceEvidenceState",
     "RolloutPreparation",
     "RunNodePlanResponse",
     "RunPlanResponse",
@@ -948,6 +964,7 @@ __all__ = (
     "RunSwitchReasonSeverity",
     "RunSwitchStopApplyRequest",
     "RunSwitchStopPreviewRequest",
+    "RuntimeArgumentValue",
     "RuntimeImagePreparation",
     "RuntimeImageStorageImpact",
     "RuntimeImageStorageImpactNasCoverage",
@@ -1003,8 +1020,6 @@ __all__ = (
     "TelemetryWorkloadsResponse",
     "TelemetryWorkloadsResponseFreshness",
     "TelemetryWorkloadState",
-    "TestReportRequest",
-    "TestReportRequestReport",
     "TopologyPlacement",
     "UninstallActiveRunResponse",
     "UninstallConsequencesResponse",
@@ -1014,36 +1029,5 @@ __all__ = (
     "UninstallPlanResponseRecipeContent",
     "UninstallPreviewRequest",
     "UninstallRequest",
-    "UpdateRecipeDraftRequest",
-    "UpdateRecipeDraftRequestDocument",
     "ValidationError",
-    "VisualArtifact",
-    "VisualBuild",
-    "VisualBuildAdditionalContext",
-    "VisualBuildContext",
-    "VisualBuildOptions",
-    "VisualBuildOptionsFormat",
-    "VisualBuildOptionsLayerCompression",
-    "VisualBuildOptionsSquash",
-    "VisualBuildOptionValue",
-    "VisualCatalogIdentity",
-    "VisualCatalogIdentityKind",
-    "VisualExecution",
-    "VisualIdentity",
-    "VisualInputSlot",
-    "VisualInterface",
-    "VisualInterfaceInput",
-    "VisualInterfaceOutput",
-    "VisualMetadata",
-    "VisualModelLicense",
-    "VisualOutputSlot",
-    "VisualProvenance",
-    "VisualProvenanceSourceKind",
-    "VisualRecipeDocument",
-    "VisualRecipeParameter",
-    "VisualRecipeParameterChangeEffect",
-    "VisualRecipeParameterType",
-    "VisualRuntime",
-    "VisualTerritorialRestrictions",
-    "VisualValidation",
 )

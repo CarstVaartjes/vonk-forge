@@ -3,9 +3,21 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from vonk_control.agent_api import AgentApiServices
+from vonk_control.agent_jobs import AgentJobService
+from vonk_control.api import create_app
+from vonk_control.audit import MemoryAuditStore
+from vonk_control.auth import TokenCodec
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     CompiledExecutionPlan,
@@ -15,7 +27,19 @@ from vonk_control.compiled_execution_plan import (
     compile_verified_execution_plan,
     execution_identity_sha256,
     materialized_model_path,
+    validate_compiled_launch_payload,
 )
+from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.models import (
+    AgentCertificate,
+    AgentNode,
+    Base,
+    InstallationNode,
+    RecipeInstallation,
+)
+from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
+from vonk_control.recipe_operations import _compiled_plan_for_start
+from vonk_control.source_bundles import SourceBundleStore
 
 
 def _spec(
@@ -33,7 +57,7 @@ def _spec(
             "interface": "vonk.runtime.v1",
             "adapter": "vllm",
             "adapter_version": 1,
-            "image": "registry.example/vonk/vllm@sha256:" + "1" * 64,
+            "image": "registry.example/vonk/vllm@sha256:" + "0" * 64,
             "architecture": "linux/arm64",
             "entrypoint": ["/opt/vonk/bin/vllm", "serve"],
             "arguments": [],
@@ -43,6 +67,7 @@ def _spec(
         "security": {
             "devices": [],
             "capabilities": [],
+            "network_mode": "none",
             "host_network": False,
             "privileged": False,
             "user": "10001:10001",
@@ -141,6 +166,12 @@ def _image(
         "image_bytes": 4096,
         "architecture": "linux-arm64",
         "runtime_interface": "vonk.runtime.v1",
+        "registry_manifest_digest": (
+            "sha256:" + "0" * 64 if source == "published" else None
+        ),
+        "platform_manifest_digest": "sha256:" + "1" * 64,
+        "local_image_config_id": "sha256:" + "2" * 64,
+        "runtime_interface_label": "v1",
         "source": source,
         "build_id": build_id,
         "distribution_object": {
@@ -157,11 +188,26 @@ def _compile(
     *,
     image: dict[str, object] | None = None,
 ) -> CompiledExecutionPlan:
+    selected_image = _image() if image is None else image
+    selected_spec = _spec() if spec is None else spec
+    runtime = selected_spec.get("runtime")
+    if selected_image.get("source") == "controller-build" and isinstance(runtime, dict):
+        selected_spec = dict(selected_spec)
+        selected_spec["runtime"] = {
+            **runtime,
+            "image": "localhost/vonk/recipe-build@" + str(selected_image["image_digest"]),
+        }
+        identity = selected_spec.get("identity")
+        if isinstance(identity, dict):
+            selected_spec["identity"] = {
+                **identity,
+                "execution_sha256": execution_identity_sha256(selected_spec),
+            }
     return compile_verified_execution_plan(
-        _spec() if spec is None else spec,
+        selected_spec,
         model_artifact_set_sha256="d" * 64,
         model_objects=_model_objects(),
-        runtime_image=_image() if image is None else image,
+        runtime_image=selected_image,
     )
 
 
@@ -188,15 +234,487 @@ def test_prebuilt_plan_binds_exact_file_and_controller_archive_receipts() -> Non
     assert "build_id" not in payload["runtime_image"]
 
 
+def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    validated = validate_compiled_launch_payload(payload)
+    assert set(validated) == {
+        "schema_version",
+        "identity",
+        "runtime",
+        "artifacts",
+        "runtime_image",
+        "security",
+        "topology",
+        "lifecycle",
+        "endpoint",
+        "job",
+    }
+    assert validated["runtime"]["executable"] == "/opt/vonk/bin/vllm"
+    assert validated["runtime"]["argv"] == ["serve"]
+    assert validated["artifacts"][0]["selection_id"] == "primary"
+    assert validated["artifacts"][0]["mount"] == {
+        "target": "/models",
+        "read_only": True,
+    }
+    assert validated["security"]["network_mode"] == "none"
+    assert validated["security"]["host_network"] is False
+    assert validated["endpoint"]["port"] == 8000
+    assert validated["job"] is None
+    rendered = json.dumps(validated, sort_keys=True)
+    assert "model_version_sha256" not in rendered
+    assert "runtime_distribution_sha256" not in rendered
+    assert "patch_bundle_sha256" not in rendered
+
+
+def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    missing = copy.deepcopy(payload)
+    del missing["job"]
+    with pytest.raises(CompiledExecutionPlanError, match="schema"):
+        validate_compiled_launch_payload(missing)
+
+    both = copy.deepcopy(payload)
+    both["job"] = {"id": "job-1"}
+    with pytest.raises(CompiledExecutionPlanError, match="interface"):
+        validate_compiled_launch_payload(both)
+
+
+def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    polluted = copy.deepcopy(payload)
+    polluted["identity"]["model_version_sha256"] = "f" * 64
+    with pytest.raises(CompiledExecutionPlanError, match="identity fields"):
+        validate_compiled_launch_payload(polluted)
+
+    mismatched = copy.deepcopy(payload)
+    mismatched["artifacts"][0]["distribution_object"]["bytes"] += 1
+    with pytest.raises(CompiledExecutionPlanError, match="receipt is inconsistent"):
+        validate_compiled_launch_payload(mismatched)
+
+
+def test_compiled_launch_payload_rejects_non_isolated_network_mode() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    polluted = copy.deepcopy(payload)
+    polluted["security"]["network_mode"] = "bridge"
+    with pytest.raises(CompiledExecutionPlanError, match="isolated network"):
+        validate_compiled_launch_payload(polluted)
+
+    polluted = copy.deepcopy(payload)
+    polluted["security"]["host_network"] = True
+    with pytest.raises(CompiledExecutionPlanError, match="isolated network"):
+        validate_compiled_launch_payload(polluted)
+
+
+def test_start_claim_binds_live_rank_placement_without_reintroducing_authority() -> None:
+    plan = _compile()
+    payload = plan.to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    started = _compiled_plan_for_start(
+        payload,
+        node=SimpleNamespace(
+            node_id="spk_" + "a" * 32,
+            rank=0,
+            role="entrypoint",
+            port=8000,
+            required_memory_bytes=4096,
+            fabric_address=None,
+        ),
+        endpoint_address="192.0.2.10",
+        master_address=None,
+        master_port=None,
+        world_size=1,
+    )
+    assert started["runtime"]["placement"]["endpoint_address"] == "192.0.2.10"
+    assert started["runtime"]["placement"]["reserved_memory_bytes"] == 4096
+    assert validate_compiled_launch_payload(started)["schema_version"] == 2
+
+
+def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
+    tmp_path: Path,
+) -> None:
+    node_id = "spk_" + "a" * 32
+    serial = "serial-a"
+    fingerprint = "fingerprint-a"
+    now = datetime(2026, 9, 6, tzinfo=UTC)
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'agent-spec.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    presence = AgentPresenceService(
+        sessions,
+        ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=lambda: now,
+    )
+    operations = AgentJobService(sessions, clock=lambda: now)
+    operations.set_contact_consumer(presence.observe_in_session)
+    services = AgentApiServices(
+        enrollment=None,
+        operations=operations,
+        sessions=sessions,
+        clock=lambda: now,
+        presence=presence,
+        artifact_root=tmp_path / "artifacts",
+        source_bundles=SourceBundleStore(tmp_path / "bundles"),
+    )
+    services.artifact_root.mkdir()
+    spec = _spec()
+    payload = _compile(spec).to_compiled_launch_payload(
+        spec,
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    installation_id = str(uuid4())
+    with sessions.begin() as session:
+        session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
+        session.add(
+            AgentCertificate(
+                serial=serial,
+                node_id=node_id,
+                fingerprint=fingerprint,
+                not_before=now - timedelta(days=1),
+                not_after=now + timedelta(days=1),
+                state="active",
+                generation=1,
+            )
+        )
+        session.add(
+            RecipeInstallation(
+                id=installation_id,
+                recipe_revision_id=str(uuid4()),
+                mapping_id=str(uuid4()),
+                mapping_generation=1,
+                recipe_build_id=str(uuid4()),
+                image_digest=payload["runtime_image"]["image_digest"],
+                plan_digest="a" * 64,
+                plan={"compiled_execution_plans": {node_id: payload}},
+                state="installed",
+                actor="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            InstallationNode(
+                installation_id=installation_id,
+                node_id=node_id,
+                rank=0,
+                role="entrypoint",
+                state="installed",
+                required_bytes=1,
+                installed_bytes=1,
+                updated_at=now,
+            )
+        )
+
+    class Jobs:
+        def list(self):
+            return []
+
+        def get(self, _job_id):
+            raise KeyError
+
+        def enqueue(self, *_args, **_kwargs):
+            raise AssertionError("the spec route must not enqueue work")
+
+    app = create_app(
+        jobs=Jobs(),
+        tokens=TokenCodec(b"k" * 32),
+        audits=MemoryAuditStore(),
+        fleet=dict,
+        now=lambda: 0,
+        agent=services,
+        trusted_agent_proxy_auth=b"p" * 32,
+    )
+    headers = {
+        "x-vonk-agent-node": node_id,
+        "x-vonk-agent-serial": serial,
+        "x-vonk-agent-fingerprint": fingerprint,
+        "x-vonk-agent-verified": "1",
+        "x-vonk-agent-proxy-auth": "p" * 32,
+        "x-vonk-agent-source": "10.0.0.42",
+    }
+    with TestClient(app) as client:
+        response = client.get(
+            f"/agent/v1/recipe-installations/{installation_id}/spec",
+            headers=headers,
+        )
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert response.json()["schema_version"] == 2
+    assert "model_version_sha256" not in response.text
+    assert "runtime_distribution_sha256" not in response.text
+    assert "patch_bundle_sha256" not in response.text
+
+
+def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
+    pytest.importorskip("vonk_forge_contracts")
+    from importlib.resources import files
+
+    from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/recipe-source-build.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    model = ModelDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/model-definition.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    recipe_document = recipe.model_dump(mode="json")
+    model_document = model.model_dump(mode="json")
+    model_digest = content_sha256(model)
+    recipe_document["models"][0]["model"]["content_sha256"] = model_digest
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    recipe_digest = content_sha256(recipe)
+    artifact_set_digest = "a" * 64
+
+    class Manifest:
+        digest = artifact_set_digest
+
+    class Cache:
+        def resolve_artifact_set(self, *, recipe_revision_sha256: str) -> Manifest:
+            assert recipe_revision_sha256 == recipe_digest
+            return Manifest()
+
+        def manifest_for_artifact_set(self, digest: str) -> Manifest:
+            assert digest == artifact_set_digest
+            return Manifest()
+
+        def resolve_verified_artifact_set(
+            self, digest: str
+        ) -> tuple[dict[str, object], ...]:
+            assert digest == artifact_set_digest
+            return (
+                {
+                    "path": "model.safetensors",
+                    "sha256": "c" * 64,
+                    "bytes": 1024,
+                    "file": "controller-owned",
+                    "file_id": "weights",
+                    "model_content_sha256": model_digest,
+                    "roles": ["weights"],
+                },
+            )
+
+    node = SimpleNamespace(
+        node_id="spk_" + "1" * 32,
+        rank=0,
+        role="entrypoint",
+    )
+    revision = SimpleNamespace(
+        kind="recipe",
+        state="active",
+        content_digest=recipe_digest,
+        document=recipe_document,
+    )
+    build = SimpleNamespace(
+        id="build-1",
+        state="succeeded",
+        image_digest="sha256:" + "1" * 64,
+        build_input_sha256="b" * 64,
+        oci_layout_sha256="f" * 64,
+        image_bytes=4096,
+    )
+    def runtime_receipt(
+        _document, image_digest: str, _runtime_spec: dict[str, object]
+    ) -> dict[str, object]:
+        return {
+            "image_digest": image_digest,
+            "oci_layout_sha256": "f" * 64,
+            "image_bytes": 4096,
+            "architecture": "linux-arm64",
+            "runtime_interface": "vonk.runtime.v1",
+            "runtime_interface_label": "v1",
+            "source": "controller-build",
+            "build_id": build.id,
+            "platform_manifest_digest": image_digest,
+            "local_image_config_id": "sha256:" + "2" * 64,
+            "local_image_reference": None,
+            "distribution_object": {
+                "name": "image.oci.tar",
+                "sha256": "f" * 64,
+                "bytes": 4096,
+                "kind": "oci-archive",
+            },
+        }
+
+    service = ControllerExecutionPlanService(
+        Cache(), runtime_image_resolver=runtime_receipt
+    )
+    plans = service.compile_installation(
+        None,
+        revision=revision,
+        build=build,
+        mapping_nodes=(node,),
+        parameters={},
+        resolved_entities={
+            "models": (SimpleNamespace(document=model_document, content_digest=model_digest),)
+        },
+    )
+
+    payload = plans[node.node_id]
+    validate_compiled_launch_payload(payload)
+    assert payload["identity"]["model_artifact_set_sha256"] == artifact_set_digest
+    assert payload["identity"]["model_artifact_bytes"] == 1024
+    assert payload["identity"]["build_input_sha256"] == "b" * 64
+    assert payload["artifacts"][0]["path"] == "model.safetensors"
+    assert payload["runtime_image"]["source"] == "controller-build"
+    assert "repository" not in json.dumps(payload, sort_keys=True)
+
+
 def test_controller_built_receipt_and_pulled_receipt_share_reusable_identity() -> None:
     prebuilt = _compile()
     built = _compile(image=_image(source="controller-build", build_id="build-7"))
     assert built.runtime_image.build_id == "build-7"
-    assert built.reusable_identity_sha256 == prebuilt.reusable_identity_sha256
+    # The selected platform/archive/config facts are shared, while the
+    # published parent-manifest provenance remains distinct from a
+    # Controller-produced image receipt.
+    assert built.reusable_identity_sha256 != prebuilt.reusable_identity_sha256
 
     editorial = _compile(_spec(recipe_digest="9" * 64))
     assert editorial.recipe_revision_sha256 != prebuilt.recipe_revision_sha256
     assert editorial.reusable_identity_sha256 == prebuilt.reusable_identity_sha256
+
+
+def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> None:
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "compiled_workload_v2.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    validated = validate_compiled_launch_payload(fixture)
+    artifacts = validated["artifacts"]
+    assert [item["path"] for item in artifacts].count("config.json") == 2
+    assert {
+        (item["selection_id"], item["file_id"], item["sha256"], item["size_bytes"])
+        for item in artifacts
+    } >= {
+        (
+            "primary",
+            "config-66402a06352a",
+            """66402a06352ac861bc9012a26678e6d5e11a5fd22180165fc19c8a27d3a9e079""",
+            72897,
+        ),
+        (
+            "dependency-qwen3-8-27b-dspark-b3c99101",
+            "config-dd65fb1b01c2",
+            "dd65fb1b01c2adea69512ff2990a79d58eb7fe2c7ea97375aa66f657a29a5bfd",
+            2448,
+        ),
+    }
+    empty = next(item for item in artifacts if item["size_bytes"] == 0)
+    assert empty["sha256"] == EMPTY_SHA256
+    assert empty["roles"] == ["entrypoint"]
+    assert empty["path"] == "__init__.py"
+    assert validated["security"]["network_mode"] == "none"
+    assert validated["security"]["host_network"] is False
+    runtime_image = validated["runtime_image"]
+    assert runtime_image["registry_manifest_digest"] != runtime_image["platform_manifest_digest"]
+    assert runtime_image["platform_manifest_digest"] == runtime_image["image_digest"]
+    assert runtime_image["local_image_config_id"] != runtime_image["image_digest"]
+    assert "local_image_reference" not in runtime_image
+    assert runtime_image["runtime_interface"] == "vonk.runtime.v1"
+    assert runtime_image["runtime_interface_label"] == "v1"
+    argv = validated["runtime"]["argv"]
+    assert "--served-model-name" in argv
+    assert argv[argv.index("--served-model-name") + 1] == "qwen3-8-27b-collision"
+    assert any(
+        item["name"] == "XDG_CACHE_HOME" and item["value"] == "/outputs/cache"
+        for item in validated["runtime"]["env"]
+    )
+    assert any(
+        item["name"] == "TMPDIR" and item["value"] == "/outputs/tmp"
+        for item in validated["runtime"]["env"]
+    )
+    assert {mount["source"] for mount in validated["security"]["mounts"]} >= {
+        "model",
+        "outputs",
+    }
 
 
 def test_mount_change_invalidates_reuse_identity_without_changing_bytes() -> None:
@@ -264,6 +782,16 @@ def test_plan_rejects_incomplete_selected_cache_receipt() -> None:
             _spec(),
             model_artifact_set_sha256="d" * 64,
             model_objects=objects,
+            runtime_image=_image(),
+        )
+
+
+def test_plan_rejects_missing_selected_cache_bytes() -> None:
+    with pytest.raises(CompiledExecutionPlanError):
+        compile_verified_execution_plan(
+            _spec(),
+            model_artifact_set_sha256="d" * 64,
+            model_objects=[],
             runtime_image=_image(),
         )
 

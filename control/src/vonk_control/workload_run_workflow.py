@@ -9,19 +9,16 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
-from .catalog_entities import CatalogError
-from .import_report import ImportDisposition, ImportReportItem
+from .catalog_entities import CatalogEntityService, CatalogError
 from .import_resolution import resolve_import
 from .model_resolution import ModelTransport
 from .models import (
-    LocalRecipe,
-    LocalRecipeRevision,
-    RecipeImport,
-    RecipeImportItem,
+    CatalogDocument,
+    CatalogDocumentRevision,
     RecipeSourceBundle,
 )
-from .recipe_contract import recipe_content_sha256
 from .registry_resolution import RegistryTransport
 from .source_bundles import GeneratedSourceBundle, SourceBundleStore
 from .workload_run_importer import WorkloadRunImportResult, import_workload_run
@@ -95,87 +92,56 @@ class WorkloadRunWorkflow:
         )
         with self._sessions.begin() as session:
             existing = session.scalar(
-                select(RecipeImport).where(
-                    RecipeImport.source_kind == "workload_run",
-                    RecipeImport.source_sha256 == source_sha256,
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "candidate",
+                    CatalogDocumentRevision.projected["source_kind"].as_string()
+                    == "workload_run",
+                    CatalogDocumentRevision.projected["source_sha256"].as_string()
+                    == source_sha256,
                 )
             )
             if existing is not None:
-                revision = session.scalar(
-                    select(LocalRecipeRevision)
-                    .where(LocalRecipeRevision.recipe_id == existing.recipe_id)
-                    .order_by(LocalRecipeRevision.revision_number.desc())
-                    .limit(1)
-                )
-                assert revision is not None
                 return AppliedWorkloadRunImport(
                     existing.id,
-                    existing.recipe_id,
-                    revision.id,
-                    revision.revision_number,
-                    revision.lifecycle,
+                    existing.document_id,
+                    existing.id,
+                    existing.revision_number,
+                    existing.state,
                     source_sha256,
                     report_digest,
-                )
+            )
             document = preview.draft_document
-            identity, metadata = document["identity"], document["metadata"]
-            assert isinstance(identity, dict) and isinstance(metadata, dict)
+            try:
+                parsed = RecipeDefinition.model_validate(document)
+            except (TypeError, ValueError) as error:
+                raise WorkloadRunWorkflowError(
+                    "catalog.document_invalid",
+                    "WorkloadRun import must produce a canonical RecipeDefinition",
+                ) from error
             now = self._clock()
-            recipe = LocalRecipe(
-                slug=str(identity["slug"]),
-                title=str(metadata["title"]),
-                description=str(metadata["description"]),
-                source_kind="workload_run",
-                created_by=actor,
-                created_at=now,
-                updated_at=now,
+            revision = CatalogEntityService(session, clock=self._clock).create_draft(
+                parsed.model_dump(mode="json"), actor=actor
             )
-            session.add(recipe)
-            session.flush()
-            revision = LocalRecipeRevision(
-                recipe_id=recipe.id,
-                revision_number=1,
-                lifecycle="blocked",
-                schema_version=1,
-                document=document,
-                content_sha256=None,
-                created_by=actor,
-                created_at=now,
-            )
-            session.add(revision)
-            _record_bundle(session, preview.bundle, stored_bundle.archive_bytes, now)
-            imported = RecipeImport(
-                recipe_id=recipe.id,
-                source_kind="workload_run",
-                source_reference=f"workload_run:sha256:{source_sha256}",
-                source_sha256=source_sha256,
-                redacted_source=preview.redacted_source,
-                created_by=actor,
-                created_at=now,
-            )
-            session.add(imported)
-            session.flush()
-            session.add_all(
-                [
-                    RecipeImportItem(
-                        import_id=imported.id,
-                        source_path=item.source_path,
-                        disposition=item.disposition.value,
-                        destination_path=item.destination_path,
-                        reason_code=item.reason_code,
-                        detail=item.detail,
-                        blocking=item.blocking,
-                    )
+            revision.projected = {
+                **revision.projected,
+                "source_kind": "workload_run",
+                "source_sha256": source_sha256,
+                "report": [
+                    {**asdict(item), "disposition": item.disposition.value}
                     for item in preview.report
-                ]
-            )
+                ],
+                "redacted_source": preview.redacted_source,
+                "source_bundle_sha256": preview.bundle.sha256,
+            }
+            _record_bundle(session, preview.bundle, stored_bundle.archive_bytes, now)
             session.flush()
             return AppliedWorkloadRunImport(
-                imported.id,
-                recipe.id,
+                revision.id,
+                revision.document_id,
                 revision.id,
                 1,
-                "blocked",
+                revision.state,
                 source_sha256,
                 report_digest,
             )
@@ -198,42 +164,27 @@ class WorkloadRunWorkflow:
                 "external metadata resolution is unavailable",
             )
         with self._sessions() as session:
-            recipe = session.get(LocalRecipe, recipe_id)
-            imported = session.scalar(
-                select(RecipeImport).where(RecipeImport.recipe_id == recipe_id)
-            )
+            recipe = session.get(CatalogDocument, recipe_id)
             revision = session.scalar(
-                select(LocalRecipeRevision)
-                .where(LocalRecipeRevision.recipe_id == recipe_id)
-                .order_by(LocalRecipeRevision.revision_number.desc())
+                select(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.document_id == recipe_id,
+                    CatalogDocumentRevision.state == "candidate",
+                )
+                .order_by(CatalogDocumentRevision.revision_number.desc())
                 .limit(1)
             )
-            if recipe is None or imported is None or revision is None:
+            if recipe is None or revision is None:
                 raise KeyError(recipe_id)
             if (
-                recipe.source_kind != "workload_run"
+                revision.kind != "recipe"
                 or revision.revision_number != expected_revision
-                or revision.lifecycle not in {"blocked", "draft"}
+                or revision.projected.get("source_kind") != "workload_run"
             ):
                 raise WorkloadRunWorkflowError(
                     "catalog.stale_revision", "WorkloadRun draft revision changed"
                 )
-            rows = session.scalars(
-                select(RecipeImportItem).where(
-                    RecipeImportItem.import_id == imported.id
-                )
-            ).all()
-            report = tuple(
-                ImportReportItem(
-                    row.source_path,
-                    ImportDisposition(row.disposition),
-                    row.destination_path,
-                    row.reason_code,
-                    row.detail,
-                    row.blocking,
-                )
-                for row in rows
-            )
+            report: tuple = ()
             snapshot_id, snapshot_document = revision.id, revision.document
             build = snapshot_document.get("build")
             context = build.get("context") if isinstance(build, dict) else None
@@ -248,9 +199,9 @@ class WorkloadRunWorkflow:
                 draft_document=snapshot_document,
                 bundle=bundle,
                 report=report,
-                source_sha256=imported.source_sha256,
+                source_sha256=str(revision.projected.get("source_sha256", "")),
                 report_digest="",
-                redacted_source=imported.redacted_source,
+                redacted_source=dict(revision.projected.get("redacted_source", {})),
                 runnable=False,
             )
         resolved = resolve_import(
@@ -269,49 +220,35 @@ class WorkloadRunWorkflow:
             digest = self._recipe_resolver(resolved.document, actor)
         except CatalogError as error:
             raise WorkloadRunWorkflowError(error.code, error.detail) from error
-        if digest != recipe_content_sha256(resolved.document):
+        if digest != content_sha256(RecipeDefinition.model_validate(resolved.document)):
             raise WorkloadRunWorkflowError(
                 "catalog.digest_mismatch", "catalog recipe digest is inconsistent"
             )
         now = self._clock()
         with self._sessions.begin() as session:
-            current_recipe = session.scalar(
-                select(LocalRecipe).where(LocalRecipe.id == recipe_id).with_for_update()
-            )
             current = session.scalar(
-                select(LocalRecipeRevision)
-                .where(LocalRecipeRevision.recipe_id == recipe_id)
-                .order_by(LocalRecipeRevision.revision_number.desc())
+                select(CatalogDocumentRevision)
+                .where(
+                    CatalogDocumentRevision.document_id == recipe_id,
+                    CatalogDocumentRevision.state == "candidate",
+                )
+                .order_by(CatalogDocumentRevision.revision_number.desc())
                 .limit(1)
             )
-            if current_recipe is None or current is None or current.id != snapshot_id:
+            if current is None or current.id != snapshot_id:
                 raise WorkloadRunWorkflowError(
                     "catalog.stale_revision", "WorkloadRun draft revision changed"
                 )
-            next_revision = LocalRecipeRevision(
-                recipe_id=recipe_id,
-                revision_number=expected_revision + 1,
-                lifecycle="resolved",
-                schema_version=1,
-                document=resolved.document,
-                content_sha256=digest,
-                created_by=actor,
-                created_at=now,
+            service = CatalogEntityService(session, clock=self._clock)
+            service.fail_candidate(recipe_id)
+            next_revision = service.revise(
+                recipe_id,
+                resolved.document,
+                actor=actor,
+                expected_revision=expected_revision,
             )
-            session.add(next_revision)
+            next_revision = service.resolve(next_revision.id, actor=actor)
             _record_bundle(session, resolved.bundle, stored_bundle.archive_bytes, now)
-            by_path = {item.source_path: item for item in resolved.report}
-            for row in session.scalars(
-                select(RecipeImportItem).where(
-                    RecipeImportItem.import_id == imported.id
-                )
-            ):
-                item = by_path[row.source_path]
-                row.disposition = item.disposition.value
-                row.reason_code = item.reason_code
-                row.detail = item.detail
-                row.blocking = item.blocking
-                row.destination_path = item.destination_path
             session.flush()
             return ResolvedWorkloadRunImport(
                 recipe_id, next_revision.id, next_revision.revision_number, digest

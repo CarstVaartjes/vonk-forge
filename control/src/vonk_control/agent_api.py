@@ -35,6 +35,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
@@ -46,6 +47,11 @@ from .auth import (
     agent_identity_from_scope,
     agent_source_from_scope,
 )
+from .compiled_execution_plan import (
+    CompiledExecutionPlanError,
+    validate_compiled_launch_payload,
+)
+from .distribution import DistributionError, DistributionService
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
@@ -65,30 +71,25 @@ from .models import (
     AgentEnrollment,
     AgentNode,
     AgentOperation,
+    CatalogDocumentRevision,
     ClusterMapping,
+    ClusterMappingNode,
     InstallationNode,
-    LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
     RecipeSourceBundle,
     RunNode,
+    RuntimeImageReceipt,
 )
 from .operation_api import bounded_error_responses
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
-from .recipe_contract import recipe_content_sha256, validate_recipe
 from .recipe_operations import (
     RecipeRunObservation,
     prepare_exact_recipe_run_observation_nodes,
     record_recipe_run_observations,
 )
-from .recipe_runtime_specs import (
-    RecipeRuntimeSpecError,
-    compile_runtime_spec,
-    resolve_recipe_entities,
-)
 from .source_bundles import SourceBundleError, SourceBundleStore
-from .distribution import DistributionError, DistributionService
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
@@ -117,6 +118,64 @@ _WORKLOAD_TUF_METADATA_NAME = re.compile(
     r"[1-9][0-9]*\.(?:targets|families|releases))\.json\Z"
 )
 _WORKLOAD_TUF_TARGET_NAME = re.compile(r"releases/[0-9a-f]{64}\.json\Z")
+
+
+def _runtime_image_receipt_matches(
+    runtime_image: Mapping[str, object],
+    identity: Mapping[str, object],
+    receipt: object,
+    *,
+    revision_id: str,
+    revision_digest: str,
+    installation_image_digest: str,
+    installation_recipe_build_id: str | None,
+) -> bool:
+    """Bind one persisted launch image to its verified Controller receipt."""
+
+    if (
+        getattr(receipt, "state", None) != "verified"
+        or getattr(receipt, "recipe_revision_id", None) != revision_id
+        or getattr(receipt, "original_content_digest", None) != revision_digest
+        or identity.get("recipe_revision_sha256") != revision_digest
+        or getattr(receipt, "effective_execution_key", None)
+        != identity.get("execution_sha256")
+        or runtime_image.get("image_digest") != installation_image_digest
+        or runtime_image.get("image_digest")
+        != getattr(receipt, "platform_manifest_digest", None)
+        or runtime_image.get("platform_manifest_digest")
+        != getattr(receipt, "platform_manifest_digest", None)
+        or runtime_image.get("registry_manifest_digest")
+        != getattr(receipt, "registry_manifest_digest", None)
+        or runtime_image.get("local_image_config_id")
+        != getattr(receipt, "local_image_config_id", None)
+        or runtime_image.get("oci_layout_sha256")
+        != getattr(receipt, "oci_archive_sha256", None)
+        or runtime_image.get("image_bytes") != getattr(receipt, "image_bytes", None)
+        or runtime_image.get("architecture") != getattr(receipt, "architecture", None)
+        or runtime_image.get("runtime_interface")
+        != getattr(receipt, "runtime_interface", None)
+        or runtime_image.get("runtime_interface_label")
+        != getattr(receipt, "runtime_interface_label", None)
+        or runtime_image.get("source") != getattr(receipt, "source", None)
+        or runtime_image.get("build_id") != getattr(receipt, "build_id", None)
+    ):
+        return False
+    source = runtime_image.get("source")
+    if source == "published":
+        return (
+            runtime_image.get("registry_manifest_digest") is not None
+            and getattr(receipt, "registry_manifest_digest", None) is not None
+            and runtime_image.get("build_id") is None
+            and getattr(receipt, "build_id", None) is None
+            and installation_recipe_build_id is None
+        )
+    if source == "controller-build":
+        return (
+            runtime_image.get("build_id") is not None
+            and getattr(receipt, "build_id", None) is not None
+            and getattr(receipt, "registry_manifest_digest", None) is None
+        )
+    return False
 
 
 class _ActorDependency(Protocol):
@@ -2038,58 +2097,189 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=404, detail="recipe specification does not exist"
                 )
-            revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+            revision = session.get(
+                CatalogDocumentRevision, installation.recipe_revision_id
+            )
             mapping = session.get(ClusterMapping, installation.mapping_id)
-            build = session.get(RecipeBuild, installation.recipe_build_id)
-            if (
-                revision is None
-                or revision.lifecycle != "resolved"
-                or revision.content_sha256 is None
-                or mapping is None
-                or mapping.state != "ready"
-                or mapping.generation != installation.mapping_generation
-                or build is None
-                or build.state != "succeeded"
-                or build.image_digest != installation.image_digest
-                or build.recipe_revision_id != revision.id
-            ):
-                raise HTTPException(
-                    status_code=409, detail="recipe specification authority is stale"
+            mapping_node = session.scalar(
+                select(ClusterMappingNode).where(
+                    ClusterMappingNode.mapping_id == installation.mapping_id,
+                    ClusterMappingNode.node_id == identity.node_id,
                 )
-            document = revision.document
-            parameters = mapping.parameters
-            try:
-                resolved_entities = resolve_recipe_entities(session, document)
-            except RecipeRuntimeSpecError as error:
-                detail = {
-                    "runtime distribution does not implement harness": (
-                        "recipe specification distribution-harness binding is invalid"
-                    ),
-                    "patch bundle does not apply to distribution": (
-                        "recipe specification patch-distribution binding is invalid"
-                    ),
-                }.get(str(error), "recipe specification dependencies are stale")
+            )
+            if installation.state not in {"installing", "installed", "partial"}:
                 raise HTTPException(
                     status_code=409,
-                    detail=detail,
+                    detail="recipe specification installation is not ready",
+                )
+            if (
+                revision is None
+                or revision.kind != "recipe"
+                or revision.schema_version != 2
+                or revision.state != "active"
+                or mapping is None
+                or mapping_node is None
+                or mapping.state != "ready"
+                or mapping.generation != installation.mapping_generation
+                or placement.rank != mapping_node.rank
+                or placement.role != mapping_node.role
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification installation authority is stale",
+                )
+            try:
+                recipe = RecipeDefinition.model_validate(revision.document)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification installation authority is stale",
                 ) from None
-        validate_recipe(document)
-        if recipe_content_sha256(document) != revision.content_sha256:
-            raise HTTPException(
-                status_code=409, detail="recipe specification digest changed"
+            if content_sha256(recipe) != revision.content_digest:
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification installation authority is stale",
+                )
+            if not isinstance(installation.plan, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            compiled_plans = installation.plan.get("compiled_execution_plans")
+            if not isinstance(compiled_plans, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            candidate = compiled_plans.get(identity.node_id)
+            if not isinstance(candidate, Mapping):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification compiled execution plan is unavailable",
+                )
+            candidate_identity = candidate.get("identity")
+            candidate_runtime_image = candidate.get("runtime_image")
+            effective_execution_key = (
+                candidate_identity.get("execution_sha256")
+                if isinstance(candidate_identity, Mapping)
+                else None
             )
+            receipts = (
+                session.scalars(
+                    select(RuntimeImageReceipt).where(
+                        RuntimeImageReceipt.recipe_revision_id
+                        == installation.recipe_revision_id,
+                        RuntimeImageReceipt.effective_execution_key
+                        == effective_execution_key,
+                        RuntimeImageReceipt.state == "verified",
+                    )
+                ).all()
+                if isinstance(effective_execution_key, str)
+                else []
+            )
+            candidate_source = (
+                candidate_runtime_image.get("source")
+                if isinstance(candidate_runtime_image, Mapping)
+                else None
+            )
+            candidate_build_id = (
+                candidate_runtime_image.get("build_id")
+                if isinstance(candidate_runtime_image, Mapping)
+                else None
+            )
+            build = (
+                session.get(RecipeBuild, candidate_build_id)
+                if candidate_source == "controller-build"
+                and isinstance(candidate_build_id, str)
+                else None
+            )
+            build_id = build.id if build is not None else None
+            build_state = build.state if build is not None else None
+            build_recipe_revision_id = (
+                build.recipe_revision_id if build is not None else None
+            )
+            build_image_digest = build.image_digest if build is not None else None
+            build_oci_layout_sha256 = (
+                build.oci_layout_sha256 if build is not None else None
+            )
+            build_image_bytes = build.image_bytes if build is not None else None
+            build_input_sha256 = (
+                build.build_input_sha256 if build is not None else None
+            )
+            installation_recipe_build_id = installation.recipe_build_id
+            revision_id = revision.id
+            revision_content_digest = revision.content_digest
+            installation_image_digest = installation.image_digest
         try:
-            spec = compile_runtime_spec(
-                document,
-                resolved_entities=resolved_entities,
-                parameters=parameters,
-                role=placement.role,
-                rank=placement.rank,
-                recipe_build_id=build.id,
-                image_digest=build.image_digest,
+            spec = validate_compiled_launch_payload(candidate)
+        except (CompiledExecutionPlanError, TypeError, ValueError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail=f"recipe specification compiled execution plan is invalid: {error}",
+            ) from None
+        topology = spec.get("topology")
+        if not isinstance(topology, Mapping) or (
+            topology.get("rank") != placement.rank
+            or topology.get("role") != placement.role
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification placement does not match the installation",
             )
-        except RecipeRuntimeSpecError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
+        identity_document = spec.get("identity")
+        runtime_image = spec.get("runtime_image")
+        if not isinstance(identity_document, Mapping) or not isinstance(
+            runtime_image, Mapping
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        if identity_document.get("recipe_revision_sha256") != revision_content_digest:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        matching_receipts = [
+            receipt
+            for receipt in receipts
+            if _runtime_image_receipt_matches(
+                runtime_image,
+                identity_document,
+                receipt,
+                revision_id=revision_id,
+                revision_digest=revision_content_digest,
+                installation_image_digest=installation_image_digest,
+                installation_recipe_build_id=installation_recipe_build_id,
+            )
+        ]
+        if len(matching_receipts) != 1:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification execution receipts are stale",
+            )
+        receipt = matching_receipts[0]
+        if runtime_image.get("source") == "controller-build":
+            if (
+                build_id != getattr(receipt, "build_id", None)
+                or build_id != installation_recipe_build_id
+                or build_state != "succeeded"
+                or build_recipe_revision_id != revision_id
+                or build_image_digest != installation_image_digest
+                or build_oci_layout_sha256
+                != getattr(receipt, "oci_archive_sha256", None)
+                or build_image_bytes != getattr(receipt, "image_bytes", None)
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification execution receipts are stale",
+                )
+            build_input = identity_document.get("build_input_sha256")
+            if build_input is not None and build_input != build_input_sha256:
+                raise HTTPException(
+                    status_code=409,
+                    detail="recipe specification execution receipts are stale",
+                )
         return _json_response(spec)
 
     def workload_helper_service() -> WorkloadHelperAuthorityService:

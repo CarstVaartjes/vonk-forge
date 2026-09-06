@@ -2,13 +2,11 @@ import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from pathlib import Path
+from importlib import resources
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.auth import TokenCodec
-from vonk_control.catalog_service import CatalogService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -17,9 +15,9 @@ from vonk_control.inventory_repository import (
 from vonk_control.models import (
     AgentNode,
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     InstallationNode,
-    LocalRecipe,
-    LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -27,8 +25,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.run_admission import RunAdmissionService, RunPlanConflict
-
-from .test_catalog_service import _seed_recipe_dependencies
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
 def setup(
@@ -47,8 +44,24 @@ def setup(
     now = datetime(2026, 8, 7, 12, tzinfo=UTC)
     node = "spk_" + "1" * 32
     document = json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text()
     )
+    document["identity"]["slug"] = "qwen"
+    model_document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    if denied_jurisdictions:
+        model_document["license"]["territorial_restrictions"] = {
+            "denied_jurisdictions": list(denied_jurisdictions),
+            "notice": "Use is prohibited in the configured territories.",
+        }
+    model = ModelDefinition.model_validate(model_document)
+    model_document = model.model_dump(mode="json")
+    document["models"][0]["model"]["content_sha256"] = content_sha256(model)
     memory = document["topology"]["roles"][0]["resources"]["memory"]
     memory.update(
         {
@@ -57,14 +70,6 @@ def setup(
             "runtime_growth_bytes": 25,
             "system_reserve_bytes": system_reserve,
         }
-    )
-    catalog = CatalogService(
-        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
-    )
-    _seed_recipe_dependencies(
-        catalog,
-        document,
-        denied_jurisdictions=tuple(denied_jurisdictions),
     )
     with sessions.begin() as session:
         session.add(
@@ -75,24 +80,59 @@ def setup(
                 capabilities=["runtime.vonk.v1"],
             )
         )
-        recipe = LocalRecipe(
-            slug="qwen",
-            title="Qwen",
-            description="Qwen",
-            source_kind="local",
+        model_root = CatalogDocument(
+            kind="model",
+            publisher=model.identity.publisher,
+            slug=model.identity.slug,
+            title=model.identity.model.title,
+            created_by="admin",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(model_root)
+        session.flush()
+        session.add(
+            CatalogDocumentRevision(
+                document_id=model_root.id,
+                kind="model",
+                publisher=model_root.publisher,
+                slug=model_root.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=model_document,
+                content_digest=content_sha256(model),
+                artifact_key="a" * 64,
+                projected={},
+                created_by="admin",
+                created_at=now,
+            )
+        )
+        recipe_document = RecipeDefinition.model_validate(document).model_dump(
+            mode="json"
+        )
+        recipe = CatalogDocument(
+            kind="recipe",
+            publisher=recipe_document["identity"]["publisher"],
+            slug=recipe_document["identity"]["slug"],
+            title=recipe_document["metadata"]["title"],
             created_by="admin",
             created_at=now,
             updated_at=now,
         )
         session.add(recipe)
         session.flush()
-        revision = LocalRecipeRevision(
-            recipe_id=recipe.id,
+        revision = CatalogDocumentRevision(
+            document_id=recipe.id,
+            kind="recipe",
+            publisher=recipe.publisher,
+            slug=recipe.slug,
             revision_number=1,
-            lifecycle="resolved",
-            schema_version=1,
-            document=document,
-            content_sha256="a" * 64,
+            schema_version=2,
+            state="active",
+            document=recipe_document,
+            content_digest=content_sha256(RecipeDefinition.model_validate(document)),
+            projected={},
             created_by="admin",
             created_at=now,
         )
@@ -106,7 +146,7 @@ def setup(
         build = RecipeBuild(
             recipe_revision_id=revision_id,
             builder_node_id=node,
-            source_bundle_sha256=document["build"]["context"]["sha256"],
+            source_bundle_sha256="c" * 64,
             build_input_sha256="e" * 64,
             state="succeeded",
             policy_report={"passed": True},

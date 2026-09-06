@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import {expect, test, type Page} from "@playwright/test";
+import {expect, test, type Page, type Route} from "@playwright/test";
 import {codeRecipe, fullLibraryDetail, librarySnapshot, minimalLibraryDetail, unlinkedRecipe} from "../src/test-fixtures/library";
 import type {components} from "../src/api/generated";
 
@@ -7,9 +7,35 @@ const GIB = 1024 ** 3;
 const nodeId = "spk_0123456789abcdef0123456789abcdef";
 const borealisId = "spk_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const commit = "a".repeat(40);
-const qwenModel = `qwen/3@${"e".repeat(64)}`;
-const qwenModelPath = `/library/models/${encodeURIComponent(qwenModel)}`;
-const qwenModelName = "Qwen 3";
+const pairedRecipe = fullLibraryDetail.recipe;
+const pairedModel = librarySnapshot.models.find(model => model.recipes.some(recipe => recipe.recipe_id === pairedRecipe.recipe_id))!;
+const pairedRecipeId = pairedRecipe.recipe_id;
+const pairedRecipeTitle = pairedRecipe.title;
+const pairedModelKey = `${pairedModel.model.publisher}/${pairedModel.model.slug}@${pairedModel.model.content_sha256}`;
+
+function canonicalRecipeDetail() {
+  const detail = structuredClone(fullLibraryDetail);
+  const placementNode = {
+    artifact_reuse_bytes: 0, disk_free_after_bytes: 240 * GIB, disk_free_bytes: 320 * GIB, disk_required_bytes: 80 * GIB, disk_reserved_bytes: 0,
+    endpoint_owner: true, fabric_address: "fabric://node-alpha", fabric_bandwidth_mbps: 25_000, inventory_age_seconds: 1, inventory_observed_at: "2026-09-06T12:00:00Z",
+    memory_available_bytes: 100 * GIB, memory_free_after_bytes: 36 * GIB, memory_kind: "unified" as const, memory_required_bytes: 60 * GIB, memory_reserved_bytes: 4 * GIB,
+    node_id: "node-alpha", rank: 0, role: "leader", telemetry_age_seconds: 1, telemetry_observed_at: "2026-09-06T12:00:00Z",
+  };
+  detail.placement = [{
+    topology_name: detail.topology.name, node_count: 1, candidate_node_ids: ["node-alpha"],
+    recommendations: [{
+      eligible: true, group_complete: true, topology_name: detail.topology.name, node_ids: ["node-alpha"], nodes: [placementNode],
+      preview_targets: [{kind: "run", input: {installation_id: "installation-chat"}}], load_state: "not_loaded", install_state: "complete", reasons: [],
+      installation_ids: ["installation-chat"], mapping_id: null, ranking_scope: "bounded-advisory", recipe_build_id: null,
+      recipe_revision_id: detail.recipe.recipe_revision_id, run_ids: [],
+      score: {active_run_count: 0, artifact_reuse_bytes: 0, exact_install_complete: true, exact_install_partial: false, maximum_telemetry_age_seconds: 1, minimum_disk_headroom_bytes: 240 * GIB, minimum_memory_headroom_bytes: 36 * GIB},
+    }],
+    rejected_groups: [], rejected_nodes: [], evaluated_group_count: 1,
+    evidence_counts: {builds: 0, mappings: 0, mapping_members: 0, installations: 1, installation_members: 1, runs: 0, run_members: 0, truncated_collections: []},
+    limits: {}, reasons: [], rejected_evidence_truncated: false, search_complete: true,
+  }];
+  return detail;
+}
 const browserProblems = new WeakMap<Page, string[]>();
 type LibraryFixtureState = {
   detailFailuresRemaining: number;
@@ -21,22 +47,6 @@ type LibraryFixtureState = {
   snapshotFailuresRemaining: number;
 };
 const libraryFixtures = new WeakMap<Page, LibraryFixtureState>();
-
-function libraryCatalogUpdate() {
-  const contentDigest = "b".repeat(64);
-  return {
-    publisher: "vonk-forge", slug: "qwen-chat", title: "Qwen Chat catalog recipe", description: "A digest-bound Qwen Chat recipe.", tags: ["qwen", "chat"],
-    uri: `vonk://catalog/vonk-forge/qwen-chat@sha256:${contentDigest}`, content_sha256: contentDigest,
-    model_publisher: "qwen", model_slug: "3", model_title: "Qwen 3", model_version_publisher: "qwen", model_version_slug: "3-bf16", model_version_title: "Qwen 3 BF16", source_owner: "QwenLM", source_repository: "https://github.com/QwenLM/Qwen3",
-    capabilities: ["chat"], qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "The reviewed immutable recipe explicitly declares accepted qualification.",
-    execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "This recipe explicitly declares an executable contract; fleet compatibility and operator review still apply.",
-    precision: "BF16", quantizations: ["BF16"], execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64), artifact_count: 1,
-    topology_name: "pair", topology_mode: "tensor_parallel", node_count: 2, topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}, {name: "worker", count: 1, endpoint_owner: false}],
-    fabric: {connectivity: "connected", minimum_bandwidth_mbps: 25_000}, expected_download_bytes: 80 * GIB, maximum_installed_bytes_per_node: 100 * GIB, maximum_runtime_memory_bytes_per_node: 72 * GIB,
-    release_version: "1.2.0", release_released_at: "2026-08-24",
-    local: {status: "update-available", recipe_id: "recipe-chat", revision_number: 3, content_sha256: "a".repeat(64), release_version: "1.0.0"},
-  };
-}
 
 async function expectNoSeriousAccessibilityViolations(page: Page) {
   const results = await new AxeBuilder({page}).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"]).analyze();
@@ -421,6 +431,7 @@ async function installLocalFleetFixture(page: Page) {
   const libraryState: LibraryFixtureState = {detailFailuresRemaining: 0, empty: false, retryCount: 0, snapshotFailuresRemaining: 0};
   libraryFixtures.set(page, libraryState);
   await page.route("**/api/v1/auth/session", route => route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}}));
+  await page.route("**/api/v1/artifact-jobs/capabilities", route => route.fulfill({json: {schema_version: 1, transport: {max_input_files: 32, max_input_file_bytes: 512 * 1024 ** 2, max_input_total_bytes: 1024 ** 3, max_output_files: 32, max_output_file_bytes: 1024 ** 3, max_output_total_bytes: 2 * 1024 ** 3, max_timeout_seconds: 3600, reserved_input_names: ["manifest.json"]}, storage: {max_stored_bytes: 4 * 1024 ** 3, used_bytes: 0, remaining_bytes: 4 * 1024 ** 3}}}));
   await page.route("**/api/v1/fleet/stream", route => route.fulfill({
     status: 200,
     contentType: "text/event-stream",
@@ -463,24 +474,33 @@ async function installLocalFleetFixture(page: Page) {
       ip_address: node?.ip_address ?? null,
     }});
   });
-  await page.route("**/api/v1/catalog/public-recipes", route => route.fulfill({json: {repository: "CarstVaartjes/vonk-forge-recipes", commit, recipes: []}}));
-  const managedSync = {schema_version: 1, sync_id: "00000000-0000-4000-8000-000000000101", request_key: "00000000-0000-4000-8000-000000000102", trigger: "automatic", state: "current", repository: "CarstVaartjes/vonk-forge-recipes", commit, expected_commit: commit, total_count: 0, processed_count: 0, imported_count: 0, updated_count: 0, unchanged_count: 0, skipped_count: 0, withdrawn_count: 0, withdrawn_recipes: [], stale_recipes: [], problems: [], created_at: "2026-09-01T12:00:00Z", completed_at: "2026-09-01T12:00:01Z"};
-  await page.route("**/api/v1/catalog/managed-recipes/sync-status", route => route.fulfill({json: managedSync}));
-  await page.route("**/api/v1/catalog/managed-recipes/sync", route => route.fulfill({json: {...managedSync, trigger: "manual"}}));
-  await page.route("**/api/v1/library?*", route => {
+  const cacheStorage = {schema_version: 2, total_bytes: 1_000, free_bytes: 700, reserve_bytes: 100, available_bytes: 600, unique_used_bytes: 300, in_flight_bytes: 0, protected_bytes: 100, reclaimable_bytes: 200};
+  const emptyCacheInventory = {schema_version: 2, source_policy: "nas-first", entries: [], storage: cacheStorage, total: 0, next_cursor: null};
+  await page.route("**/api/v1/model-cache", route => route.fulfill({json: emptyCacheInventory}));
+  await page.route("**/api/v1/model-cache?*", route => route.fulfill({json: emptyCacheInventory}));
+  const librarySnapshotRoute = (route: Route) => {
     if (libraryState.snapshotFailuresRemaining > 0) {
       libraryState.snapshotFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
     const body = libraryState.empty ? {...librarySnapshot, models: [], unlinked_recipes: []} : librarySnapshot;
     return route.fulfill({json: body});
-  });
+  };
+  await page.route("**/api/v1/library", librarySnapshotRoute);
+  await page.route("**/api/v1/library?*", librarySnapshotRoute);
   await page.route("**/api/v1/library/recipes/recipe-chat", route => {
     if (libraryState.detailFailuresRemaining > 0) {
       libraryState.detailFailuresRemaining -= 1;
       return route.fulfill({status: 200, contentType: "application/json", body: "{"});
     }
     return route.fulfill({json: fullLibraryDetail});
+  });
+  await page.route(`**/api/v1/library/recipes/${pairedRecipeId}`, route => {
+    if (libraryState.detailFailuresRemaining > 0) {
+      libraryState.detailFailuresRemaining -= 1;
+      return route.fulfill({status: 200, contentType: "application/json", body: "{"});
+    }
+    return route.fulfill({json: canonicalRecipeDetail()});
   });
   await page.route("**/api/v1/library/recipes/recipe-code", route => route.fulfill({json: {
     ...fullLibraryDetail,
@@ -496,6 +516,15 @@ async function installLocalFleetFixture(page: Page) {
       source_kind: unlinkedRecipe.source_kind,
     },
   }}));
+  await page.route("**/api/v1/library/recipes/*", route => {
+    const recipeId = new URL(route.request().url()).pathname.split("/").at(-1);
+    if (recipeId !== pairedRecipeId) return route.fallback();
+    if (libraryState.detailFailuresRemaining > 0) {
+      libraryState.detailFailuresRemaining -= 1;
+      return route.fulfill({status: 200, contentType: "application/json", body: "{"});
+    }
+    return route.fulfill({json: canonicalRecipeDetail()});
+  });
   await page.route("**/api/v1/recipes/run-plans/preview", route => route.fulfill({json: libraryLoadPlan()}));
   await page.route("**/api/v1/recipes/runs", async route => {
     libraryState.lastApplyBody = await route.request().postDataJSON() as Record<string, unknown>;
@@ -615,7 +644,7 @@ test("Fleet Detailed view and bounded history are keyboard-accessible with local
   await expectNoSeriousAccessibilityViolations(page);
   await page.getByRole("button", {name: "24 hours"}).click();
   await expect(page.getByRole("button", {name: "24 hours"})).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("link", {name: "Download to Library"}).click();
+  await page.getByRole("link", {name: "Download to NAS"}).click();
   await expect(page).toHaveURL(new RegExp(`/library\\?spark=${nodeId}$`));
   await expect(page.getByRole("complementary", {name: "Managing models on Aurora"})).toBeVisible();
 });
@@ -669,7 +698,7 @@ test("Node history and lifecycle controls work on desktop and mobile", async ({p
     await page.getByRole("button", {name: "View Aurora details"}).click();
     await expect(page.getByRole("button", {name: "Close Aurora details"})).toBeFocused();
     const detail = page.getByRole("complementary", {name: "Aurora details"});
-    await expect(detail.getByRole("link", {name: "Download to Library"})).toBeVisible();
+    await expect(detail.getByRole("link", {name: "Download to NAS"})).toBeVisible();
     await expect(detail.getByRole("button", {name: "Stop Aurora solo on this Spark"})).toBeVisible();
     await expect(detail.getByText("Stop all 2 active runs before removing this recipe from all 2 Sparks.")).toBeVisible();
     await testInfo.attach(`fleet-spark-lifecycle-${width}.png`, {body: await detail.screenshot(), contentType: "image/png"});
@@ -879,33 +908,8 @@ test("Add Spark preserves an in-flight and revealed one-time grant until an expl
   await expect(page).toHaveURL(/\/library$/);
 });
 
-test("Library mirrors the repository table with Installed on first and contained responsive scrolling", async ({page}, testInfo) => {
-  const update = libraryCatalogUpdate();
-  await page.unroute("**/api/v1/catalog/public-recipes");
-  await page.route("**/api/v1/catalog/public-recipes", route => route.fulfill({json: {repository: "CarstVaartjes/vonk-forge-recipes", commit, recipes: [update]}}));
-  await page.goto("/library");
-
-  const table = page.getByRole("table", {name: /Recipes synchronized from the repository/});
-  await expect(table).toBeVisible();
-  const headers = table.getByRole("columnheader");
-  await expect(headers.nth(0)).toContainText("Installed on");
-  await expect(headers.nth(1)).toContainText("Recipe");
-  await expect(headers.nth(4)).toContainText("Format");
-  await expect(headers.nth(5)).toContainText("Runtime");
-  await expect(table.getByRole("row", {name: /Qwen Chat/})).toContainText("Aurora");
-  await expect(page.getByText(/Import public recipe|Review recipe/)).toHaveCount(0);
-
-  for (const width of [320, 768, 1280]) {
-    await page.setViewportSize({width, height: 850});
-    await expect.poll(() => page.evaluate(() => ({body: document.body.scrollWidth, document: document.documentElement.scrollWidth, viewport: innerWidth}))).toEqual({body: width, document: width, viewport: width});
-  }
-  await page.setViewportSize({width: 1280, height: 900});
-  await page.screenshot({path: testInfo.outputPath("library-repository-table.png")});
-  await expectNoSeriousAccessibilityViolations(page);
-});
-
 test("Library separates installation capacity from load memory admission", async ({page}, testInfo) => {
-  const blocked = structuredClone(fullLibraryDetail);
+  const blocked = canonicalRecipeDetail();
   const group = blocked.placement[0].recommendations[0];
   group.eligible = false;
   group.reasons = [
@@ -914,20 +918,21 @@ test("Library separates installation capacity from load memory admission", async
   ];
   blocked.placement[0].rejected_groups = [];
   blocked.placement[0].rejected_nodes = [];
-  await page.unroute("**/api/v1/library/recipes/recipe-chat");
-  await page.route("**/api/v1/library/recipes/recipe-chat", route => route.fulfill({json: blocked}));
+  await page.unroute(`**/api/v1/library/recipes/${pairedRecipeId}`);
+  await page.unroute("**/api/v1/library/recipes/*");
+  await page.route(`**/api/v1/library/recipes/${pairedRecipeId}`, route => route.fulfill({json: blocked}));
   await page.setViewportSize({width: 1280, height: 900});
 
-  await page.goto("/library/recipes/recipe-chat");
+  await page.goto(`/library/recipes/${pairedRecipeId}`);
 
   const placement = page.getByRole("region", {name: "Complete placement groups"});
-  await expect(placement.getByText("2 Sparks · 1 installable")).toBeVisible();
+  await expect(placement.getByText("1 Sparks · 1 installable")).toBeVisible();
   const blocker = placement.locator(".placement-load-blocked-summary");
   await expect(blocker).toContainText("Installable, but cannot be loaded");
   await expect(blocker).toContainText("1.0 GiB");
   await expect(blocker).not.toContainText("run.insufficient_memory");
   await expect(placement.getByText("Unavailable placement evidence").locator("..")).not.toHaveAttribute("open");
-  const selector = placement.getByRole("button", {name: "Select complete group Spark node and Spark node"});
+  const selector = placement.getByRole("button", {name: "Select complete group Spark node"});
   await selector.click();
   await expect(placement.getByRole("button", {name: "Review Load"})).toHaveCount(0);
   await expect(placement.locator(".placement-group")).not.toContainText("run.insufficient_memory");
@@ -937,26 +942,27 @@ test("Library separates installation capacity from load memory admission", async
 
 test("Library uses the schema 2 one-click Run path when the Controller exposes run-switch", async ({page}) => {
   await page.setViewportSize({width: 1280, height: 900});
-  await page.goto("/library/recipes/recipe-chat");
+  await page.goto(`/library/recipes/${pairedRecipeId}`);
 
-  const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
+  const authority = page.locator(".library-recipe-detail");
   const run = authority.getByRole("button", {name: "Run", exact: true}).first();
   await expect(run).toBeVisible();
   await expect(authority.getByRole("button", {name: "Review Load"})).toHaveCount(0);
   await run.click();
 
   const state = libraryFixtures.get(page)!;
-  await expect.poll(() => state.lastRunSwitchPreviewBody).toMatchObject({schema_version: 2, model_version_sha256: "e".repeat(64), recipe_revision_id: "revision-chat", action: "run", retention: "retain-cached"});
+  const canonical = canonicalRecipeDetail();
+  await expect.poll(() => state.lastRunSwitchPreviewBody).toMatchObject({schema_version: 2, model_version_sha256: canonical.model_documents[0]!.selection.model.content_sha256, recipe_revision_id: canonical.recipe.recipe_revision_id, action: "run", retention: "retain-cached"});
   await expect.poll(() => state.lastRunSwitchApplyBody).toMatchObject({schema_version: 2, plan_digest: "f".repeat(64), request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
-  const progress = authority.getByRole("region", {name: "Qwen Chat progress"});
-  await expect(progress).toContainText("Copying model to node-alpha");
+  const progress = authority.getByRole("region", {name: `${pairedRecipeTitle} progress`});
+  await expect(progress).toContainText("Copying model to Spark node");
   await expect(progress).toContainText("Total bytes unavailable");
   await expect(progress.getByRole("progressbar", {name: "Run progress"})).toHaveAttribute("aria-valuetext", "Total bytes unavailable");
 });
 
 test("Library keeps partial Run progress visible for each Spark", async ({page}) => {
-  await page.goto("/library/recipes/recipe-chat");
-  const authority = page.getByRole("region", {name: "Qwen Chat recipe authority"});
+  await page.goto(`/library/recipes/${pairedRecipeId}`);
+  const authority = page.locator(".library-recipe-detail");
   const run = authority.getByRole("button", {name: "Run", exact: true}).last();
   await run.scrollIntoViewIfNeeded();
   await run.click({force: true});
@@ -964,8 +970,8 @@ test("Library keeps partial Run progress visible for each Spark", async ({page})
   const state = libraryFixtures.get(page)!;
   await expect.poll(() => state.lastRunSwitchPreviewBody).toBeTruthy();
   await expect.poll(() => state.lastRunSwitchApplyBody).toBeTruthy();
-  const progress = authority.getByRole("region", {name: "Qwen Chat progress"});
-  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("node-alpha");
+  const progress = authority.getByRole("region", {name: `${pairedRecipeTitle} progress`});
+  await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("Spark node");
   await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("In progress");
   await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("node-beta");
   await expect(progress.getByRole("list", {name: "Spark progress"})).toContainText("Waiting");
@@ -1000,43 +1006,86 @@ test("Profiles keep the saved view primary and show durable per-Spark switch pro
 test("Library retries a failed snapshot and recipe detail request", async ({page}) => {
   const state = libraryFixtures.get(page)!;
   state.snapshotFailuresRemaining = 1;
-  await page.goto("/library?view=models");
+  await page.goto(`/library?view=models&model=${encodeURIComponent(pairedModelKey)}`);
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry Library"}).click();
   await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
 
   state.detailFailuresRemaining = 1;
   await page.locator(".library-subnav").getByRole("link", {name: "Recipes", exact: true}).click();
-  await page.getByRole("link", {name: "Qwen Chat", exact: true}).click();
+  await expect(page.getByLabel("Recipes matching selected Model")).toContainText(pairedRecipeTitle);
+  await page.goto(`/library/recipes/${pairedRecipeId}`);
   await expect(page.getByRole("alert")).toBeVisible();
   await page.getByRole("button", {name: "Retry recipe detail"}).click();
-  await expect(page.getByRole("region", {name: "Qwen Chat recipe authority"})).toBeVisible();
-});
-
-test("Empty Library offers a direct escape to the custom runtime builder", async ({page}) => {
-  const state = libraryFixtures.get(page)!;
-  state.empty = true;
-  await page.goto("/library");
-  const empty = page.getByRole("region", {name: "Empty Library"});
-  await expect(empty).toBeVisible();
-  await empty.getByRole("link", {name: "Create custom runtime"}).click();
-  await expect(page).toHaveURL(/\/library\/create$/);
-  await expect(page.getByRole("heading", {name: "Create custom recipe"})).toBeVisible();
+  await expect(page.locator(".library-recipe-detail")).toBeVisible();
 });
 
 test("Library route changes restore heading focus and browser back state", async ({page}) => {
-  await page.goto("/library?view=models");
+  await page.goto(`/library?view=models&model=${encodeURIComponent(pairedModelKey)}`);
   await expect(page.getByRole("region", {name: "Models"})).toBeVisible();
   await page.locator(".library-subnav").getByRole("link", {name: "Recipes", exact: true}).click();
-  await expect(page).toHaveURL(/\/library$/);
-  await page.getByRole("link", {name: "Qwen Chat", exact: true}).click();
-  await expect(page).toHaveURL(/\/library\/recipes\/recipe-chat$/);
+  await expect(page).toHaveURL(new RegExp(`/library\\?model=${encodeURIComponent(pairedModelKey)}`));
+  await expect(page.getByLabel("Recipes matching selected Model")).toContainText(pairedRecipeTitle);
+  await page.goto(`/library/recipes/${pairedRecipeId}`);
+  await expect(page).toHaveURL(new RegExp(`/library/recipes/${pairedRecipeId}$`));
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
 
   await page.goBack();
-  await expect(page).toHaveURL(/\/library$/);
-  await expect(page.getByRole("region", {name: "Recipe catalog"})).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/library\\?model=${encodeURIComponent(pairedModelKey)}`));
+  await expect(page.getByLabel("Model and recipe list")).toBeVisible();
   await page.locator(".library-subnav").getByRole("link", {name: "Models", exact: true}).click();
-  await expect(page).toHaveURL(/\/library\?view=models$/);
+  await expect(page).toHaveURL(new RegExp(`/library\\?(?:model=${encodeURIComponent(pairedModelKey)}&view=models|view=models&model=${encodeURIComponent(pairedModelKey)})`));
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
+});
+
+test("Library pairs exact model selection with matching recipes and downloads an unlinked Model", async ({page}, testInfo) => {
+  const linked = librarySnapshot.models.find(model => model.recipes.length > 0)!;
+  const unlinked = librarySnapshot.models.find(model => model.recipes.length === 0)!;
+  const modelKey = (model: typeof linked) => `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}`;
+  const cacheOperation = {
+    schema_version: 2, id: "model-download-operation", attempt: 1, request_key: "00000000-0000-4000-8000-000000000801", kind: "download", state: "running", artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan",
+    progress: {schema_version: 2, phase: "downloading", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 100, expected_bytes: 200, current_artifact_key: "weights"}, result: null, last_error: null, created_at: "2026-09-06T00:00:00Z", updated_at: "2026-09-06T00:00:01Z", completed_at: null,
+  };
+  await page.route("**/api/v1/model-cache/download-preview", async route => route.fulfill({json: {schema_version: 2, artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan", source_policy: "nas-first", artifact_count: 2, expected_bytes: 200, already_cached_bytes: 0, new_bytes: 200, blockers: [], warnings: []}}));
+  await page.route("**/api/v1/model-cache/download", route => route.fulfill({status: 202, json: cacheOperation}));
+  await page.route("**/api/v1/model-cache/operations/*", route => route.fulfill({json: cacheOperation}));
+  await page.setViewportSize({width: 1280, height: 900});
+  await page.goto(`/library?model=${encodeURIComponent(modelKey(linked))}`);
+  const paired = page.getByLabel("Model and recipe list");
+  await expect(paired).toBeVisible();
+  const recipes = page.getByLabel("Recipes matching selected model");
+  await expect(recipes).toContainText(linked.recipes[0]!.title);
+  const workcellBox = await page.locator(".library-workcell").boundingBox();
+  const pairedBox = await paired.boundingBox();
+  const contentBox = await page.locator(".content-frame").boundingBox();
+  expect(workcellBox).not.toBeNull();
+  expect(pairedBox).not.toBeNull();
+  expect(contentBox).not.toBeNull();
+  expect(pairedBox!.width).toBeGreaterThan(900);
+  expect(Math.abs(pairedBox!.x - workcellBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(pairedBox!.x - contentBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(pairedBox!.width - workcellBox!.width)).toBeLessThanOrEqual(2);
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.screenshot({path: testInfo.outputPath("library-model-recipe-paired-desktop.png"), fullPage: false});
+
+  await page.setViewportSize({width: 360, height: 800});
+  await page.reload();
+  const mobileRecipes = page.getByLabel("Recipes matching selected model");
+  await expect(mobileRecipes).toContainText(linked.recipes[0]!.title);
+  const mobileHeaderBox = await page.locator(".app-header").boundingBox();
+  const mobileRecipesBox = await mobileRecipes.boundingBox();
+  expect(mobileRecipesBox?.y ?? 0).toBeGreaterThanOrEqual((mobileHeaderBox?.height ?? 0) - 1);
+  expect(mobileRecipesBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(800);
+  await page.getByRole("heading", {name: "Library", exact: true}).focus();
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.screenshot({path: testInfo.outputPath("library-model-recipe-paired-mobile.png"), fullPage: false});
+
+  await page.goto(`/library?view=models&model=${encodeURIComponent(modelKey(unlinked))}`);
+  const modelInventory = page.getByLabel("Exact model inventory");
+  const orphanRow = modelInventory.locator(".library-model-row").filter({hasText: unlinked.model_document.identity.model.title}).first();
+  await expect(orphanRow).toContainText("No Recipe");
+  const previewRequest = page.waitForRequest(request => request.url().endsWith("/api/v1/model-cache/download-preview"));
+  await orphanRow.getByRole("button", {name: "Download to NAS"}).click();
+  expect((await previewRequest).postDataJSON()).toMatchObject({schema_version: 2, model_version_sha256: unlinked.model.content_sha256});
+  await expect(page.getByText(/Downloading to NAS/)).toBeVisible();
 });

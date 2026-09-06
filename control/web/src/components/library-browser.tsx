@@ -1,101 +1,46 @@
 import {useEffect, useMemo, useState} from "react";
 import type {MouseEvent} from "react";
-import type {ControlApi, LibraryRecipeDetail, LibrarySnapshot, ManagedCatalogSyncSummary, PublicRecipe, VisualFleetSnapshot} from "../api/types";
+import type {ControlApi, LibraryRecipeDetail, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
+import {modelVersionKey} from "../lib/library-route";
 import type {LibraryRoute} from "../lib/library-route";
-import {LibraryRecipeAuthority} from "./library-recipe-detail";
 import {LibraryCacheView} from "./library-cache-view";
 import {LibraryModelsView} from "./library-models-view";
 import {LibraryProfilesView} from "./library-profiles-view";
-import {applyManagedCatalogWithdrawals, buildLibraryRecipeRecords, libraryFiltersFromSearch, libraryFiltersToSearch, LibraryWorkcell} from "./library-workcell";
-
-type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
+import {LibraryRecipeAuthority} from "./library-recipe-detail";
+import {buildLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS, libraryFiltersFromSearch, libraryFiltersToSearch, LibraryWorkcell} from "./library-workcell";
 
 export type LibrarySubview = "models" | "cache" | "profiles" | "recipes";
 
-function runSwitchController(api: ControlApi): Pick<ControlApi, "previewRecipeRunSwitch" | "applyRecipeRunSwitch" | "getRecipeRunSwitchOperation"> | undefined {
-  // Browser fixture adapters may intentionally expose only the older lifecycle
-  // actions. The generated production ControlApi always includes this trio.
-  if (!("previewRecipeRunSwitch" in api) || !("applyRecipeRunSwitch" in api) || !("getRecipeRunSwitchOperation" in api)) return undefined;
-  return api;
-}
-
-export function LibraryBrowser({api, catalogCommit, catalogError, catalogLoading, catalogRepository, detail, detailError, detailLoading, fleet, fleetError, onBusyChange, onNavigate, onNavigatePath, onQueryChange, onRefresh, onRetryCatalog, onRetryDetail, onRetryFleet, path, preferredNodeId, publicRecipes, query, route, snapshot, subview, syncError, syncSummary, windowed}: {
-  api: ControlApi;
-  catalogCommit?: string;
-  catalogError: string;
-  catalogLoading: boolean;
-  catalogRepository?: string;
-  detail?: LibraryRecipeDetail;
-  detailError: string;
-  detailLoading: boolean;
-  fleet?: VisualFleetSnapshot;
-  fleetError: string;
-  onBusyChange?(busy: boolean): void;
-  onNavigate: Navigate;
-  onNavigatePath?(path: string, replace?: boolean): void;
-  onQueryChange(value: string): void;
-  onRefresh(signal: AbortSignal): Promise<void>;
-  onRetryCatalog(): void;
-  onRetryDetail(): void;
-  onRetryFleet(): void;
-  path: string;
-  preferredNodeId?: string;
-  publicRecipes: PublicRecipe[];
-  query: string;
-  route: LibraryRoute;
-  snapshot: LibrarySnapshot;
-  subview: LibrarySubview;
-  syncError: string;
-  syncSummary?: ManagedCatalogSyncSummary;
-  windowed: boolean;
+export function LibraryBrowser({api, detail, detailError, detailLoading, fleet, onBusyChange, onNavigate, onNavigatePath, onQueryChange, onRefresh, onRetryDetail, path, query, route, snapshot, subview}: {
+  api: ControlApi; detail?: LibraryRecipeDetail; detailError: string; detailLoading: boolean; fleet?: VisualFleetSnapshot; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void; onQueryChange(value: string): void; onRefresh(signal: AbortSignal): Promise<void>; onRetryDetail(): void; path: string; query: string; route: LibraryRoute; snapshot: LibrarySnapshot; subview: LibrarySubview;
 }) {
   const [filters, setFilters] = useState(() => libraryFiltersFromSearch(new URL(path, location.origin).searchParams));
-  const records = useMemo(() => applyManagedCatalogWithdrawals(buildLibraryRecipeRecords(snapshot, publicRecipes), fleet, syncSummary?.withdrawn_recipes ?? []), [fleet, publicRecipes, snapshot, syncSummary?.withdrawn_recipes]);
-  const selectedRecord = route.kind === "recipe" ? records.find(record => record.recipe?.recipe_id === route.recipeId) : undefined;
-  const runApi = useMemo(() => runSwitchController(api), [api]);
-  const publicByLocalRecipe = useMemo(() => new Map(publicRecipes.flatMap(item => item.local.recipe_id ? [[item.local.recipe_id, item] as const] : [])), [publicRecipes]);
+  const records = useMemo(() => buildLibraryRecipeRecords(snapshot), [snapshot]);
+  useEffect(() => { setFilters(libraryFiltersFromSearch(new URL(path, location.origin).searchParams)); }, [path]);
   useEffect(() => {
-    setFilters(libraryFiltersFromSearch(new URL(path, location.origin).searchParams));
-  }, [path]);
-
+    if (!filters.model || snapshot.models.some(model => modelVersionKey(model.model) === filters.model)) return;
+    const next = {...filters, model: ""};
+    setFilters(next);
+    if (onNavigatePath) {
+      const url = new URL(path, location.origin);
+      url.searchParams.delete("model");
+      onNavigatePath(`${url.pathname}${url.search}`, true);
+    }
+  }, [filters, onNavigatePath, path, snapshot]);
   function updateFilters(next: typeof filters) {
     setFilters(next);
     if (!onNavigatePath) return;
-    const nextUrl = new URL(path, location.origin);
-    libraryFiltersToSearch(next, nextUrl.searchParams);
-    onNavigatePath(`${nextUrl.pathname}${nextUrl.search}`, true);
+    const url = new URL(path, location.origin);
+    onNavigatePath(`${url.pathname}?${libraryFiltersToSearch(next, url.searchParams).toString()}`, true);
   }
-
-  return <div className="library-browser-shell">
-    {catalogLoading && <p className="library-catalog-state" role="status">Refreshing recipes from the repository…</p>}
-    {catalogError && <div className="library-catalog-state is-error" role="alert"><span>Repository catalog unavailable: {catalogError}</span><button type="button" className="button secondary" onClick={onRetryCatalog}>Retry repository</button></div>}
-    {subview === "models" && <LibraryModelsView api={api} entries={records} fleet={fleet} filters={filters} onFiltersChange={updateFilters} onNavigate={onNavigate} onQueryChange={onQueryChange} query={query}/>}
-    {subview === "cache" && <LibraryCacheView api={api} entries={records} fleet={fleet} onBusyChange={onBusyChange} onNavigate={onNavigate}/>}
-    {subview === "profiles" && <LibraryProfilesView api={api} entries={records} fleet={fleet} initialCreate={new URL(path, location.origin).searchParams.get("profile") === "new"} initialProfileId={new URL(path, location.origin).searchParams.get("profile") ?? undefined} onBusyChange={onBusyChange} onNavigate={onNavigate}/>}
-    {subview === "recipes" && <LibraryWorkcell
-        api={api}
-        catalogCommit={catalogCommit}
-        catalogRepository={catalogRepository}
-        detail={detail}
-        detailContent={route.kind === "recipe" && detail ? <LibraryRecipeAuthority api={api} runApi={runApi} catalogRecipe={publicByLocalRecipe.get(detail.recipe.recipe_id)} detail={detail} modelVersionSha256={selectedRecord?.model?.content_sha256} nodeNames={Object.fromEntries(fleet?.nodes.map(node => [node.id, node.display_name || node.hostname]) ?? [])} onBusyChange={onBusyChange} onRefresh={onRefresh} policy={snapshot.freshness_policy} preferredNodeId={preferredNodeId}/> : undefined}
-        detailError={detailError}
-        detailLoading={detailLoading}
-        fleet={fleet}
-        fleetError={fleetError}
-        filters={filters}
-        onBusyChange={onBusyChange}
-        onFiltersChange={updateFilters}
-        onNavigate={onNavigate}
-        onRefresh={onRefresh}
-        onRetryDetail={onRetryDetail}
-        onRetryFleet={onRetryFleet}
-        publicRecipes={publicRecipes}
-        query={query}
-        route={route}
-        snapshot={snapshot}
-        syncError={syncError}
-        syncSummary={syncSummary}
-        windowed={windowed}
-      />}
-  </div>;
+  if (subview === "cache") return <LibraryCacheView api={api} entries={records} modelInventory={snapshot.models} fleet={fleet} onBusyChange={onBusyChange} onNavigate={onNavigate} path={path}/>;
+  if (subview === "profiles") return <LibraryProfilesView api={api} entries={records} fleet={fleet} onBusyChange={onBusyChange} onNavigate={onNavigate}/>;
+  if (subview === "models") return <LibraryModelsView api={api} entries={records} fleet={fleet} filters={filters} modelInventory={snapshot.models} onBusyChange={onBusyChange} onFiltersChange={updateFilters} onNavigate={onNavigate} onNavigatePath={onNavigatePath} onQueryChange={onQueryChange} onRefresh={onRefresh} path={path} query={query}/>;
+  if (route.kind === "recipe") {
+    if (detailLoading) return <section className="library-detail-state" role="status">Loading the exact Recipe detail…</section>;
+    if (detailError) return <section className="library-detail-state is-error" role="alert"><p>{detailError}</p><button type="button" className="button secondary" onClick={onRetryDetail}>Retry Recipe detail</button></section>;
+    if (detail) return <LibraryRecipeAuthority api={api} detail={detail} snapshot={snapshot} onRefresh={onRefresh} onBusyChange={onBusyChange}/>;
+    return <section className="library-detail-state" role="status">Recipe detail is not available.</section>;
+  }
+  return <LibraryWorkcell api={api} detail={detail} detailError={detailError} detailLoading={detailLoading} fleet={fleet} filters={filters ?? EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={updateFilters} onNavigate={onNavigate} onQueryChange={onQueryChange} onRefresh={onRefresh} onRetryDetail={onRetryDetail} query={query} route={route} snapshot={snapshot}/>;
 }

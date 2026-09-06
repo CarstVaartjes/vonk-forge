@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
-from vonk_control.models import Base, CatalogDocumentRevision, RecipeImport
+from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     RecipePackageClient,
@@ -151,11 +151,15 @@ def test_candidate_package_imports_into_canonical_controller_documents(tmp_path:
         assert {revision.kind for revision in revisions} == {"model", "recipe"}
         assert all(revision.state == "active" for revision in revisions)
         assert any(revision.content_digest == item.content_sha256 for revision in revisions)
-        receipt = session.scalar(select(RecipeImport).where(RecipeImport.source_sha256 == item.content_sha256))
-        assert receipt is not None
-        assert receipt.redacted_source["package_sha256"] == package_sha256
-        assert receipt.redacted_source["source_bundle_sha256"] == item.source_bundle_sha256
-        assert receipt.redacted_source["package_handle"]["closure_path"].endswith(
+        receipt = next(
+            revision
+            for revision in revisions
+            if revision.kind == "recipe"
+            and revision.content_digest == item.content_sha256
+        )
+        assert receipt.projected["package_sha256"] == package_sha256
+        assert receipt.projected["source_bundle_sha256"] == item.source_bundle_sha256
+        assert receipt.projected["package_handle"]["closure_path"].endswith(
             f"{package_sha256}/closure"
         )
     restarted = CatalogService(

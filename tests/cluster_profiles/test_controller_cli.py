@@ -153,60 +153,6 @@ def _artifact_capabilities(*, remaining: int = 16 * 1024**3) -> dict[str, object
     }
 
 
-def test_public_recipe_list_exposes_and_applies_the_web_catalog_filters() -> None:
-    recipes = [
-        {
-            "title": "Qwen Vision",
-            "slug": "qwen-vision",
-            "description": "Multimodal chat",
-            "model_title": "Qwen",
-            "model_publisher": "qwen",
-            "model_slug": "vision",
-            "source_owner": "Qwen",
-            "source_repository": "https://example.test/qwen",
-            "runtime_distribution": "vllm-1",
-            "precision": "bf16",
-            "topology_mode": "single",
-            "qualification": "cataloged",
-            "execution_readiness": "executable",
-            "node_count": 1,
-            "expected_download_bytes": 20,
-            "capabilities": ["chat", "vision"],
-            "tags": ["featured"],
-            "local": {"status": "update-available"},
-        },
-        {
-            "title": "Audio model",
-            "capabilities": ["audio"],
-            "local": {"status": "not-imported"},
-        },
-    ]
-    client = _Client({("GET", "/api/v1/catalog/public-recipes"): {"recipes": recipes}})
-
-    result, payload = _invoke(
-        client,
-        "--json",
-        "library",
-        "public",
-        "list",
-        "--model-type",
-        "vision",
-        "--capability",
-        "chat",
-        "--qualification",
-        "cataloged",
-        "--readiness",
-        "executable",
-        "--local",
-        "update-available",
-    )
-
-    assert result == 0
-    assert payload["filtered_count"] == 1
-    assert [recipe["slug"] for recipe in payload["recipes"]] == ["qwen-vision"]
-    assert client.calls == [("GET", "/api/v1/catalog/public-recipes", None, None)]
-
-
 def test_fleet_list_uses_the_same_health_and_warning_filters_as_the_web_view() -> None:
     client = _Client(
         {
@@ -332,182 +278,6 @@ def test_human_agent_upgrade_detail_separates_diagnosis_from_raw_evidence() -> N
     assert "next_action: Inspect package-helper" in output
 
 
-def test_library_apply_is_plan_only_until_apply_flag_is_explicit() -> None:
-    client = _Client()
-
-    result, payload = _invoke(
-        client,
-        "--json",
-        "library",
-        "load",
-        "apply",
-        "--installation-id",
-        "installation-1",
-        "--alias",
-        "qwen",
-        "--plan-digest",
-        "a" * 64,
-    )
-
-    assert result == 0
-    assert payload["mode"] == "plan"
-    assert payload["body"]["request_key"] == "request-1"
-    assert client.calls == []
-
-    result, payload = _invoke(
-        client,
-        "--json",
-        "library",
-        "load",
-        "apply",
-        "--installation-id",
-        "installation-1",
-        "--alias",
-        "qwen",
-        "--plan-digest",
-        "a" * 64,
-        "--apply",
-    )
-
-    assert result == 0
-    assert payload == {"ok": True}
-    assert client.calls[-1] == (
-        "POST",
-        "/api/v1/recipes/runs",
-        {
-            "installation_id": "installation-1",
-            "alias": "qwen",
-            "plan_digest": "a" * 64,
-            "request_key": "request-1",
-        },
-        None,
-    )
-
-
-@pytest.mark.parametrize(
-    ("argv", "path", "body"),
-    [
-        (
-            (
-                "library",
-                "build",
-                "apply",
-                "--recipe-revision-id",
-                "revision-1",
-                "--builder-node-id",
-                "spk_builder",
-                "--build-input-sha256",
-                "a" * 64,
-            ),
-            "/api/v1/recipes/builds",
-            {
-                "recipe_revision_id": "revision-1",
-                "builder_node_id": "spk_builder",
-                "build_input_sha256": "a" * 64,
-                "request_key": "request-1",
-            },
-        ),
-        (
-            (
-                "library",
-                "distribute",
-                "apply",
-                "--recipe-build-id",
-                "build-1",
-                "--mapping-id",
-                "mapping-1",
-                "--mapping-generation",
-                "3",
-                "--plan-digest",
-                "b" * 64,
-            ),
-            "/api/v1/recipes/image-distributions",
-            {
-                "recipe_build_id": "build-1",
-                "mapping_id": "mapping-1",
-                "mapping_generation": 3,
-                "plan_digest": "b" * 64,
-                "request_key": "request-1",
-            },
-        ),
-    ],
-)
-def test_recipe_build_and_distribution_apply_are_plan_only_until_confirmed(
-    argv: tuple[str, ...], path: str, body: dict[str, object]
-) -> None:
-    client = _Client()
-
-    result, plan = _invoke(client, "--json", *argv)
-
-    assert result == 0
-    assert plan == {
-        "mode": "plan",
-        "apply": False,
-        "method": "POST",
-        "path": path,
-        "body": body,
-    }
-    assert client.calls == []
-
-    result, response = _invoke(client, "--json", *argv, "--apply")
-
-    assert result == 0
-    assert response == {"ok": True}
-    assert client.calls == [("POST", path, body, None)]
-
-
-@pytest.mark.parametrize(
-    ("argv", "path", "body"),
-    [
-        (
-            (
-                "library",
-                "build",
-                "preview",
-                "--recipe-revision-id",
-                "revision-1",
-                "--builder-node-id",
-                "spk_builder",
-            ),
-            "/api/v1/recipes/build-plans/preview",
-            {
-                "recipe_revision_id": "revision-1",
-                "builder_node_id": "spk_builder",
-            },
-        ),
-        (
-            (
-                "library",
-                "distribute",
-                "preview",
-                "--recipe-build-id",
-                "build-1",
-                "--mapping-id",
-                "mapping-1",
-                "--mapping-generation",
-                "3",
-            ),
-            "/api/v1/recipes/image-distribution-plans/preview",
-            {
-                "recipe_build_id": "build-1",
-                "mapping_id": "mapping-1",
-                "mapping_generation": 3,
-            },
-        ),
-    ],
-)
-def test_recipe_build_and_distribution_previews_use_exact_api_inputs(
-    argv: tuple[str, ...], path: str, body: dict[str, object]
-) -> None:
-    client = _Client({("POST", path): {"preview": True}})
-
-    result, response = _invoke(client, "--json", *argv)
-
-    assert result == 0
-    assert response == {"preview": True}
-    assert client.calls == [("POST", path, body, None)]
-
-
 def test_activity_and_library_pagination_are_forwarded_to_the_api() -> None:
     client = _Client()
 
@@ -539,7 +309,7 @@ def test_telemetry_range_uses_the_web_resolution_and_point_defaults() -> None:
     client = _Client()
 
     result, _ = _invoke(
-        client, "--json", "fleet", "telemetry", "spk_node", "--range", "7d"
+        client, "--json", "fleet", "telemetry", "history", "spk_node", "--range", "7d"
     )
 
     assert result == 0
@@ -810,136 +580,6 @@ def test_library_all_follows_and_merges_bounded_server_pages() -> None:
     assert client.calls[1][3] == {"cursor": "page-2", "limit": 100}
 
 
-def test_public_facets_and_comparison_expose_the_web_catalog_choices() -> None:
-    recipes = [
-        {
-            "uri": "vonk://catalog/qwen/chat@sha256:" + "a" * 64,
-            "title": "Chat",
-            "model_publisher": "qwen",
-            "model_slug": "chat",
-            "model_title": "Qwen Chat",
-            "source_owner": "Qwen",
-            "source_repository": "https://example.test/qwen",
-            "runtime_distribution": "vllm",
-            "precision": "bf16",
-            "topology_mode": "single",
-            "qualification": "cataloged",
-            "execution_readiness": "executable",
-            "node_count": 1,
-            "capabilities": ["chat", "reasoning"],
-            "local": {"status": "current"},
-        },
-        {
-            "uri": "vonk://catalog/qwen/image@sha256:" + "b" * 64,
-            "title": "Image",
-            "model_publisher": "qwen",
-            "model_slug": "image",
-            "model_title": "Qwen Image",
-            "source_owner": "Qwen",
-            "source_repository": "https://example.test/qwen-image",
-            "runtime_distribution": "diffusers",
-            "precision": "fp16",
-            "topology_mode": "single",
-            "qualification": "candidate",
-            "execution_readiness": "integration-required",
-            "node_count": 2,
-            "capabilities": ["image-generation"],
-            "local": {"status": "not-imported"},
-        },
-    ]
-    response = {"repository": "recipes", "commit": "abc", "recipes": recipes}
-    client = _Client({("GET", "/api/v1/catalog/public-recipes"): response})
-
-    result, payload = _invoke(
-        client, "--json", "library", "public", "facets", "--source-owner", "Qwen"
-    )
-
-    assert result == 0
-    assert payload["matching_count"] == 2
-    capability_counts = {
-        item["value"]: item["count"] for item in payload["facets"]["capability"]
-    }
-    assert capability_counts["chat"] == 1
-    assert capability_counts["image-generation"] == 1
-
-    client = _Client({("GET", "/api/v1/catalog/public-recipes"): response})
-    result, payload = _invoke(
-        client,
-        "--json",
-        "library",
-        "public",
-        "facets",
-        "--model",
-        "qwen/chat",
-        "--model-type",
-        "language",
-    )
-    assert result == 0
-    model_type_counts = {
-        item["value"]: item["count"] for item in payload["facets"]["model_type"]
-    }
-    assert model_type_counts["image"] == 1
-    assert [item["value"] for item in payload["facets"]["model"]] == ["qwen/chat"]
-
-    client = _Client({("GET", "/api/v1/catalog/public-recipes"): response})
-    result, payload = _invoke(
-        client,
-        "--json",
-        "library",
-        "public",
-        "compare",
-        recipes[1]["uri"],
-        recipes[0]["uri"],
-    )
-    assert result == 0
-    assert [recipe["title"] for recipe in payload["recipes"]] == ["Image", "Chat"]
-
-
-def test_custom_recipe_template_uses_the_authoritative_web_builder_preset() -> None:
-    result, payload = _invoke(
-        _Client(), "--json", "library", "template", "--preset", "vllm"
-    )
-
-    assert result == 0
-    assert payload["identity"]["slug"] == "custom-vllm-chat"
-    assert payload["execution"]["harness"]["slug"] == "vllm-openai"
-    assert payload["runtime"]["distribution"]["slug"] == "vllm-cuda"
-    assert (
-        payload["topology"]["roles"][0]["resources"]["memory"]["startup_peak_bytes"]
-        == 68_719_476_736
-    )
-
-
-def test_templates_and_mutation_plans_do_not_require_controller_credentials(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    monkeypatch.delenv("VONK_CONTROL_URL", raising=False)
-    monkeypatch.delenv("VONK_CONTROL_TOKEN_FILE", raising=False)
-    stdout = StringIO()
-    with redirect_stdout(stdout):
-        result = cli.main(("library", "template", "--preset", "custom", "--json"))
-    assert result == 0
-    assert json.loads(stdout.getvalue())["identity"]["slug"] == "custom-service"
-
-    document = tmp_path / "recipe.json"
-    document.write_text('{"schema_version":1}')
-    stdout = StringIO()
-    with redirect_stdout(stdout):
-        result = cli.main(
-            (
-                "library",
-                "create",
-                "--slug",
-                "offline-plan",
-                "--document",
-                str(document),
-                "--json",
-            )
-        )
-    assert result == 0
-    assert json.loads(stdout.getvalue())["mode"] == "plan"
-
-
 def test_local_comparison_requires_two_or_three_unique_recipes() -> None:
     client = _Client(
         {
@@ -1079,25 +719,6 @@ def test_fleet_enrollments_all_follows_continuation_cursors() -> None:
     }
 
 
-def test_json_file_inputs_reject_duplicate_keys(tmp_path) -> None:
-    document = tmp_path / "recipe.json"
-    document.write_text('{"schema_version":1,"schema_version":2}')
-
-    result, payload = _invoke(
-        _Client(),
-        "--json",
-        "library",
-        "create",
-        "--slug",
-        "recipe",
-        "--document",
-        str(document),
-    )
-
-    assert result == 2
-    assert "duplicate key" in payload["error"]
-
-
 @pytest.mark.parametrize(
     ("argv", "method", "path"),
     [
@@ -1120,219 +741,6 @@ def test_json_file_inputs_reject_duplicate_keys(tmp_path) -> None:
             ("fleet", "revoke", "spk/node", "--apply"),
             "POST",
             "/api/v1/agents/nodes/spk%2Fnode/revoke",
-        ),
-        (
-            ("library", "public", "preview", "vonk://recipe"),
-            "POST",
-            "/api/v1/catalog/imports/public/preview",
-        ),
-        (
-            (
-                "library",
-                "public",
-                "import",
-                "vonk://recipe",
-                "--expected-content-sha256",
-                "a" * 64,
-                "--apply",
-            ),
-            "POST",
-            "/api/v1/catalog/imports/public",
-        ),
-        (
-            (
-                "library",
-                "resolve",
-                "recipe/id",
-                "--expected-revision",
-                "1",
-                "--apply",
-            ),
-            "POST",
-            "/api/v1/catalog/recipes/recipe%2Fid/resolve",
-        ),
-        (
-            (
-                "library",
-                "fork",
-                "recipe/id",
-                "--revision",
-                "1",
-                "--slug",
-                "forked",
-                "--apply",
-            ),
-            "POST",
-            "/api/v1/catalog/recipes/recipe%2Fid/fork",
-        ),
-        (
-            (
-                "library",
-                "map",
-                "preview",
-                "--recipe-revision-id",
-                "revision",
-                "--node-id",
-                "node",
-            ),
-            "POST",
-            "/api/v1/recipes/mapping-plans/preview",
-        ),
-        (
-            (
-                "library",
-                "map",
-                "apply",
-                "--recipe-revision-id",
-                "revision",
-                "--node-id",
-                "node",
-                "--placement-digest",
-                "digest",
-                "--apply",
-            ),
-            "POST",
-            "/api/v1/recipes/mappings",
-        ),
-        (
-            (
-                "library",
-                "build",
-                "preview",
-                "--recipe-revision-id",
-                "revision",
-                "--builder-node-id",
-                "node",
-            ),
-            "POST",
-            "/api/v1/recipes/build-plans/preview",
-        ),
-        (
-            (
-                "library",
-                "build",
-                "apply",
-                "--recipe-revision-id",
-                "revision",
-                "--builder-node-id",
-                "node",
-                "--build-input-sha256",
-                "digest",
-                "--apply",
-            ),
-            "POST",
-            "/api/v1/recipes/builds",
-        ),
-        (
-            (
-                "library",
-                "distribute",
-                "preview",
-                "--recipe-build-id",
-                "build",
-                "--mapping-id",
-                "mapping",
-                "--mapping-generation",
-                "3",
-            ),
-            "POST",
-            "/api/v1/recipes/image-distribution-plans/preview",
-        ),
-        (
-            (
-                "library",
-                "distribute",
-                "apply",
-                "--recipe-build-id",
-                "build",
-                "--mapping-id",
-                "mapping",
-                "--mapping-generation",
-                "3",
-                "--plan-digest",
-                "digest",
-                "--apply",
-            ),
-            "POST",
-            "/api/v1/recipes/image-distributions",
-        ),
-        (
-            (
-                "library",
-                "install",
-                "preview",
-                "--mapping-id",
-                "mapping",
-                "--recipe-build-id",
-                "build",
-            ),
-            "POST",
-            "/api/v1/recipes/install-plans/preview",
-        ),
-        (
-            (
-                "library",
-                "install",
-                "apply",
-                "--mapping-id",
-                "mapping",
-                "--recipe-build-id",
-                "build",
-                "--plan-digest",
-                "digest",
-                "--apply",
-            ),
-            "POST",
-            "/api/v1/recipes/installations",
-        ),
-        (
-            (
-                "library",
-                "load",
-                "preview",
-                "--installation-id",
-                "install",
-                "--alias",
-                "alias",
-            ),
-            "POST",
-            "/api/v1/recipes/run-plans/preview",
-        ),
-        (
-            ("library", "stop", "preview", "run/id"),
-            "POST",
-            "/api/v1/recipes/stop-plans/preview",
-        ),
-        (
-            (
-                "library",
-                "stop",
-                "apply",
-                "run/id",
-                "--plan-digest",
-                "digest",
-                "--apply",
-            ),
-            "POST",
-            "/api/v1/recipes/runs/run%2Fid/stop",
-        ),
-        (
-            ("library", "uninstall", "preview", "install/id"),
-            "POST",
-            "/api/v1/recipes/uninstall-plans/preview",
-        ),
-        (
-            (
-                "library",
-                "uninstall",
-                "apply",
-                "install/id",
-                "--plan-digest",
-                "digest",
-                "--apply",
-            ),
-            "POST",
-            "/api/v1/recipes/installations/install%2Fid/uninstall",
         ),
         (
             ("library", "operation", "show", "operation/id"),
@@ -1370,55 +778,6 @@ def test_controller_actions_use_the_web_controller_routes(
 
     assert result == 0
     assert client.calls[-1][:2] == (method, path)
-
-
-def test_custom_recipe_create_and_update_forward_canonical_documents(tmp_path) -> None:
-    document = tmp_path / "recipe.json"
-    document.write_text('{"schema_version":1,"identity":{"slug":"demo"}}')
-    client = _Client()
-
-    result, _payload = _invoke(
-        client,
-        "--json",
-        "library",
-        "create",
-        "--slug",
-        "demo",
-        "--document",
-        str(document),
-        "--apply",
-    )
-    assert result == 0
-    assert client.calls[-1][:3] == (
-        "POST",
-        "/api/v1/catalog/recipes",
-        {
-            "slug": "demo",
-            "document": {"schema_version": 1, "identity": {"slug": "demo"}},
-        },
-    )
-
-    result, _payload = _invoke(
-        client,
-        "--json",
-        "library",
-        "update",
-        "recipe/id",
-        "--expected-revision",
-        "2",
-        "--document",
-        str(document),
-        "--apply",
-    )
-    assert result == 0
-    assert client.calls[-1][:3] == (
-        "PUT",
-        "/api/v1/catalog/recipes/recipe%2Fid/draft",
-        {
-            "expected_revision": 2,
-            "document": {"schema_version": 1, "identity": {"slug": "demo"}},
-        },
-    )
 
 
 def test_enrollment_grants_distinguish_new_and_replacement_certificates() -> None:
@@ -1505,7 +864,6 @@ def test_agent_upgrade_cli_previews_and_applies_without_ssh() -> None:
     "argv",
     [
         ("library", "compare", "one", "two", "three", "four"),
-        ("library", "public", "compare", "one"),
         ("cache", "show", "artifact-set-1"),
         ("cache", "repair", "artifact-set-1", "preview"),
         ("fleet", "enroll", "--ttl-seconds", "901"),
@@ -1519,6 +877,32 @@ def test_controller_rejects_out_of_contract_values(argv: tuple[str, ...]) -> Non
 
     assert result == 2
     assert payload["error_type"] == "control_api"
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("library", "public", "list"),
+        ("library", "template"),
+        ("library", "create"),
+        ("library", "update"),
+        ("library", "resolve"),
+        ("library", "fork"),
+        ("library", "install", "preview"),
+        ("library", "map", "preview"),
+        ("profiles", "prepare", "preview", "profile-1"),
+    ],
+)
+def test_removed_legacy_command_surface_is_rejected(
+    argv: tuple[str, ...],
+) -> None:
+    client = _Client()
+
+    result, payload = _invoke(client, "--json", *argv)
+
+    assert result == 2
+    assert payload["error_type"] == "arguments"
+    assert client.calls == []
 
 
 def test_task_oriented_model_cache_and_profile_commands_use_stable_routes() -> None:
@@ -1602,6 +986,97 @@ def test_models_show_uses_library_identity_projection() -> None:
     assert payload["model"]["slug"] == "demo"
 
 
+def test_models_list_keeps_unlinked_models_in_a_dynamic_canonical_fixture() -> None:
+    client = _Client(
+        {
+            ("GET", "/api/v1/library"): {
+                "models": [
+                    {
+                        "model": {
+                            "publisher": "acme",
+                            "slug": "unlinked",
+                            "content_sha256": "a" * 64,
+                        },
+                        "recipes": [],
+                    },
+                    {
+                        "model": {
+                            "publisher": "acme",
+                            "slug": "served",
+                            "content_sha256": "b" * 64,
+                        },
+                        "recipes": [
+                            {
+                                "recipe_id": "recipe-1",
+                                "title": "Served recipe",
+                                "capabilities": ["chat"],
+                            }
+                        ],
+                    },
+                ],
+                "unlinked_recipes": [
+                    {
+                        "recipe_id": "recipe-2",
+                        "title": "Unlinked recipe",
+                        "capabilities": [],
+                    }
+                ],
+            }
+        }
+    )
+
+    result, payload = _invoke(client, "--json", "models", "list")
+
+    assert result == 0
+    assert [item["model"]["slug"] for item in payload["models"]] == [
+        "unlinked",
+        "served",
+    ]
+    assert payload["models"][0]["recipes"] == []
+    assert payload["unlinked_recipes"][0]["recipe_id"] == "recipe-2"
+
+
+def test_recipes_list_and_show_use_independent_canonical_routes() -> None:
+    recipes = {
+        "schema_version": 1,
+        "recipes": [
+            {"recipe_id": "recipe-1", "title": "Chat engine"},
+            {"recipe_id": "recipe-2", "title": "Vision engine"},
+        ],
+        "next_cursor": None,
+    }
+    client = _Client(
+        {
+            ("GET", "/api/v1/library/recipes"): recipes,
+            ("GET", "/api/v1/library/recipes/recipe%2F1"): {
+                "recipe": {"recipe_id": "recipe/1", "title": "Chat engine"}
+            },
+        }
+    )
+
+    result, payload = _invoke(
+        client, "--json", "recipes", "list", "--search", "vision"
+    )
+
+    assert result == 0
+    assert [recipe["recipe_id"] for recipe in payload["recipes"]] == ["recipe-2"]
+    assert client.calls[0] == (
+        "GET",
+        "/api/v1/library/recipes",
+        None,
+        {"limit": 100},
+    )
+
+    result, payload = _invoke(client, "--json", "recipes", "show", "recipe/1")
+
+    assert result == 0
+    assert payload["recipe"]["recipe_id"] == "recipe/1"
+    assert client.calls[-1][:2] == (
+        "GET",
+        "/api/v1/library/recipes/recipe%2F1",
+    )
+
+
 def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> None:
     client = _Client(
         {
@@ -1673,7 +1148,6 @@ def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> Non
         ("profiles", "duplicate", "p", "--name", "Copy"),
         ("profiles", "capture-current", "--name", "Current"),
         ("profiles", "delete", "p"),
-        ("profiles", "prepare", "preview", "p"),
         ("profiles", "status", "p"),
         ("operations", "show", "o"),
         ("operations", "watch", "o"),
@@ -1950,6 +1424,56 @@ def test_simple_run_human_mode_reports_changed_operation_progress_to_stderr() ->
 
     assert result == 0
     assert "phase: copying | bytes: 10/100 | sparks: spk_1" in stderr.getvalue()
+
+
+def test_model_download_reports_canonical_cache_progress_and_terminal_error() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/model-cache/download-preview"): {
+                "plan_digest": "d" * 64
+            },
+            ("POST", "/api/v1/model-cache/download"): {"operation_id": "op-1"},
+            ("GET", "/api/v1/operations/op-1"): [
+                {
+                    "state": "running",
+                    "progress": {
+                        "phase": "downloading",
+                        "downloaded_bytes": 12,
+                        "expected_bytes": 34,
+                        "current_artifact_key": "weights.safetensors",
+                    },
+                },
+                {
+                    "state": "failed",
+                    "last_error": "source unavailable",
+                    "progress": {
+                        "phase": "failed",
+                        "downloaded_bytes": 12,
+                        "expected_bytes": 34,
+                        "current_artifact_key": "weights.safetensors",
+                    },
+                },
+            ],
+        }
+    )
+    stdout = StringIO()
+    stderr = StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        result = cli.main(
+            (
+                "models",
+                "download",
+                "--model-version-sha256",
+                "a" * 64,
+                "--request-key",
+                "11111111-1111-4111-8111-111111111111",
+            ),
+            control_client=client,
+        )
+
+    assert result == 0
+    assert "phase: downloading | bytes: 12/34 | artifact: weights.safetensors" in stderr.getvalue()
+    assert '"last_error":"source unavailable"' in stdout.getvalue()
 
 
 def test_operation_progress_projects_run_switch_subphase_and_node_identity() -> None:

@@ -11,6 +11,11 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Fresh databases already receive these tables from the pre-baseline
+    # canonical revision.  Existing databases at 0017 still need this
+    # additive creation path; never drop or rewrite their live data here.
+    if "catalog_documents" in sa.inspect(op.get_bind()).get_table_names():
+        return
     op.create_table(
         "catalog_documents",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -127,7 +132,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("catalog_recipe_model_references")
-    op.drop_table("catalog_document_heads")
-    op.drop_table("catalog_document_revisions")
-    op.drop_table("catalog_documents")
+    # Canonical tables are now part of the maintained baseline.  Keep this
+    # historical revision non-destructive for both fresh and upgraded DBs.
+    pass

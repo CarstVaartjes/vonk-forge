@@ -6,12 +6,14 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from ..models.recipe_topology_mode import check_recipe_topology_mode
+from ..models.recipe_topology_mode import RecipeTopologyMode
 from typing import cast
 
 if TYPE_CHECKING:
   from ..models.recipe_fabric import RecipeFabric
   from ..models.recipe_parallelism import RecipeParallelism
-  from ..models.recipe_role import RecipeRole
+  from ..models.recipe_topology_role import RecipeTopologyRole
 
 
 
@@ -26,21 +28,21 @@ class RecipeTopology:
     """
         Attributes:
             fabric (RecipeFabric):
-            mode (str):
+            mode (RecipeTopologyMode):
             name (str):
             node_count (int):
             parallelism (RecipeParallelism):
-            roles (list['RecipeRole']):
+            roles (list['RecipeTopologyRole']):
             start_order (list[str]):
             stop_order (list[str]):
      """
 
     fabric: 'RecipeFabric'
-    mode: str
+    mode: RecipeTopologyMode
     name: str
     node_count: int
     parallelism: 'RecipeParallelism'
-    roles: list['RecipeRole']
+    roles: list['RecipeTopologyRole']
     start_order: list[str]
     stop_order: list[str]
 
@@ -51,10 +53,10 @@ class RecipeTopology:
     def to_dict(self) -> dict[str, Any]:
         from ..models.recipe_fabric import RecipeFabric
         from ..models.recipe_parallelism import RecipeParallelism
-        from ..models.recipe_role import RecipeRole
+        from ..models.recipe_topology_role import RecipeTopologyRole
         fabric = self.fabric.to_dict()
 
-        mode = self.mode
+        mode: str = self.mode
 
         name = self.name
 
@@ -99,14 +101,17 @@ class RecipeTopology:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.recipe_fabric import RecipeFabric
         from ..models.recipe_parallelism import RecipeParallelism
-        from ..models.recipe_role import RecipeRole
+        from ..models.recipe_topology_role import RecipeTopologyRole
         d = dict(src_dict)
         fabric = RecipeFabric.from_dict(d.pop("fabric"))
 
 
 
 
-        mode = d.pop("mode")
+        mode = check_recipe_topology_mode(d.pop("mode"))
+
+
+
 
         name = d.pop("name")
 
@@ -120,7 +125,7 @@ class RecipeTopology:
         roles = []
         _roles = d.pop("roles")
         for roles_item_data in (_roles):
-            roles_item = RecipeRole.from_dict(roles_item_data)
+            roles_item = RecipeTopologyRole.from_dict(roles_item_data)
 
 
 

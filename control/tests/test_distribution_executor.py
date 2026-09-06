@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import hashlib
+import json
 import uuid
+from datetime import UTC, datetime
+from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -13,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DistributionObject
 from vonk_control.auth import TokenCodec
 from vonk_control.distribution import (
+    ControllerRuntimeImageVerifiedObjectSource,
     DistributionService,
     MemoryVerifiedObjectSource,
     build_distribution_service_from_components,
@@ -21,21 +24,22 @@ from vonk_control.distribution_executor import (
     CompositeDistributionPhaseExecutor,
     DurableDistributionPhaseExecutor,
 )
+from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache_api import model_cache_operation_provider
 from vonk_control.models import (
     AgentOperation,
     AgentOperationAttempt,
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     Job,
-    LocalRecipe,
-    LocalRecipeRevision,
     RecipeBuild,
 )
-from vonk_control.model_cache import ModelCacheService
-from vonk_control.model_cache_api import model_cache_operation_provider
 from vonk_control.operation_api import merge_operation_providers
 from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system
+from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 
 
 def _target(node: str, *, image: bool = False) -> SimpleNamespace:
@@ -73,7 +77,7 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
     assert result.result == {"skipped": True, "verified": False, "verified_digests": ["c" * 64], "verified_image_digest": "sha256:" + "d" * 64, "verified_oci_layout_sha256": "e" * 64, "cached_nodes": list(nodes), "cached_target_totals": {node: 0 for node in nodes}}
 
 
-def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> None:
+def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> None:  # noqa: F811
     _client, services, _tokens, clock = agent_system
     model = DistributionObject("weights/model.bin", "a" * 64, 10, "model")
     config = DistributionObject("config/tokenizer.json", "b" * 64, 5, "model")
@@ -83,7 +87,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     source.register_runtime_image("sha256:" + "e" * 64, archive.sha256)
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
     executor = DurableDistributionPhaseExecutor(services.sessions, services.operations, distribution, clock=clock)
-    executor._model_objects = lambda _plan: (model, config)
+    executor._model_objects = lambda _plan, _progress: ((model, config), "d" * 64, 15)
     executor._archive = lambda _plan, **_kwargs: archive
     targets = [
         SimpleNamespace(node_id=NODE_A, state="preparing", verified_sha256=None, imported_image_digest=None, verified_at=None),
@@ -148,7 +152,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     assert verify.result["verified"] is True
 
 
-def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> None:
+def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> None:  # noqa: F811
     _client, services, _tokens, clock = agent_system
     source = MemoryVerifiedObjectSource()
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
@@ -352,7 +356,7 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
 
 
 def test_production_composite_uncached_cache_then_two_target_distribution(
-    agent_system,
+    agent_system,  # noqa: F811
     tmp_path: Path,
 ) -> None:
     """Exercise the production source pair and durable child handoff.
@@ -369,8 +373,24 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
         reserve_bytes=0,
         fixture_sources=True,
     )
-    model_version = "a" * 64
-    recipe_digest = "b" * 64
+    model = ModelDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "model-definition.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    model_version = content_sha256(model)
+    recipe_document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text(encoding="utf-8")
+    )
+    recipe_document["identity"]["slug"] = "production-composite"
+    recipe_document["models"][0]["model"]["content_sha256"] = model_version
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    recipe_document = recipe.model_dump(mode="json")
+    recipe_digest = content_sha256(recipe)
     model_payload = b"model weights"
     auxiliary_payload = b"tokenizer auxiliary"
     model_source = tmp_path / "weights.source"
@@ -429,33 +449,69 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     image_digest = "sha256:" + "d" * 64
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
+    model_id = str(uuid.uuid4())
+    model_revision_id = str(uuid.uuid4())
     build_id = str(uuid.uuid4())
     now = clock.now
     with services.sessions.begin() as session:
-        session.add(
-            LocalRecipe(
-                id=recipe_id,
-                slug="production-composite",
-                title="Production composite",
-                description="fixture",
-                source_kind="local",
-                created_by="test",
-                created_at=now,
-                updated_at=now,
-            )
+        session.add_all(
+            [
+                CatalogDocument(
+                    id=recipe_id,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    title=recipe.metadata.title,
+                    created_by="test",
+                    created_at=now,
+                    updated_at=now,
+                ),
+                CatalogDocument(
+                    id=model_id,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    title=model.identity.model.title,
+                    created_by="test",
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
         )
-        session.add(
-            LocalRecipeRevision(
-                id=revision_id,
-                recipe_id=recipe_id,
-                revision_number=1,
-                lifecycle="resolved",
-                schema_version=2,
-                document={"model": {"content_sha256": model_version}},
-                content_sha256=recipe_digest,
-                created_by="test",
-                created_at=now,
-            )
+        session.flush()
+        session.add_all(
+            [
+                CatalogDocumentRevision(
+                    id=revision_id,
+                    document_id=recipe_id,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=recipe_document,
+                    content_digest=recipe_digest,
+                    projected={},
+                    created_by="test",
+                    created_at=now,
+                ),
+                CatalogDocumentRevision(
+                    id=model_revision_id,
+                    document_id=model_id,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=model.model_dump(mode="json"),
+                    content_digest=model_version,
+                    projected={},
+                    created_by="test",
+                    created_at=now,
+                ),
+            ]
         )
         session.add(
             RecipeBuild(
@@ -763,3 +819,104 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert unknown_item["progress"].get("total_bytes") is None
     assert unknown_item["progress"]["total_bytes_known"] is False
     assert unknown_item["progress"]["members"][0].get("total_bytes") is None
+
+
+def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
+    agent_system, tmp_path: Path  # noqa: F811
+) -> None:
+    _client, services, _tokens, clock = agent_system
+    recipe_document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-image.json")
+        .read_text(encoding="utf-8")
+    )
+    recipe_document["identity"]["slug"] = "published-fallback-guard"
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    recipe_digest = content_sha256(recipe)
+    registry_digest = "sha256:" + "d" * 64
+    image_digest = "sha256:" + "e" * 64
+    assert registry_digest != image_digest
+    assert recipe_document["execution"]["image"]["digest"] == registry_digest.removeprefix("sha256:")
+    archive_payload = b"coincident build archive"
+    archive_digest = hashlib.sha256(archive_payload).hexdigest()
+    recipe_id = str(uuid.uuid4())
+    revision_id = str(uuid.uuid4())
+    build_id = str(uuid.uuid4())
+    plan_digest = "f" * 64
+    with services.sessions.begin() as session:
+        session.add(
+            CatalogDocument(
+                id=recipe_id,
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                title=recipe.metadata.title,
+                created_by="test",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.flush()
+        session.add_all(
+            [
+                CatalogDocumentRevision(
+                    id=revision_id,
+                    document_id=recipe_id,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=recipe.model_dump(mode="json"),
+                    content_digest=recipe_digest,
+                    projected={},
+                    created_by="test",
+                    created_at=clock.now,
+                ),
+                RecipeBuild(
+                    id=build_id,
+                    recipe_revision_id=revision_id,
+                    builder_node_id=NODE_A,
+                    source_bundle_sha256="c" * 64,
+                    build_input_sha256="e" * 64,
+                    state="succeeded",
+                    policy_report={},
+                    plan={},
+                    image_digest=image_digest,
+                    oci_layout_sha256=archive_digest,
+                    image_bytes=len(archive_payload),
+                    created_at=clock.now,
+                    updated_at=clock.now,
+                ),
+                Job(
+                    id=str(uuid.uuid4()),
+                    request_id=str(uuid.uuid4()),
+                    kind="recipe.run-switch.v2",
+                    state="running",
+                    actor="test",
+                    authority_revision=plan_digest,
+                    targets=[NODE_A],
+                    payload_digest="a" * 64,
+                    payload={
+                        "plan_digest": plan_digest,
+                        "plan": {
+                            "recipe_revision_id": revision_id,
+                            "recipe_build_id": None,
+                        },
+                    },
+                    result={},
+                    created_at=clock.now,
+                    updated_at=clock.now,
+                ),
+            ]
+        )
+    source = ControllerRuntimeImageVerifiedObjectSource(
+        services.sessions, services.artifact_root
+    )
+    assignment = SimpleNamespace(
+        plan_digest=plan_digest,
+        oci_image_digest=image_digest,
+        oci_archive_sha256=archive_digest,
+    )
+    assert source.verify_runtime_image_assignment(assignment) is False

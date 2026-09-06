@@ -408,10 +408,13 @@ function targetNameLookup(fleet: VisualFleetSnapshot | null, library: LibrarySna
     ...(library?.unlinked_recipes ?? []),
   ];
   for (const recipe of recipes) {
-    const title = recipe.title.trim() && recipe.title.trim() !== recipe.recipe_id ? recipe.title.trim() : "Unnamed recipe";
+    const title = recipe.recipe_document.metadata.title.trim() && recipe.recipe_document.metadata.title.trim() !== recipe.recipe_id ? recipe.recipe_document.metadata.title.trim() : "Unnamed recipe";
     names.set(recipe.recipe_id, title);
-    if (recipe.selected_revision) names.set(recipe.selected_revision.id, `${title} revision ${recipe.selected_revision.revision_number}`);
-    recipe.installations.forEach((installation, index) => names.set(installation.installation_id, `${title} installation ${index + 1}`));
+    names.set(recipe.content_sha256, `${title} revision ${recipe.recipe_document.release.version}`);
+    recipe.installations.forEach((installation, index) => {
+      names.set(installation.recipe_revision_id, `${title} revision ${recipe.recipe_document.release.version}`);
+      names.set(installation.installation_id, `${title} installation ${index + 1}`);
+    });
     recipe.runs.forEach((run, index) => names.set(run.run_id, `${title} run ${index + 1}`));
   }
   return names;

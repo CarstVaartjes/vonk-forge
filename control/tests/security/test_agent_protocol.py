@@ -8,6 +8,7 @@ import tomllib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 from sqlalchemy import create_engine
@@ -36,6 +37,10 @@ PROBE_RESULT = {
 }
 PROTOCOL_WHEEL = ROOT / "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
+PUBLIC_CONTRACTS_WHEEL = (
+    ROOT / "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
+)
+PUBLIC_CONTRACTS_WHEEL_HASH = hashlib.sha256(PUBLIC_CONTRACTS_WHEEL.read_bytes()).hexdigest()
 
 
 class Clock:
@@ -181,10 +186,13 @@ def test_protocol_has_no_arbitrary_operation_member() -> None:
 def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     control_project = (ROOT / "control/pyproject.toml").read_text()
     protocol_wheel_path = PROTOCOL_WHEEL
+    contracts_wheel_path = PUBLIC_CONTRACTS_WHEEL
+    packaging_lock = (ROOT / "control/packaging/public-contracts.lock").read_text()
     dockerignore_path = ROOT / ".dockerignore"
     dockerfile = (ROOT / "control/Dockerfile").read_text()
 
     assert protocol_wheel_path.is_file()
+    assert contracts_wheel_path.is_file()
     assert dockerignore_path.is_file()
     control_lock = tomllib.loads((ROOT / "control/uv.lock").read_text())
     protocol_sources = [
@@ -192,18 +200,47 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         for package in control_lock["package"]
         if package["name"] == "vonk-agent-protocol"
     ]
+    contract_package = next(
+        package
+        for package in control_lock["package"]
+        if package["name"] == "vonk-forge-public-contracts"
+    )
 
     assert '"vonk-agent-protocol==2.2.0"' in control_project
     assert protocol_sources == [
-        {"path": "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"},
+        {"path": "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"}
     ]
+    assert control_lock["package"][
+        next(
+            index
+            for index, package in enumerate(control_lock["package"])
+            if package["name"] == "vonk-agent-protocol"
+        )
+    ]["wheels"] == [
+        {
+            "filename": "vonk_agent_protocol-2.2.0-py3-none-any.whl",
+            "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
+        }
+    ]
+    assert contract_package["source"] == {
+        "path": "../inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
+    }
+    assert contract_package["wheels"] == [
+        {
+            "filename": "vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
+            "hash": f"sha256:{PUBLIC_CONTRACTS_WHEEL_HASH}",
+        }
+    ]
+    assert 'revision = "fcf601339bc726af5f1a41f5abe1e331ccf32af4"' in packaging_lock
+    assert 'approved_revision = "2001c6502bfdc66141dd7224bfde5d77734e9959"' in packaging_lock
+    assert f'sha256 = "{PUBLIC_CONTRACTS_WHEEL_HASH}"' in packaging_lock
     assert "COPY control/pyproject.toml ./" in dockerfile
     assert "COPY control/src ./src" in dockerfile
-    assert (
-        "COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/"
-        in dockerfile
-    )
+    assert "COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/" in dockerfile
     assert "/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" in dockerfile
+    assert "python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /agent-protocol" not in dockerfile
+    assert "COPY inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl /wheels/" in dockerfile
+    assert "/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl" in dockerfile
     dockerignore = set(dockerignore_path.read_text().splitlines())
     assert "*" in dockerignore
     lines = dockerignore_path.read_text().splitlines()
@@ -215,7 +252,9 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         "!control/web/**",
         "control/.venv",
         "!inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl",
+        "!inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
     } <= dockerignore
+    assert "!agent_protocol/src/**" not in dockerignore
     assert {
         "**/__pycache__/**",
         "**/*.py[cod]",
@@ -275,6 +314,9 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     assert direct_url["url"].endswith(
         "/inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
     )
+    assert package["source"] == {
+        "path": "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
+    }
     assert package["wheels"] == [
         {
             "filename": "vonk_agent_protocol-2.2.0-py3-none-any.whl",
@@ -283,7 +325,49 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     ]
 
 
-def test_root_context_image_installs_the_verified_protocol_wheel() -> None:
+def test_control_environment_preserves_the_canonical_zero_byte_model_contract() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            "control",
+            "python",
+            "-c",
+            dedent(
+                """
+                from vonk_agent_protocol import AgentProtocolError, DistributionObject
+
+                empty = DistributionObject.parse({
+                    "name": "support/empty.safetensors",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                    "bytes": 0,
+                    "kind": "model",
+                })
+                try:
+                    DistributionObject.parse({
+                        "name": "support/empty.safetensors",
+                        "sha256": "0" * 64,
+                        "bytes": 0,
+                        "kind": "model",
+                    })
+                except AgentProtocolError:
+                    inconsistent = True
+                else:
+                    inconsistent = False
+                print(empty.bytes == 0 and inconsistent)
+                """
+            ),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "True"
+
+
+def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() -> None:
     if shutil.which("docker") is None:
         pytest.skip("Docker CLI is unavailable")
     if (
@@ -291,7 +375,7 @@ def test_root_context_image_installs_the_verified_protocol_wheel() -> None:
         != 0
     ):
         pytest.skip("Docker daemon is unavailable")
-    image = "vonk-control:test-protocol-wheel"
+    image = "vonk-control:test-packaging-contracts"
     build = subprocess.run(
         [
             "docker",
@@ -321,7 +405,29 @@ def test_root_context_image_installs_the_verified_protocol_wheel() -> None:
             "python",
             image,
             "-c",
-            "import importlib.metadata, json; d = importlib.metadata.distribution('vonk-agent-protocol'); print(json.dumps({'version': d.version, 'direct_url': json.loads((d._path / 'direct_url.json').read_text())}))",
+            dedent(
+                """
+                import importlib.metadata, json
+                from importlib.resources import files
+                from vonk_agent_protocol import AgentProtocolError, DistributionObject
+                from vonk_control.recipe_runtime_specs import compile_runtime_spec
+                from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+
+                def rejects(value):
+                    try:
+                        DistributionObject.parse(value)
+                    except AgentProtocolError:
+                        return True
+                    return False
+
+                recipe = RecipeDefinition.model_validate(json.loads(files("vonk_forge_contracts").joinpath("examples/recipe-image.json").read_text()))
+                model = ModelDefinition.model_validate(json.loads(files("vonk_forge_contracts").joinpath("examples/model-definition.json").read_text()))
+                compiled = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+                empty = DistributionObject.parse({"name": "support/empty.safetensors", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "bytes": 0, "kind": "model"})
+                inconsistent = rejects({"name": "support/empty.safetensors", "sha256": "0" * 64, "bytes": 0, "kind": "model"})
+                print(json.dumps({"protocol": importlib.metadata.version("vonk-agent-protocol"), "contracts": importlib.metadata.version("vonk-forge-public-contracts"), "model": ModelDefinition.__name__, "recipe": RecipeDefinition.__name__, "distribution": DistributionObject.__name__, "zero_byte_model": empty.bytes == 0, "inconsistent_zero_byte_rejected": inconsistent, "compiled_interface": compiled["runtime"]["interface"], "compiled_image": compiled["runtime"]["image"]}))
+                """
+            ),
         ],
         check=True,
         capture_output=True,
@@ -329,15 +435,17 @@ def test_root_context_image_installs_the_verified_protocol_wheel() -> None:
     )
     installed = json.loads(result.stdout)
 
-    assert installed["version"] == "2.2.0"
-    assert (
-        installed["direct_url"]["url"]
-        == "file:///wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
-    )
-    assert (
-        installed["direct_url"]["archive_info"]["hash"]
-        == f"sha256={PROTOCOL_WHEEL_HASH}"
-    )
+    assert installed == {
+        "protocol": "2.2.0",
+        "contracts": "0.1.0",
+        "model": "ModelDefinition",
+        "recipe": "RecipeDefinition",
+        "distribution": "DistributionObject",
+        "zero_byte_model": True,
+        "inconsistent_zero_byte_rejected": True,
+        "compiled_interface": "vonk.runtime.v1",
+        "compiled_image": "registry.example/vonk/vllm@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    }
 
 
 @pytest.mark.parametrize(

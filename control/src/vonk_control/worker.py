@@ -234,6 +234,8 @@ def assemble_production_worker(
     model_cache=None,
     agent_artifact_root: Path | None = None,
     operator_jurisdiction: str | None = None,
+    compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
+    runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
 ) -> Worker:
     """Compose the worker-owned reconciliation runtime."""
@@ -275,6 +277,7 @@ def assemble_production_worker(
             agent_jobs,
             distribution,
             model_cache=model_cache,
+            runtime_image_preparer=runtime_image_preparer,
             clock=clock,
         )
     else:
@@ -305,6 +308,7 @@ def assemble_production_worker(
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             operator_jurisdiction=operator_jurisdiction,
+            compiled_plan_provider=compiled_plan_provider,
         ),
         run_admission=RunAdmissionService(
             sessions,
@@ -389,13 +393,25 @@ if __name__ == "__main__":
     from datetime import UTC, datetime
     from pathlib import Path
 
+    from sqlalchemy import select
+    from vonk_forge_contracts import RecipeDefinition, content_sha256
+
     from .agent_jobs import AgentJobService
     from .db import build_engine, session_factory, wait_for_database
+    from .execution_plan_service import ControllerExecutionPlanService
     from .model_cache import ModelCacheService
+    from .models import CatalogDocumentRevision
     from .presence import AgentPresenceService, ManagementAddressPolicy
     from .route_runtime import (
         AtomicRouteBundlePublisher,
         FileSupervisorAcknowledger,
+    )
+    from .runtime_image_preparation import (
+        FilesystemRuntimeImageStorage,
+        SkopeoOCIImageTransport,
+        persist_runtime_image_receipt,
+        prepare_runtime_image,
+        resolve_persisted_runtime_image_receipt,
     )
     from .settings import WorkerSettings
     from .worker_authority import HttpWorkerAuthority
@@ -445,6 +461,112 @@ if __name__ == "__main__":
         huggingface_token_path=settings.huggingface_token_path,
     )
     model_cache.resume_operations()
+    runtime_image_storage = FilesystemRuntimeImageStorage(
+        settings.agent_artifact_root
+    )
+    runtime_image_transport = SkopeoOCIImageTransport()
+
+    def prepare_runtime_image_receipt(document, runtime_spec, build):
+        runtime = runtime_spec.get("runtime")
+        if not isinstance(runtime, Mapping):
+            raise TypeError("compiled runtime projection is unavailable")
+        build_receipt = None
+        execution = document.get("execution")
+        if isinstance(execution, Mapping) and execution.get("mode") == "build":
+            if build is None:
+                raise ValueError("source build receipt is unavailable")
+            build_receipt = {
+                "state": build.state,
+                "build_id": build.id,
+                "image_digest": build.image_digest,
+                "oci_layout_sha256": build.oci_layout_sha256,
+                "image_bytes": build.image_bytes,
+            }
+        identity = runtime_spec.get("identity")
+        effective_execution_key = (
+            identity.get("execution_sha256")
+            if isinstance(identity, Mapping)
+            else None
+        )
+        if not isinstance(effective_execution_key, str):
+            raise TypeError("compiled runtime execution identity is unavailable")
+
+        def write_receipt(receipt):
+            recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
+            with sessions.begin() as session:
+                revision = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.content_digest == recipe_digest,
+                    )
+                )
+                if revision is None or revision.content_digest is None:
+                    raise ValueError("active recipe revision for runtime receipt is unavailable")
+                persist_runtime_image_receipt(
+                    session,
+                    recipe_revision_id=revision.id,
+                    original_content_digest=revision.content_digest,
+                    effective_execution_key=effective_execution_key,
+                    receipt=receipt,
+                    verified_at=clock(),
+                )
+
+        return prepare_runtime_image(
+            document,
+            runtime=runtime,
+            storage=runtime_image_storage,
+            transport=runtime_image_transport,
+            build_receipt=build_receipt,
+            now=clock(),
+            receipt_writer=write_receipt,
+        )
+
+    def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
+        runtime = runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
+        if not isinstance(runtime, Mapping):
+            raise TypeError("runtime image preparation is required: runtime projection is unavailable")
+        architecture = runtime.get("architecture")
+        interface = runtime.get("interface", runtime.get("runtime_interface"))
+        if not isinstance(architecture, str) or not isinstance(interface, str):
+            raise TypeError("runtime image preparation is required: platform identity is unavailable")
+        receipt = runtime_image_storage.find_verified(
+            image_digest,
+            expected_architecture=architecture,
+            expected_runtime_interface=interface,
+        )
+        if receipt is None:
+            raise ValueError("runtime image preparation is required before compile/install")
+        identity = runtime_spec.get("identity")
+        execution_key = identity.get("execution_sha256") if isinstance(identity, Mapping) else None
+        recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
+        if not isinstance(execution_key, str):
+            raise TypeError("runtime image preparation execution identity is unavailable")
+        with sessions() as session:
+            revision = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.content_digest == recipe_digest,
+                )
+            )
+            if revision is None:
+                raise ValueError("durable runtime image receipt is unavailable before compile/install")
+            resolve_persisted_runtime_image_receipt(
+                session,
+                recipe_revision_id=revision.id,
+                original_content_digest=recipe_digest,
+                effective_execution_key=execution_key,
+                receipt=receipt,
+            )
+        if revision is None:
+            raise ValueError("durable runtime image receipt is unavailable before compile/install")
+        return receipt
+
+    execution_plans = ControllerExecutionPlanService(
+        model_cache,
+        runtime_image_resolver=resolve_runtime_image_receipt,
+    )
     worker = assemble_production_worker(
         jobs=jobs,
         sessions=sessions,
@@ -466,6 +588,8 @@ if __name__ == "__main__":
         artifact_job_reconcile_batch_limit=settings.artifact_job_reconcile_batch_limit,
         model_cache=model_cache,
         agent_artifact_root=settings.agent_artifact_root,
+        compiled_plan_provider=execution_plans.compile_installation,
+        runtime_image_preparer=prepare_runtime_image_receipt,
         loop_heartbeat=WorkerHeartbeatRecorder(
             sessions,
             process_instance_id=current_worker_instance_id(),

@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
@@ -26,7 +26,17 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .models import ArtifactDistributionAssignment, RecipeBuild
+from .models import (
+    ArtifactDistributionAssignment,
+    CatalogDocumentRevision,
+    Job,
+    RecipeBuild,
+    RuntimeImageReceipt,
+)
+from .runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    RuntimeImagePreparationError,
+)
 
 
 class DistributionError(ValueError):
@@ -177,6 +187,190 @@ class RecipeBuildVerifiedObjectSource(FilesystemVerifiedObjectSource):
         if authorized is None:
             raise DistributionError("distribution.object_unavailable", "OCI archive is not a succeeded build artifact")
         return super().open_verified(digest, expected_bytes)
+
+
+class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource):
+    """Verified OCI source for pulled and Controller-built receipts.
+
+    A pulled image receipt is accepted only when its recipe provenance still
+    resolves to the active canonical recipe and the recipe's immutable image
+    pin matches the receipt's registry identity.  Source-built images retain
+    the existing succeeded ``RecipeBuild`` authority.  The filesystem is
+    therefore a content store, while the database remains the authority that
+    authorizes use of an archive in a target assignment.
+    """
+
+    def __init__(self, sessions: sessionmaker[Session], artifact_root: Path, **kwargs: object) -> None:
+        super().__init__(sessions, artifact_root, **kwargs)
+        self._runtime_storage = FilesystemRuntimeImageStorage(artifact_root)
+
+    def _published_receipt_authorizes(self, image_digest: str, archive_sha256: str) -> bool:
+        try:
+            receipt = self._runtime_storage.read_receipt(archive_sha256)
+            if receipt.source != "published" or receipt.image_digest != image_digest:
+                return False
+            if receipt.registry_manifest_digest is None:
+                return False
+            with self.sessions() as session:
+                revision = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.content_digest
+                        == receipt.distribution_content_sha256,
+                        CatalogDocumentRevision.publisher
+                        == receipt.distribution_publisher,
+                        CatalogDocumentRevision.slug == receipt.distribution_slug,
+                    )
+                )
+                if revision is None:
+                    return False
+                execution = revision.document.get("execution")
+                image = execution.get("image") if isinstance(execution, Mapping) else None
+                raw_registry = image.get("digest") if isinstance(image, Mapping) else None
+                expected_registry = (
+                    raw_registry
+                    if isinstance(raw_registry, str) and raw_registry.startswith("sha256:")
+                    else f"sha256:{raw_registry}"
+                    if isinstance(raw_registry, str)
+                    else None
+                )
+                if expected_registry != receipt.registry_manifest_digest:
+                    return False
+                durable = session.scalar(
+                    select(RuntimeImageReceipt).where(
+                        RuntimeImageReceipt.recipe_revision_id == revision.id,
+                        RuntimeImageReceipt.source == "published",
+                        RuntimeImageReceipt.original_content_digest
+                        == receipt.distribution_content_sha256,
+                        RuntimeImageReceipt.state == "verified",
+                        RuntimeImageReceipt.registry_manifest_digest
+                        == receipt.registry_manifest_digest,
+                        RuntimeImageReceipt.platform_manifest_digest == image_digest,
+                        RuntimeImageReceipt.local_image_config_id
+                        == receipt.local_image_config_id,
+                        RuntimeImageReceipt.oci_archive_sha256 == archive_sha256,
+                        RuntimeImageReceipt.image_bytes == receipt.image_bytes,
+                        RuntimeImageReceipt.architecture == receipt.architecture,
+                        RuntimeImageReceipt.runtime_interface == receipt.runtime_interface,
+                        RuntimeImageReceipt.runtime_interface_label
+                        == receipt.runtime_interface_label,
+                    )
+                )
+                if durable is None:
+                    return False
+            self._runtime_storage.verify_existing(archive_sha256, receipt.image_bytes)
+            return True
+        except (RuntimeImagePreparationError, OSError, ValueError):
+            return False
+
+    def _published_recipe_requests(self, image_digest: str) -> bool:
+        """Return whether an active published Recipe claims this image identity."""
+
+        with self.sessions() as session:
+            revisions = tuple(session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
+            ))
+            registry_digests: set[str] = set()
+            for revision in revisions:
+                execution = revision.document.get("execution")
+                image = execution.get("image") if isinstance(execution, Mapping) else None
+                raw_digest = image.get("digest") if isinstance(image, Mapping) else None
+                expected = (
+                    raw_digest
+                    if isinstance(raw_digest, str) and raw_digest.startswith("sha256:")
+                    else f"sha256:{raw_digest}"
+                    if isinstance(raw_digest, str)
+                    else None
+                )
+                if expected is not None:
+                    registry_digests.add(expected)
+            if image_digest in registry_digests:
+                return True
+            revision_ids = [revision.id for revision in revisions]
+            if revision_ids and session.scalar(
+                select(RuntimeImageReceipt.id).where(
+                    RuntimeImageReceipt.recipe_revision_id.in_(revision_ids),
+                    RuntimeImageReceipt.source == "published",
+                    RuntimeImageReceipt.state == "verified",
+                    RuntimeImageReceipt.registry_manifest_digest.in_(registry_digests),
+                    RuntimeImageReceipt.platform_manifest_digest == image_digest,
+                ).limit(1)
+            ) is not None:
+                return True
+
+        # The filesystem receipt preserves the parent/platform relationship
+        # even when its SQL row has been deleted or tampered with.  Use it only
+        # to suppress an unsafe build fallback; SQL remains required for use.
+        for receipt_path in sorted(self._runtime_storage.root.glob("*.receipt.json")):
+            try:
+                receipt = self._runtime_storage.read_receipt(
+                    receipt_path.name.removesuffix(".receipt.json")
+                )
+            except (RuntimeImagePreparationError, OSError, ValueError):
+                continue
+            if (
+                receipt.source == "published"
+                and receipt.registry_manifest_digest in registry_digests
+                and receipt.platform_manifest_digest == image_digest
+            ):
+                return True
+        return False
+
+    def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
+        if self._published_receipt_authorizes(image_digest, archive_sha256):
+            return True
+        # A canonical published-image request must never fall through to a
+        # coincidentally matching RecipeBuild archive after its own receipt or
+        # SQL authority fails.  Build fallback remains valid only for digests
+        # no active published Recipe claims.
+        if self._published_recipe_requests(image_digest):
+            return False
+        return super().verify_runtime_image(image_digest, archive_sha256)
+
+    def verify_runtime_image_assignment(self, assignment: DistributionAssignment) -> bool:
+        """Verify an assignment with its durable Run/Switch source binding."""
+
+        with self.sessions() as session:
+            jobs = session.scalars(
+                select(Job).where(
+                    Job.kind == "recipe.run-switch.v2",
+                    Job.payload["plan_digest"].as_string() == assignment.plan_digest,
+                )
+            )
+            for job in jobs:
+                plan = job.payload.get("plan")
+                if not isinstance(plan, Mapping):
+                    continue
+                revision_id = plan.get("recipe_revision_id")
+                if plan.get("recipe_build_id") is None and isinstance(revision_id, str):
+                    # This assignment was issued for a direct published image;
+                    # its published receipt remains the only image authority.
+                    return self._published_receipt_authorizes(
+                        assignment.oci_image_digest,
+                        assignment.oci_archive_sha256,
+                    )
+        return self.verify_runtime_image(
+            assignment.oci_image_digest,
+            assignment.oci_archive_sha256,
+        )
+
+    def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
+        if self._published_archive_authorizes(digest, expected_bytes):
+            return FilesystemVerifiedObjectSource.open_verified(self, digest, expected_bytes)
+        return super().open_verified(digest, expected_bytes)
+
+    def _published_archive_authorizes(self, digest: str, expected_bytes: int) -> bool:
+        try:
+            receipt = self._runtime_storage.read_receipt(digest)
+            if receipt.source != "published" or receipt.image_bytes != expected_bytes:
+                return False
+            return self._published_receipt_authorizes(receipt.image_digest, digest)
+        except (RuntimeImagePreparationError, OSError, ValueError):
+            return False
 
 
 class ModelCacheVerifiedObjectSource:
@@ -433,10 +627,15 @@ class DistributionService:
                 "distribution.model_set_mismatch",
                 "assignment model objects do not match a verified cache manifest",
             )
+        assignment_verifier = getattr(self.source, "verify_runtime_image_assignment", None)
         image_verifier = getattr(self.source, "verify_runtime_image", None)
-        if image_verifier is None or not image_verifier(
-            assignment.oci_image_digest, assignment.oci_archive_sha256
-        ):
+        image_verified = (
+            assignment_verifier(assignment)
+            if callable(assignment_verifier)
+            else image_verifier is not None
+            and image_verifier(assignment.oci_image_digest, assignment.oci_archive_sha256)
+        )
+        if not image_verified:
             raise DistributionError(
                 "distribution.runtime_image_mismatch",
                 "assignment OCI archive does not match the verified image identity",
@@ -577,6 +776,7 @@ class DistributionService:
 
 __all__ = [
     "CompositeVerifiedObjectSource",
+    "ControllerRuntimeImageVerifiedObjectSource",
     "DistributionError",
     "DistributionService",
     "FilesystemVerifiedObjectSource",
@@ -616,7 +816,7 @@ def build_distribution_service_from_components(
     """Build the production source pair from Controller startup components."""
     return build_distribution_service(
         ModelCacheVerifiedObjectSource.from_service(model_cache),
-        RecipeBuildVerifiedObjectSource(sessions, artifact_root),
+        ControllerRuntimeImageVerifiedObjectSource(sessions, artifact_root),
         sessions,
         clock=clock,
     )

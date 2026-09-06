@@ -123,3 +123,23 @@ test("switches an in-scope dual-to-solo replacement on the first click and keeps
   expect(within(progress).getByRole("list", {name: "Profile switch targets"})).toHaveTextContent("Spark A");
   expect(within(progress).getByRole("list", {name: "Profile switch targets"})).toHaveTextContent("Spark B");
 });
+
+test("holds cleanup behind an explicit confirmation while keeping normal switches one click", async () => {
+  const user = userEvent.setup();
+  const fleetProfiles = vi.fn(async () => ({schema_version: 2, generated_at: "2026-09-05T00:00:00Z", profiles: [profile]}));
+  const fleetProfileStatus = vi.fn(async () => ({schema_version: 2, profile_id: profileId, profile_digest: digest, state: "drifted", matched: false, drifted: true, scope: {node_ids: [nodeA, nodeB], idle_node_ids: [nodeA]}, reasons: [], generated_at: "2026-09-05T00:00:00Z"}));
+  const cleanupPreview = {...preview, summary: {...preview.summary, uninstalls: 1}, reasons: [{code: "profile.cleanup_required", detail: "The exact retention policy would remove an unlisted installation.", severity: "warning"}]} as unknown as FleetProfilePreview;
+  const previewFleetProfile = vi.fn(async () => cleanupPreview);
+  const applyFleetProfile = vi.fn(async () => application);
+  const api = {fleetProfiles, fleetProfileStatus, previewFleetProfile, applyFleetProfile} as unknown as ControlApi;
+
+  render(<LibraryProfilesView api={api} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
+
+  const reviewButton = await screen.findByRole("button", {name: "Review cleanup"});
+  await user.click(reviewButton);
+  expect(applyFleetProfile).not.toHaveBeenCalled();
+  const confirmation = screen.getByRole("alert");
+  expect(confirmation).toHaveTextContent("Cleanup requires confirmation");
+  await user.click(within(confirmation).getByRole("button", {name: "Confirm switch"}));
+  expect(applyFleetProfile).toHaveBeenCalledTimes(1);
+});

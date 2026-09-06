@@ -46,14 +46,6 @@ import type {
   JobsResponse,
   ProposalInput,
   ProposalPreview,
-  CatalogRecipeDocument,
-  CatalogRecipeList,
-  CatalogRecipeRevision,
-  GlobalRecipeRevision,
-  PublicRecipeList,
-  PublicRecipePreview,
-  ManagedCatalogSyncSummary,
-  ManagedCatalogSyncInput,
   WorkloadRunApplied,
   WorkloadRunPreview,
   TelemetryHistory,
@@ -63,11 +55,6 @@ import type {
   TelemetryResolution,
   VisualFleetSnapshot,
   NodeProfileUpdate,
-  SourceBundleReceipt,
-  SourcePolicyReport,
-  RecipeBuildPlan,
-  RecipeMappingPlan,
-  RecipeOperation,
   LibraryBuildApplyInput,
   LibraryBuildPreviewInput,
   LibraryImageDistributionApplyInput,
@@ -225,103 +212,6 @@ export class ApiClient implements ControlApi {
     const response = await fetch("/api/v1/auth/logout", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`);
-  }
-
-  async catalogRecipes(cursor?: string): Promise<CatalogRecipeList> {
-    return resultData(await this.generated.GET("/api/v1/catalog/recipes", {params: {query: {cursor, limit: 20}}}));
-  }
-
-  async catalogRecipe(recipeId: string): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.GET("/api/v1/catalog/recipes/{recipe_id}", {params: {path: {recipe_id: recipeId}}}));
-  }
-
-  async createCatalogRecipe(input: {slug: string; document: CatalogRecipeDocument}): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.POST("/api/v1/catalog/recipes", {body: input}));
-  }
-
-  async updateCatalogRecipe(recipeId: string, expectedRevision: number, document: CatalogRecipeDocument): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.PUT("/api/v1/catalog/recipes/{recipe_id}/draft", {params: {path: {recipe_id: recipeId}}, body: {expected_revision: expectedRevision, document}}));
-  }
-
-  async resolveCatalogRecipe(recipeId: string, expectedRevision: number): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.POST("/api/v1/catalog/recipes/{recipe_id}/resolve", {params: {path: {recipe_id: recipeId}}, body: {expected_revision: expectedRevision}}));
-  }
-
-  async forkCatalogRecipe(recipeId: string, revision: number, slug: string): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.POST("/api/v1/catalog/recipes/{recipe_id}/fork", {params: {path: {recipe_id: recipeId}}, body: {revision, slug}}));
-  }
-
-  previewGlobalRecipe(uri: string): Promise<GlobalRecipeRevision> {
-    return this.request("/api/v1/catalog/imports/global/preview", {method: "POST", body: JSON.stringify({uri})});
-  }
-
-  importGlobalRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision> {
-    return this.request("/api/v1/catalog/imports/global", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256})});
-  }
-
-  listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList> {
-    return this.request("/api/v1/catalog/public-recipes", {signal});
-  }
-
-  previewPublicRecipe(uri: string, signal?: AbortSignal): Promise<PublicRecipePreview> {
-    return this.request("/api/v1/catalog/imports/public/preview", {method: "POST", body: JSON.stringify({uri}), signal});
-  }
-
-  importPublicRecipe(uri: string, expectedContentSha256: string, signal?: AbortSignal): Promise<CatalogRecipeRevision> {
-    return this.request("/api/v1/catalog/imports/public", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256}), signal});
-  }
-
-  syncManagedRecipeCatalog(input?: ManagedCatalogSyncInput, signal?: AbortSignal): Promise<ManagedCatalogSyncSummary> {
-    return this.request("/api/v1/catalog/managed-recipes/sync", {
-      method: "POST",
-      body: JSON.stringify({request_key: crypto.randomUUID(), ...input}),
-      signal,
-    });
-  }
-
-  managedRecipeCatalogSyncStatus(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary> {
-    return this.request("/api/v1/catalog/managed-recipes/sync-status", {signal});
-  }
-
-  async attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void> {
-    await this.request(`/api/v1/catalog/recipes/${encodeURIComponent(recipeId)}/publication-report`, {method: "PUT", body: JSON.stringify({report})});
-  }
-
-  publicationExport(recipeId: string, publisher: string): Promise<Record<string, unknown>> {
-    return this.request(`/api/v1/catalog/recipes/${encodeURIComponent(recipeId)}/publication-export`, {method: "POST", body: JSON.stringify({publisher})});
-  }
-
-  async uploadSourceBundle(sha256: string, archive: Uint8Array): Promise<SourceBundleReceipt> {
-    if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("Invalid source bundle digest");
-    const headers = new Headers({Accept: "application/json", "Content-Type": "application/vnd.vonk-forge.source-bundle.v1+tar"});
-    const csrf = csrfToken();
-    if (csrf) headers.set("X-CSRF-Token", csrf);
-    const response = await fetch(`/api/v1/catalog/source-bundles/${sha256}`, {
-      method: "PUT", body: archive as BodyInit, headers, credentials: "same-origin",
-    });
-    this.requireAuthentication(response);
-    if (!response.ok) throw new Error(`Source upload returned ${response.status}: ${(await response.text()).slice(0, 256)}`);
-    return response.json() as Promise<SourceBundleReceipt>;
-  }
-
-  checkRecipeSource(recipeRevisionId: string): Promise<SourcePolicyReport> {
-    return this.request("/api/v1/recipes/source-checks", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId})});
-  }
-
-  previewRecipeBuild(recipeRevisionId: string, builderNodeId: string): Promise<RecipeBuildPlan> {
-    return this.request("/api/v1/recipes/build-plans/preview", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId, builder_node_id: builderNodeId})});
-  }
-
-  buildRecipe(plan: RecipeBuildPlan): Promise<RecipeOperation> {
-    return this.request("/api/v1/recipes/builds", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, builder_node_id: plan.builder_node_id, build_input_sha256: plan.build_input_sha256, request_key: crypto.randomUUID()})});
-  }
-
-  previewRecipeMapping(recipeRevisionId: string, nodeIds: string[]): Promise<RecipeMappingPlan> {
-    return this.request("/api/v1/recipes/mapping-plans/preview", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId, node_ids: nodeIds, parameters: {}})});
-  }
-
-  createRecipeMapping(plan: RecipeMappingPlan): Promise<{mapping_id: string; generation: number; placement_digest: string}> {
-    return this.request("/api/v1/recipes/mappings", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, node_ids: plan.nodes.map(node => node.node_id), parameters: plan.parameters, placement_digest: plan.placement_digest, request_key: crypto.randomUUID()})});
   }
 
   previewWorkloadRun(sourceYaml: string): Promise<WorkloadRunPreview> {

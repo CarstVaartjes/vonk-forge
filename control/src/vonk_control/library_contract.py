@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -15,7 +17,7 @@ _UUID_PATTERN = (
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 _IMAGE_DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
-_MAX_PAGE_RECIPES = 100
+_MAX_PAGE_RECIPES = 512
 _MAX_OPERATIONAL_ROWS = 512
 _MAX_OPERATIONAL_MEMBERS = 16_384
 _MAX_AGENT_ROWS = 500
@@ -66,21 +68,14 @@ class FreshnessPolicy(_StrictModel):
     telemetry_delayed_seconds: int = Field(default=20, ge=1, le=300)
 
 
-class RecipeRevisionSummary(_StrictModel):
-    id: UuidId
-    revision_number: int = Field(ge=1, le=2_147_483_647)
-    lifecycle: Literal["draft", "blocked", "resolved", "deprecated"]
-    schema_version: Literal[1] = 1
-    content_sha256: Digest | None
-    created_at: datetime
-
-
 class LibraryRecipeIdentity(_StrictModel):
     recipe_id: UuidId
+    recipe_revision_id: UuidId
+    publisher: Text128
     slug: Text128
+    content_sha256: Digest
     title: Text200
     description: Annotated[str, StringConstraints(max_length=4_096)]
-    source_kind: Literal["local", "workload_run", "global", "recipe_library"]
 
 
 class LibraryInstallationSummary(_StrictModel):
@@ -106,9 +101,7 @@ class LibraryRunSummary(_StrictModel):
 class LibraryCapabilityProvenance(_StrictModel):
     """Exact source identity and bounded location for one capability inventory."""
 
-    source_kind: Literal[
-        "model-version", "recipe-revision", "model-capability-evidence"
-    ]
+    source_kind: Literal["model", "recipe", "model-capability-evidence"]
     publisher: Text128
     slug: Text128
     content_sha256: Digest | None
@@ -141,113 +134,21 @@ class LibraryCapabilityInventory(_StrictModel):
     reasons: list[ProjectionReason] = Field(default_factory=list, max_length=16)
 
 
-class ModelVersionIdentity(_StrictModel):
-    kind: Literal["model-version"]
+class LibraryModelIdentity(_StrictModel):
+    """Content-addressed identity for a canonical Model document."""
+
+    kind: Literal["model"] = "model"
     publisher: Text128
     slug: Text128
     content_sha256: Digest
 
 
-class LibraryCatalogReference(_StrictModel):
-    """A content addressed catalog identity retained in a Library response."""
-
-    kind: Literal["model-group", "model", "model-version"]
-    publisher: Text128
-    slug: Text128
-    content_sha256: Digest
 
 
-class LibraryModelMetadata(_StrictModel):
-    title: Text200
-    description: Annotated[str, StringConstraints(max_length=4_000)]
-    tags: list[Text64] = Field(max_length=20)
-
-
-class LibraryModelSource(_StrictModel):
-    repository: Text512
-    revision: Text80
-
-
-class LibraryModelLineage(_StrictModel):
-    publisher: Text128
-    relation: Literal["official", "derived", "quantized"]
-    source_model: LibraryCatalogReference
-    derivation: Annotated[str, StringConstraints(max_length=2_000)]
-
-
-class LibraryModelFormat(_StrictModel):
-    container: Literal["gguf", "safetensors"]
-    precision: Text64
-    quantization: Text128
-
-
-class LibraryModelParameters(_StrictModel):
-    total: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
-    active: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
-
-
-class LibraryModelLimits(_StrictModel):
-    context_tokens: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
-    resolution_pixels: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
-    frames: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
-    sample_rate_hz: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_BIGINT)
-
-
-class LibraryModelSizes(_StrictModel):
-    download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    installed_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class LibraryModelArtifact(_StrictModel):
-    id: Text64
-    path: Text512
-    kind: Literal["huggingface.file", "http.file", "oci.artifact"]
-    repository: Text512
-    revision: Text80
-    sha256: Digest
-    download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    installed_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    roles: list[Text64] = Field(min_length=1, max_length=16)
-
-
-class LibraryModelFamily(_StrictModel):
-    identity: LibraryCatalogReference
-    family: Text64
-    metadata: LibraryModelMetadata
-
-
-class LibraryModelDefinition(_StrictModel):
-    identity: LibraryCatalogReference
-    model_group: LibraryCatalogReference
-    architecture: Text128
-    metadata: LibraryModelMetadata
-
-
-class LibraryModelVersionFacts(_StrictModel):
-    """Exact schema-valid model-version facts, with unknown fields fail-closed."""
-
-    schema_version: Literal[2] = 2
-    state: Literal["resolved", "unknown"]
-    identity: ModelVersionIdentity
-    model: LibraryCatalogReference | None = None
-    family: LibraryModelFamily | None = None
-    model_definition: LibraryModelDefinition | None = None
-    metadata: LibraryModelMetadata | None = None
-    version: Text128 | None = None
-    source: LibraryModelSource | None = None
-    lineage: LibraryModelLineage | None = None
-    format: LibraryModelFormat | None = None
-    parameters: LibraryModelParameters | None = None
-    limits: LibraryModelLimits | None = None
-    sizes: LibraryModelSizes | None = None
-    artifacts: list[LibraryModelArtifact] = Field(max_length=512)
-    dependencies: list[LibraryCatalogReference] = Field(max_length=32)
-    availability: Literal["active", "withdrawn", "superseded"] | None = None
-    reasons: list[ProjectionReason] = Field(default_factory=list, max_length=16)
 
 
 class LibraryRecipeSummary(LibraryRecipeIdentity):
-    selected_revision: RecipeRevisionSummary | None
+    recipe_document: RecipeDefinition
     capabilities: list[Text64] = Field(max_length=64)
     topology_name: Text64 | None
     installations: list[LibraryInstallationSummary] = Field(max_length=64)
@@ -259,312 +160,40 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
     run_returned_count: int = Field(ge=0, le=64)
     runs_truncated: bool
     reasons: list[ProjectionReason] = Field(max_length=16)
-    recipe_capabilities: "LibraryCapabilityInventory" = Field(
+    recipe_capabilities: LibraryCapabilityInventory = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )
 
 
 class LibraryModel(_StrictModel):
-    model: ModelVersionIdentity
+    model: LibraryModelIdentity
+    model_document: ModelDefinition
     page_local: Literal[True] = True
-    recipes: list[LibraryRecipeSummary] = Field(min_length=1, max_length=100)
-    model_capabilities: "LibraryCapabilityInventory" = Field(
+    recipes: list[LibraryRecipeSummary] = Field(
+        min_length=0, max_length=_MAX_PAGE_RECIPES
+    )
+    model_capabilities: LibraryCapabilityInventory = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )
-    model_version: LibraryModelVersionFacts | None = None
 
 
 class LibrarySnapshot(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     generated_at: datetime
-    models: list[LibraryModel] = Field(max_length=100)
-    unlinked_recipes: list[LibraryRecipeSummary] = Field(max_length=100)
+    models: list[LibraryModel] = Field(max_length=_MAX_PAGE_RECIPES)
+    unlinked_recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
     freshness_policy: FreshnessPolicy
 
 
-class VisualIdentity(_StrictModel):
-    publisher: Text128
-    slug: Text128
+class LibraryRecipeList(_StrictModel):
+    """Read-only overview of active canonical Recipe revisions."""
 
-
-class VisualMetadata(_StrictModel):
-    title: Text200
-    description: Text512
-    tags: list[Text64] = Field(max_length=64)
-
-
-class VisualCatalogIdentity(_StrictModel):
-    kind: Literal[
-        "model-version",
-        "execution-harness",
-        "runtime-distribution",
-        "patch-bundle",
-    ]
-    publisher: Text128
-    slug: Text128
-    content_sha256: Digest
-
-
-class VisualExecution(_StrictModel):
-    harness: VisualCatalogIdentity
-    patch_bundle: VisualCatalogIdentity | None
-
-
-class VisualBuildContext(_StrictModel):
-    sha256: Digest
-    expected_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    media_type: Text128
-
-
-class VisualBuildOptionValue(_StrictModel):
-    name: Text128
-    value: str = Field(max_length=1024)
-
-
-class VisualBuildAdditionalContext(_StrictModel):
-    name: Text64
-    path: Text256
-
-
-class VisualBuildOptions(_StrictModel):
-    additional_contexts: list[VisualBuildAdditionalContext] = Field(max_length=16)
-    annotations: list[VisualBuildOptionValue] = Field(max_length=64)
-    environment: list[VisualBuildOptionValue] = Field(max_length=64)
-    format: Literal["oci", "docker"]
-    identity_label: bool
-    ignorefile: Text256 | None
-    jobs: int = Field(ge=1, le=32)
-    labels: list[VisualBuildOptionValue] = Field(max_length=64)
-    layer_compression: Literal["disabled", "gzip"]
-    layer_labels: list[VisualBuildOptionValue] = Field(max_length=64)
-    layers: bool
-    no_hostname: bool
-    no_hosts: bool
-    omit_history: bool
-    os_features: list[Text64] = Field(max_length=32)
-    os_version: Text64 | None
-    shm_bytes: int = Field(ge=65_536, le=68_719_476_736)
-    skip_unused_stages: bool
-    squash: Literal["none", "new", "all"]
-    timestamp: int | None = Field(default=None, ge=0, le=4_102_444_800)
-    unset_environment: list[Text128] = Field(max_length=64)
-    unset_labels: list[Text128] = Field(max_length=64)
-
-
-class VisualBuild(_StrictModel):
-    context: VisualBuildContext
-    dockerfile: Text256
-    target: Text64 | None
-    platform: Text64
-    network_mode: Text32
-    network_hosts: list[Text256] = Field(max_length=64)
-    capabilities: list[Text32] = Field(max_length=12)
-    options: VisualBuildOptions
-    cpu_cores: int = Field(ge=1, le=256)
-    download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    temporary_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    memory_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    processes: int = Field(ge=1, le=65_535)
-    timeout_seconds: int = Field(ge=1, le=86_400)
-
-
-class VisualArtifact(_StrictModel):
-    id: Text64
-    kind: Text64
-    repository: Text256
-    revision: Text128
-    include_paths: list[Text512] = Field(max_length=256)
-    download_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    installed_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    roles: list[Text64] = Field(max_length=64)
-
-
-class VisualRuntime(_StrictModel):
-    distribution: VisualCatalogIdentity
-    entrypoint: list[Text256] = Field(max_length=64)
-    lifecycle_pre_start_count: int = Field(ge=0, le=64)
-    lifecycle_post_stop_count: int = Field(ge=0, le=64)
-    stop_timeout_seconds: int = Field(ge=1, le=86_400)
-
-
-class VisualRecipeParameter(_StrictModel):
-    name: Text64
-    description: Text512
-    type: Literal["string", "integer", "boolean", "enum"]
-    default: DisplayScalar
-    minimum: int | None = Field(
-        default=None,
-        ge=-_MAX_SIGNED_BIGINT,
-        le=_MAX_SIGNED_BIGINT,
-    )
-    maximum: int | None = Field(
-        default=None,
-        ge=-_MAX_SIGNED_BIGINT,
-        le=_MAX_SIGNED_BIGINT,
-    )
-    allowed_values: list[DisplayScalar] = Field(default_factory=list, max_length=128)
-    pattern: Annotated[str, StringConstraints(max_length=256)] | None = None
-    change_effect: Literal["rebuild", "reinstall", "restart"]
-
-
-class VisualInputSlot(_StrictModel):
-    id: Annotated[
-        str,
-        StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"),
-    ]
-    label: Text64
-    description: Text256
-    media_types: list[Text128] = Field(min_length=1, max_length=16)
-    extensions: list[
-        Annotated[
-            str,
-            StringConstraints(pattern=r"^\.[a-z0-9][a-z0-9._-]{0,15}$"),
-        ]
-    ] = Field(max_length=16)
-    min_files: int = Field(ge=0, le=32)
-    max_files: int = Field(ge=1, le=32)
-    max_file_bytes: int = Field(ge=1, le=512 * 1024**2)
-    max_total_bytes: int = Field(ge=1, le=1024**3)
-
-
-class VisualInterfaceInput(_StrictModel):
-    path: Annotated[str, StringConstraints(min_length=1, max_length=512)]
-    required: bool
-    media_types: list[Text128] = Field(min_length=1, max_length=16)
-    max_bytes: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    min_files: int = Field(ge=0, le=32)
-    max_files: int = Field(ge=1, le=32)
-    slots: list[VisualInputSlot] = Field(default_factory=list, max_length=32)
-
-
-class VisualOutputSlot(_StrictModel):
-    id: Annotated[
-        str,
-        StringConstraints(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$"),
-    ]
-    label: Text64
-    description: Text256
-    media_types: list[Text128] = Field(min_length=1, max_length=16)
-    extensions: list[
-        Annotated[
-            str,
-            StringConstraints(pattern=r"^\.[a-z0-9][a-z0-9._-]{0,15}$"),
-        ]
-    ] = Field(min_length=1, max_length=16)
-    min_files: int = Field(ge=0, le=32)
-    max_files: int = Field(ge=1, le=32)
-    max_file_bytes: int = Field(ge=1, le=1024**3)
-    max_total_bytes: int = Field(ge=1, le=2 * 1024**3)
-
-
-class VisualInterfaceOutput(_StrictModel):
-    path: Annotated[str, StringConstraints(min_length=1, max_length=512)]
-    allowed_media_types: list[Text128] = Field(max_length=16)
-    max_total_bytes: int | None = Field(default=None, ge=1, le=2 * 1024**3)
-    slots: list[VisualOutputSlot] = Field(default_factory=list, max_length=32)
-
-
-class VisualInterface(_StrictModel):
-    adapter: Text64
-    port: int | None = Field(default=None, ge=1, le=65_535)
-    model_aliases: list[Text128] = Field(default_factory=list, max_length=64)
-    health_path: (
-        Annotated[str, StringConstraints(min_length=1, max_length=512)] | None
-    ) = None
-    path: Annotated[str, StringConstraints(min_length=1, max_length=512)] | None = None
-    timeout_seconds: int | None = Field(default=None, ge=1, le=3_600)
-    input: VisualInterfaceInput | None = None
-    output: VisualInterfaceOutput | None = None
-
-
-class VisualTerritorialRestrictions(_StrictModel):
-    denied_jurisdictions: list[
-        Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
-    ] = Field(min_length=1, max_length=32)
-    notice: Annotated[str, StringConstraints(min_length=1, max_length=1_000)]
-
-
-class VisualModelLicense(_StrictModel):
-    territorial_restrictions: VisualTerritorialRestrictions | None = None
-
-
-class VisualValidation(_StrictModel):
-    checks: list[Text80] = Field(min_length=1, max_length=64)
-    benchmark_count: int = Field(ge=0, le=32)
-
-
-class VisualProvenance(_StrictModel):
-    source_kind: Literal["local", "workload_run", "global", "fork"]
-    source_reference: Annotated[str, StringConstraints(max_length=2_048)] | None
-    attribution: list[Text512] = Field(max_length=32)
-
-
-class VisualRecipeDocument(_StrictModel):
-    schema_version: Literal[1]
-    identity: VisualIdentity
-    metadata: VisualMetadata
-    model: VisualCatalogIdentity
-    model_license: VisualModelLicense | None
-    execution: VisualExecution
-    build: VisualBuild
-    parameters: list[VisualRecipeParameter] = Field(max_length=128)
-    artifacts: list[VisualArtifact] = Field(max_length=128)
-    runtime: VisualRuntime
-    interfaces: list[VisualInterface] = Field(max_length=64)
-    validation: VisualValidation
-    provenance: VisualProvenance
-
-
-class RecipeDiskRequirements(_StrictModel):
-    image_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    artifact_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    staging_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    cache_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    rollback_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    safety_margin_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class RecipeMemoryRequirements(_StrictModel):
-    kind: Literal["unified", "host", "accelerator"]
-    startup_peak_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    steady_state_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    runtime_growth_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    system_reserve_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class RecipeRole(_StrictModel):
-    name: Text64
-    count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    endpoint_owner: bool
-    artifacts: list[Text64] = Field(max_length=128)
-    disk: RecipeDiskRequirements
-    memory: RecipeMemoryRequirements
-
-
-class RecipeFabric(_StrictModel):
-    connectivity: Literal["none", "connected", "full_mesh", "switch"]
-    minimum_bandwidth_mbps: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class RecipeParallelism(_StrictModel):
-    tensor: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    pipeline: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    data: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    backend: Text64
-
-
-class RecipeTopology(_StrictModel):
-    name: Text64
-    mode: Text64
-    node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    parallelism: RecipeParallelism
-    roles: list[RecipeRole] = Field(min_length=1, max_length=32)
-    fabric: RecipeFabric
-    start_order: list[Text64] = Field(max_length=32)
-    stop_order: list[Text64] = Field(max_length=32)
-
-
+    schema_version: Literal[2] = 2
+    generated_at: datetime
+    recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
+    next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
+    freshness_policy: FreshnessPolicy
 class OperationalBuild(_StrictModel):
     recipe_build_id: UuidId
     recipe_revision_id: UuidId
@@ -791,24 +420,27 @@ class TopologyPlacement(_StrictModel):
     reasons: list[ProjectionReason] = Field(max_length=16)
 
 
+class LibraryRecipeModel(_StrictModel):
+    selection: RecipeModelSelection
+    model_document: ModelDefinition
+
+
 class LibraryRecipeDetail(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     generated_at: datetime
     recipe: LibraryRecipeIdentity
-    selected_revision: RecipeRevisionSummary | None
-    visual_recipe: VisualRecipeDocument | None
+    definition: RecipeDefinition
     topology: RecipeTopology | None
     operational_state: OperationalState
     placement: list[TopologyPlacement] = Field(max_length=1)
     reasons: list[ProjectionReason] = Field(max_length=16)
-    model: ModelVersionIdentity | None = None
+    model_documents: list[LibraryRecipeModel] = Field(max_length=32)
     model_capabilities: LibraryCapabilityInventory = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )
     recipe_capabilities: LibraryCapabilityInventory = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )
-    model_version: LibraryModelVersionFacts | None = None
 
 
 def _utc(value: datetime) -> datetime:

@@ -5,11 +5,12 @@ import io
 import json
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from importlib import resources
 from pathlib import Path
 
 import pytest
 import vonk_control.recipe_builds as recipe_builds_module
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     AgentClaim,
@@ -19,8 +20,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentOperation as ProtocolOperation,
 )
-from vonk_control.auth import TokenCodec
-from vonk_control.catalog_service import CatalogService, RecipeDraftInput
+from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -29,8 +29,7 @@ from vonk_control.models import (
     AgentNode,
     AgentOperation,
     Base,
-    CatalogEntity,
-    CatalogEntityRevision,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     Job,
@@ -46,8 +45,6 @@ from vonk_control.recipe_operations import (
     _record_build_evidence,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-
-from .test_catalog_service import _seed_recipe_dependencies
 
 
 class RecordingQueue:
@@ -103,22 +100,16 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
     bundles = SourceBundleStore(tmp_path / "bundles")
     stored = bundles.put(bundle.sha256, io.BytesIO(bundle.archive))
     document = json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text(encoding="utf-8")
     )
-    document["build"]["network"] = network or {"mode": "none", "hosts": []}
-    document["build"]["context"]["sha256"] = bundle.sha256
-    document["build"]["context"]["expected_bytes"] = len(bundle.archive)
-    document["identity"]["slug"] = "qwen3-vllm"
-    document["build"]["target"] = "runtime"
-    document["build"]["security"] = {"capabilities": ["DAC_OVERRIDE"]}
-    document["build"]["resources"] = {
-        "cpu_cores": 6,
-        "download_bytes": 100,
-        "temporary_bytes": 200,
-        "memory_bytes": 300,
-        "processes": 2048,
-        "timeout_seconds": 600,
+    document["execution"]["build"]["network"] = network or {
+        "mode": "none",
+        "hosts": [],
     }
+    document["identity"]["slug"] = "qwen3-vllm"
+    document["execution"]["build"]["target"] = "runtime"
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -168,14 +159,63 @@ def setup(tmp_path: Path, *, network: dict[str, object] | None = None):
             ),
         )
     )
-    catalog = CatalogService(
-        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    catalog = CatalogEntityService(sessions, clock=lambda: now)
+    model = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
     )
-    _seed_recipe_dependencies(catalog, document)
-    draft = catalog.create_recipe(
-        "admin", RecipeDraftInput(slug="qwen3-vllm", document=document)
-    )
-    revision = catalog.resolve(draft.recipe_id, 1, "admin")
+    model_draft = catalog.create_draft(model, actor="admin")
+    catalog.resolve(model_draft.id, actor="admin")
+    recipe_draft = catalog.create_draft(document, actor="admin")
+    with sessions.begin() as session:
+        stored_revision = session.get(CatalogDocumentRevision, recipe_draft.id)
+        assert stored_revision is not None
+        stored_revision.projected = {
+            **stored_revision.projected,
+            "source_bundle_sha256": bundle.sha256,
+            "build_resources": {
+                "cpu_cores": 6,
+                "download_bytes": 100,
+                "temporary_bytes": 200,
+                "memory_bytes": 300,
+                "processes": 2048,
+                "timeout_seconds": 600,
+            },
+            "build_security": {"capabilities": ["DAC_OVERRIDE"]},
+            "build_options": {
+                "additional_contexts": [],
+                "annotations": [],
+                "environment": [],
+                "format": "oci",
+                "identity_label": True,
+                "ignorefile": None,
+                "jobs": 1,
+                "labels": [],
+                "layer_compression": "disabled",
+                "layer_labels": [],
+                "layers": True,
+                "no_hostname": False,
+                "no_hosts": False,
+                "omit_history": False,
+                "os_features": [],
+                "os_version": None,
+                "shm_bytes": 67108864,
+                "skip_unused_stages": True,
+                "squash": "none",
+                "timestamp": None,
+                "unset_environment": [],
+                "unset_labels": [],
+            },
+            "build_model_artifacts": [
+                {
+                    "path": "model.safetensors",
+                    "sha256": "c" * 64,
+                    "size_bytes": 1024,
+                }
+            ],
+        }
+    revision = catalog.resolve(recipe_draft.id, actor="admin")
     return sessions, bundles, now, node_id, revision
 
 
@@ -202,25 +242,11 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
     assert plan.agent_payload["base_image_storage_bytes"] == 100
     assert (
         plan.agent_payload["source_bundle_sha256"]
-        == revision.document["build"]["context"]["sha256"]
+        == revision.projected["source_bundle_sha256"]
     )
     with sessions() as session:
         stored = session.get(RecipeBuild, plan.build_id)
         assert stored is not None and stored.state == "planned"
-
-
-def test_build_plan_rejects_missing_exact_recipe_dependency(tmp_path: Path) -> None:
-    sessions, bundles, now, node_id, revision = setup(tmp_path)
-    with sessions.begin() as session:
-        session.execute(delete(CatalogEntityRevision))
-        session.execute(delete(CatalogEntity))
-
-    with pytest.raises(RecipeBuildError) as caught:
-        RecipeBuildService(sessions, bundles=bundles).plan(
-            revision.id, node_id, now=now
-        )
-
-    assert caught.value.code == "build.dependencies_stale"
 
 
 def test_build_identity_changes_when_builder_runtime_changes(tmp_path: Path) -> None:
@@ -580,14 +606,14 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
 ) -> None:
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     source_bytes = len(
-        bundles.get(revision.document["build"]["context"]["sha256"]).archive
+        bundles.get(revision.projected["source_bundle_sha256"]).archive
     )
-    temporary_bytes = revision.document["build"]["resources"]["temporary_bytes"]
+    temporary_bytes = revision.projected["build_resources"]["temporary_bytes"]
     output_bytes = max(
         role["resources"]["disk"]["image_bytes"]
         for role in revision.document["topology"]["roles"]
     )
-    base_image_bytes = revision.document["build"]["resources"]["download_bytes"]
+    base_image_bytes = revision.projected["build_resources"]["download_bytes"]
     peak_bytes = max(temporary_bytes, base_image_bytes + source_bytes + output_bytes)
     disk_total_bytes = 2 * 1024**4
     required_bytes = peak_bytes + recipe_builds_module._build_disk_reserve(

@@ -4,19 +4,30 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import DistributionAssignment, DistributionObject, canonical_message
+from vonk_agent_protocol import (
+    DistributionAssignment,
+    DistributionObject,
+    canonical_message,
+)
 
 from .agent_jobs import AgentJobService
 from .distribution import DistributionError, DistributionService
-from .models import AgentOperation, AgentOperationAttempt, Job, RecipeBuild
 from .model_cache import ModelCacheNotFound
+from .models import (
+    AgentOperation,
+    AgentOperationAttempt,
+    CatalogDocumentRevision,
+    Job,
+    RecipeBuild,
+    RuntimeImageReceipt,
+)
 from .run_switch_contract import RunSwitchPhase, RunSwitchPlan
 from .run_switch_operations import PhaseExecution
 
@@ -72,8 +83,16 @@ class DurableDistributionPhaseExecutor:
                     "skipped": True,
                     "verified": True,
                     "verified_digests": list(plan.storage.artifact_digests),
-                    "verified_image_digest": plan.image_digest or plan.preparation.runtime_image.image_digest,
-                    "verified_oci_layout_sha256": plan.build.oci_layout_sha256 or plan.preparation.runtime_image.oci_layout_sha256,
+                    "verified_image_digest": (
+                        plan.preparation.runtime_image.image_digest
+                        if plan.preparation is not None
+                        else plan.image_digest
+                    ),
+                    "verified_oci_layout_sha256": (
+                        plan.preparation.runtime_image.oci_layout_sha256
+                        if plan.preparation is not None
+                        else plan.build.oci_layout_sha256
+                    ),
                     "cached_nodes": list(cached),
                     "cached_target_totals": {node_id: self._target_bytes(plan, node_id) for node_id in cached},
                 })
@@ -86,25 +105,44 @@ class DurableDistributionPhaseExecutor:
                 "skipped": True,
                 "verified": phase.kind == "verify",
                 "verified_digests": list(plan.storage.artifact_digests),
-                "verified_image_digest": plan.image_digest,
-                "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
+                "verified_image_digest": (
+                    plan.preparation.runtime_image.image_digest
+                    if plan.preparation is not None
+                    else plan.image_digest
+                ),
+                "verified_oci_layout_sha256": (
+                    plan.preparation.runtime_image.oci_layout_sha256
+                    if plan.preparation is not None
+                    else plan.build.oci_layout_sha256
+                ),
                 "cached_nodes": list(targets),
                 "cached_target_totals": {
                     node_id: self._target_bytes(plan, node_id)
                     for node_id in targets
                 },
             })
-        model_objects = self._model_objects(plan)
+        model_objects, model_set_digest, model_set_bytes = self._model_objects(
+            plan, progress
+        )
         image_digest, layout_digest, image_bytes, build_id = self._runtime_identity(plan, progress)
+        effective_execution_key = self._runtime_execution_key(progress)
         archive = self._archive(
             plan,
             build_id=build_id,
             image_digest=image_digest,
             layout_digest=layout_digest,
             image_bytes=image_bytes,
+            effective_execution_key=effective_execution_key,
         )
         assignments = {
-            node_id: self._assignment(plan, node_id, model_objects, archive, image_digest=image_digest)
+            node_id: self._assignment(
+                plan,
+                node_id,
+                model_objects,
+                archive,
+                image_digest=image_digest,
+                model_set_digest=model_set_digest,
+            )
             for node_id in missing
         }
         child_id = self._ensure_child(
@@ -115,6 +153,7 @@ class DurableDistributionPhaseExecutor:
             cached=cached,
             assignments=assignments,
             target_order=targets,
+            target_bytes=model_set_bytes + image_bytes,
         )
         return PhaseExecution(
             operation_id=child_id,
@@ -202,7 +241,18 @@ class DurableDistributionPhaseExecutor:
             }
             return _ChildView(state=state, result=payload)
 
-    def _ensure_child(self, plan: RunSwitchPlan, phase: RunSwitchPhase, *, actor: str, request_key: str, cached: tuple[str, ...], assignments: Mapping[str, DistributionAssignment], target_order: tuple[str, ...]) -> str:
+    def _ensure_child(
+        self,
+        plan: RunSwitchPlan,
+        phase: RunSwitchPhase,
+        *,
+        actor: str,
+        request_key: str,
+        cached: tuple[str, ...],
+        assignments: Mapping[str, DistributionAssignment],
+        target_order: tuple[str, ...],
+        target_bytes: int | None = None,
+    ) -> str:
         child_request = str(uuid.uuid5(uuid.UUID(request_key), f"artifact-distribution:{phase.kind}:{phase.index}"))
         now = self._clock()
         with self._sessions() as session:
@@ -230,7 +280,9 @@ class DurableDistributionPhaseExecutor:
                     raise
         with self._sessions.begin() as session:
             target_totals = {
-                node_id: self._target_bytes(plan, node_id)
+                node_id: target_bytes
+                if target_bytes is not None
+                else self._target_bytes(plan, node_id)
                 for node_id in (*cached, *assignments)
             }
             total_bytes = sum(value for value in target_totals.values())
@@ -296,28 +348,52 @@ class DurableDistributionPhaseExecutor:
                 )
             return child.id
 
-    def _model_objects(self, plan: RunSwitchPlan) -> tuple[DistributionObject, ...]:
+    def _model_objects(
+        self,
+        plan: RunSwitchPlan,
+        progress: Mapping[str, object],
+    ) -> tuple[tuple[DistributionObject, ...], str, int]:
         preparation = plan.preparation
-        if preparation is None:
-            raise RuntimeError("exact model preparation is unavailable")
+        model_set_digest = (
+            preparation.model.artifact_set_sha256 if preparation is not None else None
+        )
+        model_set_bytes = (
+            preparation.model.artifact_set_bytes if preparation is not None else None
+        )
+        if model_set_digest is None:
+            phase_results = progress.get("phase_results")
+            if isinstance(phase_results, list):
+                for raw in reversed(phase_results):
+                    if not isinstance(raw, Mapping):
+                        continue
+                    value = raw.get("model_artifact_set_sha256")
+                    if isinstance(value, str):
+                        model_set_digest = value
+                        candidate_bytes = raw.get("model_artifact_set_bytes")
+                        if type(candidate_bytes) is int and candidate_bytes > 0:
+                            model_set_bytes = candidate_bytes
+                        break
+        if not isinstance(model_set_digest, str):
+            raise TypeError("exact model preparation identity is unavailable")
         source = getattr(self._distribution.source, "model_source", self._distribution.source)
         getter = getattr(source, "objects_for_set", None)
         if not callable(getter):
-            raise RuntimeError("verified model cache manifest provider is unavailable")
-        objects = tuple(getter(preparation.model.artifact_set_sha256))
+            raise TypeError("verified model cache manifest provider is unavailable")
+        objects = tuple(getter(model_set_digest))
         if not objects or any(item.kind != "model" for item in objects):
             raise RuntimeError("verified model cache manifest is incomplete")
         expected_digests = set(plan.storage.artifact_digests)
         if expected_digests and {item.sha256 for item in objects} != expected_digests:
             raise RuntimeError("verified model cache manifest does not match the plan")
-        if sum(item.bytes for item in objects) != preparation.model.artifact_set_bytes:
+        actual_bytes = sum(item.bytes for item in objects)
+        if model_set_bytes is not None and actual_bytes != model_set_bytes:
             raise RuntimeError("verified model cache byte total does not match the plan")
-        return objects
+        return objects, model_set_digest, actual_bytes
 
     @staticmethod
     def _runtime_identity(
         plan: RunSwitchPlan, progress: Mapping[str, object]
-    ) -> tuple[str, str, int, str]:
+    ) -> tuple[str, str, int, str | None]:
         image_digest = plan.image_digest
         layout_digest = plan.build.oci_layout_sha256
         image_bytes = plan.build.image_bytes
@@ -337,49 +413,109 @@ class DurableDistributionPhaseExecutor:
                 candidate = raw.get("result") if isinstance(raw.get("result"), Mapping) else raw
                 if not isinstance(candidate, Mapping):
                     continue
-                image_digest = image_digest or candidate.get("image_digest")
-                layout_digest = layout_digest or candidate.get("oci_layout_sha256")
-                image_bytes = image_bytes or candidate.get("image_bytes")
+                runtime_receipt = candidate.get("runtime_image")
+                if isinstance(runtime_receipt, Mapping):
+                    candidate = {**candidate, **runtime_receipt}
+                if candidate.get("source") == "published":
+                    image_digest = candidate.get("image_digest") or image_digest
+                    layout_digest = candidate.get(
+                        "oci_layout_sha256", candidate.get("oci_archive_sha256")
+                    ) or layout_digest
+                    image_bytes = candidate.get("image_bytes") or image_bytes
+                else:
+                    image_digest = image_digest or candidate.get("image_digest")
+                    layout_digest = layout_digest or candidate.get(
+                        "oci_layout_sha256", candidate.get("oci_archive_sha256")
+                    )
+                    image_bytes = image_bytes or candidate.get("image_bytes")
                 build_id = build_id or candidate.get("build_id")
-                if image_digest and layout_digest and image_bytes is not None and build_id:
+                if image_digest and layout_digest and image_bytes is not None:
                     break
         if (
-            not isinstance(build_id, str)
+            (build_id is not None and not isinstance(build_id, str))
             or not isinstance(image_digest, str)
             or not isinstance(layout_digest, str)
             or type(image_bytes) is not int
         ):
-            raise RuntimeError("succeeded OCI build identity is unavailable")
+            raise RuntimeError("verified OCI runtime image identity is unavailable")
         return image_digest, layout_digest, image_bytes, build_id
+
+    @staticmethod
+    def _runtime_execution_key(progress: Mapping[str, object]) -> str | None:
+        phase_results = progress.get("phase_results")
+        if not isinstance(phase_results, list):
+            return None
+        for raw in reversed(phase_results):
+            if not isinstance(raw, Mapping):
+                continue
+            runtime_receipt = raw.get("runtime_image")
+            if isinstance(runtime_receipt, Mapping):
+                value = runtime_receipt.get("effective_execution_key")
+                if isinstance(value, str):
+                    return value
+            value = raw.get("effective_execution_key")
+            if isinstance(value, str):
+                return value
+        return None
 
     def _archive(
         self,
         plan: RunSwitchPlan,
         *,
-        build_id: str,
+        build_id: str | None,
         image_digest: str,
         layout_digest: str,
         image_bytes: int,
+        effective_execution_key: str | None = None,
     ) -> DistributionObject:
-        if not build_id or not image_digest or not layout_digest or image_bytes < 1:
-            raise RuntimeError("succeeded OCI build identity is unavailable")
+        if not image_digest or not layout_digest or image_bytes < 1:
+            raise RuntimeError("verified OCI runtime image identity is unavailable")
         with self._sessions() as session:
-            build = session.get(RecipeBuild, build_id)
-            if build is None or build.state != "succeeded" or build.image_digest != image_digest or build.oci_layout_sha256 != layout_digest or build.image_bytes != image_bytes:
-                raise RuntimeError("OCI build authority changed")
-            if plan.recipe_revision_id is not None and build.recipe_revision_id != plan.recipe_revision_id:
-                raise RuntimeError("OCI build recipe revision changed")
+            if build_id is not None:
+                build = session.get(RecipeBuild, build_id)
+                if (
+                    build is None
+                    or build.state != "succeeded"
+                    or build.image_digest != image_digest
+                    or build.oci_layout_sha256 != layout_digest
+                    or build.image_bytes != image_bytes
+                ):
+                    raise RuntimeError("OCI build authority changed")
+                if plan.recipe_revision_id is not None and build.recipe_revision_id != plan.recipe_revision_id:
+                    raise RuntimeError("OCI build recipe revision changed")
+            else:
+                receipt = session.scalar(
+                    select(RuntimeImageReceipt).where(
+                        RuntimeImageReceipt.recipe_revision_id == plan.recipe_revision_id,
+                        RuntimeImageReceipt.source == "published",
+                        RuntimeImageReceipt.original_content_digest == plan.recipe_content_sha256,
+                        RuntimeImageReceipt.effective_execution_key == effective_execution_key,
+                        RuntimeImageReceipt.state == "verified",
+                        RuntimeImageReceipt.platform_manifest_digest == image_digest,
+                        RuntimeImageReceipt.oci_archive_sha256 == layout_digest,
+                        RuntimeImageReceipt.image_bytes == image_bytes,
+                    )
+                )
+                if receipt is None:
+                    raise RuntimeError("published runtime image receipt authority changed")
         return DistributionObject("image.oci.tar", layout_digest, image_bytes, "oci-archive")
 
-    def _assignment(self, plan: RunSwitchPlan, node_id: str, model_objects: tuple[DistributionObject, ...], archive: DistributionObject, *, image_digest: str) -> DistributionAssignment:
-        preparation = plan.preparation
-        assert preparation is not None
+    def _assignment(
+        self,
+        plan: RunSwitchPlan,
+        node_id: str,
+        model_objects: tuple[DistributionObject, ...],
+        archive: DistributionObject,
+        *,
+        image_digest: str,
+        model_set_digest: str,
+    ) -> DistributionAssignment:
         generation = getattr(getattr(plan, "mapping", None), "mapping_generation", None)
         if type(generation) is not int or generation < 1:
             generation = 1
         # UUID v4 is part of the wire contract, while the digest-derived bytes
         # make replay after a Controller restart yield the same assignment.
-        seed = f"{plan.plan_digest}:{generation}:{node_id}:{preparation.model.artifact_set_sha256}:{archive.sha256}"
+        seed = f"{plan.plan_digest}:{generation}:{node_id}:{model_set_digest}:{archive.sha256}"
         assignment_bytes = bytearray(hashlib.sha256(seed.encode("utf-8")).digest()[:16])
         assignment_bytes[6] = (assignment_bytes[6] & 0x0F) | 0x40
         assignment_bytes[8] = (assignment_bytes[8] & 0x3F) | 0x80
@@ -390,7 +526,7 @@ class DurableDistributionPhaseExecutor:
             "generation": generation,
             "node_id": node_id,
             "expires_at": (plan.generated_at.astimezone(UTC) + timedelta(hours=1)).isoformat(),
-            "model_artifact_set_sha256": preparation.model.artifact_set_sha256,
+            "model_artifact_set_sha256": model_set_digest,
             "objects": [item.to_mapping() for item in (*model_objects, archive)],
             "oci_image_digest": image_digest,
             "oci_archive_sha256": archive.sha256,
@@ -437,12 +573,30 @@ class DurableDistributionPhaseExecutor:
         expected_image = plan.image_digest or (
             preparation.runtime_image.image_digest if preparation is not None else None
         )
+        expected_registry = plan.image_digest
         expected_layout = plan.build.oci_layout_sha256 or (
             preparation.runtime_image.oci_layout_sha256 if preparation is not None else None
         )
         phase_results = progress.get("phase_results", [])
         if not isinstance(phase_results, list):
             phase_results = []
+        for raw in reversed(phase_results):
+            if not isinstance(raw, Mapping):
+                continue
+            runtime_receipt = raw.get("runtime_image")
+            if not isinstance(runtime_receipt, Mapping):
+                continue
+            candidate_image = runtime_receipt.get("image_digest")
+            candidate_layout = runtime_receipt.get(
+                "oci_layout_sha256", runtime_receipt.get("oci_archive_sha256")
+            )
+            if isinstance(candidate_image, str) and isinstance(candidate_layout, str):
+                expected_image = candidate_image
+                expected_layout = candidate_layout
+                candidate_registry = runtime_receipt.get("registry_manifest_digest")
+                if isinstance(candidate_registry, str):
+                    expected_registry = candidate_registry
+                break
         # A preview may have planned the build and left plan image fields
         # empty. Only a strict assignment emitted by this executor can supply
         # the effective post-build identity for verification.
@@ -515,6 +669,7 @@ class DurableDistributionPhaseExecutor:
             "verified": True,
             "verified_digests": sorted(expected_digests),
             "verified_image_digest": expected_image,
+            "verified_registry_manifest_digest": expected_registry,
             "verified_oci_layout_sha256": expected_layout,
             "cached_nodes": sorted(cached_nodes),
             "evidence": [dict(receipts[node_id]) for node_id in sorted(receipts)],
@@ -536,9 +691,16 @@ class DurableDistributionPhaseExecutor:
 class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
     """Run the Controller cache child before Spark target distribution."""
 
-    def __init__(self, *args: Any, model_cache: object, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        model_cache: object,
+        runtime_image_preparer: Callable[..., object] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._model_cache = model_cache
+        self._runtime_image_preparer = runtime_image_preparer
 
     def execute(
         self,
@@ -550,6 +712,15 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         request_key: str,
         progress: Mapping[str, object],
     ) -> PhaseExecution:
+        if phase.kind == "prepare" and phase.subphase == "runtime-image":
+            # This is the only mutating image boundary.  It runs as its own
+            # durable high-level phase so install admission cannot compile a
+            # schema-2 payload until the Controller archive and receipt are
+            # present.  Target-copy only consumes the persisted evidence.
+            runtime_result = self._prepare_runtime_image(plan)
+            if runtime_result is None:
+                raise RuntimeError("runtime image preparation returned no evidence")
+            return PhaseExecution(result=runtime_result)
         if phase.subphase != "model-download":
             return super().execute(
                 plan,
@@ -568,7 +739,7 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         preview_method = getattr(self._model_cache, "download_preview", None)
         start_method = getattr(self._model_cache, "start_download", None)
         if not callable(preview_method) or not callable(start_method):
-            raise RuntimeError("model-cache download provider is unavailable")
+            raise TypeError("model-cache download provider is unavailable")
         # An exact persisted set is sufficient to resolve the opaque manifest.
         # When a recipe revision ID is available, include the model pin as an
         # additional cross-check; never send both recipe ID and recipe digest.
@@ -627,6 +798,102 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             **pins,
         )
         return PhaseExecution(operation_id=view.id, result=self._cache_result(view))
+
+    def _prepare_runtime_image(
+        self, plan: RunSwitchPlan
+    ) -> Mapping[str, object] | None:
+        """Prepare one Controller image before target distribution.
+
+        This callback is deliberately supplied only to the durable worker
+        executor.  API preview, admission, and agent spec reads use the
+        read-only receipt resolver in ``ControllerExecutionPlanService``.
+        """
+
+        if self._runtime_image_preparer is None:
+            return None
+        if plan.recipe_revision_id is None or not plan.spark_group.nodes:
+            raise RuntimeError("runtime image preparation identity is unavailable")
+        from .execution_plan_service import _bind_runtime_artifacts
+        from .recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
+
+        node = min(plan.spark_group.nodes, key=lambda item: (item.rank, item.node_id))
+        with self._sessions() as session:
+            revision = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id == plan.recipe_revision_id,
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
+            )
+            if revision is None:
+                raise RuntimeError("runtime image preparation recipe revision is unavailable")
+            build = (
+                session.get(RecipeBuild, plan.recipe_build_id)
+                if plan.recipe_build_id is not None
+                else None
+            )
+            package_handle = None
+            execution = revision.document.get("execution")
+            if isinstance(execution, Mapping) and execution.get("mode") == "build":
+                if build is None or build.state != "succeeded":
+                    raise RuntimeError("runtime image preparation build receipt is unavailable")
+                package_handle = {
+                    "image_digest": build.image_digest,
+                    "image_reference": f"localhost/vonk/recipe-build@{build.image_digest}",
+                    "build_input_sha256": build.build_input_sha256,
+                    "platform": "linux/arm64",
+                }
+            entities = resolve_recipe_entities(session, revision.document)
+            parameters = (
+                dict(plan.mapping.parameters)
+                if plan.mapping is not None
+                else {}
+            )
+            runtime_spec = compile_runtime_spec(
+                revision.document,
+                resolved_entities=entities,
+                parameters=parameters,
+                role=node.role,
+                rank=node.rank,
+                package_handle=package_handle,
+            )
+            runtime_spec = _bind_runtime_artifacts(
+                runtime_spec,
+                entities["models"],
+            )
+        receipt = self._runtime_image_preparer(
+            revision.document,
+            runtime_spec,
+            build,
+        )
+        to_mapping = getattr(receipt, "to_mapping", None)
+        raw = to_mapping() if callable(to_mapping) else receipt
+        if not isinstance(raw, Mapping):
+            raise TypeError("runtime image preparation returned invalid evidence")
+        identity = runtime_spec.get("identity")
+        effective_execution_key = (
+            identity.get("execution_sha256")
+            if isinstance(identity, Mapping)
+            else None
+        )
+        image_digest = raw.get("image_digest")
+        layout_digest = raw.get("oci_layout_sha256", raw.get("oci_archive_sha256"))
+        image_bytes = raw.get("image_bytes")
+        if (
+            not isinstance(image_digest, str)
+            or not isinstance(layout_digest, str)
+            or type(image_bytes) is not int
+            or image_bytes < 1
+        ):
+            raise RuntimeError("runtime image preparation returned incomplete evidence")
+        return {
+            "runtime_image": dict(raw),
+            "effective_execution_key": effective_execution_key,
+            "image_digest": image_digest,
+            "oci_layout_sha256": layout_digest,
+            "image_bytes": image_bytes,
+            "build_id": raw.get("build_id"),
+        }
 
     def get(self, operation_id: str) -> Any:
         getter = getattr(self._model_cache, "get_operation", None)

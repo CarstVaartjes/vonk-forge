@@ -1,23 +1,175 @@
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_control.auth import TokenCodec
-from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingError, ClusterMappingService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
 )
-from vonk_control.models import AgentNode, Base, ClusterMapping, ClusterMappingNode
+from vonk_control.models import (
+    AgentNode,
+    Base,
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+    CatalogRecipeModelReference,
+    ClusterMapping,
+    ClusterMappingNode,
+)
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-from .test_catalog_service import _seed_recipe_dependencies
+MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
+MODEL_REVISION_ID = "00000000-0000-4000-8000-000000000011"
+RECIPE_DOCUMENT_ID = "00000000-0000-4000-8000-000000000020"
+RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
+
+
+def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
+    model = ModelDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "model-definition.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    raw_recipe = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-image.json")
+        .read_text(encoding="utf-8")
+    )
+    raw_recipe["identity"]["slug"] = "glm-5-2-triple"
+    raw_recipe["settings"]["knobs"]["max_model_len"] = {
+        "value": 32768,
+        "change_effect": "restart",
+    }
+    entrypoint = raw_recipe["topology"]["roles"][0]
+    worker = copy.deepcopy(entrypoint)
+    worker.update({"name": "worker", "count": 2, "endpoint_owner": False})
+    raw_recipe["topology"] = {
+        "name": "triple-tp3",
+        "mode": "tensor_parallel",
+        "node_count": 3,
+        "roles": [entrypoint, worker],
+        "parallelism": {
+            "world_size": 3,
+            "tensor": 3,
+            "pipeline": 1,
+            "data": 1,
+            "backend": "tcp",
+        },
+        "fabric": {
+            "connectivity": "full_mesh",
+            "minimum_bandwidth_mbps": 10000,
+        },
+        "start_order": ["worker", "entrypoint"],
+        "stop_order": ["entrypoint", "worker"],
+    }
+    return model, RecipeDefinition.model_validate(raw_recipe)
+
+
+def _seed_canonical_catalog(
+    sessions: sessionmaker, now: datetime
+) -> CatalogDocumentRevision:
+    model, recipe = _canonical_catalog_documents()
+    model_digest = content_sha256(model)
+    recipe_digest = content_sha256(recipe)
+    with sessions.begin() as session:
+        session.add_all(
+            [
+                CatalogDocument(
+                    id=MODEL_DOCUMENT_ID,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    title=model.identity.model.title,
+                    created_by="test",
+                    created_at=now,
+                    updated_at=now,
+                ),
+                CatalogDocument(
+                    id=RECIPE_DOCUMENT_ID,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    title=recipe.metadata.title,
+                    created_by="test",
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        session.add_all(
+            [
+                CatalogDocumentRevision(
+                    id=MODEL_REVISION_ID,
+                    document_id=MODEL_DOCUMENT_ID,
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=model.model_dump(mode="json"),
+                    content_digest=model_digest,
+                    artifact_key="a" * 64,
+                    created_by="test",
+                    created_at=now,
+                ),
+                CatalogDocumentRevision(
+                    id=RECIPE_REVISION_ID,
+                    document_id=RECIPE_DOCUMENT_ID,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=recipe.model_dump(mode="json"),
+                    content_digest=recipe_digest,
+                    execution_key="b" * 64,
+                    created_by="test",
+                    created_at=now,
+                ),
+            ]
+        )
+        session.add_all(
+            [
+                CatalogDocumentHead(
+                    kind="model",
+                    publisher=model.identity.publisher,
+                    slug=model.identity.slug,
+                    active_revision_id=MODEL_REVISION_ID,
+                    generation=1,
+                ),
+                CatalogDocumentHead(
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    active_revision_id=RECIPE_REVISION_ID,
+                    generation=1,
+                ),
+                CatalogRecipeModelReference(
+                    recipe_revision_id=RECIPE_REVISION_ID,
+                    recipe_kind="recipe",
+                    selection_id=recipe.models[0].id,
+                    model_revision_id=MODEL_REVISION_ID,
+                    model_kind="model",
+                    model_publisher=model.identity.publisher,
+                    model_slug=model.identity.slug,
+                    model_content_digest=model_digest,
+                ),
+            ]
+        )
+        return session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
 
 
 def setup(tmp_path: Path):
@@ -58,55 +210,7 @@ def setup(tmp_path: Path):
                 fabric_bandwidth_mbps=10_000,
             )
         )
-    document = json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
-    )
-    document["identity"]["slug"] = "glm-5-2-triple"
-    document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
-    entrypoint = document["topology"]["roles"][0]
-    document["topology"] = {
-        "name": "triple-tp3",
-        "mode": "tensor_parallel",
-        "node_count": 3,
-        "roles": [
-            entrypoint,
-            {
-                **entrypoint,
-                "name": "worker",
-                "count": 2,
-                "endpoint_owner": False,
-            },
-        ],
-        "parallelism": {
-            "world_size": 3,
-            "tensor": 3,
-            "pipeline": 1,
-            "data": 1,
-            "backend": "tcp",
-        },
-        "fabric": {"connectivity": "full_mesh", "minimum_bandwidth_mbps": 10000},
-        "start_order": ["worker", "entrypoint"],
-        "stop_order": ["entrypoint", "worker"],
-    }
-    document["parameters"] = [
-        {
-            "name": "max_model_len",
-            "description": "Maximum context length.",
-            "type": "integer",
-            "default": 32768,
-            "minimum": 1024,
-            "maximum": 131072,
-            "change_effect": "restart",
-        }
-    ]
-    catalog = CatalogService(
-        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
-    )
-    _seed_recipe_dependencies(catalog, document)
-    draft = catalog.create_recipe(
-        "admin", RecipeDraftInput(slug="glm-5-2-triple", document=document)
-    )
-    revision = catalog.resolve(draft.recipe_id, 1, "admin")
+    revision = _seed_canonical_catalog(sessions, now)
     return sessions, now, node_ids, revision
 
 

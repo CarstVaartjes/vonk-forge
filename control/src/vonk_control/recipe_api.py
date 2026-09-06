@@ -150,13 +150,14 @@ class InstallNodePlanResponse(StrictModel):
 class InstallPlanResponse(StrictModel):
     mapping_id: str
     mapping_generation: int
-    recipe_build_id: str
+    recipe_build_id: str | None
     image_digest: str
     recipe_revision_id: str
     recipe_content_sha256: str
     allowed: bool
     nodes: list[InstallNodePlanResponse]
     plan_digest: str
+    compiled_execution_plans: dict[str, dict[str, object]] = Field(default_factory=dict)
 
 
 class RunNodePlanResponse(StrictModel):
@@ -339,7 +340,7 @@ class RunStatusResponse(StrictModel):
 
 class InstallPreviewRequest(StrictModel):
     mapping_id: str = Field(pattern=_UUID)
-    recipe_build_id: str = Field(pattern=_UUID)
+    recipe_build_id: str | None = Field(default=None, pattern=_UUID)
 
 
 class MappingPreviewRequest(StrictModel):
@@ -648,7 +649,9 @@ def install_recipe_operation_routes(
             plan = recipes().preview_install(body.mapping_id, body.recipe_build_id)
         except (KeyError, ValueError) as error:
             return conflict(request, error)
-        return asdict(plan)
+        value = asdict(plan)
+        value["compiled_execution_plans"] = plan.compiled_plan_by_node
+        return value
 
     @app.post(
         "/api/v1/recipes/installations",

@@ -152,6 +152,48 @@ class CapabilityEvidence(_StrictModel):
     detail: Annotated[str, StringConstraints(max_length=256)] | None = None
 
 
+class ResourceDemandEvidence(_StrictModel):
+    """The evidence terms used for one selected rank's memory fit."""
+
+    weights_bytes: int | None = Field(default=None, ge=0)
+    runtime_overhead_bytes: int | None = Field(default=None, ge=0)
+    context_bytes: int | None = Field(default=None, ge=0)
+    concurrency_bytes: int | None = Field(default=None, ge=0)
+    batch_bytes: int | None = Field(default=None, ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+    evidence_state: Literal["declared", "measured", "fresh", "stale", "unknown"]
+    evidence_digest: Digest | None = None
+
+
+class EffectiveParallelism(_StrictModel):
+    """Derived from topology; never an editable settings field."""
+
+    world_size: int = Field(ge=1, le=31)
+    tensor: int = Field(ge=1, le=31)
+    pipeline: int = Field(ge=1, le=31)
+    data: int = Field(ge=1, le=31)
+    backend: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+
+    @model_validator(mode="after")
+    def product_matches_world_size(self) -> EffectiveParallelism:
+        if self.world_size != self.tensor * self.pipeline * self.data:
+            raise ValueError("topology parallelism product must equal world_size")
+        return self
+
+
+class EffectiveSettingsSelection(_StrictModel):
+    """Canonical effective settings bound into the Run/Switch plan digest."""
+
+    kind: Literal["generation", "embedding", "job"]
+    context_tokens: int | None = Field(default=None, ge=1)
+    concurrency: int | None = Field(default=None, ge=1)
+    max_batch_tokens: int | None = Field(default=None, ge=1)
+    parallelism: EffectiveParallelism
+    knobs: dict[str, object] = Field(default_factory=dict, max_length=64)
+    change_effects: dict[str, Literal["none", "restart", "reprepare", "rebuild", "reinstall"]] = Field(max_length=64)
+    identity_sha256: Digest
+
+
 class SparkFitNode(_StrictModel):
     node_id: NodeId
     rank: int = Field(ge=0, le=31)
@@ -163,6 +205,7 @@ class SparkFitNode(_StrictModel):
     memory_required_bytes: int | None = Field(default=None, ge=0)
     memory_available_bytes: int | None = Field(default=None, ge=0)
     memory_free_after_bytes: int | None = None
+    resource_demand: ResourceDemandEvidence | None = None
     blockers: list[RunSwitchReason] = Field(default_factory=list, max_length=32)
     warnings: list[RunSwitchReason] = Field(default_factory=list, max_length=32)
 
@@ -211,6 +254,7 @@ class BuildCompatibilityEvidence(_StrictModel):
 class RuntimeImageStorageImpact(_StrictModel):
     build_id: UuidId | None
     image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    oci_layout_sha256: Digest | None = None
     image_bytes: int | None = Field(default=None, ge=0)
     required_bytes: int | None = Field(default=None, ge=0)
     reused_bytes: int = Field(default=0, ge=0)
@@ -281,6 +325,8 @@ class RunSwitchPhase(_StrictModel):
     subphase: Literal[
         "container-build",
         "model-download",
+        "runtime-image",
+        "runtime-plan",
         "target-copy",
         "runtime-install",
     ] | None = None
@@ -311,6 +357,7 @@ class RunSwitchPlan(_StrictModel):
     freshness: list[FreshnessEvidence] = Field(max_length=128)
     fit_current: SparkFit
     fit_after_stop: SparkFit | None
+    effective_settings: EffectiveSettingsSelection | None = None
     # ``fit`` is the current admission view retained as a compact client
     # affordance; the two named views above make stop-before-prepare decisions
     # explicit for reviewers and profile callers.
@@ -352,6 +399,8 @@ class RunSwitchProgress(_StrictModel):
     subphase: Literal[
         "container-build",
         "model-download",
+        "runtime-image",
+        "runtime-plan",
         "target-copy",
         "runtime-install",
     ] | None = None

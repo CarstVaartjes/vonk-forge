@@ -65,68 +65,77 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     assert "chain_pem" not in serialized
 
 
-def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
+def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None:
     schema = json.loads(OPENAPI.read_text())
     components = schema["components"]["schemas"]
+    operations = _operations(schema)
     library_model = components["LibraryModel"]
     assert set(library_model["properties"]) == {
         "model",
+        "model_document",
         "model_capabilities",
-        "model_version",
         "page_local",
         "recipes",
     }
     assert library_model["properties"]["model"] == {
-        "$ref": "#/components/schemas/ModelVersionIdentity"
+        "$ref": "#/components/schemas/LibraryModelIdentity"
+    }
+    assert library_model["properties"]["model_document"] == {
+        "$ref": "#/components/schemas/ModelDefinition"
     }
     assert library_model["properties"]["model_capabilities"] == {
         "$ref": "#/components/schemas/LibraryCapabilityInventory"
     }
-    assert library_model["properties"]["model_version"]["anyOf"] == [
-        {"$ref": "#/components/schemas/LibraryModelVersionFacts"},
-        {"type": "null"},
-    ]
     assert components["LibraryRecipeSummary"]["properties"][
         "recipe_capabilities"
     ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
+    assert components["LibraryRecipeSummary"]["properties"]["recipe_document"] == {
+        "$ref": "#/components/schemas/RecipeDefinition"
+    }
+    assert components["LibraryRecipeIdentity"]["properties"]["recipe_revision_id"] == {
+        "pattern": (
+            "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            "[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        ),
+        "title": "Recipe Revision Id",
+        "type": "string",
+    }
     assert components["LibraryRecipeDetail"]["properties"][
         "model_capabilities"
     ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
     assert components["LibraryRecipeDetail"]["properties"][
         "recipe_capabilities"
     ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
-    assert components["LibraryModelVersionFacts"]["properties"]["schema_version"][
-        "const"
-    ] == 2
+    assert components["LibraryRecipeDetail"]["properties"]["definition"] == {
+        "$ref": "#/components/schemas/RecipeDefinition"
+    }
     assert components["LibraryCapabilityInventory"]["properties"]["schema_version"][
         "const"
     ] == 2
-    model_identity = components["ModelVersionIdentity"]
-    assert model_identity["properties"]["kind"]["const"] == "model-version"
+    model_identity = components["LibraryModelIdentity"]
+    assert model_identity["properties"]["kind"]["const"] == "model"
     assert set(model_identity["required"]) == {
-        "kind",
         "publisher",
         "slug",
         "content_sha256",
     }
-    assert (
-        components["RecipeRevisionSummary"]["properties"]["schema_version"]["const"]
-        == 1
-    )
-    # CatalogEntityRevisionResponse is the genuine current entity-v1 wire
-    # contract; the nested model capability authority is schema 2.
-    assert (
-        components["CatalogEntityRevisionResponse"]["properties"]["schema_version"][
-            "const"
-        ]
-        == 1
-    )
+    recipe_identity = components["LibraryRecipeIdentity"]
+    assert "source_kind" not in recipe_identity["properties"]
+    assert "content_sha256" in recipe_identity["properties"]
+    assert "selected_revision" not in components["LibraryRecipeSummary"]["properties"]
+    assert library_model["properties"]["recipes"]["minItems"] == 0
+    assert library_model["properties"]["recipes"]["maxItems"] == 512
+    recipe_list = components["LibraryRecipeList"]
+    assert "minItems" not in recipe_list["properties"]["recipes"]
+    assert recipe_list["properties"]["recipes"]["maxItems"] == 512
+    assert operations["listLibraryRecipes"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/LibraryRecipeList"}
 
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    assert 'model: components["schemas"]["ModelVersionIdentity"];' in typescript
-    assert "schema_version: 1;" in typescript
-    python_client = (PYTHON_CLIENT / "models/recipe_revision_summary.py").read_text()
-    assert "schema_version: Union[Literal[1], Unset] = 1" in python_client
+    assert "ModelVersionIdentity" not in components
+    assert "LibraryModelVersionFacts" not in components
+    assert "RecipeRevisionSummary" not in components
+    assert "LibraryRecipeDefinition" not in components
 
 
 def test_repair_manifest_is_v2_while_upgrade_package_remains_v1() -> None:
@@ -388,54 +397,95 @@ def test_generated_library_contract_has_one_recipe_topology_and_strict_identitie
 ):
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
     detail = schema["LibraryRecipeDetail"]
-    visual = schema["VisualRecipeDocument"]
 
-    assert set(detail["properties"]) >= {"topology", "placement", "visual_recipe"}
+    assert set(detail["properties"]) >= {
+        "topology",
+        "placement",
+        "definition",
+        "model_documents",
+    }
+    assert "model" not in detail["properties"]
+    assert "model_document" not in detail["properties"]
+    model_documents = detail["properties"]["model_documents"]
+    assert model_documents["type"] == "array"
+    assert model_documents["items"] == {
+        "$ref": "#/components/schemas/LibraryRecipeModel"
+    }
+    assert model_documents["maxItems"] == 32
+    assert set(schema["LibraryRecipeModel"]["properties"]) == {
+        "selection",
+        "model_document",
+    }
+    assert schema["LibraryRecipeModel"]["properties"]["selection"] == {
+        "$ref": "#/components/schemas/RecipeModelSelection"
+    }
+    assert schema["LibraryRecipeModel"]["properties"]["model_document"] == {
+        "$ref": "#/components/schemas/ModelDefinition"
+    }
     assert "profiles" not in detail["properties"]
-    assert set(visual["properties"]) >= {"model", "execution", "runtime", "interfaces"}
-    assert "workload" not in visual["properties"]
-    assert "adapter" not in schema["VisualRuntime"]["properties"]
+    assert detail["properties"]["definition"] == {
+        "$ref": "#/components/schemas/RecipeDefinition"
+    }
+    definition = schema["RecipeDefinition"]
+    assert set(definition["properties"]) >= {
+        "identity",
+        "metadata",
+        "models",
+        "execution",
+        "runtime",
+        "interfaces",
+        "settings",
+        "validation",
+        "release",
+        "provenance",
+    }
+    assert "VisualRecipeDocument" not in schema
 
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    mapping_contract = typescript.split("MappingPreviewInput: {", 1)[1].split("};", 1)[
-        0
-    ]
-    detail_contract = typescript.split("LibraryRecipeDetail: {", 1)[1].split("};", 1)[0]
-    runtime_contract = typescript.split("VisualRuntime: {", 1)[1].split("};", 1)[0]
-    assert "topology_name" not in mapping_contract
-    assert "topology:" in detail_contract and "profiles:" not in detail_contract
-    assert "distribution:" in runtime_contract and "adapter:" not in runtime_contract
+
+def test_generated_openapi_removes_retired_catalog_recipe_operations() -> None:
+    document = json.loads(OPENAPI.read_text())
+    paths = document["paths"]
+    operations = {
+        operation.get("operationId")
+        for methods in paths.values()
+        if isinstance(methods, dict)
+        for operation in methods.values()
+        if isinstance(operation, dict)
+    }
+    assert "/api/v1/catalog/public-recipes" not in paths
+    assert "/api/v1/catalog/imports/public" not in paths
+    assert "/api/v1/catalog/imports/recipe-library" not in paths
+    assert "listPublicRecipes" not in operations
+    assert "previewPublicRecipeImport" not in operations
+    assert "importPublicRecipe" not in operations
 
 
-def test_generated_library_artifact_preserves_exact_huggingface_subset_identity() -> (
-    None
-):
+def test_generated_library_schema_uses_shared_authority_documents() -> None:
+    components = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    forbidden = (
+        "PublicRecipe",
+        "LibraryRecipeDefinition",
+        "ModelVersion",
+        "Qualification",
+        "Readiness",
+        "RuntimeDistribution",
+    )
+    assert not any(
+        any(token in name for token in forbidden) for name in components
+    )
+    assert components["LibraryModel"]["properties"]["model_document"] == {
+        "$ref": "#/components/schemas/ModelDefinition"
+    }
+    assert components["LibraryRecipeSummary"]["properties"]["recipe_document"] == {
+        "$ref": "#/components/schemas/RecipeDefinition"
+    }
+
+
+def test_generated_library_contract_drops_legacy_visual_artifact_identity() -> None:
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    include_paths = schema["VisualArtifact"]["properties"]["include_paths"]
-    assert include_paths["maxItems"] == 256
-    assert include_paths["items"]["maxLength"] == 512
-    assert "include_paths" in schema["VisualArtifact"]["required"]
+    assert "VisualArtifact" not in schema
+    assert "LibraryModelArtifact" not in schema
 
-    from cluster_profiles.generated_control.models.visual_artifact import (
-        VisualArtifact,
-    )
-
-    subset = ["config.json", "weights/model-00001.safetensors"]
-    artifact = VisualArtifact(
-        download_bytes=1,
-        id="model",
-        include_paths=subset,
-        installed_bytes=1,
-        kind="huggingface.snapshot",
-        repository="publisher/model",
-        revision="a" * 40,
-        roles=["entrypoint"],
-    )
-    assert artifact.to_dict()["include_paths"] == subset
-
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    contract = typescript.split("VisualArtifact: {", 1)[1].split("};", 1)[0]
-    assert "include_paths: string[];" in contract
 
 
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:
