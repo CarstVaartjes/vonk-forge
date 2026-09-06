@@ -53,9 +53,10 @@ Run one node at a time until the synthetic lifecycle is green, then widen to
 the intended topology:
 
 1. Confirm Fleet inventory is fresh and the planned resource reservation fits.
-2. Select an immutable canonical Model and Recipe revision synchronized into Library.
+2. Select an immutable canonical Model and Recipe revision from the Controller's
+   automatically refreshed global repository metadata.
 3. Preview installation and placement on the selected Spark set.
-4. Install and require exact build, transfer, import, and runtime evidence.
+4. Install and require exact build, transfer, image-load, and runtime evidence.
 5. Start the recipe and require route publication only after the workload is
    ready.
 6. Send a bounded inference request through the normal private Tailscale URL.
@@ -67,12 +68,14 @@ For multi-node recipes, also prove rank failure withdraws the route, recovery
 does not silently change the accepted recipe or artifact digest, and a full NAS
 or Spark restart restores only persisted authority—not stale readiness.
 
-Before physical work, run `scripts/qualify-recipe --level structural` against
-the exact recipe-library checkout and retain its package and compiler evidence.
-Container qualification remains unavailable until the production
-`CompiledExecutionPlan` materializer is linked; do not treat the current
-`environment-limited` result as a pass. Execute the physical lifecycle through
-Controller Run/Switch, or the equivalent normal CLI command:
+Dev/CI must run `scripts/qualify-recipe --level structural` against the exact
+canonical repository checkout and retain its package and compiler evidence.
+The local checkout is a dev/CI input only; production execution follows the
+global repository metadata that the Controller refreshes at startup and every
+15 minutes through its Caddy proxy. Container qualification remains unavailable
+until the production `CompiledExecutionPlan` materializer is linked; do not
+treat the current `environment-limited` result as a pass. Execute the physical
+lifecycle through Controller Run/Switch, or the equivalent normal CLI command:
 
 ```sh
 cat > run-request.json <<'JSON'
@@ -99,9 +102,13 @@ vonkctl models run --input-file run-request.json --json
 ```
 
 The resulting Controller operation is the authority for preparation, install,
-start, route, stop, and cleanup progress. Once the route is active, run the
-Recipe's declared HTTP serving checks with `scripts/qualify-recipe --serving-url
-URL --evidence-ledger PATH` and retain the bounded serving result separately.
+start, route, stop, and cleanup progress. Applying a changed revision eagerly
+fetches its immutable recipe package and source bundle into read-only execution
+cache; retain their exact revision and digests with the operation receipt. Model
+and image bytes remain persistent local caches. Once the route is active, run
+the Recipe's declared HTTP serving checks with `scripts/qualify-recipe
+--serving-url URL --evidence-ledger PATH` and retain the bounded serving result
+separately.
 
 ## Upgrade and recovery
 

@@ -64,7 +64,9 @@ only after both ranks are healthy.
 ## Qualify the exact inputs
 
 Structural qualification works without GPU hardware and proves the canonical
-ModelDefinition, RecipeDefinition, package, compiler, and adapter contract:
+ModelDefinition, RecipeDefinition, package, compiler, and adapter contract.
+Run it in the dev/CI workspace against the exact repository checkout; that
+checkout is qualification input and is not production recipe authority:
 
 ```bash
 cd '<REPOSITORY_CHECKOUT>'
@@ -75,8 +77,10 @@ scripts/qualify-recipe \
   --level structural > '<EVIDENCE_DIRECTORY>/mia-structural.json'
 ```
 
-Use Controller Run/Switch for the physical lifecycle after the canonical recipe
-package has synchronized into Library:
+The production Controller follows the global recipe repository's `main` branch
+through its Caddy proxy and refreshes metadata at startup and every 15 minutes.
+Select the immutable Model and Recipe revision from that refreshed metadata,
+then use Controller Run/Switch for the physical lifecycle:
 
 ```bash
 vonkctl models run --input-file '<RUN_REQUEST_JSON>' --json
@@ -84,13 +88,15 @@ vonkctl models run --input-file '<RUN_REQUEST_JSON>' --json
 
 The Controller resolves the digest-pinned image, verified model bytes, exact
 recipe revision, and selected Spark group; previews the operation; then runs
-the build, distribution, install, start, and route phases. Retain its operation
-ID, plan digest, per-rank receipts, route state, recovery transitions, and
-cleanup result. Run the Recipe's declared serving checks against the active
-endpoint with `scripts/qualify-recipe --serving-url URL --evidence-ledger PATH`
-and retain that bounded result with the structural output. Do not record a
-container-qualified gate until the production materializer exists and the
-container path completes successfully.
+the build, distribution, install, start, and route phases. Applying a changed
+revision eagerly fetches its exact immutable recipe package and source bundle
+into the read-only execution cache. Retain the recipe revision, package and
+source-bundle digests, operation ID, plan digest, per-rank receipts, route
+state, recovery transitions, and cleanup result. Run the Recipe's declared
+serving checks against the active endpoint with `scripts/qualify-recipe
+--serving-url URL --evidence-ledger PATH` and retain that bounded result with
+the structural output. Do not record a container-qualified gate until the
+production materializer exists and the container path completes successfully.
 
 ## Failure, recovery, and cleanup
 
