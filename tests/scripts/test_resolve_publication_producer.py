@@ -60,13 +60,15 @@ def test_ancestor_reuse_checks_actual_producer_filters(
         ("completed", "success", 0),
     ],
 )
+@pytest.mark.parametrize("event", ["push", "workflow_dispatch"])
 def test_exact_producer_cannot_fall_back_while_running_or_failed(
-    monkeypatch, status, conclusion, expected
+    monkeypatch, status, conclusion, expected, event
 ):
     resolver = module()
 
     def command(*args):
         assert "head_sha=" in args[-1]
+        assert "event=push" not in args[-1]
         return json.dumps(
             {
                 "workflow_runs": [
@@ -75,7 +77,7 @@ def test_exact_producer_cannot_fall_back_while_running_or_failed(
                         "run_number": 2,
                         "head_sha": SOURCE,
                         "head_branch": "main",
-                        "event": "push",
+                        "event": event,
                         "status": status,
                         "conclusion": conclusion,
                     }
@@ -87,6 +89,22 @@ def test_exact_producer_cannot_fall_back_while_running_or_failed(
     actual, evidence = resolver.resolve("dev-images.yml", SOURCE, "owner/repo")
     assert actual == expected
     assert evidence == ((5, 2, SOURCE) if expected == 0 else None)
+
+
+def test_latest_exact_dispatch_supersedes_older_push(monkeypatch):
+    resolver = module()
+    runs = [
+        {"id": 5, "run_number": 541, "event": "push"},
+        {"id": 9, "run_number": 542, "event": "workflow_dispatch"},
+        {"id": 10, "run_number": 543, "event": "pull_request"},
+    ]
+    for item in runs:
+        item.update(head_sha=SOURCE, head_branch="main", status="completed", conclusion="success")
+    def command(*args):
+        assert "head_sha=" in args[-1]  # No ancestor lookup may replace this exact producer.
+        return json.dumps({"workflow_runs": runs})
+    monkeypatch.setattr(resolver, "run", command)
+    assert resolver.resolve("agent-release.yml", SOURCE, "owner/repo") == (0, (9, 542, SOURCE))
 
 
 def test_renaming_an_input_out_of_its_area_is_a_change(tmp_path, monkeypatch):

@@ -17,6 +17,7 @@ import sys
 import yaml
 
 WORKFLOWS = {"agent-release.yml", "dev-images.yml", "installer-setups.yml"}
+PRODUCER_EVENTS = {"push", "workflow_dispatch"}
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 
 
@@ -60,14 +61,14 @@ def resolve(
         raise ValueError("invalid producer identity")
     endpoint = f"repos/{repo}/actions/workflows/{workflow}/runs"
     exact = json.loads(
-        run("gh", "api", f"{endpoint}?event=push&head_sha={source}&per_page=100")
+        run("gh", "api", f"{endpoint}?head_sha={source}&per_page=100")
     )["workflow_runs"]
     exact = [
         r
         for r in exact
         if r.get("head_sha") == source
         and r.get("head_branch") == "main"
-        and r.get("event") == "push"
+        and r.get("event") in PRODUCER_EVENTS
     ]
     exact.sort(key=lambda r: (r.get("created_at", ""), r.get("id", 0)), reverse=True)
     if exact:
@@ -83,7 +84,7 @@ def resolve(
             "api",
             "--paginate",
             "--slurp",
-            f"{endpoint}?event=push&status=completed&branch=main&per_page=100",
+            f"{endpoint}?status=completed&branch=main&per_page=100",
         )
     )
     candidates = [r for page in pages for r in page["workflow_runs"]]
@@ -97,7 +98,8 @@ def resolve(
         if (
             not SHA.fullmatch(base)
             or candidate.get("head_branch") != "main"
-            or candidate.get("event") != "push"
+            or candidate.get("event") not in PRODUCER_EVENTS
+            or candidate.get("status") != "completed"
             or candidate.get("conclusion") != "success"
         ):
             continue
