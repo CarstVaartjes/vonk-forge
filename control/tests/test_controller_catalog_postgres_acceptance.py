@@ -32,6 +32,8 @@ pytest.importorskip("vonk_control.recipe_packages")
 from vonk_control.catalog_api import install_catalog_routes
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
+from vonk_control.library_api import install_library_routes
+from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
@@ -170,8 +172,15 @@ def _app(
         actor_dependency=Depends(actor),
         audits=MemoryAuditStore(),
         service=catalog,
-        recipe_library=reader,
         managed_sync=sync,
+    )
+    install_library_routes(
+        app,
+        actor_dependency=Depends(actor),
+        projection=LibraryProjection(
+            catalog._sessions,
+            cursors=codec.cursor_codec(),
+        ),
     )
     token = codec.issue(
         Actor("acceptance", "administrator"),
@@ -344,23 +353,13 @@ def test_fresh_orbstack_postgres_imports_exact_published_corpus_and_survives_off
     api = _app(
         TokenCodec(b"a" * 32), catalog=catalog, reader=reader, sync=sync
     )
-    response = api.get("/api/v1/catalog/public-recipes")
+    response = api.get("/api/v1/library")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["repository"] == REPOSITORY
-    assert payload["commit"] == snapshot.commit
-    assert len(payload["recipes"]) == expected_recipe_count
-    assert {
-        (item["publisher"], item["slug"], item["content_sha256"])
-        for item in payload["recipes"]
-    } == {
-        (
-            row["document"]["identity"]["publisher"],
-            row["document"]["identity"]["slug"],
-            row["content_sha256"],
-        )
-        for row in recipes
-    }
+    assert len(payload["models"]) == expected_model_count
+    recipe_overview = api.get("/api/v1/library/recipes")
+    assert recipe_overview.status_code == 200
+    assert len(recipe_overview.json()["recipes"]) == expected_recipe_count
     api.close()
     reader.close()
 

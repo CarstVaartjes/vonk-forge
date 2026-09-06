@@ -740,7 +740,6 @@ def create_app(
         actor_dependency=authenticated_actor,
         audits=audits,
         service=catalog,
-        recipe_library=recipe_library,
         managed_sync=managed_catalog_sync,
     )
     install_library_routes(

@@ -75,6 +75,14 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     assert sum(bool(model["recipes"]) for model in payload["models"]) == 79
     assert sum(not model["recipes"] for model in payload["models"]) == 13
     assert any(model["recipes"] == [] for model in payload["models"])
+    assert {model["model"]["kind"] for model in payload["models"]} == {"model"}
+    assert all(
+        "source_kind" not in recipe
+        and "selected_revision" not in recipe
+        and "content_sha256" in recipe
+        for model in payload["models"]
+        for recipe in model["recipes"]
+    )
     library_model_schema = app.openapi()["components"]["schemas"]["LibraryModel"]
     assert "minItems" not in library_model_schema["properties"]["recipes"]
     recipe_response = client.get("/api/v1/library/recipes")
@@ -84,3 +92,11 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     detail = client.get(f"/api/v1/library/recipes/{recipe_id}")
     assert detail.status_code == 200
     assert detail.json()["recipe"]["recipe_id"] == recipe_id
+    detail_payload = detail.json()
+    assert detail_payload["definition"]["execution"]
+    assert detail_payload["definition"]["models"]
+    assert len(detail_payload["recipe"]["content_sha256"]) == 64
+    assert "source_kind" not in detail_payload["recipe"]
+    assert "selected_revision" not in detail_payload
+    assert "visual_recipe" not in detail_payload
+    assert "VisualRecipeDocument" not in app.openapi()["components"]["schemas"]

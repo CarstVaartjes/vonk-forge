@@ -81,7 +81,7 @@ def test_import_persists_canonical_model_recipe_and_package_identity(service: Ca
     client.close()
 
 
-def test_import_is_idempotent_and_list_reads_active_canonical_revision(service: CatalogService, tmp_path: Path) -> None:
+def test_import_is_idempotent_and_persists_active_canonical_revision(service: CatalogService, tmp_path: Path) -> None:
     client, item = _item(tmp_path)
     kwargs = {
         "library_commit": item.library_commit,
@@ -96,9 +96,14 @@ def test_import_is_idempotent_and_list_reads_active_canonical_revision(service: 
     first = service.import_recipe_library("test", **kwargs)
     second = service.import_recipe_library("test", **kwargs)
     assert second.id == first.id
-    summaries, cursor = service.list_recipes(limit=10)
-    assert cursor is None
-    assert [summary.recipe_id for summary in summaries] == [first.recipe_id]
+    with service._sessions() as session:
+        revisions = session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        ).all()
+    assert [revision.document_id for revision in revisions] == [first.recipe_id]
     client.close()
 
 
