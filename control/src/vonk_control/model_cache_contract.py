@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .operation_contract import AvailabilityOperationFailure, OperationMemberProgress
+
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 ARTIFACT_KEY_PATTERN = r"^[a-z][a-z0-9_.:-]{0,255}$"
 REVISION_PATTERN = r"^[0-9a-f]{40,64}$"
@@ -132,7 +134,7 @@ class CacheEntryResponse(StrictModel):
     expected_bytes: int = Field(ge=0)
     verified_bytes: int = Field(ge=0)
     unique_bytes: int = Field(ge=0)
-    artifacts: list[CacheArtifactResponse] = Field(max_length=128)
+    artifacts: list[CacheArtifactResponse] = Field(max_length=1024)
     protected: bool
     protected_reasons: list[str] = Field(max_length=32)
     update_available: bool
@@ -160,6 +162,16 @@ class ModelCacheOperationProgress(StrictModel):
     downloaded_bytes: int = Field(ge=0)
     expected_bytes: int | None = Field(default=None, ge=0)
     current_artifact_key: str | None = Field(default=None, pattern=ARTIFACT_KEY_PATTERN)
+    total_bytes_known: bool = True
+    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
+    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
+    members: list[OperationMemberProgress] = Field(default_factory=list, max_length=1024)
+
+    @model_validator(mode="after")
+    def total_known_matches_value(self) -> ModelCacheOperationProgress:
+        if self.total_bytes_known != (self.expected_bytes is not None):
+            raise ValueError("total_bytes_known must match expected_bytes")
+        return self
 
 
 class ModelCacheOperationResponse(StrictModel):
@@ -173,7 +185,7 @@ class ModelCacheOperationResponse(StrictModel):
     plan_digest: Digest | None
     progress: ModelCacheOperationProgress
     result: dict[str, object] | None = None
-    last_error: str | None = Field(default=None, max_length=512)
+    failure: AvailabilityOperationFailure | None = None
     created_at: str
     updated_at: str
     completed_at: str | None
@@ -239,6 +251,10 @@ class ModelCacheUpdateResponse(StrictModel):
     artifact_set_sha256: Digest
     model_version_sha256: Digest | None
     latest_model_version_sha256: Digest | None
+    model_update_from: dict[str, object] | None = None
+    model_update_to: dict[str, object] | None = None
+    model_update_ambiguous: bool = False
+    model_update_candidates: list[dict[str, object]] = Field(default_factory=list, max_length=16)
     recipe_revision_sha256: Digest | None
     latest_recipe_revision_sha256: Digest | None
     model_update_available: bool

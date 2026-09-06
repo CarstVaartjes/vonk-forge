@@ -1547,6 +1547,7 @@ def production_app() -> FastAPI:
         sessions,
         settings.model_cache_root,
         reserve_bytes=settings.model_cache_reserve_bytes,
+        max_parallel_downloads=settings.model_cache_parallel_downloads,
         clock=clock,
         huggingface_token_path=settings.huggingface_token_path,
     )
@@ -1958,6 +1959,7 @@ def production_app() -> FastAPI:
         automatic_sync_stop.set()
         if automatic_sync_task is not None:
             await automatic_sync_task
+        model_cache.close()
         recipe_library.close()
         agent_upgrades.close()
 
