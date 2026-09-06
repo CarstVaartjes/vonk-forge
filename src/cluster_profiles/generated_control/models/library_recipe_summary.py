@@ -41,6 +41,7 @@ class LibraryRecipeSummary:
             reasons (list['LibraryProjectionReason']):
             recipe_document (RecipeDefinition): The sole public recipe authoring contract.
             recipe_id (str):
+            recipe_revision_id (str):
             run_returned_count (int):
             run_total_count (int):
             runs (list['LibraryRunSummary']):
@@ -63,6 +64,7 @@ class LibraryRecipeSummary:
     reasons: list['LibraryProjectionReason']
     recipe_document: 'RecipeDefinition'
     recipe_id: str
+    recipe_revision_id: str
     run_returned_count: int
     run_total_count: int
     runs: list['LibraryRunSummary']
@@ -116,6 +118,8 @@ class LibraryRecipeSummary:
 
         recipe_id = self.recipe_id
 
+        recipe_revision_id = self.recipe_revision_id
+
         run_returned_count = self.run_returned_count
 
         run_total_count = self.run_total_count
@@ -155,6 +159,7 @@ class LibraryRecipeSummary:
             "reasons": reasons,
             "recipe_document": recipe_document,
             "recipe_id": recipe_id,
+            "recipe_revision_id": recipe_revision_id,
             "run_returned_count": run_returned_count,
             "run_total_count": run_total_count,
             "runs": runs,
@@ -220,6 +225,8 @@ class LibraryRecipeSummary:
 
         recipe_id = d.pop("recipe_id")
 
+        recipe_revision_id = d.pop("recipe_revision_id")
+
         run_returned_count = d.pop("run_returned_count")
 
         run_total_count = d.pop("run_total_count")
@@ -270,6 +277,7 @@ class LibraryRecipeSummary:
             reasons=reasons,
             recipe_document=recipe_document,
             recipe_id=recipe_id,
+            recipe_revision_id=recipe_revision_id,
             run_returned_count=run_returned_count,
             run_total_count=run_total_count,
             runs=runs,

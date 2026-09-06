@@ -14,9 +14,11 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_entities import CatalogEntityService
+from vonk_control.fleet_profile_contract import FleetProfileAssignmentInput
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_projection import LibraryProjection, LibraryProjectionError
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
+from vonk_control.run_switch_contract import RunSwitchPreviewRequest
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 ROOT = Path(
@@ -138,11 +140,13 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
         entities.resolve(revision.id, actor="test")
     recipe_ids: set[str] = set()
     recipe_ids_by_slug: dict[str, str] = {}
+    recipe_revision_ids: dict[str, str] = {}
     for row in index["recipes"]:
         revision = entities.create_draft(row["document"], actor="test")
         entities.resolve(revision.id, actor="test")
         recipe_ids.add(revision.document_id)
         recipe_ids_by_slug[row["document"]["identity"]["slug"]] = revision.document_id
+        recipe_revision_ids[row["content_sha256"]] = revision.id
 
     projection = LibraryProjection(
         sessions,
@@ -182,6 +186,45 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     assert {
         item.recipe_document.identity.slug for item in recipe_overview.recipes
     } == {recipe.identity.slug for recipe in expected_recipes.values()}
+    for item in recipe_overview.recipes:
+        assert item.recipe_revision_id == recipe_revision_ids[item.content_sha256]
+        assert item.recipe_revision_id not in {item.recipe_id, item.content_sha256}
+
+    first_recipe = recipe_overview.recipes[0]
+    profile_assignment = FleetProfileAssignmentInput.model_validate(
+        {
+            "recipe_revision_id": first_recipe.recipe_revision_id,
+            "topology_name": first_recipe.recipe_document.topology.name,
+            "desired_state": "installed",
+            "nodes": [
+                {
+                    "node_id": "spk_" + "0" * 32,
+                    "rank": 0,
+                    "role": first_recipe.recipe_document.topology.roles[0].name,
+                    "endpoint_owner": True,
+                }
+            ],
+        }
+    )
+    run_input = RunSwitchPreviewRequest.model_validate(
+        {
+            "model_version_sha256": "a" * 64,
+            "recipe_revision_id": first_recipe.recipe_revision_id,
+            "spark_group": {
+                "nodes": [
+                    {
+                        "node_id": "spk_" + "0" * 32,
+                        "rank": 0,
+                        "role": first_recipe.recipe_document.topology.roles[0].name,
+                        "endpoint_owner": True,
+                    }
+                ]
+            },
+            "alias": "canonical",
+        }
+    )
+    assert profile_assignment.recipe_revision_id == first_recipe.recipe_revision_id
+    assert run_input.recipe_revision_id == first_recipe.recipe_revision_id
 
     app = FastAPI()
     install_library_routes(
