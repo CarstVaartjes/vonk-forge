@@ -308,7 +308,10 @@ class DurableDistributionPhaseExecutor:
                 ],
             }
             child = Job(
-                id=str(uuid.uuid5(uuid.UUID(request_key), f"artifact-child:{phase.index}")),
+                # The request key provides replay identity. Job/operation IDs
+                # are persisted once and follow the shared helper UUIDv4
+                # contract when this transfer requests Docker image import.
+                id=str(uuid.uuid4()),
                 request_id=child_request,
                 kind="artifact-distribution",
                 state="queued",
@@ -346,7 +349,7 @@ class DurableDistributionPhaseExecutor:
                         "authority_revision": plan.plan_digest,
                         "plan_digest": plan.plan_digest,
                     },
-                    operation_id=str(uuid.uuid5(uuid.UUID(child.id), node_id)),
+                    operation_id=str(uuid.uuid4()),
                 )
             return child.id
 

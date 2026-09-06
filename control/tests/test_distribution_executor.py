@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DistributionObject
+from vonk_agent_protocol.host_helper import HostHelperOperation, HostOperationKind
 from vonk_control.auth import TokenCodec
 from vonk_control.distribution import (
     ControllerRuntimeImageVerifiedObjectSource,
@@ -127,6 +128,16 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         operation = next(iter(child.payload["assignments"].values()))
         assert operation["assignment_id"]
         stored = session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
+        # Exercise the actual privileged-action consumer contract with IDs
+        # emitted by the transfer producer, rather than hand-written UUIDs.
+        HostHelperOperation(
+            HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
+            {
+                "action": "image-import", "job_id": child.id,
+                "operation_id": stored.id, "attempt": 1,
+                "fence": str(uuid4()), "request_sha256": "a" * 64,
+            },
+        )
         # ArtifactDistributionRequest is a plan reference. The agent fetches
         # the registered assignment through its authenticated distribution API.
         assert stored.payload == {

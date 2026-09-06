@@ -545,7 +545,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         Ok(path) => path,
                         Err(_) => return failed("distributed OCI archive could not be retained"),
                     };
-                    if self
+                    if let Err(error) = self
                         .execute_host_runtime(
                             claim,
                             HostRuntimeAction::ImageImport,
@@ -557,9 +557,17 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             ),
                         )
                         .await
-                        .is_err()
                     {
-                        return failed("distributed OCI image could not be imported");
+                        // HostRuntimeError exposes only bounded, stable
+                        // categories, never helper stderr or credentials.
+                        return ExecutionResult {
+                            state: "failed",
+                            body: json!({
+                                "reason": format!(
+                                    "distributed OCI image could not be imported: {error}"
+                                ),
+                            }),
+                        };
                     }
                     ExecutionResult {
                         state: "succeeded",
