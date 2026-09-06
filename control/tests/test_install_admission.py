@@ -36,7 +36,8 @@ RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
 def _canonical_catalog_documents(
-    *, denied_jurisdictions: tuple[str, ...] = (), recipe_mode: str = "build"
+    *, denied_jurisdictions: tuple[str, ...] = (), recipe_mode: str = "build",
+    disk_estimates: tuple[int, int] = (30, 70),
 ) -> tuple[ModelDefinition, RecipeDefinition]:
     raw_model = json.loads(
         files("vonk_forge_contracts")
@@ -64,8 +65,8 @@ def _canonical_catalog_documents(
     }
     raw_recipe["topology"]["roles"][0]["resources"]["disk"].update(
         {
-            "image_bytes": 30,
-            "artifact_bytes": 70,
+            "image_bytes": disk_estimates[0],
+            "artifact_bytes": disk_estimates[1],
             "staging_bytes": 20,
             "cache_bytes": 0,
             "rollback_bytes": 0,
@@ -82,9 +83,11 @@ def _seed_canonical_catalog(
     *,
     denied_jurisdictions: tuple[str, ...] = (),
     recipe_mode: str = "build",
+    disk_estimates: tuple[int, int] = (30, 70),
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents(
-        denied_jurisdictions=denied_jurisdictions, recipe_mode=recipe_mode
+        denied_jurisdictions=denied_jurisdictions, recipe_mode=recipe_mode,
+        disk_estimates=disk_estimates,
     )
     model_digest = content_sha256(model)
     recipe_digest = content_sha256(recipe)
@@ -381,6 +384,7 @@ def setup(
     observed_age=0,
     denied_jurisdictions=(),
     recipe_mode="build",
+    disk_estimates=(30, 70),
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'install.sqlite'}")
@@ -417,6 +421,7 @@ def setup(
         now,
         denied_jurisdictions=tuple(denied_jurisdictions),
         recipe_mode=recipe_mode,
+        disk_estimates=disk_estimates,
     )
     mappings = ClusterMappingService(sessions)
     mapping_plan = mappings.preview(resolved.id, (node_id,), {}, "admin")
@@ -484,16 +489,9 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
     tmp_path, free: int, allowed: bool
 ) -> None:
     sessions, now, _node, mapping, _build, sizes = setup(
-        tmp_path, free=free, recipe_mode="image"
+        tmp_path, free=free, recipe_mode="image", disk_estimates=(1, 1)
     )
     with sessions.begin() as session:
-        revision = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
-        document = json.loads(json.dumps(revision.document))
-        document["topology"]["roles"][0]["resources"]["disk"].update(
-            image_bytes=1, artifact_bytes=1
-        )
-        revision.document = document
-        revision.content_digest = content_sha256(RecipeDefinition.model_validate(document))
         for artifact in session.scalars(select(NodeArtifact)):
             session.delete(artifact)
     plan = _service(

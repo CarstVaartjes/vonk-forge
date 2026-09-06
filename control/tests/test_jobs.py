@@ -275,10 +275,13 @@ def test_matching_fence_can_heartbeat_wait_and_fail(service) -> None:
     assert jobs.get(retry.job_id).state == "failed"
 
 
-def test_generic_worker_claim_skips_agent_owned_upgrade_jobs(service) -> None:
+@pytest.mark.parametrize("kind", [
+    "agent-upgrade", "artifact-distribution", "recipe.run-switch.v2", "recipe.stop.v2",
+])
+def test_generic_worker_claim_skips_coordinator_owned_jobs(service, kind) -> None:
     jobs, _ = service
     upgrade = jobs.enqueue(
-        "agent-upgrade",
+        kind,
         "operator",
         "abc",
         ["spk_1"],

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import CursorCodec
 from .logging import redact_text
-from .models import Job, JobAttempt
+from .models import AgentOperation, Job, JobAttempt
 
 _SENSITIVE = re.compile(r"(?i)(password|secret|token|private.?key|authorization)")
 _MAX_PAYLOAD = 65_536
@@ -387,7 +387,16 @@ class JobService:
                 select(Job)
                 .where(
                     Job.reconciliation_id.is_(None),
-                    Job.kind != "agent-upgrade",
+                    # Agent work and durable coordinators own these jobs.
+                    # A generic lease must never turn their queued state into
+                    # an "unsupported job kind" failure between worker turns.
+                    Job.kind.not_in((
+                        "agent-upgrade", "artifact-distribution",
+                        "recipe.run-switch.v2", "recipe.stop.v2",
+                    )),
+                    ~select(AgentOperation.id).where(
+                        AgentOperation.parent_job_id == Job.id
+                    ).exists(),
                     or_(
                         Job.state == "queued",
                         Job.id.in_(
