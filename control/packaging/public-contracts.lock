@@ -1,8 +1,8 @@
 source = "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
-# Frozen unpublished candidate used for current image evidence; do not resolve main.
-revision = "fcf601339bc726af5f1a41f5abe1e331ccf32af4"
-approved_revision = "2001c6502bfdc66141dd7224bfde5d77734e9959"
+# Resolved from recipes main immediately after v1.0.2 publication (PR #72).
+branch = "main"
+revision = "32b4c094ba0bf6376d419cb06357fe76b160d944"
 subdirectory = "contracts"
 package = "vonk-forge-public-contracts==0.1.0"
 wheel = "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
-sha256 = "6842382d12226e324543f2a0c15cb0b0fe445d7ad6a480a470dd14a75b53a8fe"
+sha256 = "694a60b6bfc2bd15ccd10aa77910d850cdfcd536374cae28792958266382e326"

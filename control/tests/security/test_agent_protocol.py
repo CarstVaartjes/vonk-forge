@@ -223,24 +223,22 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
         }
     ]
     assert contract_package["source"] == {
-        "path": "../inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
+        "git": "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#32b4c094ba0bf6376d419cb06357fe76b160d944"
     }
-    assert contract_package["wheels"] == [
-        {
-            "filename": "vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
-            "hash": f"sha256:{PUBLIC_CONTRACTS_WHEEL_HASH}",
-        }
-    ]
-    assert 'revision = "fcf601339bc726af5f1a41f5abe1e331ccf32af4"' in packaging_lock
-    assert 'approved_revision = "2001c6502bfdc66141dd7224bfde5d77734e9959"' in packaging_lock
+    assert "wheels" not in contract_package
+    assert 'branch = "main"' in packaging_lock
+    assert 'revision = "32b4c094ba0bf6376d419cb06357fe76b160d944"' in packaging_lock
     assert f'sha256 = "{PUBLIC_CONTRACTS_WHEEL_HASH}"' in packaging_lock
     assert "COPY control/pyproject.toml ./" in dockerfile
     assert "COPY control/src ./src" in dockerfile
     assert "COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/" in dockerfile
     assert "/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" in dockerfile
     assert "python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /agent-protocol" not in dockerfile
-    assert "COPY inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl /wheels/" in dockerfile
-    assert "/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl" in dockerfile
+    assert "git clone --filter=blob:none --no-checkout" in dockerfile
+    assert "git -C /public-contracts checkout --detach" in dockerfile
+    assert "python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels" in dockerfile
+    assert "/public-contracts/contracts" in dockerfile
+    assert "COPY inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl /wheels/" not in dockerfile
     dockerignore = set(dockerignore_path.read_text().splitlines())
     assert "*" in dockerignore
     lines = dockerignore_path.read_text().splitlines()
