@@ -39,6 +39,7 @@ class RuntimeImageStorageImpact:
             missing_image_distribution_bytes (Union[None, Unset, int]):
             missing_nas_bytes (Union[None, Unset, int]):
             missing_spark_bytes (Union[None, Unset, int]):
+            oci_layout_sha256 (Union[None, Unset, str]):
             reclaimable_bytes (Union[Unset, int]):  Default: 0.
             reclaimable_digests (Union[Unset, list[str]]):
             required_bytes (Union[None, Unset, int]):
@@ -55,6 +56,7 @@ class RuntimeImageStorageImpact:
     missing_image_distribution_bytes: Union[None, Unset, int] = UNSET
     missing_nas_bytes: Union[None, Unset, int] = UNSET
     missing_spark_bytes: Union[None, Unset, int] = UNSET
+    oci_layout_sha256: Union[None, Unset, str] = UNSET
     reclaimable_bytes: Union[Unset, int] = 0
     reclaimable_digests: Union[Unset, list[str]] = UNSET
     required_bytes: Union[None, Unset, int] = UNSET
@@ -102,6 +104,12 @@ class RuntimeImageStorageImpact:
         else:
             missing_spark_bytes = self.missing_spark_bytes
 
+        oci_layout_sha256: Union[None, Unset, str]
+        if isinstance(self.oci_layout_sha256, Unset):
+            oci_layout_sha256 = UNSET
+        else:
+            oci_layout_sha256 = self.oci_layout_sha256
+
         reclaimable_bytes = self.reclaimable_bytes
 
         reclaimable_digests: Union[Unset, list[str]] = UNSET
@@ -142,6 +150,8 @@ class RuntimeImageStorageImpact:
             field_dict["missing_nas_bytes"] = missing_nas_bytes
         if missing_spark_bytes is not UNSET:
             field_dict["missing_spark_bytes"] = missing_spark_bytes
+        if oci_layout_sha256 is not UNSET:
+            field_dict["oci_layout_sha256"] = oci_layout_sha256
         if reclaimable_bytes is not UNSET:
             field_dict["reclaimable_bytes"] = reclaimable_bytes
         if reclaimable_digests is not UNSET:
@@ -228,6 +238,16 @@ class RuntimeImageStorageImpact:
         missing_spark_bytes = _parse_missing_spark_bytes(d.pop("missing_spark_bytes", UNSET))
 
 
+        def _parse_oci_layout_sha256(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        oci_layout_sha256 = _parse_oci_layout_sha256(d.pop("oci_layout_sha256", UNSET))
+
+
         reclaimable_bytes = d.pop("reclaimable_bytes", UNSET)
 
         reclaimable_digests = cast(list[str], d.pop("reclaimable_digests", UNSET))
@@ -265,6 +285,7 @@ class RuntimeImageStorageImpact:
             missing_image_distribution_bytes=missing_image_distribution_bytes,
             missing_nas_bytes=missing_nas_bytes,
             missing_spark_bytes=missing_spark_bytes,
+            oci_layout_sha256=oci_layout_sha256,
             reclaimable_bytes=reclaimable_bytes,
             reclaimable_digests=reclaimable_digests,
             required_bytes=required_bytes,
