@@ -64,7 +64,13 @@ fn main() {
             image_ref.clone(),
         ]
     } else {
-        production_start_arguments()
+        start_request_arguments(
+            &archive_sha,
+            &registry_digest,
+            &platform_digest,
+            &image_ref,
+            production_start_arguments(),
+        )
     };
     let job_id = Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap();
     let operation_id = if action == HostRuntimeAction::ImageImport {
@@ -266,4 +272,45 @@ fn production_start_arguments() -> Vec<String> {
         ],
     );
     arguments
+}
+
+fn start_request_arguments(
+    archive_sha: &str,
+    registry_digest: &str,
+    platform_digest: &str,
+    image_ref: &str,
+    docker_arguments: Vec<String>,
+) -> Vec<String> {
+    let mut arguments = vec![
+        archive_sha.to_owned(),
+        registry_digest.to_owned(),
+        platform_digest.to_owned(),
+        image_ref.to_owned(),
+    ];
+    arguments.extend(docker_arguments);
+    arguments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::start_request_arguments;
+
+    #[test]
+    fn start_request_matches_host_runtime_wire_shape() {
+        let arguments = start_request_arguments(
+            &"a".repeat(64),
+            &format!("sha256:{}", "b".repeat(64)),
+            &format!("sha256:{}", "c".repeat(64)),
+            "localhost/vonk/compiled-runtime-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            vec!["run".to_owned(), "--network".to_owned(), "none".to_owned()],
+        );
+        assert_eq!(arguments.len(), 7);
+        assert_eq!(&arguments[..4], [
+            "a".repeat(64),
+            format!("sha256:{}", "b".repeat(64)),
+            format!("sha256:{}", "c".repeat(64)),
+            "localhost/vonk/compiled-runtime-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_owned(),
+        ]);
+        assert_eq!(&arguments[4..], ["run", "--network", "none"]);
+    }
 }
