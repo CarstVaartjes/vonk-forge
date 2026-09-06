@@ -24,11 +24,17 @@ def test_controller_image_pins_and_packages_the_reviewed_skopeo_transport() -> N
     assert "architecture" in dockerfile
     assert '"$TARGETARCH"' in dockerfile
     assert "expected_child=\"$SKOPEO_ARM64_DIGEST\"" in dockerfile
-    assert "COPY --from=skopeo /usr/bin/skopeo /usr/bin/skopeo" in dockerfile
+    assert "COPY --from=skopeo /usr/bin/skopeo /usr/local/lib/skopeo/skopeo.real" in dockerfile
+    assert "ARG TARGETARCH" in dockerfile
+    assert "amd64) skopeo_loader=ld-linux-x86-64.so.2" in dockerfile
+    assert "arm64) skopeo_loader=ld-linux-aarch64.so.1" in dockerfile
     assert "COPY --from=build /config /usr/local/lib/config" in dockerfile
     assert "COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo" in dockerfile
     assert "/usr/lib64/ld-linux-*.so*" in dockerfile
     assert "cp -aL \"$library\" /skopeo-runtime/lib/" in dockerfile
+    assert "--library-path /usr/local/lib/skopeo" in dockerfile
+    assert "skopeo.real" in dockerfile
+    assert "patchelf" not in dockerfile
     assert "ldconfig" not in dockerfile
     assert "COPY --from=skopeo /etc/containers /etc/containers" in dockerfile
     assert "COPY --from=skopeo /etc/pki /etc/pki" in dockerfile
