@@ -429,6 +429,31 @@ def test_upgrade_preview_accepts_current_package_echo_but_rejects_unsigned_custo
     assert len(upgrades.calls) == 1
 
 
+def test_upgrade_preview_response_is_canonical_and_closed() -> None:
+    upgrades = RepairPreviewUpgrades()
+    client, issued, *_ = _browser_client(agent_upgrades=upgrades)
+    client.cookies.set("vonk_session", issued.token)
+    client.cookies.set("vonk_csrf", issued.csrf)
+
+    response = client.post(
+        "/api/v1/agents/upgrades/preview",
+        headers={"x-csrf-token": issued.csrf},
+        json=repair_preview_document(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "authority_revision",
+        "node_ids",
+        "package",
+        "plan_digest",
+        "repair_manifest",
+        "strategy",
+    }
+    assert body["package"]["schema_version"] == 1
+
+
 def test_cookie_authentication_is_unavailable_without_browser_service() -> None:
     """A signed bearer token in a cookie must not restore legacy cookie auth."""
     client, headers, _jobs, _audits = _client("administrator")

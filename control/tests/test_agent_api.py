@@ -23,7 +23,14 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    HostHelperOperation,
+    HostOperationKind,
+    SignedHostHelperGrant,
+    SignedPackageHelperGrant,
+    SignedPackageObjectReceipt,
+    canonical_message,
+)
 from vonk_control.agent_api import (
     AgentApiServices,
     EnrollmentRateLimiter,
@@ -37,6 +44,7 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
+from vonk_control.host_helper_authority import HostHelperGrantIssuer
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
@@ -71,6 +79,10 @@ from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+from vonk_control.workload_helper_authority import (
+    WorkloadHelperGrantIssuer,
+    WorkloadObjectReceiptIssuer,
+)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 NODE_A = "spk_" + "a" * 32
@@ -743,6 +755,229 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
         ).status_code
         == 422
     )
+
+
+def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
+    agent_system,
+) -> None:
+    client, services, _, clock = agent_system
+    request_id = "00000000-0000-4000-8000-000000000005"
+    job_id = "00000000-0000-4000-8000-000000000002"
+    operation_id = "00000000-0000-4000-8000-000000000003"
+    fence = "00000000-0000-4000-8000-000000000004"
+
+    host_issuer = HostHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.generate(),
+        clock=clock,
+        request_id_factory=lambda: uuid.UUID(request_id),
+    )
+    package_issuer = WorkloadHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.generate(),
+        clock=clock,
+        request_id_factory=lambda: uuid.UUID(request_id),
+    )
+    receipt_issuer = WorkloadObjectReceiptIssuer(
+        ed25519.Ed25519PrivateKey.generate()
+    )
+
+    class RecordingHostAuthority:
+        def __init__(self) -> None:
+            self.grant_calls: list[dict[str, object]] = []
+            self.upgrade_calls: list[dict[str, object]] = []
+
+        def issue_grant(self, **kwargs: object) -> object:
+            self.grant_calls.append(kwargs)
+            operation = HostHelperOperation(
+                HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
+                {
+                    "action": kwargs["action"].value,
+                    "job_id": kwargs["job_id"],
+                    "operation_id": kwargs["operation_id"],
+                    "attempt": kwargs["attempt"],
+                    "fence": kwargs["fence"],
+                    "request_sha256": kwargs["request_sha256"],
+                },
+            )
+            return host_issuer.issue_grant(
+                node_id=kwargs["node_id"],
+                operation=operation,
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+        def issue_agent_upgrade_grant(self, **kwargs: object) -> object:
+            self.upgrade_calls.append(kwargs)
+            operation = HostHelperOperation(
+                HostOperationKind.INSTALL_VONK_DEB,
+                {
+                    "package_sha256": kwargs["package_sha256"],
+                    "package_signature": kwargs["package_signature"],
+                },
+            )
+            return host_issuer.issue_grant(
+                node_id=kwargs["node_id"],
+                operation=operation,
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+    class RecordingPackageAuthority:
+        def __init__(self) -> None:
+            self.grant_calls: list[dict[str, object]] = []
+            self.receipt_calls: list[dict[str, object]] = []
+
+        def issue_grant(self, **kwargs: object) -> object:
+            self.grant_calls.append(kwargs)
+            return package_issuer.issue_grant(
+                request_id=kwargs["request_id"],
+                node_id=kwargs["node_id"],
+                job_id=kwargs["job_id"],
+                operation_id=kwargs["operation_id"],
+                attempt=kwargs["attempt"],
+                fence=kwargs["fence"],
+                release_digest=kwargs["release_digest"],
+                generation=kwargs["generation"],
+                operation=kwargs["operation"],
+                request_digest=kwargs["request_digest"],
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+        def issue_receipts(self, **kwargs: object) -> tuple[object, ...]:
+            self.receipt_calls.append(kwargs)
+            return tuple(
+                receipt_issuer.issue_object_receipt(
+                    object_digest=item["object_digest"], size=item["size"]
+                )
+                for item in kwargs["objects"]
+            )
+
+    host = RecordingHostAuthority()
+    package = RecordingPackageAuthority()
+    object.__setattr__(services, "host_runtime_authority", host)
+    object.__setattr__(services, "workload_helper_authority", package)
+    headers = agent_headers(NODE_A, "serial-a")
+    common = {
+        "node_id": NODE_A,
+        "job_id": job_id,
+        "operation_id": operation_id,
+        "attempt": 1,
+        "fence": fence,
+        "expires_in_seconds": 30,
+    }
+
+    host_response = client.post(
+        "/agent/v1/host-runtime/grant",
+        headers=headers,
+        json=common | {"action": "start", "request_sha256": "a" * 64},
+    )
+    assert host_response.status_code == 200
+    assert isinstance(SignedHostHelperGrant.parse(host_response.json()["grant"]), SignedHostHelperGrant)
+    assert host.grant_calls[0]["job_id"] == job_id
+
+    upgrade_response = client.post(
+        "/agent/v1/agent-upgrade/grant",
+        headers=headers,
+        json=common
+        | {
+            "package_sha256": "b" * 64,
+            "package_signature": "c" * 128,
+        },
+    )
+    assert upgrade_response.status_code == 200
+    assert isinstance(
+        SignedHostHelperGrant.parse(upgrade_response.json()["grant"]),
+        SignedHostHelperGrant,
+    )
+
+    receipt_response = client.post(
+        "/agent/v1/package-helper/receipts",
+        headers=headers,
+        json={key: value for key, value in common.items() if key != "expires_in_seconds"}
+        | {
+            "release_digest": "d" * 64,
+            "objects": [{"object_digest": "e" * 64, "size": 17}],
+        },
+    )
+    assert receipt_response.status_code == 200
+    assert isinstance(
+        SignedPackageObjectReceipt.parse(receipt_response.json()["receipts"][0]),
+        SignedPackageObjectReceipt,
+    )
+    assert package.receipt_calls[0]["objects"] == [
+        {"object_digest": "e" * 64, "size": 17}
+    ]
+
+    grant_body = common | {
+        "request_id": request_id,
+        "release_digest": "d" * 64,
+        "generation": "gen-future-stack-001",
+        "operation": "health",
+        "request_digest": "f" * 64,
+    }
+    grant_response = client.post(
+        "/agent/v1/package-helper/grant", headers=headers, json=grant_body
+    )
+    assert grant_response.status_code == 200
+    assert isinstance(
+        SignedPackageHelperGrant.parse(grant_response.json()["grant"]),
+        SignedPackageHelperGrant,
+    )
+    assert package.grant_calls[0]["generation"] == "gen-future-stack-001"
+
+    assert (
+        client.post(
+            "/agent/v1/package-helper/grant",
+            headers=headers,
+            json=grant_body | {"generation": 7},
+        ).status_code
+        == 422
+    )
+    assert len(package.grant_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/package-helper/receipts",
+            headers=headers,
+            json={
+                key: value
+                for key, value in common.items()
+                if key != "expires_in_seconds"
+            }
+            | {
+                "release_digest": "d" * 64,
+                "objects": [
+                    {"object_digest": "e" * 64, "size": 17, "extra": True}
+                ],
+            },
+        ).status_code
+        == 422
+    )
+    assert len(package.receipt_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/host-runtime/grant",
+            headers=headers,
+            json=common
+            | {
+                "job_id": "00000000-0000-5000-8000-000000000002",
+                "action": "start",
+                "request_sha256": "a" * 64,
+            },
+        ).status_code
+        == 422
+    )
+    assert len(host.grant_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/agent-upgrade/grant",
+            headers=headers,
+            json=common
+            | {
+                "attempt": "1",
+                "package_sha256": "b" * 64,
+                "package_signature": "c" * 128,
+            },
+        ).status_code
+        == 422
+    )
+    assert len(host.upgrade_calls) == 1
 
 
 def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
