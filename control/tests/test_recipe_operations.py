@@ -13,8 +13,13 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
+from alembic import command
+from alembic.autogenerate import compare_metadata
+from alembic.config import Config
+from alembic.migration import MigrationContext
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from sqlalchemy import create_engine, event, select, text
+from sqlalchemy import create_engine, event, inspect, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     RecipeRunObservationReceiptClaims,
@@ -315,13 +320,15 @@ def setup_services(
     recipe_transform: Callable[[dict[str, object]], None] | None = None,
     model_transform: Callable[[dict[str, object]], None] | None = None,
     engine=None,
+    create_schema: bool = True,
     route_withdrawer=None,
 ):
     engine = engine or create_engine(
         f"sqlite:///{tmp_path / 'operations.sqlite'}",
         connect_args={"check_same_thread": False},
     )
-    Base.metadata.create_all(engine)
+    if create_schema:
+        Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     node_ids = tuple("spk_" + f"{index + 1:032x}" for index in range(nodes))
     with sessions.begin() as session:
@@ -729,6 +736,126 @@ def test_canonical_recipe_revision_drives_install_and_schema2_payload(
         payload = compiled[nodes[0]]
         assert payload["schema_version"] == 2
         assert payload["identity"]["recipe_revision_sha256"] == revision.content_digest
+
+
+def test_fresh_alembic_head_postgres_runs_canonical_recipe_lifecycle(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Prove migrations alone support the canonical operational graph."""
+
+    control_root = Path(__file__).resolve().parents[1]
+    config = Config(control_root / "alembic.ini")
+    config.set_main_option("script_location", str(control_root / "migrations"))
+    config.set_main_option(
+        "sqlalchemy.url",
+        postgres_engine.url.render_as_string(hide_password=False),
+    )
+    command.upgrade(config, "head")
+
+    with postgres_engine.connect() as connection:
+        metadata_differences = compare_metadata(
+            MigrationContext.configure(connection), Base.metadata
+        )
+    assert [
+        difference
+        for difference in metadata_differences
+        if difference[0] in {"add_fk", "remove_fk"}
+    ] == []
+
+    expected_foreign_keys = {
+        ("cluster_mappings", ("recipe_revision_id",)): (
+            "catalog_document_revisions",
+            ("id",),
+        ),
+        ("recipe_builds", ("recipe_revision_id",)): (
+            "catalog_document_revisions",
+            ("id",),
+        ),
+        ("recipe_installations", ("recipe_revision_id",)): (
+            "catalog_document_revisions",
+            ("id",),
+        ),
+        ("runtime_image_receipts", ("recipe_revision_id",)): (
+            "catalog_document_revisions",
+            ("id",),
+        ),
+        ("runtime_image_authorizations", ("recipe_revision_id",)): (
+            "catalog_document_revisions",
+            ("id",),
+        ),
+        ("recipe_installations", ("mapping_id",)): ("cluster_mappings", ("id",)),
+        ("recipe_installations", ("recipe_build_id",)): ("recipe_builds", ("id",)),
+        ("installation_nodes", ("installation_id",)): (
+            "recipe_installations",
+            ("id",),
+        ),
+        ("recipe_runs", ("installation_id",)): ("recipe_installations", ("id",)),
+        ("recipe_runs", ("mapping_id",)): ("cluster_mappings", ("id",)),
+        ("run_nodes", ("run_id",)): ("recipe_runs", ("id",)),
+        ("artifact_jobs", ("run_id",)): ("recipe_runs", ("id",)),
+    }
+    inspector = inspect(postgres_engine)
+    assert "local_recipe_revisions" not in inspector.get_table_names()
+    for (table, columns), (
+        target_table,
+        target_columns,
+    ) in expected_foreign_keys.items():
+        matching = [
+            foreign_key
+            for foreign_key in inspector.get_foreign_keys(table)
+            if tuple(foreign_key["constrained_columns"]) == columns
+        ]
+        assert len(matching) == 1
+        assert matching[0]["referred_table"] == target_table
+        assert tuple(matching[0]["referred_columns"]) == target_columns
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path,
+        engine=postgres_engine,
+        create_schema=False,
+    )
+    installation = installed_recipe(
+        service,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id="fresh-alembic-canonical-install",
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="fresh-alembic-canonical-run",
+    )
+
+    with sessions() as session:
+        installation_row = session.get(RecipeInstallation, installation.owner_id)
+        run_row = session.get(RecipeRun, run.owner_id)
+        revisions = tuple(
+            session.scalars(
+                select(CatalogDocumentRevision).order_by(CatalogDocumentRevision.kind)
+            )
+        )
+        assert installation_row is not None
+        assert run_row is not None
+        assert [revision.kind for revision in revisions] == ["model", "recipe"]
+        assert installation_row.state == "installed"
+        assert run_row.state == "running"
+        assert run_row.installation_id == installation_row.id
+        assert run_row.mapping_id == installation_row.mapping_id == mapping_id
+        canonical_revision = session.get(
+            CatalogDocumentRevision, installation_row.recipe_revision_id
+        )
+        assert canonical_revision is not None
+        assert canonical_revision.kind == "recipe"
+        assert canonical_revision.state == "active"
+
+    with pytest.raises(IntegrityError), sessions.begin() as session:
+        installation_row = session.get(RecipeInstallation, installation.owner_id)
+        assert installation_row is not None
+        installation_row.recipe_revision_id = "missing-canonical-revision"
+        session.flush()
 
 
 def started_recipe(
