@@ -193,10 +193,26 @@ class FleetProfileAssignmentPreview(_StrictModel):
     ] = Field(max_length=7)
     reasons: list[FleetProfileReason] = Field(max_length=32)
 
+    @model_validator(mode="after")
+    def validate_nodes(self) -> FleetProfileAssignmentPreview:
+        if len(self.node_ids) != len(set(self.node_ids)):
+            raise ValueError("assignment preview node IDs must be unique")
+        return self
+
 
 class FleetProfileScopePreview(_StrictModel):
     node_ids: list[NodeId] = Field(max_length=32)
     idle_node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> FleetProfileScopePreview:
+        if len(self.node_ids) != len(set(self.node_ids)):
+            raise ValueError("preview scope node IDs must be unique")
+        if len(self.idle_node_ids) != len(set(self.idle_node_ids)):
+            raise ValueError("preview idle node IDs must be unique")
+        if not set(self.idle_node_ids) <= set(self.node_ids):
+            raise ValueError("preview idle node IDs must be inside the profile scope")
+        return self
 
 
 class FleetProfilePlanStep(_StrictModel):
@@ -216,6 +232,12 @@ class FleetProfilePlanStep(_StrictModel):
     recipe_revision_id: UuidId | None = None
     node_ids: list[NodeId] = Field(default_factory=list, max_length=32)
     label: Annotated[str, StringConstraints(min_length=1, max_length=240)]
+
+    @model_validator(mode="after")
+    def validate_nodes(self) -> FleetProfilePlanStep:
+        if len(self.node_ids) != len(set(self.node_ids)):
+            raise ValueError("plan step node IDs must be unique")
+        return self
 
 
 class FleetProfilePlanSummary(_StrictModel):
