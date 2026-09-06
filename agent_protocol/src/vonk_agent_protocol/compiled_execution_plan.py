@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ipaddress
 import re
-import uuid
 from typing import Annotated, Any, Literal
 
 from pydantic import (
@@ -190,7 +189,7 @@ class CompiledArtifact(_Strict):
     path: str
     sha256: Digest
     size_bytes: int = Field(ge=0, le=16 * 1024**4)
-    roles: list[str] = Field(min_length=1, max_length=32)
+    roles: list[str] = Field(min_length=1)
     mount: CompiledArtifactMount
     model: CompiledModelIdentity
     distribution_object: CompiledDistributionObject
@@ -250,11 +249,6 @@ class CompiledRuntimeImage(_Strict):
             raise ValueError("published image receipt is invalid")
         if self.source == "controller-build" and (not self.build_id or self.registry_manifest_digest is not None):
             raise ValueError("Controller image receipt is invalid")
-        if self.build_id is not None:
-            try:
-                uuid.UUID(self.build_id)
-            except ValueError as error:
-                raise ValueError("runtime build id is invalid") from error
         expected = f"localhost/vonk/compiled-runtime-{self.oci_layout_sha256}@{self.platform_manifest_digest}"
         if self.local_image_reference != expected:
             raise ValueError("runtime image reference is not bound")
