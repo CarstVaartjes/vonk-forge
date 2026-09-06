@@ -29,7 +29,11 @@ from .models import (
     RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
-from .run_switch_contract import RunSwitchPhase, RunSwitchPlan
+from .run_switch_contract import (
+    ArtifactVerificationResult,
+    RunSwitchPhase,
+    RunSwitchPlan,
+)
 from .run_switch_operations import PhaseExecution
 
 
@@ -80,24 +84,19 @@ class DurableDistributionPhaseExecutor:
             targets = tuple(phase.node_ids)
             cached = self._cached_targets(plan, targets)
             if len(cached) == len(targets):
-                return PhaseExecution(result={
-                    "skipped": True,
-                    "verified": True,
-                    "verified_digests": list(plan.storage.artifact_digests),
-                    "verified_build_id": self._runtime_identity(plan, progress)[3],
-                    "verified_image_digest": (
-                        plan.preparation.runtime_image.image_digest
-                        if plan.preparation is not None
-                        else plan.image_digest
-                    ),
-                    "verified_oci_layout_sha256": (
-                        plan.preparation.runtime_image.oci_layout_sha256
-                        if plan.preparation is not None
-                        else plan.build.oci_layout_sha256
-                    ),
-                    "cached_nodes": list(cached),
-                    "cached_target_totals": {node_id: self._target_bytes(plan, node_id) for node_id in cached},
-                })
+                return PhaseExecution(
+                    result=self._verification_result(
+                        plan,
+                        progress,
+                        skipped=True,
+                        cached_nodes=cached,
+                        cached_target_totals={
+                            node_id: self._target_bytes(plan, node_id)
+                            for node_id in cached
+                        },
+                        verified_registry_manifest_digest=plan.image_digest,
+                    )
+                )
             return PhaseExecution(result=self._verify_evidence(plan, progress, targets, cached))
         targets = tuple(phase.node_ids)
         cached = self._cached_targets(plan, targets)
@@ -256,10 +255,12 @@ class DurableDistributionPhaseExecutor:
                     # otherwise a successful import appears pending with zero
                     # bytes even though its result body is complete.
                     "completed_bytes": (
-                        self._int(raw.get("bytes"))
-                        or self._int(raw.get("completed_bytes"))
-                        if member_state != "succeeded"
-                        else terminal_downloaded
+                        (
+                            self._int(raw.get("bytes"))
+                            or self._int(raw.get("completed_bytes"))
+                            if member_state != "succeeded"
+                            else terminal_downloaded
+                        )
                         or 0
                     ),
                     "total_bytes": self._int(raw.get("total_bytes")) or expected_total,
@@ -308,6 +309,44 @@ class DurableDistributionPhaseExecutor:
             child.updated_at = self._clock()
             session.commit()
             return _ChildView(state=state, result=payload)
+
+    @staticmethod
+    def _verification_result(
+        plan: RunSwitchPlan,
+        progress: Mapping[str, object],
+        *,
+        skipped: bool = False,
+        cached_nodes: Sequence[str] = (),
+        cached_target_totals: Mapping[str, int] | None = None,
+        verified_image_digest: str | None = None,
+        verified_registry_manifest_digest: str | None = None,
+        verified_oci_layout_sha256: str | None = None,
+        evidence: Sequence[Mapping[str, object]] = (),
+    ) -> dict[str, object]:
+        resolved_image_digest, resolved_layout_digest, _image_bytes, build_id = (
+            DurableDistributionPhaseExecutor._runtime_identity(plan, progress)
+        )
+        result = ArtifactVerificationResult(
+            skipped=skipped,
+            verified=True,
+            verified_digests=list(plan.storage.artifact_digests),
+            verified_build_id=build_id,
+            verified_image_digest=(
+                verified_image_digest
+                if verified_image_digest is not None
+                else resolved_image_digest
+            ),
+            verified_registry_manifest_digest=verified_registry_manifest_digest,
+            verified_oci_layout_sha256=(
+                verified_oci_layout_sha256
+                if verified_oci_layout_sha256 is not None
+                else resolved_layout_digest
+            ),
+            cached_nodes=list(cached_nodes),
+            cached_target_totals=dict(cached_target_totals or {}),
+            evidence=[dict(item) for item in evidence],
+        )
+        return result.model_dump(mode="json")
 
     def _ensure_child(
         self,
@@ -806,16 +845,15 @@ class DurableDistributionPhaseExecutor:
                 raise RuntimeError(f"target {node_id} image import evidence is missing")
             if receipt.get("verified_oci_layout_sha256") != expected_layout:
                 raise RuntimeError(f"target {node_id} OCI archive evidence is not exact")
-        return {
-            "verified": True,
-            "verified_digests": sorted(expected_digests),
-            "verified_build_id": self._runtime_identity(plan, progress)[3],
-            "verified_image_digest": expected_image,
-            "verified_registry_manifest_digest": expected_registry,
-            "verified_oci_layout_sha256": expected_layout,
-            "cached_nodes": sorted(cached_nodes),
-            "evidence": [dict(receipts[node_id]) for node_id in sorted(receipts)],
-        }
+        return self._verification_result(
+            plan,
+            progress,
+            cached_nodes=sorted(cached_nodes),
+            verified_image_digest=expected_image,
+            verified_registry_manifest_digest=expected_registry,
+            verified_oci_layout_sha256=expected_layout,
+            evidence=[dict(receipts[node_id]) for node_id in sorted(receipts)],
+        )
 
     @staticmethod
     def _member_state(value: str) -> str:

@@ -170,6 +170,7 @@ class RecordingArtifactExecutor:
                 result={
                     "verified": True,
                     "verified_digests": digests,
+                    "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": image_digest,
                     "verified_oci_layout_sha256": archive_sha256,
                 }
@@ -379,6 +380,7 @@ class ColdStartPhaseExecutor:
                 result={
                     "verified": True,
                     "verified_digests": list(plan.storage.artifact_digests),
+                    "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
                 }
@@ -800,6 +802,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     result={
                         "verified": True,
                         "verified_digests": list(plan.storage.artifact_digests),
+                        "verified_build_id": getattr(plan, "recipe_build_id", None),
                         "verified_image_digest": plan.image_digest,
                         "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
                     }

@@ -122,6 +122,9 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     build_progress = {"phase_results": [{"build_id": str(uuid4()), "image_digest": "sha256:" + "e" * 64, "oci_layout_sha256": "c" * 64, "image_bytes": 11}]}
     first = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress=build_progress)
     assert first.operation_id is not None
+    pending = executor.get(first.operation_id)
+    assert pending.result["progress"]["members"][0]["completed_bytes"] == 0
+    assert isinstance(pending.result["progress"]["members"][0]["completed_bytes"], int)
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
         assert child is not None
@@ -233,12 +236,29 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
     )
     plan = SimpleNamespace(
         preparation=SimpleNamespace(
-            model=SimpleNamespace(artifact_set_sha256=artifact_digest),
+            model=SimpleNamespace(
+                artifact_set_sha256=artifact_digest,
+                artifact_set_bytes=7,
+                targets=[SimpleNamespace(
+                    node_id=node_id,
+                    state="ready",
+                    verified_sha256=artifact_digest,
+                    verified_at=datetime.now(UTC),
+                    imported_image_digest=None,
+                )],
+            ),
             runtime_image=SimpleNamespace(
                 build_id=build_id,
                 image_digest=image_digest,
                 oci_layout_sha256=layout_digest,
                 image_bytes=11,
+                targets=[SimpleNamespace(
+                    node_id=node_id,
+                    state="ready",
+                    verified_sha256=layout_digest,
+                    verified_at=datetime.now(UTC),
+                    imported_image_digest=image_digest,
+                )],
             ),
         ),
         storage=SimpleNamespace(artifact_digests=[artifact_digest]),
@@ -299,6 +319,23 @@ def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
             SimpleNamespace(kind="verify"),
             {**result, "verified_build_id": str(uuid4())},
         )
+
+    cached = DurableDistributionPhaseExecutor(
+        None,
+        None,
+        None,
+        clock=lambda: datetime.now(UTC),
+    ).execute(
+        plan,
+        SimpleNamespace(kind="verify", node_ids=[node_id], index=0),
+        item_index=0,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress={},
+    )
+    assert cached.result["skipped"] is True
+    assert cached.result["verified_build_id"] == build_id
+    _validate_artifact_execution(plan, SimpleNamespace(kind="verify"), cached.result)
 
 
 def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> None:  # noqa: F811
