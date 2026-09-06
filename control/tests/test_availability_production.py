@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import UTC, datetime
 from importlib.resources import files
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -186,4 +187,66 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
         assert receipt is not None
         assert receipt.recipe_revision_id == "recipe-revision"
         assert receipt.state == "verified"
+    production.close()
+
+
+def test_source_build_without_builder_queues_provisional_parent(tmp_path, monkeypatch) -> None:
+    recipe = RecipeDefinition.model_validate(
+        json.loads(files("vonk_forge_contracts").joinpath("examples", "recipe-source-build.json").read_text())
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'saturated.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        session.add(CatalogDocumentRevision(
+            id="saturated-revision", document_id="saturated-document", kind="recipe",
+            publisher=recipe.identity.publisher, slug=recipe.identity.slug,
+            revision_number=1, schema_version=2, state="active",
+            document=recipe.model_dump(mode="json"), content_digest=content_sha256(recipe),
+            artifact_key="c" * 64, execution_key="a" * 64, projected={},
+            created_by="test", created_at=now,
+        ))
+
+    class Builds:
+        def resolve(self, _revision_id: str):
+            return SimpleNamespace(
+                cached=False, input_intent_sha256="a" * 64,
+                build_input_sha256=None, build_id=None,
+            )
+
+        def plan(self, *_args, **_kwargs):
+            raise AssertionError("builder planning must remain dispatch-time")
+
+    monkeypatch.setattr(
+        availability_production,
+        "resolve_recipe_entities",
+        lambda _session, _document: {},
+    )
+    monkeypatch.setattr(
+        availability_production,
+        "_compile_consistent_runtime",
+        lambda *_args, **_kwargs: {
+            "input_intent_sha256": "a" * 64,
+            "interface": "vonk.runtime.v1",
+            "architecture": "linux/arm64",
+            "image": "sha256:" + "d" * 64,
+        },
+    )
+
+    class Settings:
+        agent_artifact_root = tmp_path / "artifacts"
+
+    production = build_recipe_image_availability(
+        sessions, settings=Settings(), managed_catalog_sync=None,
+        recipe_builds=Builds(), recipe_operations=object(), clock=lambda: now,
+    )
+    queued = production.service.start(
+        "saturated-revision", actor="operator", request_id="s" * 36,
+    )
+    assert queued.state == "queued"
+    assert queued.build_input_sha256 is None
+    with sessions() as session:
+        row = session.get(CatalogDocumentRevision, "saturated-revision")
+        assert row is not None
     production.close()
