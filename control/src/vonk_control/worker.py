@@ -262,7 +262,7 @@ def assemble_production_worker(
     agent_artifact_root: Path | None = None,
     recipe_image_artifact_root: Path | None = None,
     recipe_image_parallel_preparations: int = 4,
-    recipe_build_parallel_preparations: int = 4,
+    recipe_build_parallel_preparations: int = 2,
     compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
