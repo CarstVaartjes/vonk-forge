@@ -13,6 +13,7 @@ import re
 from collections.abc import Mapping, Sequence
 from math import isfinite
 from pathlib import Path
+
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.resolver import (
     ContractResolutionError,
@@ -250,7 +251,7 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
     if len(recipe.runtime.arguments) > _MAX_RUNTIME_ARGUMENTS:
         raise HarnessCompileError("recipe has too many runtime arguments")
     for argument in recipe.runtime.arguments:
-        name = argument.name[2:] if argument.name.startswith("--") else argument.name
+        name = argument.name.removeprefix("--")
         if _SAFE_ARG_NAME.fullmatch(name) is None:
             raise HarnessCompileError(f"recipe argument name is invalid: {argument.name}")
         # Preserve engine option spelling exactly; argv is not shell text.
