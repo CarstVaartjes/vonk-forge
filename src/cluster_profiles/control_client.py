@@ -117,6 +117,7 @@ class ControlHTTPError(ControlClientError):
         *,
         code: str | None = None,
         recovery: tuple[str, ...] = (),
+        retryable: bool = False,
         retry_time: str | None = None,
         preserved: str | None = None,
         required_bytes: int | None = None,
@@ -128,6 +129,7 @@ class ControlHTTPError(ControlClientError):
         self.status_code = status_code
         self.code = code or f"http.{status_code}"
         self.recovery = recovery
+        self.retryable = retryable
         self.retry_time = retry_time
         self.preserved = preserved
         self.required_bytes = required_bytes
@@ -229,6 +231,9 @@ def _structured_http_error_fields(problem: object) -> dict[str, object]:
     else:
         recovery = ()
     retry_time = problem.get("retry_time", problem.get("retry_at"))
+    retry_after_seconds = problem.get("retry_after_seconds")
+    retry_after_seconds = retry_after_seconds if type(retry_after_seconds) is int and retry_after_seconds >= 0 else None
+    retryable = problem.get("retryable") is True
     preserved = problem.get("preserved")
     numeric_fields = {
         key: problem.get(key) if type(problem.get(key)) is int and problem.get(key) >= 0 else None
@@ -239,6 +244,8 @@ def _structured_http_error_fields(problem: object) -> dict[str, object]:
         "code": code if isinstance(code, str) and code else None,
         "recovery": recovery,
         "retry_time": retry_time if isinstance(retry_time, str) else None,
+        "retry_after_seconds": retry_after_seconds,
+        "retryable": retryable,
         "preserved": preserved if isinstance(preserved, str) else None,
         **numeric_fields,
         "log_excerpt": log_excerpt if isinstance(log_excerpt, str) else None,
@@ -460,12 +467,19 @@ class ControlClient:
         log_excerpt = getattr(parsed, "log_excerpt", None)
         if not isinstance(log_excerpt, str):
             log_excerpt = None
+        retryable = getattr(parsed, "retryable", False) is True
+        retry_after = _bounded_retry_after(headers.get("retry-after"))
+        if retry_after is None:
+            parsed_retry_after = getattr(parsed, "retry_after_seconds", None)
+            if type(parsed_retry_after) is int and parsed_retry_after >= 0:
+                retry_after = parsed_retry_after
         raise error_type(
             status_code,
             detail,
-            _bounded_retry_after(headers.get("retry-after")),
+            retry_after,
             code=code,
             recovery=recovery,
+            retryable=retryable,
             retry_time=retry_time,
             preserved=preserved,
             **numeric_fields,
@@ -585,10 +599,14 @@ class ControlClient:
             detail = problem.get("detail") if isinstance(problem, dict) else None
             error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
             fields = _structured_http_error_fields(problem)
+            retry_after = _bounded_retry_after(response_headers.get("retry-after"))
+            body_retry_after = fields.pop("retry_after_seconds", None)
+            if retry_after is None and type(body_retry_after) is int:
+                retry_after = body_retry_after
             raise error_type(
                 status,
                 detail if isinstance(detail, str) else "control API request failed",
-                _bounded_retry_after(response_headers.get("retry-after")),
+                retry_after,
                 **fields,
                 sensitive_values=(self._token,),
             )
@@ -752,10 +770,14 @@ class ControlClient:
                 detail = problem.get("detail") if isinstance(problem, dict) else None
                 error_type = _STATUS_ERRORS.get(error.code, ControlHTTPError)
                 fields = _structured_http_error_fields(problem)
+                retry_after = _bounded_retry_after(error.headers.get("retry-after"))
+                body_retry_after = fields.pop("retry_after_seconds", None)
+                if retry_after is None and type(body_retry_after) is int:
+                    retry_after = body_retry_after
                 raise error_type(
                     error.code,
                     detail if isinstance(detail, str) else "control API request failed",
-                    _bounded_retry_after(error.headers.get("retry-after")),
+                    retry_after,
                     **fields,
                     sensitive_values=(self._token,),
                 ) from None
