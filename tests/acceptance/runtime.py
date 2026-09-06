@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 MAXIMUM_HTTPS_BODY_BYTES = 2 * 1024 * 1024
+OPTIONAL_SECRET_FILES = {"hf-token"}
 
 
 class AcceptanceError(RuntimeError):
@@ -225,9 +226,9 @@ def assert_bundle_contract(bundle: Path) -> None:
         else:
             _require_mode(path, 0o600)
         content = path.read_bytes().strip()
-        if not content:
+        if not content and relative.as_posix() not in OPTIONAL_SECRET_FILES:
             raise AcceptanceError(f"bundle file {relative} is empty")
-        if not runtime_config and (
+        if content and not runtime_config and (
             content in compose_raw or content in environment_raw
         ):
             raise AcceptanceError(
