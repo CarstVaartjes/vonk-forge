@@ -105,9 +105,11 @@ def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None
     assert "source_kind" not in recipe_identity["properties"]
     assert "content_sha256" in recipe_identity["properties"]
     assert "selected_revision" not in components["LibraryRecipeSummary"]["properties"]
-    assert "minItems" not in library_model["properties"]["recipes"]
+    assert library_model["properties"]["recipes"]["minItems"] == 0
+    assert library_model["properties"]["recipes"]["maxItems"] == 512
     recipe_list = components["LibraryRecipeList"]
     assert "minItems" not in recipe_list["properties"]["recipes"]
+    assert recipe_list["properties"]["recipes"]["maxItems"] == 512
     assert operations["listLibraryRecipes"]["responses"]["200"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/LibraryRecipeList"}

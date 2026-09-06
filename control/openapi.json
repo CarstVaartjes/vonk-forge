@@ -4961,7 +4961,8 @@
             "items": {
               "$ref": "#/components/schemas/LibraryRecipeSummary"
             },
-            "maxItems": 100,
+            "maxItems": 512,
+            "minItems": 0,
             "title": "Recipes",
             "type": "array"
           }
@@ -5882,7 +5883,7 @@
             "items": {
               "$ref": "#/components/schemas/LibraryRecipeSummary"
             },
-            "maxItems": 100,
+            "maxItems": 512,
             "title": "Recipes",
             "type": "array"
           },
@@ -6126,7 +6127,7 @@
             "items": {
               "$ref": "#/components/schemas/LibraryModel"
             },
-            "maxItems": 100,
+            "maxItems": 512,
             "title": "Models",
             "type": "array"
           },
@@ -6152,7 +6153,7 @@
             "items": {
               "$ref": "#/components/schemas/LibraryRecipeSummary"
             },
-            "maxItems": 100,
+            "maxItems": 512,
             "title": "Unlinked Recipes",
             "type": "array"
           }
@@ -6347,12 +6348,10 @@
             "items": {
               "$ref": "#/components/schemas/ManagedCatalogSyncProblem"
             },
-            "maxItems": 256,
             "title": "Problems",
             "type": "array"
           },
           "processed_count": {
-            "maximum": 256.0,
             "minimum": 0.0,
             "title": "Processed Count",
             "type": "integer"
@@ -6383,7 +6382,6 @@
             "items": {
               "$ref": "#/components/schemas/ManagedCatalogStaleRecipe"
             },
-            "maxItems": 256,
             "title": "Stale Recipes",
             "type": "array"
           },
@@ -6403,7 +6401,6 @@
             "type": "string"
           },
           "total_count": {
-            "maximum": 256.0,
             "minimum": 0.0,
             "title": "Total Count",
             "type": "integer"
@@ -6435,7 +6432,6 @@
             "items": {
               "$ref": "#/components/schemas/ManagedCatalogWithdrawnRecipe"
             },
-            "maxItems": 256,
             "title": "Withdrawn Recipes",
             "type": "array"
           }
@@ -18886,7 +18882,7 @@
             "required": false,
             "schema": {
               "default": 100,
-              "maximum": 100,
+              "maximum": 512,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
@@ -19329,7 +19325,7 @@
             "required": false,
             "schema": {
               "default": 100,
-              "maximum": 100,
+              "maximum": 512,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"

@@ -106,16 +106,16 @@ class ManagedCatalogSyncResponse(StrictModel):
     repository: str = Field(min_length=1, max_length=200)
     commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
     expected_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
-    total_count: int = Field(ge=0, le=256)
-    processed_count: int = Field(ge=0, le=256)
+    total_count: int = Field(ge=0)
+    processed_count: int = Field(ge=0)
     imported_count: int = Field(ge=0)
     updated_count: int = Field(ge=0)
     unchanged_count: int = Field(ge=0)
     skipped_count: int = Field(ge=0)
     withdrawn_count: int = Field(ge=0)
-    withdrawn_recipes: list[ManagedCatalogWithdrawnRecipe] = Field(max_length=256)
-    stale_recipes: list[ManagedCatalogStaleRecipe] = Field(max_length=256)
-    problems: list[ManagedCatalogSyncProblem] = Field(max_length=256)
+    withdrawn_recipes: list[ManagedCatalogWithdrawnRecipe]
+    stale_recipes: list[ManagedCatalogStaleRecipe]
+    problems: list[ManagedCatalogSyncProblem]
     created_at: str
     completed_at: str | None
 
