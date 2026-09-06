@@ -111,7 +111,7 @@ from .operation_api import (
 )
 from .recipe_api import install_recipe_operation_routes
 from .recipe_builds import RecipeBuildService
-from .recipe_library import RecipeLibraryError
+from .recipe_library_types import RecipeLibraryError
 from .recipe_operations import RecipeOperationService
 from .recipe_packages import RecipePackageClient
 from .run_switch_api import install_run_switch_routes

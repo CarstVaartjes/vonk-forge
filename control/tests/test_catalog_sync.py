@@ -15,7 +15,7 @@ from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from vonk_control.models import Base, CatalogDocumentRevision
-from vonk_control.recipe_library import (
+from vonk_control.recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
