@@ -203,7 +203,7 @@ test("removes an idle recipe from its complete Spark group in place", async () =
 
   await user.click(screen.getByRole("button", {name: "Remove Qwen Pair from 2 Sparks"}));
   const dialog = await screen.findByRole("dialog", {name: "Review Remove"});
-  expect(within(dialog).getByText("The local catalog recipe is retained.")).toBeVisible();
+  expect(within(dialog).getByText("The exact Recipe metadata remains available.")).toBeVisible();
   await user.click(within(dialog).getByRole("button", {name: "Remove selected installation"}));
 
   expect(applyLibraryUninstall).toHaveBeenCalledWith("install-pair", {plan_digest: "remove-plan", request_key: expect.any(String)}, expect.any(AbortSignal));

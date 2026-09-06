@@ -10,6 +10,8 @@ test("renders the canonical model and recipe workcell", async () => {
   expect(await screen.findByRole("heading", {name: "Library"})).toBeVisible();
   expect(screen.getByLabelText("Models")).toBeVisible();
   expect(screen.getByLabelText("Recipes matching selected Model")).toBeVisible();
+  expect(screen.queryByRole("button", {name: /sync|import|prepare catalog/i})).not.toBeInTheDocument();
+  expect(screen.queryByText(/sync|import|prepare catalog/i)).not.toBeInTheDocument();
 });
 test("keeps the exact model filter addressable", async () => {
   history.replaceState(null, "", "/library?view=models");
