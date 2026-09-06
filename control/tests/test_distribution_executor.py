@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -36,7 +37,11 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.operation_api import merge_operation_providers
-from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.run_switch_operations import (
+    RunSwitchOperationConflict,
+    RunSwitchOperationService,
+    _validate_artifact_execution,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
@@ -183,7 +188,8 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
     assert view.result["members"][0]["error"] == "digest mismatch"
 
 
-def test_model_download_is_a_durable_cache_child_with_exact_pins() -> None:
+@pytest.mark.parametrize("image_prepared", [True, False])
+def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared: bool) -> None:
     calls: list[dict[str, object]] = []
     cache_view = SimpleNamespace(
         id=str(uuid4()),
@@ -230,6 +236,16 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins() -> None:
         )),
         recipe_revision_id=str(uuid4()),
     )
+    if not image_prepared:
+        model = plan.preparation.model
+        plan.model_version_sha256 = model.model_version_sha256
+        plan.recipe_content_sha256 = model.recipe_revision_sha256
+        plan.storage = SimpleNamespace(
+            artifact_set_sha256=model.artifact_set_sha256,
+            artifact_set_bytes=model.artifact_set_bytes,
+            artifact_digests=["1" * 64, "2" * 64],
+        )
+        plan.preparation = None
     phase = SimpleNamespace(kind="transfer", subphase="model-download", index=2)
     executor = CompositeDistributionPhaseExecutor(
         None,
@@ -262,6 +278,19 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins() -> None:
     projected = executor.get(cache_view.id)
     assert projected.state == "queued"
     assert projected.progress["completed_bytes"] == 3
+    if image_prepared:
+        plan.storage = SimpleNamespace(missing_nas_bytes=12)
+    else:
+        plan.storage.missing_nas_bytes = 12
+    receipt = {
+        "artifact_set_sha256": "d" * 64, "coverage": "complete",
+        "downloaded_bytes": 12, "total_bytes": 12,
+    }
+    _validate_artifact_execution(plan, phase, receipt)
+    with pytest.raises(RunSwitchOperationConflict, match="artifact-set-mismatch"):
+        _validate_artifact_execution(plan, phase, {**receipt, "artifact_set_sha256": "f" * 64})
+    with pytest.raises(RunSwitchOperationConflict, match="byte-evidence-mismatch"):
+        _validate_artifact_execution(plan, phase, {**receipt, "downloaded_bytes": 11})
 
 
 def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(

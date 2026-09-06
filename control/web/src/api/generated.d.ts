@@ -1910,6 +1910,10 @@ export interface components {
         ArtifactStorageImpact: {
             /** Artifact Digests */
             artifact_digests?: string[];
+            /** Artifact Set Bytes */
+            artifact_set_bytes?: number | null;
+            /** Artifact Set Sha256 */
+            artifact_set_sha256?: string | null;
             /**
              * Copied Bytes
              * @default 0

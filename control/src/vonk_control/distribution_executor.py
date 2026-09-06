@@ -805,9 +805,24 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         if phase.kind != "transfer" or item_index != 0:
             raise RuntimeError("invalid model-download phase")
         preparation = plan.preparation
-        if preparation is None:
+        model = preparation.model if preparation is not None else None
+        artifact_set_sha256 = (
+            model.artifact_set_sha256 if model is not None else plan.storage.artifact_set_sha256
+        )
+        model_version_sha256 = (
+            model.model_version_sha256 if model is not None else plan.model_version_sha256
+        )
+        recipe_revision_sha256 = (
+            model.recipe_revision_sha256 if model is not None else plan.recipe_content_sha256
+        )
+        artifact_count = (
+            model.artifact_count if model is not None else len(plan.storage.artifact_digests)
+        )
+        artifact_set_bytes = (
+            model.artifact_set_bytes if model is not None else plan.storage.artifact_set_bytes
+        )
+        if not artifact_set_sha256 or not artifact_count or not artifact_set_bytes:
             raise RuntimeError("exact model preparation is unavailable")
-        model = preparation.model
         preview_method = getattr(self._model_cache, "download_preview", None)
         start_method = getattr(self._model_cache, "start_download", None)
         if not callable(preview_method) or not callable(start_method):
@@ -816,33 +831,33 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         # When a recipe revision ID is available, include the model pin as an
         # additional cross-check; never send both recipe ID and recipe digest.
         pins: dict[str, object] = {
-            "artifact_set_sha256": model.artifact_set_sha256,
+            "artifact_set_sha256": artifact_set_sha256,
         }
         if plan.recipe_revision_id is not None:
             pins.update(
-                model_version_sha256=model.model_version_sha256,
+                model_version_sha256=model_version_sha256,
                 recipe_revision_id=plan.recipe_revision_id,
             )
         preview = preview_method(**pins)
         if (
             not isinstance(preview, Mapping)
-            or preview.get("artifact_set_sha256") != model.artifact_set_sha256
+            or preview.get("artifact_set_sha256") != artifact_set_sha256
             or not isinstance(preview.get("plan_digest"), str)
             or len(preview["plan_digest"]) != 64
-            or preview.get("artifact_count") != model.artifact_count
-            or preview.get("expected_bytes") != model.artifact_set_bytes
+            or preview.get("artifact_count") != artifact_count
+            or preview.get("expected_bytes") != artifact_set_bytes
         ):
             raise RuntimeError("model-cache download preview is not exact")
         manifest_getter = getattr(self._model_cache, "manifest_for_artifact_set", None)
         manifest = (
-            manifest_getter(model.artifact_set_sha256)
+            manifest_getter(artifact_set_sha256)
             if callable(manifest_getter)
             else preview.get("_manifest")
         )
         if (
-            getattr(manifest, "digest", None) != model.artifact_set_sha256
+            getattr(manifest, "digest", None) != artifact_set_sha256
             or getattr(manifest, "recipe_revision_sha256", None)
-            != model.recipe_revision_sha256
+            != recipe_revision_sha256
         ):
             raise RuntimeError("model-cache manifest recipe identity is not exact")
         blockers = preview.get("blockers", [])
@@ -855,14 +870,14 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             return PhaseExecution(result={
                 "skipped": True,
                 "coverage": "complete",
-                "artifact_set_sha256": model.artifact_set_sha256,
+                "artifact_set_sha256": artifact_set_sha256,
                 # The set is already covered, so this phase transferred no
                 # bytes.  ``expected_bytes`` is the immutable set size while
                 # ``new_bytes`` is the operation's transfer envelope.
                 "downloaded_bytes": 0,
                 "total_bytes": 0,
             })
-        cache_request_key = str(uuid.uuid5(uuid.UUID(request_key), f"model-download:{phase.index}:{model.artifact_set_sha256}"))
+        cache_request_key = str(uuid.uuid5(uuid.UUID(request_key), f"model-download:{phase.index}:{artifact_set_sha256}"))
         view = start_method(
             actor=actor,
             request_key=cache_request_key,
