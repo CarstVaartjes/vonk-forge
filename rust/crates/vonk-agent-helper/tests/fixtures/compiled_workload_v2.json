@@ -6,7 +6,7 @@
     "harness_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "build_input_sha256": null,
     "model_artifact_set_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "model_artifact_bytes": 26
+    "model_artifact_bytes": 33
   },
   "runtime": {
     "executable": "/opt/vonk/bin/vllm",
