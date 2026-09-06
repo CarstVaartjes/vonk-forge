@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+from vonk_control.models import Base
+from vonk_control.models import RuntimeImageReceipt as RuntimeImageReceiptRow
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
     RuntimeImagePreparationError,
     SkopeoOCIImageTransport,
+    persist_runtime_image_receipt,
     prepare_runtime_image,
+    resolve_persisted_runtime_image_receipt,
 )
 from vonk_forge_contracts import RecipeDefinition
 
@@ -85,12 +93,19 @@ def test_prebuilt_pull_export_is_verified_and_receipt_is_immediately_readable(
 ) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     transport = TinyTransport()
+    written = []
+
+    def writer(value):
+        assert Path(value.archive_path).is_file()
+        assert storage.read_receipt(value.oci_archive_sha256) == value
+        written.append(value)
 
     receipt = prepare_runtime_image(
         _recipe("recipe-image.json"),
         runtime=_runtime(),
         storage=storage,
         transport=transport,
+        receipt_writer=writer,
     )
 
     assert receipt.source == "published"
@@ -107,6 +122,7 @@ def test_prebuilt_pull_export_is_verified_and_receipt_is_immediately_readable(
     assert Path(receipt.archive_path).read_bytes() == ARCHIVE
     assert storage.read_receipt(ARCHIVE_DIGEST) == receipt
     assert transport.calls[0][0].endswith(IMAGE_DIGEST)
+    assert written == [receipt]
 
     resolved = storage.find_verified(
         IMAGE_DIGEST,
@@ -121,8 +137,10 @@ def test_prebuilt_pull_export_is_verified_and_receipt_is_immediately_readable(
         runtime=_runtime(),
         storage=storage,
         transport=transport,
+        receipt_writer=writer,
     )
     assert reused == receipt
+    assert written == [receipt, receipt]
     assert len(transport.calls) == 1
 
 
@@ -172,6 +190,35 @@ def test_corrupt_prebuilt_receipt_fails_before_redownload(tmp_path: Path) -> Non
             transport=transport,
         )
     assert len(transport.calls) == 1
+
+
+def test_non_schema_two_receipt_is_rejected_by_all_read_paths(tmp_path: Path) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    receipt_path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
+    value = json.loads(receipt_path.read_text(encoding="utf-8"))
+    value["schema_version"] = 1
+    receipt_path.write_text(json.dumps(value), encoding="utf-8")
+    for read in (
+        lambda: storage.find_published(
+            IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        ),
+        lambda: storage.find_verified(
+            IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        ),
+        lambda: storage.read_receipt(receipt.oci_archive_sha256),
+    ):
+        with pytest.raises(RuntimeImagePreparationError, match="schema version"):
+            read()
 
 
 def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
@@ -277,6 +324,22 @@ def test_source_build_uses_same_normalized_receipt_and_preserves_provenance(
     assert storage.read_receipt(ARCHIVE_DIGEST) == receipt
     assert archive.read_bytes() == ARCHIVE
 
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        row = persist_runtime_image_receipt(
+            session,
+            recipe_revision_id="revision-source",
+            original_content_digest=receipt.distribution_content_sha256,
+            effective_execution_key="e" * 64,
+            receipt=receipt,
+            verified_at=datetime.now(UTC),
+        )
+        session.commit()
+        assert row.source == "controller-build"
+        assert row.build_id == "build-7"
+        assert row.registry_manifest_digest is None
+
 
 def test_transport_digest_mismatch_does_not_publish_archive_or_receipt(
     tmp_path: Path,
@@ -350,3 +413,138 @@ def test_runtime_distribution_document_is_not_a_recipe_authority(tmp_path: Path)
             storage=FilesystemRuntimeImageStorage(tmp_path / "objects"),
             transport=TinyTransport(),
         )
+
+
+def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    revision_id = "revision-direct"
+    original_digest = receipt.distribution_content_sha256
+    execution_key = "f" * 64
+    first_at = datetime.now(UTC)
+    with Session(engine) as session:
+        row = persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision_id,
+            original_content_digest=original_digest,
+            effective_execution_key=execution_key,
+            receipt=receipt,
+            verified_at=first_at,
+        )
+        session.commit()
+        assert row.source == "published"
+        assert row.registry_manifest_digest == IMAGE_DIGEST
+        assert row.platform_manifest_digest == PLATFORM_IMAGE_DIGEST
+        assert row.local_image_config_id == "sha256:" + "c" * 64
+        assert row.oci_archive_sha256 == ARCHIVE_DIGEST
+        assert row.image_bytes == len(ARCHIVE)
+    second_at = first_at + timedelta(seconds=1)
+    with Session(engine) as session:
+        same = persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision_id,
+            original_content_digest=original_digest,
+            effective_execution_key=execution_key,
+            receipt=receipt,
+            verified_at=second_at,
+        )
+        session.commit()
+        assert same.id == row.id
+        assert same.verified_at.replace(tzinfo=UTC) == second_at
+    conflicting = replace(
+        receipt,
+        platform_manifest_digest=BUILT_IMAGE_DIGEST,
+        image_digest=BUILT_IMAGE_DIGEST,
+    )
+    with Session(engine) as session, pytest.raises(
+        RuntimeImagePreparationError, match="identity changed"
+    ):
+        persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision_id,
+            original_content_digest=original_digest,
+            effective_execution_key=execution_key,
+            receipt=conflicting,
+            verified_at=second_at,
+        )
+
+
+def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    kwargs = {
+        "recipe_revision_id": "revision-direct",
+        "original_content_digest": receipt.distribution_content_sha256,
+        "effective_execution_key": "f" * 64,
+        "receipt": receipt,
+    }
+    session = Session(engine)
+    with pytest.raises(ValueError, match="does not match"):
+        resolve_persisted_runtime_image_receipt(session, **kwargs)
+    persist_runtime_image_receipt(
+        session,
+        **kwargs,
+        verified_at=datetime.now(UTC),
+    )
+    session.commit()
+    session.close()
+    with Session(engine) as session:
+        assert resolve_persisted_runtime_image_receipt(session, **kwargs).source == "published"
+        session.query(RuntimeImageReceiptRow).update({"local_image_config_id": "sha256:" + "d" * 64})
+        session.commit()
+    session = Session(engine)
+    with pytest.raises(ValueError, match="does not match"):
+        resolve_persisted_runtime_image_receipt(session, **kwargs)
+    session.close()
+
+
+def test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    transport = TinyTransport()
+    attempts = 0
+
+    def fail_once(_receipt: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("database unavailable")
+
+    with pytest.raises(RuntimeImagePreparationError, match="could not be persisted"):
+        prepare_runtime_image(
+            _recipe("recipe-image.json"),
+            runtime=_runtime(),
+            storage=storage,
+            transport=transport,
+            receipt_writer=fail_once,
+        )
+    assert len(transport.calls) == 1
+    retry = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=transport,
+        receipt_writer=fail_once,
+    )
+    assert retry.registry_manifest_digest == IMAGE_DIGEST
+    assert attempts == 2
+    assert len(transport.calls) == 1

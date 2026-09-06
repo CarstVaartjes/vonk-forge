@@ -357,7 +357,7 @@ class RecipeOperationService:
         )
         return job if job is not None and isinstance(job.result, Mapping) else None
 
-    def preview_install(self, mapping_id: str, recipe_build_id: str) -> InstallPlan:
+    def preview_install(self, mapping_id: str, recipe_build_id: str | None) -> InstallPlan:
         return self._install_admission.plan_install(
             mapping_id, recipe_build_id, now=self._clock()
         )

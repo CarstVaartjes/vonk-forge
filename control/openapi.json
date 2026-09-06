@@ -3805,6 +3805,14 @@
             "title": "Allowed",
             "type": "boolean"
           },
+          "compiled_execution_plans": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Compiled Execution Plans",
+            "type": "object"
+          },
           "image_digest": {
             "title": "Image Digest",
             "type": "string"
@@ -3829,8 +3837,15 @@
             "type": "string"
           },
           "recipe_build_id": {
-            "title": "Recipe Build Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Build Id"
           },
           "recipe_content_sha256": {
             "title": "Recipe Content Sha256",
@@ -3885,14 +3900,20 @@
             "type": "string"
           },
           "recipe_build_id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Recipe Build Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Build Id"
           }
         },
         "required": [
-          "mapping_id",
-          "recipe_build_id"
+          "mapping_id"
         ],
         "title": "InstallPreviewRequest",
         "type": "object"
@@ -3930,9 +3951,16 @@
             "type": "string"
           },
           "recipe_build_id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Recipe Build Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipe Build Id"
           },
           "request_key": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
@@ -3942,7 +3970,6 @@
         },
         "required": [
           "mapping_id",
-          "recipe_build_id",
           "plan_digest",
           "request_key"
         ],
@@ -11472,6 +11499,8 @@
                 "enum": [
                   "container-build",
                   "model-download",
+                  "runtime-image",
+                  "runtime-plan",
                   "target-copy",
                   "runtime-install"
                 ],
@@ -11944,6 +11973,8 @@
                 "enum": [
                   "container-build",
                   "model-download",
+                  "runtime-image",
+                  "runtime-plan",
                   "target-copy",
                   "runtime-install"
                 ],
@@ -12274,6 +12305,18 @@
             ],
             "title": "Nas Coverage",
             "type": "string"
+          },
+          "oci_layout_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oci Layout Sha256"
           },
           "reclaimable_bytes": {
             "default": 0,

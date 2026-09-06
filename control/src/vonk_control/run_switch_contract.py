@@ -211,6 +211,7 @@ class BuildCompatibilityEvidence(_StrictModel):
 class RuntimeImageStorageImpact(_StrictModel):
     build_id: UuidId | None
     image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None
+    oci_layout_sha256: Digest | None = None
     image_bytes: int | None = Field(default=None, ge=0)
     required_bytes: int | None = Field(default=None, ge=0)
     reused_bytes: int = Field(default=0, ge=0)

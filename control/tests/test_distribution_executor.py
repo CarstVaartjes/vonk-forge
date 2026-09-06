@@ -15,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DistributionObject
 from vonk_control.auth import TokenCodec
 from vonk_control.distribution import (
+    ControllerRuntimeImageVerifiedObjectSource,
     DistributionService,
     MemoryVerifiedObjectSource,
     build_distribution_service_from_components,
@@ -86,7 +87,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     source.register_runtime_image("sha256:" + "e" * 64, archive.sha256)
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
     executor = DurableDistributionPhaseExecutor(services.sessions, services.operations, distribution, clock=clock)
-    executor._model_objects = lambda _plan: (model, config)
+    executor._model_objects = lambda _plan, _progress: ((model, config), "d" * 64, 15)
     executor._archive = lambda _plan, **_kwargs: archive
     targets = [
         SimpleNamespace(node_id=NODE_A, state="preparing", verified_sha256=None, imported_image_digest=None, verified_at=None),
@@ -382,7 +383,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     model_version = content_sha256(model)
     recipe_document = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", "recipe-source-build.json")
         .read_text(encoding="utf-8")
     )
     recipe_document["identity"]["slug"] = "production-composite"
@@ -818,3 +819,104 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert unknown_item["progress"].get("total_bytes") is None
     assert unknown_item["progress"]["total_bytes_known"] is False
     assert unknown_item["progress"]["members"][0].get("total_bytes") is None
+
+
+def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
+    agent_system, tmp_path: Path  # noqa: F811
+) -> None:
+    _client, services, _tokens, clock = agent_system
+    recipe_document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-image.json")
+        .read_text(encoding="utf-8")
+    )
+    recipe_document["identity"]["slug"] = "published-fallback-guard"
+    recipe = RecipeDefinition.model_validate(recipe_document)
+    recipe_digest = content_sha256(recipe)
+    registry_digest = "sha256:" + "d" * 64
+    image_digest = "sha256:" + "e" * 64
+    assert registry_digest != image_digest
+    assert recipe_document["execution"]["image"]["digest"] == registry_digest.removeprefix("sha256:")
+    archive_payload = b"coincident build archive"
+    archive_digest = hashlib.sha256(archive_payload).hexdigest()
+    recipe_id = str(uuid.uuid4())
+    revision_id = str(uuid.uuid4())
+    build_id = str(uuid.uuid4())
+    plan_digest = "f" * 64
+    with services.sessions.begin() as session:
+        session.add(
+            CatalogDocument(
+                id=recipe_id,
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                title=recipe.metadata.title,
+                created_by="test",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.flush()
+        session.add_all(
+            [
+                CatalogDocumentRevision(
+                    id=revision_id,
+                    document_id=recipe_id,
+                    kind="recipe",
+                    publisher=recipe.identity.publisher,
+                    slug=recipe.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=recipe.model_dump(mode="json"),
+                    content_digest=recipe_digest,
+                    projected={},
+                    created_by="test",
+                    created_at=clock.now,
+                ),
+                RecipeBuild(
+                    id=build_id,
+                    recipe_revision_id=revision_id,
+                    builder_node_id=NODE_A,
+                    source_bundle_sha256="c" * 64,
+                    build_input_sha256="e" * 64,
+                    state="succeeded",
+                    policy_report={},
+                    plan={},
+                    image_digest=image_digest,
+                    oci_layout_sha256=archive_digest,
+                    image_bytes=len(archive_payload),
+                    created_at=clock.now,
+                    updated_at=clock.now,
+                ),
+                Job(
+                    id=str(uuid.uuid4()),
+                    request_id=str(uuid.uuid4()),
+                    kind="recipe.run-switch.v2",
+                    state="running",
+                    actor="test",
+                    authority_revision=plan_digest,
+                    targets=[NODE_A],
+                    payload_digest="a" * 64,
+                    payload={
+                        "plan_digest": plan_digest,
+                        "plan": {
+                            "recipe_revision_id": revision_id,
+                            "recipe_build_id": None,
+                        },
+                    },
+                    result={},
+                    created_at=clock.now,
+                    updated_at=clock.now,
+                ),
+            ]
+        )
+    source = ControllerRuntimeImageVerifiedObjectSource(
+        services.sessions, services.artifact_root
+    )
+    assignment = SimpleNamespace(
+        plan_digest=plan_digest,
+        oci_image_digest=image_digest,
+        oci_archive_sha256=archive_digest,
+    )
+    assert source.verify_runtime_image_assignment(assignment) is False

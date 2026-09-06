@@ -19,13 +19,17 @@ import os
 import re
 import subprocess
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 from vonk_forge_contracts import RecipeDefinition
+
+from .models import RuntimeImageReceipt as RuntimeImageReceiptRow
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -229,6 +233,163 @@ class RuntimeImageReceipt:
         return asdict(self)
 
 
+def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 2:
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_invalid",
+            "runtime image receipt schema version is unsupported",
+        )
+    try:
+        return RuntimeImageReceipt(**dict(value))
+    except (TypeError, ValueError, KeyError) as error:
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_unavailable",
+            "runtime image receipt is unavailable or malformed",
+        ) from error
+
+
+def persist_runtime_image_receipt(
+    session: Session,
+    *,
+    recipe_revision_id: str,
+    original_content_digest: str,
+    effective_execution_key: str,
+    receipt: RuntimeImageReceipt,
+    verified_at: datetime,
+) -> RuntimeImageReceiptRow:
+    """Atomically upsert the verified runtime identity in Controller SQL.
+
+    Filesystem receipts are an object cache.  The SQL row is the authority
+    consumed by install admission and agent specification reads, so a
+    successful filesystem preparation is not complete until this function
+    flushes the exact recipe/effective execution binding in the caller's
+    transaction.
+    """
+
+    if (
+        not isinstance(recipe_revision_id, str)
+        or not isinstance(original_content_digest, str)
+        or not isinstance(effective_execution_key, str)
+        or len(original_content_digest) != 64
+        or len(effective_execution_key) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for value in (original_content_digest, effective_execution_key)
+            for character in value
+        )
+    ):
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_identity_invalid",
+            "runtime image receipt recipe identity is invalid",
+        )
+    if receipt.source not in {"published", "controller-build"}:
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_identity_invalid",
+            "runtime image receipt source is invalid",
+        )
+    if receipt.distribution_content_sha256 != original_content_digest:
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_identity_invalid",
+            "runtime image receipt recipe digest does not match the catalog revision",
+        )
+    if receipt.source == "published":
+        if receipt.registry_manifest_digest is None or receipt.build_id is not None:
+            raise RuntimeImagePreparationError(
+                "runtime_image.receipt_identity_invalid",
+                "published runtime image receipt provenance is invalid",
+            )
+    elif receipt.registry_manifest_digest is not None or receipt.build_id is None:
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_identity_invalid",
+            "Controller-build runtime image receipt provenance is invalid",
+        )
+    if (
+        receipt.architecture != "linux-arm64"
+        or receipt.runtime_interface != "vonk.runtime.v1"
+        or receipt.runtime_interface_label != "v1"
+    ):
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_identity_invalid",
+            "runtime image platform or interface identity is invalid",
+        )
+    lookup = select(RuntimeImageReceiptRow).where(
+        RuntimeImageReceiptRow.recipe_revision_id == recipe_revision_id,
+        RuntimeImageReceiptRow.source == receipt.source,
+        RuntimeImageReceiptRow.original_content_digest == original_content_digest,
+        RuntimeImageReceiptRow.effective_execution_key == effective_execution_key,
+    )
+    row = session.scalar(lookup)
+    identity = {
+        "registry_manifest_digest": receipt.registry_manifest_digest,
+        "platform_manifest_digest": receipt.platform_manifest_digest,
+        "local_image_config_id": receipt.local_image_config_id,
+        "oci_archive_sha256": receipt.oci_archive_sha256,
+        "image_bytes": receipt.image_bytes,
+        "architecture": receipt.architecture,
+        "runtime_interface": receipt.runtime_interface,
+        "runtime_interface_label": receipt.runtime_interface_label,
+        "build_id": receipt.build_id,
+    }
+    if row is None:
+        row = RuntimeImageReceiptRow(
+            recipe_revision_id=recipe_revision_id,
+            source=receipt.source,
+            original_content_digest=original_content_digest,
+            effective_execution_key=effective_execution_key,
+            **identity,
+            verified_at=verified_at,
+            state="verified",
+        )
+        session.add(row)
+    else:
+        existing = {
+            key: getattr(row, key)
+            for key in identity
+        }
+        if existing != identity:
+            raise RuntimeImagePreparationError(
+                "runtime_image.receipt_identity_conflict",
+                "durable runtime image receipt identity changed for the same execution",
+            )
+        row.verified_at = verified_at
+        row.state = "verified"
+    session.flush()
+    return row
+
+
+def resolve_persisted_runtime_image_receipt(
+    session: Session,
+    *,
+    recipe_revision_id: str,
+    original_content_digest: str,
+    effective_execution_key: str,
+    receipt: RuntimeImageReceipt,
+) -> RuntimeImageReceiptRow:
+    """Require SQL to match every verified filesystem identity field."""
+
+    row = session.scalar(
+        select(RuntimeImageReceiptRow).where(
+            RuntimeImageReceiptRow.recipe_revision_id == recipe_revision_id,
+            RuntimeImageReceiptRow.source == receipt.source,
+            RuntimeImageReceiptRow.original_content_digest == original_content_digest,
+            RuntimeImageReceiptRow.effective_execution_key == effective_execution_key,
+            RuntimeImageReceiptRow.state == "verified",
+            RuntimeImageReceiptRow.registry_manifest_digest == receipt.registry_manifest_digest,
+            RuntimeImageReceiptRow.platform_manifest_digest == receipt.platform_manifest_digest,
+            RuntimeImageReceiptRow.local_image_config_id == receipt.local_image_config_id,
+            RuntimeImageReceiptRow.oci_archive_sha256 == receipt.oci_archive_sha256,
+            RuntimeImageReceiptRow.image_bytes == receipt.image_bytes,
+            RuntimeImageReceiptRow.architecture == receipt.architecture,
+            RuntimeImageReceiptRow.runtime_interface == receipt.runtime_interface,
+            RuntimeImageReceiptRow.runtime_interface_label == receipt.runtime_interface_label,
+            RuntimeImageReceiptRow.build_id == receipt.build_id,
+        )
+    )
+    if row is None:
+        raise ValueError("durable runtime image receipt identity does not match filesystem receipt")
+    return row
+
+
 class RuntimeImageStorage(Protocol):
     def prepare_path(self) -> Path:
         """Return a private path for a new export."""
@@ -358,9 +519,9 @@ class FilesystemRuntimeImageStorage:
         for receipt_path in sorted(self.root.glob("*.receipt.json")):
             try:
                 value = json.loads(receipt_path.read_text(encoding="utf-8"))
-                if not isinstance(value, Mapping):
-                    raise TypeError
-                receipt = RuntimeImageReceipt(**dict(value))
+                receipt = _parse_runtime_image_receipt(value)
+            except RuntimeImagePreparationError:
+                raise
             except (OSError, TypeError, ValueError, KeyError) as error:
                 raise RuntimeImagePreparationError(
                     "runtime_image.receipt_unavailable",
@@ -413,9 +574,9 @@ class FilesystemRuntimeImageStorage:
         for receipt_path in sorted(self.root.glob("*.receipt.json")):
             try:
                 value = json.loads(receipt_path.read_text(encoding="utf-8"))
-                if not isinstance(value, Mapping):
-                    raise TypeError
-                receipt = RuntimeImageReceipt(**dict(value))
+                receipt = _parse_runtime_image_receipt(value)
+            except RuntimeImagePreparationError:
+                raise
             except (OSError, TypeError, ValueError, KeyError) as error:
                 raise RuntimeImagePreparationError(
                     "runtime_image.receipt_unavailable",
@@ -449,9 +610,9 @@ class FilesystemRuntimeImageStorage:
         path = self.root / f"{archive_sha256}.receipt.json"
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(value, Mapping):
-                raise TypeError
-            return RuntimeImageReceipt(**dict(value))
+            return _parse_runtime_image_receipt(value)
+        except RuntimeImagePreparationError:
+            raise
         except (OSError, TypeError, ValueError, KeyError) as error:
             raise RuntimeImagePreparationError(
                 "runtime_image.receipt_unavailable", "runtime image receipt is unavailable or malformed"
@@ -466,6 +627,7 @@ def prepare_runtime_image(
     transport: OCIImageTransport | None = None,
     build_receipt: Mapping[str, object] | object | None = None,
     now: datetime | None = None,
+    receipt_writer: Callable[[RuntimeImageReceipt], object] | None = None,
 ) -> RuntimeImageReceipt:
     """Prepare the image selected by a canonical ``RecipeDefinition``.
 
@@ -513,6 +675,16 @@ def prepare_runtime_image(
         raise RuntimeImagePreparationError(
             "runtime_image.digest_mismatch", "prepared image digest does not match the immutable distribution"
         )
+    if receipt_writer is not None:
+        try:
+            receipt_writer(receipt)
+        except RuntimeImagePreparationError:
+            raise
+        except Exception as error:
+            raise RuntimeImagePreparationError(
+                "runtime_image.receipt_persistence_failed",
+                "durable runtime image receipt could not be persisted",
+            ) from error
     return receipt
 
 
@@ -941,5 +1113,7 @@ __all__ = [
     "RuntimeImageReceipt",
     "RuntimeImageStorage",
     "SkopeoOCIImageTransport",
+    "persist_runtime_image_receipt",
     "prepare_runtime_image",
+    "resolve_persisted_runtime_image_receipt",
 ]

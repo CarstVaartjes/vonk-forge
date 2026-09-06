@@ -150,7 +150,7 @@ class InstallNodePlanResponse(StrictModel):
 class InstallPlanResponse(StrictModel):
     mapping_id: str
     mapping_generation: int
-    recipe_build_id: str
+    recipe_build_id: str | None
     image_digest: str
     recipe_revision_id: str
     recipe_content_sha256: str
@@ -340,7 +340,7 @@ class RunStatusResponse(StrictModel):
 
 class InstallPreviewRequest(StrictModel):
     mapping_id: str = Field(pattern=_UUID)
-    recipe_build_id: str = Field(pattern=_UUID)
+    recipe_build_id: str | None = Field(default=None, pattern=_UUID)
 
 
 class MappingPreviewRequest(StrictModel):
