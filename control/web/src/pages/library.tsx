@@ -23,6 +23,36 @@ function tabPath(path: string, view: LibrarySubview): string {
   return `${url.pathname}${url.search}`;
 }
 
+export async function loadLibrarySnapshot(api: ControlApi, signal: AbortSignal): Promise<LibrarySnapshot> {
+  let cursor: string | undefined;
+  let first: LibrarySnapshot | undefined;
+  const seenCursors = new Set<string>();
+  const models = new Map<string, LibrarySnapshot["models"][number]>();
+  const unlinked = new Map<string, LibrarySnapshot["unlinked_recipes"][number]>();
+  do {
+    const page = await api.librarySnapshot(cursor, signal);
+    first ??= page;
+    for (const model of page.models) {
+      const key = `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}`;
+      const existing = models.get(key);
+      if (!existing) models.set(key, model);
+      else {
+        const recipes = new Map(existing.recipes.map(recipe => [recipe.recipe_revision_id, recipe]));
+        for (const recipe of model.recipes) recipes.set(recipe.recipe_revision_id, recipe);
+        models.set(key, {...existing, recipes: [...recipes.values()]});
+      }
+    }
+    for (const recipe of page.unlinked_recipes) unlinked.set(recipe.recipe_revision_id, recipe);
+    cursor = page.next_cursor ?? undefined;
+    if (cursor) {
+      if (seenCursors.has(cursor)) throw new Error("Library pagination cursor repeated");
+      seenCursors.add(cursor);
+    }
+  } while (cursor);
+  if (!first) throw new Error("Library returned no page");
+  return {...first, models: [...models.values()], unlinked_recipes: [...unlinked.values()], next_cursor: null};
+}
+
 export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path}: {api: ControlApi; path: string; onBusyChange?(busy: boolean): void; onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void; onNavigatePath?(path: string, replace?: boolean): void}) {
   const [snapshot, setSnapshot] = useState<LibrarySnapshot>();
   const [fleet, setFleet] = useState<VisualFleetSnapshot>();
@@ -43,7 +73,7 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
   useEffect(() => setQuery(new URL(path, location.origin).searchParams.get("q") ?? ""), [path]);
   useEffect(() => {
     const controller = new AbortController(); setError("");
-    void api.librarySnapshot(undefined, controller.signal).then(value => { if (!controller.signal.aborted) setSnapshot(value); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Library"); });
+    void loadLibrarySnapshot(api, controller.signal).then(value => { if (!controller.signal.aborted) setSnapshot(value); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Library"); });
     return () => controller.abort();
   }, [api, attempt]);
   useEffect(() => {
@@ -59,7 +89,11 @@ export function LibraryPage({api, onBusyChange, onNavigate, onNavigatePath, path
     void api.libraryRecipe(recipeId, controller.signal).then(value => { if (!controller.signal.aborted) { setDetail(value); setDetailLoading(false); } }).catch(value => { if (!controller.signal.aborted) { setDetailError(value instanceof Error ? value.message.slice(0, 256) : "Unable to load Recipe detail"); setDetailLoading(false); } });
     return () => controller.abort();
   }, [api, detailAttempt, route]);
-  useEffect(() => { queueMicrotask(() => heading.current?.focus()); }, [path]);
+  useEffect(() => {
+    if (!snapshot || route.kind !== "model" || snapshot.models.some(model => `${model.model.publisher}/${model.model.slug}@${model.model.content_sha256}` === route.modelKey)) return;
+    onNavigatePath?.("/library", true);
+  }, [onNavigatePath, route, snapshot]);
+  useEffect(() => { if (route.kind === "model" && typeof window !== "undefined" && window.innerWidth <= 760) return; queueMicrotask(() => heading.current?.focus()); }, [path, route.kind]);
   const updateQuery = useCallback((value: string) => { setQuery(value); if (!onNavigatePath) return; const url = new URL(path, location.origin); if (value) url.searchParams.set("q", value); else url.searchParams.delete("q"); onNavigatePath(`${url.pathname}${url.search}`, true); }, [onNavigatePath, path]);
   const contextualNavigate = useCallback((event: MouseEvent<HTMLAnchorElement>, nextPath: string) => { if (!preferredNodeId || !nextPath.startsWith("/library")) return onNavigate(event, nextPath); const url = new URL(nextPath, location.origin); url.searchParams.set("spark", preferredNodeId); onNavigate(event, `${url.pathname}${url.search}`); }, [onNavigate, preferredNodeId]);
   const refresh = useCallback(async (signal: AbortSignal) => { if (route.kind === "recipe") await api.libraryRecipe(route.recipeId, signal).then(value => { if (!signal.aborted) setDetail(value); }); if (!signal.aborted) { setAttempt(value => value + 1); setFleetAttempt(value => value + 1); } }, [api, route]);

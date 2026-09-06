@@ -1,10 +1,45 @@
-import {useEffect, useMemo, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import type {MouseEvent} from "react";
 import type {CacheEntryResponse, ControlApi, LibraryModel, ModelCacheOperationResponse, VisualFleetSnapshot} from "../api/types";
 import {formatBytes} from "../lib/fleet";
+import {modelVersionKey} from "../lib/library-route";
 import type {LibraryRecipeRecord} from "./library-workcell";
+import {LibraryModelDeletionDialog} from "./library-model-deletion-dialog";
 
 export type LibraryCacheEntry = {key: string; model: LibraryModel; cache?: CacheEntryResponse; files: LibraryModel["model_document"]["files"]; recipeCount: number; status: string; expectedBytes: number; verifiedBytes: number; error?: string};
+
+export async function loadModelCacheInventory(api: ControlApi, signal: AbortSignal): Promise<import("../api/types").ModelCacheInventoryResponse> {
+  let cursor: string | undefined;
+  let first: import("../api/types").ModelCacheInventoryResponse | undefined;
+  const entries: CacheEntryResponse[] = [];
+  const seen = new Set<string>();
+  do {
+    const page = await api.modelCacheInventory(cursor, signal);
+    first ??= page;
+    entries.push(...page.entries);
+    cursor = page.next_cursor ?? undefined;
+    if (cursor) { if (seen.has(cursor)) throw new Error("NAS cache pagination cursor repeated"); seen.add(cursor); }
+  } while (cursor);
+  if (!first) throw new Error("NAS cache returned no page");
+  return {...first, entries, next_cursor: null, total: entries.length};
+}
+
+export function LibraryModelDownloadAction({api, model, onComplete}: {api: ControlApi; model: LibraryModel; onComplete?(): void}) {
+  const [operation, setOperation] = useState<ModelCacheOperationResponse>();
+  const [error, setError] = useState("");
+  const completedOperation = useRef<string | undefined>(undefined);
+  const active = Boolean(operation && !terminal(operation.state));
+  useEffect(() => { if (!operation) return; if (operation.state === "succeeded") { if (completedOperation.current !== operation.id) { completedOperation.current = operation.id; onComplete?.(); } return; } if (!active) return; const timer = window.setTimeout(() => void api.modelCacheOperation(operation.id).then(setOperation).catch(value => setError(value instanceof Error ? value.message : "Download progress unavailable")), 1200); return () => window.clearTimeout(timer); }, [active, api, onComplete, operation]);
+  async function download() {
+    setError("");
+    try {
+      const plan = await api.previewModelCacheDownload({schema_version: 2, source_policy: "nas-first", model_version_sha256: model.model.content_sha256});
+      if (plan.blockers.length) { setError(plan.blockers.join("; ")); return; }
+      setOperation(await api.downloadModelCache({schema_version: 2, source_policy: "nas-first", model_version_sha256: model.model.content_sha256, artifact_set_sha256: plan.artifact_set_sha256, plan_digest: plan.plan_digest, request_key: crypto.randomUUID()}));
+    } catch (value) { setError(value instanceof Error ? value.message : "Download to NAS failed"); }
+  }
+  return <span className="library-model-download"><button type="button" className="button secondary" disabled={active} onClick={() => void download()}>{active ? "Downloading to NAS…" : operation?.state === "succeeded" ? "Downloaded to NAS" : "Download to NAS"}</button>{operation && <small role="status">{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}</small>}{error && <small role="alert">{error}</small>}</span>;
+}
 
 export function aggregateCacheEntries(models: readonly LibraryModel[], inventory?: {entries: CacheEntryResponse[]}): LibraryCacheEntry[] {
   return models.map(model => {
@@ -16,7 +51,8 @@ export function aggregateCacheEntries(models: readonly LibraryModel[], inventory
     const expectedBytes = files.reduce((sum, file) => sum + file.size_bytes, 0);
     const verifiedBytes = files.filter(file => verified.has(`${file.path}|${file.sha256}|${file.size_bytes}`)).reduce((sum, file) => sum + file.size_bytes, 0);
     const cache = candidates.find(entry => entry.coverage === "complete" && complete) ?? candidates[0];
-    return {key: model.model.content_sha256, model, cache, files, recipeCount: model.recipes.length, status: complete ? "cached" : cache?.state ?? "not cached", expectedBytes, verifiedBytes, error: candidates.find(entry => entry.last_error)?.last_error ?? undefined};
+    const status = complete ? "cached" : candidates.length ? (cache?.state === "cached" ? "partial" : cache?.state ?? "partial") : "not cached";
+    return {key: model.model.content_sha256, model, cache, files, recipeCount: model.recipes.length, status, expectedBytes, verifiedBytes, error: candidates.find(entry => entry.last_error)?.last_error ?? undefined};
   });
 }
 
@@ -28,9 +64,9 @@ export function LibraryCacheView({api, entries: _entries, modelInventory = [], o
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [attempt, setAttempt] = useState(0);
-  useEffect(() => { if (!api.modelCacheInventory) return; const controller = new AbortController(); void api.modelCacheInventory(undefined, controller.signal).then(value => { if (!controller.signal.aborted) setInventory(value); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Unable to read NAS cache"); }); return () => controller.abort(); }, [api, attempt]);
+  useEffect(() => { if (!api.modelCacheInventory) return; const controller = new AbortController(); void loadModelCacheInventory(api, controller.signal).then(value => { if (!controller.signal.aborted) setInventory(value); }).catch(value => { if (!controller.signal.aborted) setError(value instanceof Error ? value.message : "Unable to read NAS cache"); }); return () => controller.abort(); }, [api, attempt]);
   useEffect(() => { const busy = Boolean(operation && !terminal(operation.state)); onBusyChange?.(busy); return () => onBusyChange?.(false); }, [onBusyChange, operation]);
-  useEffect(() => { if (!operation || terminal(operation.state) || !api.modelCacheOperation) return; const timer = window.setTimeout(() => void api.modelCacheOperation!(operation.id).then(setOperation).catch(() => undefined), 1500); return () => window.clearTimeout(timer); }, [api, operation]);
+  useEffect(() => { if (!operation || terminal(operation.state) || !api.modelCacheOperation) return; const timer = window.setTimeout(() => void api.modelCacheOperation!(operation.id).then(next => { setOperation(next); if (terminal(next.state) && next.state === "succeeded") setAttempt(value => value + 1); }).catch(value => setError(value instanceof Error ? value.message : "Cache operation progress is unavailable")), 1500); return () => window.clearTimeout(timer); }, [api, operation]);
   const entries = useMemo(() => aggregateCacheEntries(modelInventory, inventory), [inventory, modelInventory]);
   const visible = entries.filter(entry => !query.trim() || `${entry.model.model_document.metadata.description} ${entry.model.model.slug}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   async function download(model: LibraryModel) {
@@ -38,5 +74,5 @@ export function LibraryCacheView({api, entries: _entries, modelInventory = [], o
     setError("");
     try { const plan = await api.previewModelCacheDownload({schema_version: 2, source_policy: "nas-first", model_version_sha256: model.model.content_sha256}); if (plan.blockers.length) { setError(plan.blockers.join("; ")); return; } const next = await api.downloadModelCache({schema_version: 2, source_policy: "nas-first", model_version_sha256: model.model.content_sha256, artifact_set_sha256: plan.artifact_set_sha256, plan_digest: plan.plan_digest, request_key: crypto.randomUUID()}); setOperation(next); } catch (value) { setError(value instanceof Error ? value.message : "Download to NAS failed"); }
   }
-  return <section className="library-cache-view" aria-labelledby="library-cache-heading"><header className="library-subview-heading"><div><h2 id="library-cache-heading">NAS cache</h2><p>Every Model file is tracked together. Download the complete manifest to NAS in one action.</p></div><a className="button secondary" href="/library?view=models" onClick={event => onNavigate(event, "/library?view=models")}>Choose a Model</a></header><label className="library-cache-search">Find a Model<input type="search" aria-label="Search NAS cache" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search exact model"/></label>{error && <div className="library-cache-state is-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => { setError(""); setAttempt(value => value + 1); }}>Retry cache</button></div>}{operation && <section className={`library-cache-operation state-${operation.state}`} role="status" aria-live="polite"><strong>{operation.state === "succeeded" ? "Downloaded to NAS" : operation.state === "failed" ? "Download failed" : "Downloading to NAS"}</strong><span>{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}{operation.last_error ? ` · ${operation.last_error}` : ""}</span>{operation.progress.total_artifacts > 0 && <div className="library-cache-operation-track" role="progressbar" aria-valuemin={0} aria-valuemax={operation.progress.total_artifacts} aria-valuenow={operation.progress.completed_artifacts}><span style={{width: `${Math.min(100, operation.progress.completed_artifacts / operation.progress.total_artifacts * 100)}%`}}/></div>}</section>}<div className="library-cache-list" aria-label="Complete model file cache">{visible.map(entry => <article className="library-cache-row" key={entry.key}><div><h3>{entry.model.model_document.identity.model.title}</h3><p>{entry.model.model_document.identity.version} · {entry.model.model_document.identity.variant} · {entry.model.model.publisher}/{entry.model.model.slug} · {entry.recipeCount ? `${entry.recipeCount} Recipe${entry.recipeCount === 1 ? "" : "s"}` : "No Recipe linked"}</p><span className={`library-cache-status state-${entry.status}`}>{entry.status}</span></div><dl><div><dt>Files</dt><dd>{entry.files.length}</dd></div><div><dt>Complete bytes</dt><dd>{formatBytes(entry.expectedBytes)}</dd></div><div><dt>Verified</dt><dd>{formatBytes(entry.verifiedBytes)}</dd></div></dl><button type="button" className="button" disabled={Boolean(operation && !terminal(operation.state)) || entry.status === "cached"} onClick={() => void download(entry.model)}>{entry.status === "cached" ? "Cached on NAS" : "Download to NAS"}</button><details><summary>Show all files</summary><ul>{entry.files.map(file => <li key={file.id}><span>{file.path}</span><small>{formatBytes(file.size_bytes)} · sha256:{file.sha256.slice(0, 12)}…</small></li>)}</ul></details></article>)}{visible.length === 0 && <p className="library-empty-state">No cached Models match.</p>}</div></section>;
+  return <section className="library-cache-view" aria-labelledby="library-cache-heading"><header className="library-subview-heading"><div><h2 id="library-cache-heading">NAS cache</h2><p>Every Model file is tracked together. Download the complete manifest to NAS in one action.</p></div><a className="button secondary" href="/library?view=models" onClick={event => onNavigate(event, "/library?view=models")}>Choose a Model</a></header><label className="library-cache-search">Find a Model<input type="search" aria-label="Search NAS cache" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search exact model"/></label>{error && <div className="library-cache-state is-error" role="alert"><span>{error}</span><button type="button" className="button secondary" onClick={() => { setError(""); setAttempt(value => value + 1); }}>Retry cache</button></div>}{operation && <section className={`library-cache-operation state-${operation.state}`} role="status" aria-live="polite"><strong>{operation.state === "succeeded" ? "Downloaded to NAS" : operation.state === "failed" ? "Cache operation failed" : "Cache operation in progress"}</strong><span>{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}{operation.last_error ? ` · ${operation.last_error}` : ""}</span>{operation.progress.total_artifacts > 0 && <div className="library-cache-operation-track" role="progressbar" aria-valuemin={0} aria-valuemax={operation.progress.total_artifacts} aria-valuenow={operation.progress.completed_artifacts}><span style={{width: `${Math.min(100, operation.progress.completed_artifacts / operation.progress.total_artifacts * 100)}%`}}/></div>}</section>}<div className="library-cache-list" aria-label="Complete model file cache">{visible.map(entry => <article className="library-cache-row" key={entry.key}><div><h3>{entry.model.model_document.identity.model.title}</h3><p>{entry.model.model_document.identity.version} · {entry.model.model_document.identity.variant} · {entry.model.model.publisher}/{entry.model.model.slug} · {entry.recipeCount ? `${entry.recipeCount} Recipe${entry.recipeCount === 1 ? "" : "s"}` : "No Recipe linked"}</p><span className={`library-cache-status state-${entry.status}`}>{entry.status}</span></div><dl><div><dt>Files</dt><dd>{entry.files.length}</dd></div><div><dt>Complete bytes</dt><dd>{formatBytes(entry.expectedBytes)}</dd></div><div><dt>Verified</dt><dd>{formatBytes(entry.verifiedBytes)}</dd></div></dl><span className="library-cache-actions"><button type="button" className="button" disabled={Boolean(operation && !terminal(operation.state)) || entry.status === "cached"} onClick={() => void download(entry.model)}>{entry.status === "cached" ? "Cached on NAS" : "Download to NAS"}</button>{entry.status === "cached" && <a className="button secondary" href={`/library?view=models&model=${encodeURIComponent(modelVersionKey(entry.model.model))}`} onClick={event => onNavigate(event, `/library?view=models&model=${encodeURIComponent(modelVersionKey(entry.model.model))}`)}>Review Model removal in Models</a>}</span><details><summary>Show all files</summary><ul>{entry.files.map(file => <li key={file.id}><span>{file.path}</span><small>{formatBytes(file.size_bytes)} · sha256:{file.sha256.slice(0, 12)}…</small></li>)}</ul></details></article>)}{visible.length === 0 && <p className="library-empty-state">No cached Models match.</p>}</div></section>;
 }

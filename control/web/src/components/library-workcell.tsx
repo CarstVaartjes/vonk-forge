@@ -1,3 +1,4 @@
+import {useEffect, useRef} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import type {ControlApi, LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
 import type {LibraryRoute} from "../lib/library-route";
@@ -30,14 +31,6 @@ export type LibraryRecipeRecord = {
   capabilities: string[];
 };
 
-type RevisionedRecipeSummary = LibraryRecipeSummary & {recipe_revision_id: string};
-
-function recipeRevisionId(recipe: LibraryRecipeSummary): string {
-  const revision = (recipe as RevisionedRecipeSummary).recipe_revision_id;
-  if (!revision) throw new Error(`Recipe ${recipe.recipe_id} is missing its canonical revision identity`);
-  return revision;
-}
-
 function modelTitle(model: LibraryModel): string {
   return model.model_document.identity.model.title || model.model_document.identity.family.title || `${model.model.publisher}/${model.model.slug}`;
 }
@@ -50,7 +43,7 @@ export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot): LibraryRec
     const bytes = files.reduce((total, file) => total + file.size_bytes, 0);
     const capabilities = (model.model_capabilities?.facts ?? []).filter(fact => fact.support === "supported").map(fact => fact.capability);
     if (model.recipes.length === 0) return [{key: `model:${key}`, title, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, capabilities}];
-    return model.recipes.map(recipe => ({key: `${key}:${recipeRevisionId(recipe)}`, title: recipe.title, recipe, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, capabilities: [...new Set([...capabilities, ...recipe.capabilities])]}));
+    return model.recipes.map(recipe => ({key: `${key}:${recipe.recipe_revision_id}`, title: recipe.title, recipe, model: model.model, modelDocument: model.model_document, modelCapabilities: model.model_capabilities, modelKey: key, modelTitle: title, modelFiles: files, modelBytes: bytes, capabilities: [...new Set([...capabilities, ...recipe.capabilities])]}));
   });
 }
 
@@ -62,11 +55,11 @@ export function filterLibraryRecipeRecords(records: LibraryRecipeRecord[], filte
   });
 }
 
-function NavigateLink({href, onNavigate, children}: {href: string; onNavigate: (event: MouseEvent<HTMLAnchorElement>, path: string) => void; children: ReactNode}) {
-  return <a href={href} onClick={event => onNavigate(event, href)}>{children}</a>;
+function NavigateLink({current, href, onNavigate, children}: {current?: boolean; href: string; onNavigate: (event: MouseEvent<HTMLAnchorElement>, path: string) => void; children: ReactNode}) {
+  return <a href={href} aria-current={current ? "page" : undefined} onClick={event => onNavigate(event, href)}>{children}</a>;
 }
 
-export function LibraryWorkcell({api: _api, detail: _detail, fleet: _fleet, filters, onFiltersChange, onNavigate, onQueryChange, query, route: _route, snapshot}: {
+export function LibraryWorkcell({api: _api, detail: _detail, fleet: _fleet, filters, onFiltersChange, onNavigate, onQueryChange, query, route, snapshot}: {
   api: ControlApi;
   detail?: LibraryRecipeDetail;
   detailError?: string;
@@ -90,9 +83,15 @@ export function LibraryWorkcell({api: _api, detail: _detail, fleet: _fleet, filt
   const models = [...new Map(records.map(record => [record.modelKey, record])).values()]
     .filter(record => !query.trim() || matching.some(item => item.modelKey === record.modelKey));
   const modelOptions = [...new Map(records.map(record => [record.modelKey, record.modelTitle])).entries()];
-  const selectedModelKey = _route.kind === "model" ? _route.modelKey : filters.model || models[0]?.modelKey;
+  const selectedModelKey = route.kind === "model" ? route.modelKey : filters.model || models[0]?.modelKey;
   const selectedModel = models.find(record => record.modelKey === selectedModelKey);
   const selectedRecipes = matching.filter(record => record.modelKey === selectedModelKey && record.recipe);
+  const recipePaneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (route.kind !== "model" || typeof window === "undefined" || window.innerWidth > 760) return;
+    if (recipePaneRef.current && typeof recipePaneRef.current.scrollIntoView === "function") recipePaneRef.current.scrollIntoView({block: "start"});
+    recipePaneRef.current?.focus({preventScroll: true});
+  }, [route.kind, selectedModelKey]);
   return <section className="library-workcell" aria-label="Models and recipes">
     <div className="library-workcell-toolbar">
       <label>Find models or recipes<input type="search" aria-label="Search Library" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search names, slugs, capabilities" /></label>
@@ -102,8 +101,8 @@ export function LibraryWorkcell({api: _api, detail: _detail, fleet: _fleet, filt
     <div className="library-paired-list" aria-label="Model and recipe list">
       <div className="library-paired-heading"><span>Models · {models.length} of {new Set(records.map(record => record.modelKey)).size}</span><span>Recipes for selected Model · {selectedRecipes.length}</span></div>
       <div className="library-paired-panes">
-        <div className="library-model-pane" aria-label="Models">{models.map(model => <NavigateLink key={model.modelKey} href={modelLibraryPath(model.modelKey)} onNavigate={onNavigate}><span className={model.modelKey === selectedModelKey ? "is-selected" : undefined}><strong>{model.modelTitle}</strong><small>{model.model?.publisher}/{model.model?.slug}</small><small>{model.modelFiles.length} files · {formatBytes(model.modelBytes)}</small><em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em></span></NavigateLink>)}{models.length === 0 && <p className="library-empty-state">No Models match these filters.</p>}</div>
-        <div className="library-recipe-pane" aria-label="Recipes matching selected Model">{selectedModel && <div className="library-selected-model-context"><strong>{selectedModel.modelTitle}</strong><span>{selectedModel.modelFiles.length} files · {formatBytes(selectedModel.modelBytes)} · {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}</span></div>}{selectedRecipes.map(record => { const document = record.recipe!.recipe_document; const roleBytes = document.topology.roles.reduce((sum, role) => sum + role.count * role.resources.disk.image_bytes + role.count * role.resources.disk.artifact_bytes, 0); return <NavigateLink key={record.key} href={recipeLibraryPath(record.recipe!.recipe_id)} onNavigate={onNavigate}><strong>{record.title}</strong><small>{document.runtime.engine} · release {document.release.version} · {document.topology.node_count} Spark{document.topology.node_count === 1 ? "" : "s"} · {document.topology.mode}</small><small>{document.topology.roles.map(role => `${role.name}: ${formatBytes(role.resources.memory.startup_peak_bytes)} startup / ${formatBytes(role.resources.memory.steady_state_bytes)} steady`).join(" · ")}</small><small>{formatBytes(roleBytes)} image + artifact envelope</small></NavigateLink>; })}{selectedModel && selectedRecipes.length === 0 && <div className="library-empty-recipe"><strong>No Recipe linked</strong><span>This exact Model is available for cache management but has no runnable Recipe.</span></div>}{!selectedModel && <p className="library-empty-state">Select a Model to see matching Recipes.</p>}</div>
+        <div className="library-model-pane" aria-label="Models"><ul>{models.map(model => <li key={model.modelKey}><NavigateLink current={model.modelKey === selectedModelKey} href={modelLibraryPath(model.modelKey)} onNavigate={onNavigate}><span className={model.modelKey === selectedModelKey ? "is-selected" : undefined}><strong>{model.modelTitle}</strong><small>{model.model?.publisher}/{model.model?.slug}</small><small>{model.modelFiles.length} files · {formatBytes(model.modelBytes)}</small><em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em></span></NavigateLink></li>)}</ul>{models.length === 0 && <p className="library-empty-state">No Models match these filters.</p>}</div>
+        <div className="library-recipe-pane" aria-label="Recipes matching selected Model" ref={recipePaneRef} tabIndex={-1}>{selectedModel && <div className="library-selected-model-context"><strong>{selectedModel.modelTitle}</strong><span>{selectedModel.modelFiles.length} files · {formatBytes(selectedModel.modelBytes)} · {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}</span></div>}<ul>{selectedRecipes.map(record => { const document = record.recipe!.recipe_document; const roleBytes = document.topology.roles.reduce((sum, role) => sum + role.count * role.resources.disk.image_bytes + role.count * role.resources.disk.artifact_bytes, 0); return <li key={record.key}><NavigateLink href={recipeLibraryPath(record.recipe!.recipe_id)} onNavigate={onNavigate}><strong>{record.title}</strong><small>{document.runtime.engine} · release {document.release.version} · {document.topology.node_count} Spark{document.topology.node_count === 1 ? "" : "s"} · {document.topology.mode}</small><small>{document.topology.roles.map(role => `${role.name}: ${formatBytes(role.resources.memory.startup_peak_bytes)} startup / ${formatBytes(role.resources.memory.steady_state_bytes)} steady`).join(" · ")}</small><small>{formatBytes(roleBytes)} image + artifact envelope</small></NavigateLink></li>; })}</ul>{selectedModel && selectedRecipes.length === 0 && <div className="library-empty-recipe"><strong>No Recipe linked</strong><span>This exact Model is available for cache management but has no runnable Recipe.</span></div>}{!selectedModel && <p className="library-empty-state">Select a Model to see matching Recipes.</p>}</div>
       </div>
     </div>
   </section>;
