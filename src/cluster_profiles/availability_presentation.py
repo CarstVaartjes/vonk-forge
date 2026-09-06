@@ -7,11 +7,10 @@ never chooses a different Model, Recipe revision, or source.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
-from typing import Any
-
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 _AUTHORIZATION = re.compile(r"(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+")
 _SENSITIVE = re.compile(r"(?i)\b(token|api[_-]?key|secret|password)\s*[:=]\s*[^\s,;]+")
@@ -158,7 +157,7 @@ def parse_availability_operation(value: object) -> AvailabilityOperationView | N
         members=tuple(children),
         failure=parse_availability_failure(value.get("failure")),
         result=dict(result) if isinstance(result, Mapping) else None,
-        actions=tuple(_text(item, maximum=64) for item in value.get("actions", ()) if isinstance(item, str)) if isinstance(value.get("actions"), Sequence) else (),
+        actions=tuple(_text(item, maximum=64) for item in value.get("actions", ()) if isinstance(item, str)) if isinstance(value.get("actions"), Sequence) and not isinstance(value.get("actions"), (str, bytes)) else (),
     )
 
 
