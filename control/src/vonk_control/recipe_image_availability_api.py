@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Path, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from .operation_contract import AvailabilityOperationFailure
 from .recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
@@ -41,13 +42,6 @@ def _failure_document(error: RecipeImageAvailabilityError) -> dict[str, object]:
         "free_bytes": None,
         "shortfall_bytes": None,
     }
-    # The model-cache owner supplies the shared schema class.  Keeping this
-    # import at call time lets this route remain importable during a rolling
-    # deploy, while every deployed response is validated by that class.
-    try:
-        from .operation_contract import AvailabilityOperationFailure
-    except ImportError:
-        return raw
     return AvailabilityOperationFailure.model_validate(raw).model_dump(mode="json")
 
 
@@ -55,10 +49,6 @@ def _view_document(view: Any) -> dict[str, object]:
     document = view.document()
     failure = document.get("failure")
     if not isinstance(failure, dict):
-        return document
-    try:
-        from .operation_contract import AvailabilityOperationFailure
-    except ImportError:
         return document
     document["failure"] = AvailabilityOperationFailure.model_validate(failure).model_dump(mode="json")
     return document

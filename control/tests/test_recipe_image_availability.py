@@ -286,3 +286,81 @@ def test_same_immutable_image_reuses_preparation_across_recipe_revisions(tmp_pat
     assert service.get(first.id).state == "succeeded"
     assert service.get(second.id).state == "succeeded"
     assert transport.calls == 1
+
+
+def test_request_replay_returns_original_before_metadata_refresh(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-replay", recipe)
+    calls = 0
+
+    def authority(_revision_id: str) -> tuple[RecipeDefinition, dict[str, object]]:
+        nonlocal calls
+        calls += 1
+        return recipe, _runtime()
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=authority,
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+    )
+    first = service.start("revision-replay", actor="operator", request_id="7" * 36)
+    replay = service.start("revision-replay", actor="operator", request_id="7" * 36)
+    assert replay.id == first.id
+    assert calls == 1
+
+
+def test_same_work_identity_keeps_distinct_authorization_operations(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-auth", recipe)
+    transport = Transport()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id: (recipe, _runtime()),
+        transport=transport,
+        clock=lambda: datetime.now(UTC),
+    )
+    first = service.start("revision-auth", actor="operator-a", request_id="8" * 36)
+    second = service.start("revision-auth", actor="operator-b", request_id="9" * 36)
+    assert second.id != first.id
+    claims = service.claim_pending(limit=2, owner_id="worker-a")
+    for claim in claims:
+        service.run_claim(claim)
+    assert service.get(first.id).state == "succeeded"
+    assert service.get(second.id).state == "succeeded"
+    assert transport.calls == 1
+
+
+def test_force_download_is_a_distinct_operation_for_same_revision(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-force", recipe)
+    transport = Transport()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id: (recipe, _runtime()),
+        transport=transport,
+        clock=lambda: datetime.now(UTC),
+    )
+    cached = service.start("revision-force", actor="operator", request_id="a" * 36)
+    forced = service.start("revision-force", actor="operator", request_id="b" * 36, force=True)
+    assert forced.id != cached.id
+    for claim in service.claim_pending(limit=2, owner_id="worker-a"):
+        service.run_claim(claim)
+    assert service.get(cached.id).state == "succeeded"
+    assert service.get(forced.id).state == "succeeded"
+    assert transport.calls == 2
