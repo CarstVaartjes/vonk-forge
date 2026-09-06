@@ -118,6 +118,7 @@ def build_recipe_image_availability(
     managed_catalog_sync: Any | None,
     recipe_builds: Any,
     recipe_operations: Any,
+    model_cache: Any | None = None,
     clock: Callable[[], datetime],
     max_parallel: int = 4,
     max_parallel_builds: int = 1,
@@ -164,32 +165,54 @@ def build_recipe_image_availability(
             package_handle: Mapping[str, object] | None = None
             builder_node_id: str | None = None
             if recipe.execution.mode == "build":
-                builder = next(
-                    (
-                        candidate
-                        for candidate in session.scalars(
-                            select(AgentNode)
-                            .where(AgentNode.state == "active")
-                            .order_by(AgentNode.id)
-                        )
-                        if candidate.architecture == "linux-arm64"
-                        and "recipe.build.v1" in (candidate.capabilities or ())
-                    ),
-                    None,
+                candidates = tuple(
+                    candidate
+                    for candidate in session.scalars(
+                        select(AgentNode)
+                        .where(AgentNode.state == "active")
+                        .order_by(AgentNode.id)
+                    )
+                    if candidate.architecture == "linux-arm64"
+                    and "recipe.build.v1" in (candidate.capabilities or ())
                 )
-                if builder is None:
+                plans: list[tuple[int, str, Any]] = []
+                active_jobs = tuple(
+                    session.scalars(
+                        select(Job).where(
+                            Job.state.in_({"queued", "running", "partial"}),
+                            Job.kind.in_({"recipe.build.v1", "recipe.image.availability.v2"}),
+                        )
+                    )
+                )
+                for candidate in candidates:
+                    try:
+                        candidate_plan = recipe_builds.plan(
+                            revision_id, candidate.id, now=clock()
+                        )
+                    except Exception:
+                        continue
+                    active_work = 0
+                    for job in active_jobs:
+                        if job.kind == "recipe.build.v1" and candidate.id in (job.targets or ()):
+                            active_work += 1
+                        elif job.kind == "recipe.image.availability.v2":
+                            job_payload = job.payload if isinstance(job.payload, Mapping) else {}
+                            job_runtime = job_payload.get("runtime")
+                            if (
+                                job_payload.get("builder_node_id") == candidate.id
+                                or (
+                                    isinstance(job_runtime, Mapping)
+                                    and job_runtime.get("builder_node_id") == candidate.id
+                                )
+                            ):
+                                active_work += 1
+                    plans.append((active_work, candidate.id, candidate_plan))
+                if not plans:
                     raise RecipeImageAvailabilityError(
                         "recipe_image.build_unavailable",
                         "no active compatible Recipe builder is available",
                     )
-                builder_node_id = builder.id
-                try:
-                    plan = recipe_builds.plan(revision_id, builder_node_id, now=clock())
-                except Exception as error:
-                    raise RecipeImageAvailabilityError(
-                        str(getattr(error, "code", "recipe_image.build_unavailable")),
-                        str(error)[:512],
-                    ) from error
+                _, builder_node_id, plan = min(plans, key=lambda item: (item[0], item[1]))
                 package_handle = {"build_input_sha256": plan.build_input_sha256}
             try:
                 runtime = _compile_consistent_runtime(
@@ -311,6 +334,7 @@ def build_recipe_image_availability(
         builder=builder,
         clock=clock,
         receipt_writer=receipt_writer,
+        model_cache=model_cache,
         max_parallel=max_parallel,
         max_parallel_builds=max_parallel_builds,
     )

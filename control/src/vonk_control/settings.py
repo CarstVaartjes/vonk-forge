@@ -178,7 +178,7 @@ class Settings:
     model_cache_reserve_bytes: int = 10 * 1024**3
     model_cache_parallel_downloads: int = 4
     recipe_image_parallel_preparations: int = 4
-    recipe_build_parallel_preparations: int = 1
+    recipe_build_parallel_preparations: int = 4
     huggingface_token_path: Path | None = None
 
     @property
@@ -603,7 +603,7 @@ class WorkerSettings:
     model_cache_reserve_bytes: int = 10 * 1024**3
     model_cache_parallel_downloads: int = 4
     recipe_image_parallel_preparations: int = 4
-    recipe_build_parallel_preparations: int = 1
+    recipe_build_parallel_preparations: int = 4
     huggingface_token_path: Path | None = None
 
     @classmethod

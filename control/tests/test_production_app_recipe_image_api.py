@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_control import route_runtime
+from vonk_control import availability_production
 from vonk_control.api import production_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision, Job
@@ -123,6 +124,15 @@ def test_production_app_recipe_availability_auth_status_and_retry(
 
     monkeypatch.setattr(route_runtime, "AtomicRouteBundlePublisher", TemporaryPublisher)
     monkeypatch.setattr(route_runtime, "FileSupervisorAcknowledger", TemporaryAcknowledger)
+
+    # The auth/status route proof uses the existing synthetic image fixture;
+    # model-child completion is covered by dedicated model-cache composition
+    # tests with a canonical artifact source.
+    original_builder = availability_production.build_recipe_image_availability
+    def image_only_builder(*args, **kwargs):
+        kwargs["model_cache"] = None
+        return original_builder(*args, **kwargs)
+    monkeypatch.setattr(availability_production, "build_recipe_image_availability", image_only_builder)
 
     app = production_app()
     codec = TokenCodec(signing_key.read_bytes())
