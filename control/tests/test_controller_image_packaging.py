@@ -26,6 +26,7 @@ def test_controller_image_pins_and_packages_the_reviewed_skopeo_transport() -> N
     assert '"$TARGETARCH"' in dockerfile
     assert "expected_child=\"$SKOPEO_ARM64_DIGEST\"" in dockerfile
     assert "COPY --from=skopeo /usr/bin/skopeo /usr/bin/skopeo" in dockerfile
+    assert "COPY --from=build /config /usr/local/lib/config" in dockerfile
     assert "COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo" in dockerfile
     assert "ldconfig" in dockerfile
     assert "COPY --from=skopeo /etc/containers /etc/containers" in dockerfile

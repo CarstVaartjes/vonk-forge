@@ -107,6 +107,7 @@ RUN groupadd --gid 10001 control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control-cache \
     && install -d -o 10001 -g 10001 -m 1777 /var/tmp
 COPY --from=build /install /usr/local
+COPY --from=build /config /usr/local/lib/config
 COPY --from=skopeo /usr/bin/skopeo /usr/bin/skopeo
 COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo
 COPY --from=skopeo /etc/containers /etc/containers
