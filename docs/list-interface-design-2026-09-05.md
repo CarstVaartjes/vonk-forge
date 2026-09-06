@@ -28,7 +28,7 @@ main action obvious and communicate status with words as well as color.
 | --- | --- | --- | --- |
 | Models | Model name; family, version and variant | Main capabilities; format/quantization; size; applicable recipes | Select model/version or open details |
 | Installations | Model and recipe; assigned Sparks | Current state; relevant version; progress when active | Open installation or operation details |
-| Recipes | Recipe name; exact model/version | Engine; Spark count; memory/context where applicable; version | Select recipe; Controller Run where available |
+| Recipes | Recipe name; creator and exact model/version | Engine; Spark count; memory/context where applicable; version | Select recipe; Controller Run where available |
 
 These are priorities, not a demand to show unavailable facts. Keep public rows
 limited to published data; private installations and operations belong in the
@@ -51,6 +51,13 @@ a recipe exposes the existing Spark selection and Run controls. Keep the model
 and recipe relationship visible while choosing Sparks. Selection is navigation,
 not an operation: nothing downloads, switches or starts until the user invokes
 the corresponding action.
+
+Keep every independent Recipe visible and selectable. One creator can publish
+several Recipes for the same model and Spark count, with different engines,
+quantization, settings or performance goals. Display creator attribution and
+the distinguishing facts, but key rows and selection by canonical Recipe
+identity and revision. Never collapse alternatives by creator, model, engine
+or topology. Comparing alternatives must not silently change the Run target.
 
 Changing the model/version clears an incompatible recipe selection and prevents
 a stale Run target. If no recipe matches, explain that state within the right

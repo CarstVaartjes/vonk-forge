@@ -21,6 +21,11 @@ meaningful runtime checks remain requirements.
    belongs inside those documents. Remove active model-target, recipe-release,
    runtime-distribution, patch-bundle, and legacy entity sidecar authorities.
    Supporting Dockerfiles, patches, and representative fixtures are allowed.
+   Each Recipe has its own canonical publisher/slug identity and content
+   revision. A model may have multiple Recipes from the same or different
+   creators for the same Spark count. Creator attribution, model identity,
+   engine and topology are comparison/filter fields, never deduplication keys.
+   Preserve variants for different engines, quantization, settings and goals.
 2. **Exact inputs, current dependencies.** Consumer builds refresh the latest
    published contract and record the resolved commit. During parallel work,
    use Sol's current candidate contract and revalidate against the published
