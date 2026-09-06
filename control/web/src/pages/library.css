@@ -3915,11 +3915,13 @@
 .library-paired-heading { display: grid; grid-template-columns: 40% 60%; gap: 1px; color: var(--text-muted, #abb5a7); background: var(--border, #3b4336); font-size: .7rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .library-paired-heading span { padding: .7rem .8rem; background: var(--surface-panel, #111912); }
 .library-paired-panes { display: grid; grid-template-columns: 40% 60%; min-height: 20rem; }
-.library-model-pane, .library-recipe-pane { display: grid; align-content: start; gap: 1px; background: var(--border, #3b4336); }
-.library-model-pane > ul, .library-recipe-pane > ul { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.library-model-pane, .library-recipe-pane { display: grid; align-content: start; gap: 1px; min-width: 0; background: var(--surface-panel, #111912); }
+.library-model-pane { border-right: 1px solid var(--border, #3b4336); }
+.library-model-pane > ul, .library-recipe-pane > ul { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; background: var(--border, #3b4336); }
 .library-model-pane > ul > li, .library-recipe-pane > ul > li { display: contents; }
 .library-model-pane > ul > li > a, .library-recipe-pane > ul > li > a, .library-empty-recipe, .library-selected-model-context { display: grid; gap: .25rem; padding: .75rem .8rem; color: var(--text, #f0f3eb); background: var(--surface-panel, #111912); text-decoration: none; }
 .library-model-pane > ul > li > a:hover, .library-recipe-pane > ul > li > a:hover { background: var(--surface-raised, #19231a); }
+.library-model-pane > ul > li > a > span { display: grid; gap: .25rem; min-width: 0; overflow-wrap: anywhere; }
 .library-model-pane > ul > li > a > span.is-selected { display: grid; gap: .25rem; margin: -.35rem -.45rem; padding: .35rem .45rem; border-left: 2px solid var(--mint, #7cc64b); background: var(--surface-raised, #19231a); }
 .library-model-pane strong, .library-recipe-pane strong { font-size: .84rem; }
 .library-model-pane small, .library-recipe-pane small, .library-selected-model-context span, .library-empty-recipe span { color: var(--text-muted, #abb5a7); font-size: .72rem; }
