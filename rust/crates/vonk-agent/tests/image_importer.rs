@@ -163,7 +163,7 @@ fn trusted_distribution_retention_renames_and_rejects_symlink_sources() {
         .retain_verified_distribution_archive(
             &digest,
             &format!("sha256:{}", "d".repeat(64)),
-            14,
+            15,
             &source,
         )
         .unwrap();
@@ -177,7 +177,7 @@ fn trusted_distribution_retention_renames_and_rejects_symlink_sources() {
             .retain_verified_distribution_archive(
                 &"e".repeat(64),
                 &format!("sha256:{}", "f".repeat(64)),
-                14,
+                15,
                 &symlink_source,
             )
             .is_err()

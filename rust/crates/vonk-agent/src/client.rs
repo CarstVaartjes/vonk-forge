@@ -1520,7 +1520,10 @@ fn valid_oci_digest(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentHttpClient, ClientError, ExactRecipeRunObservation, valid_reported_hostname};
+    use super::{
+        AgentHttpClient, ClientError, ExactRecipeRunObservation, partial_path,
+        valid_reported_hostname,
+    };
     use crate::{oci::RecipeRunObservation, telemetry::TelemetrySample};
     use chrono::{DateTime, Utc};
     use serde_json::{Value, json};
