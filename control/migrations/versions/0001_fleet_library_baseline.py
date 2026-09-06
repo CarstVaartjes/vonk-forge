@@ -775,7 +775,7 @@ def upgrade() -> None:
     sa.Column('recipe_revision_id', sa.String(length=36), nullable=False),
     sa.Column('mapping_id', sa.String(length=36), nullable=False),
     sa.Column('mapping_generation', sa.Integer(), nullable=False),
-    sa.Column('recipe_build_id', sa.String(length=36), nullable=False),
+    sa.Column('recipe_build_id', sa.String(length=36), nullable=True),
     sa.Column('image_digest', sa.String(length=71), nullable=False),
     sa.Column('plan_digest', sa.String(length=64), nullable=False),
     sa.Column('plan', sa.JSON(), nullable=False),

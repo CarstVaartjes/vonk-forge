@@ -252,6 +252,29 @@ def test_runtime_image_receipt_uses_production_identity_fields(
     }
 
 
+def test_fresh_recipe_installation_allows_published_images_without_build(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'recipe-installation-build-null.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    recipe_build = next(
+        column
+        for column in inspect(engine).get_columns("recipe_installations")
+        if column["name"] == "recipe_build_id"
+    )
+
+    assert recipe_build["nullable"] is True
+    build_foreign_keys = [
+        foreign_key
+        for foreign_key in inspect(engine).get_foreign_keys("recipe_installations")
+        if foreign_key["constrained_columns"] == ["recipe_build_id"]
+    ]
+    assert len(build_foreign_keys) == 1
+    assert build_foreign_keys[0]["referred_table"] == "recipe_builds"
+
+
 def test_runtime_image_receipt_rejects_inconsistent_provenance_and_digests(
     tmp_path: Path,
 ) -> None:

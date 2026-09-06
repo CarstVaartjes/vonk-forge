@@ -2205,8 +2205,8 @@ class RecipeInstallation(Base):
         index=True,
     )
     mapping_generation: Mapped[int] = mapped_column(Integer, nullable=False)
-    recipe_build_id: Mapped[str] = mapped_column(
-        ForeignKey("recipe_builds.id", ondelete="RESTRICT"), nullable=False, index=True
+    recipe_build_id: Mapped[str | None] = mapped_column(
+        ForeignKey("recipe_builds.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     image_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     # A digest identifies the approved plan contents, not one installation row.
