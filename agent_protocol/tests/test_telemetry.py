@@ -10,7 +10,6 @@ from vonk_agent_protocol import (
     validate_schema_message,
 )
 
-
 NODE_ID = "spk_0123456789abcdef0123456789abcdef"
 BOOT_ID = "00000000-0000-4000-8000-000000000001"
 

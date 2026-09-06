@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 
 

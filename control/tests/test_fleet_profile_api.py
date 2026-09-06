@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import json
+from datetime import UTC, datetime
 from importlib.resources import files
 
 from fastapi.testclient import TestClient
@@ -15,9 +15,13 @@ from vonk_control.fleet_profiles import (
     FleetProfileService,
     RunSwitchFleetProfileAdapter,
 )
+from vonk_control.models import (
+    AgentNode,
+    Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
-
-from vonk_control.models import AgentNode, Base, CatalogDocument, CatalogDocumentRevision
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
 PROFILE = "00000000-0000-4000-8000-000000000001"

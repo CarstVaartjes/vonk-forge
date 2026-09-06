@@ -351,20 +351,19 @@ def test_postgres_runtime_image_authorization_migration_and_checks(
            1, :now, 'authorized')
         """
     )
-    with pytest.raises(IntegrityError):
-        with postgres_engine.begin() as connection:
-            connection.execute(
-                invalid_authorization,
-                {
-                    "digest": "G" * 64,
-                    "execution": "c" * 64,
-                    "registry": "sha256:" + "d" * 64,
-                    "platform": "sha256:" + "e" * 64,
-                    "config": "sha256:" + "f" * 64,
-                    "archive": "1" * 64,
-                    "now": now,
-                },
-            )
+    with pytest.raises(IntegrityError), postgres_engine.begin() as connection:
+        connection.execute(
+            invalid_authorization,
+            {
+                "digest": "G" * 64,
+                "execution": "c" * 64,
+                "registry": "sha256:" + "d" * 64,
+                "platform": "sha256:" + "e" * 64,
+                "config": "sha256:" + "f" * 64,
+                "archive": "1" * 64,
+                "now": now,
+            },
+        )
 
 
 def test_fresh_recipe_installation_allows_published_images_without_build(
@@ -448,9 +447,8 @@ def test_runtime_image_receipt_rejects_inconsistent_provenance_and_digests(
     )
     for number, overrides in enumerate(invalid, start=1):
         values = {**base, **overrides, "id": f"receipt-{number}"}
-        with pytest.raises(IntegrityError):
-            with engine.begin() as connection:
-                connection.execute(insert, values)
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            connection.execute(insert, values)
 
 
 def test_existing_compatibility_recovery_revision_upgrades_without_operational_model(

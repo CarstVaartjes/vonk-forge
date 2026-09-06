@@ -16,12 +16,12 @@ from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
 from vonk_control.api import AdminServices, create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_projection import (
     FleetNodeIdentity,
     FleetSnapshot,
     TelemetryHistoryResponse,
 )
-from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,

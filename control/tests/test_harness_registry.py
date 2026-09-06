@@ -14,8 +14,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessCompileError
 from vonk_control.harnesses.common import (
-    compile_arguments,
     SyntheticHarnessCompiler,
+    compile_arguments,
     custom_adapter_command,
     structured_command,
     validate_projection,

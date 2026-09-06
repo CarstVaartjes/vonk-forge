@@ -3,14 +3,19 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
+from vonk_agent_protocol import DistributionAssignment, DistributionObject
 from vonk_control.distribution import (
+    DistributionError,
     DistributionService,
     MemoryVerifiedObjectSource,
     ModelCacheVerifiedObjectSource,
 )
-from vonk_agent_protocol import DistributionAssignment, DistributionObject
 
-from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system
+from .test_agent_api import NODE_A, NODE_B, agent_headers
+from .test_agent_api import agent_system as _agent_system
+
+agent_system = _agent_system
 
 
 def _assignment(
@@ -120,12 +125,9 @@ def test_distribution_assignment_survives_controller_service_restart(agent_syste
     restarted = DistributionService(source, clock=clock, sessions=sessions)
     assert restarted.manifest(node_id=NODE_A, plan_digest=assignment.plan_digest)["assignment_id"] == assignment.assignment_id
     restarted.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
-    try:
+    with pytest.raises(DistributionError) as caught:
         restarted.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
-    except Exception as error:
-        assert getattr(error, "code", None) == "distribution.revoked"
-    else:
-        raise AssertionError("revoked assignment remained authorized")
+    assert caught.value.code == "distribution.revoked"
 
 
 def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> None:
@@ -139,12 +141,9 @@ def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> N
     )
     source.register_artifact_set("c" * 64, assignment.objects)
     source.register_runtime_image(assignment.oci_image_digest, assignment.oci_archive_sha256)
-    try:
+    with pytest.raises(DistributionError) as caught:
         DistributionService(source, clock=clock).register(assignment)
-    except Exception as error:
-        assert getattr(error, "code", None) == "distribution.model_set_mismatch"
-    else:
-        raise AssertionError("unverified cache manifest was accepted")
+    assert caught.value.code == "distribution.model_set_mismatch"
 
 
 def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> None:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / "control/Dockerfile"
 
@@ -68,7 +67,7 @@ def test_skopeo_digest_and_platform_arguments_are_bounded() -> None:
     source = (ROOT / "control/src/vonk_control/runtime_image_preparation.py").read_text(
         encoding="utf-8"
     )
-    assert re.search(r"def _platform_args\(architecture: str\).*?override-arch", source, re.S)
+    assert re.search(r"def _platform_args\(architecture: str\).*?override-arch", source, re.DOTALL)
     assert "expected_manifest" in source
     assert "runtime_image.digest_mismatch" in source
     assert "runtime_image.architecture_mismatch" in source

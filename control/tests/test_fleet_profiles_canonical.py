@@ -7,12 +7,15 @@ from importlib.resources import files
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
-
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import FleetProfileService
-from vonk_control.models import AgentNode, Base, CatalogDocument, CatalogDocumentRevision
-
+from vonk_control.models import (
+    AgentNode,
+    Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
+)
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 NODE_1 = "spk_" + "1" * 32

@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-
 from vonk_agent_protocol import (
     AgentProtocolError,
     DistributionAssignment,
