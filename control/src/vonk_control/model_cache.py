@@ -56,6 +56,7 @@ _DEFAULT_MAX_PARALLEL_DOWNLOADS = 4
 _MAX_PARALLEL_DOWNLOADS = 16
 _RETRY_BASE_SECONDS = 5
 _RETRY_MAX_SECONDS = 300
+_MAX_RETRY_HINT_SECONDS = 365 * 24 * 60 * 60
 _TRANSFER_CLAIM_SECONDS = 120
 _HF_CANONICAL_HOST = "huggingface.co"
 _USE_MANIFEST_BYTES = object()
@@ -184,13 +185,15 @@ def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | 
         values.append(max(0, reset - int(now.timestamp())) if reset > 1_000_000_000 else max(0, reset))
     raw_rate_limit = headers.get("ratelimit") or headers.get("RateLimit")
     if raw_rate_limit:
-        # RFC 9333 permits policy parameters such as `RateLimit:
+        # The IETF RateLimit draft permits policy parameters such as `RateLimit:
         # "resolvers";r=0;t=123`.  The `t` value is a delta in seconds.
         values.extend(
             int(match.group(1))
-            for match in re.finditer(r"(?:^|;)\s*t\s*=\s*(\d+)", raw_rate_limit)
+            for match in re.finditer(
+                r"(?:^|;)\s*t\s*=\s*(\d+)\s*(?=;|$)", raw_rate_limit
+            )
         )
-    return max(values) if values else None
+    return min(max(values), _MAX_RETRY_HINT_SECONDS) if values else None
 
 
 def _huggingface_access_url(source: str) -> str:
@@ -2663,7 +2666,22 @@ class ModelCacheService:
                     else None
                 ),
             )
-        except ModelCacheStorageError as error:
+        except (ModelCacheStorageError, httpx.HTTPError, OSError) as error:
+            if _retryable_failure(error):
+                self._finish_failed(
+                    operation_id,
+                    requested_set,
+                    manifest,
+                    error,
+                    failed_artifact_key=(
+                        failed_artifact_key
+                        if isinstance(failed_artifact_key, str)
+                        else None
+                    ),
+                )
+                return self.get_operation(operation_id)
+            if not isinstance(error, ModelCacheStorageError):
+                raise
             safe_detail = redact_text(error.detail)[:512]
             now = self._clock()
             failure_payload = {
@@ -2678,6 +2696,8 @@ class ModelCacheService:
                 "free_bytes": None,
                 "shortfall_bytes": None,
             }
+            if isinstance(failed_artifact_key, str):
+                failure_payload["artifact_key"] = failed_artifact_key
             with self._lock, self._session(write=True) as session:
                 previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
                 if previous is None:
@@ -2796,7 +2816,11 @@ class ModelCacheService:
         client = self._http
         owns_client = client is None
         if client is None:
-            client = httpx.Client(follow_redirects=False)
+            client = httpx.Client(
+                follow_redirects=False,
+                timeout=httpx.Timeout(30.0),
+                trust_env=False,
+            )
         try:
             for spec in specs:
                 response = self._open_http_response(
