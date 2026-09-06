@@ -196,34 +196,19 @@ export type GlobalRecipeRevision = {
   publisher: string; slug: string; recipe_id: string; revision_number: number; revision_id: string;
   content_sha256: string; published_at: string; document: Record<string, unknown>;
 };
-export type PublicRecipeCapability = "chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d";
-export type PublicRecipeExecutionReadiness = "executable" | "not-executable" | "integration-required" | "not-declared";
-export type PublicRecipeExecutionReadinessBasis = "explicit-executable-metadata" | "explicit-non-executable-metadata" | "explicit-integration-required-metadata" | "missing-readiness-metadata" | "conflicting-readiness-metadata";
-export type PublicRecipeQualificationBasis = "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
-export type PublicRecipeAlignment = "standard" | "abliterated" | "derisked" | "other-modified" | "unspecified";
-export type PublicRecipeChange = {kind: "initial" | "model" | "runtime" | "performance" | "fix" | "security" | "compatibility" | "breaking" | "metadata"; summary: string; details: string | null; references: string[]};
-export type PublicRecipeRelease = {version: string; released_at: string; content_sha256: string; upgrade_effect: "metadata-only" | "restart" | "reinstall" | "rebuild"; changes: PublicRecipeChange[]};
-export type PublicRecipeLocalState = {status: "not-imported" | "current" | "update-available" | "local-ahead" | "different-revision" | "conflict"; recipe_id: string | null; revision_number: number | null; content_sha256: string | null; release_version: string | null};
-export type PublicRecipe = {
-  publisher: string; slug: string; title: string; description: string; tags: string[];
-  uri: string; content_sha256: string;
-  model_publisher: string; model_slug: string; model_title: string;
-  model_version_publisher: string; model_version_slug: string; model_version_title: string;
-  source_owner: string | null; source_repository: string | null;
-  alignment: PublicRecipeAlignment;
-  capabilities: PublicRecipeCapability[]; qualification: "candidate" | "cataloged";
-  qualification_basis: PublicRecipeQualificationBasis; qualification_detail: string; precision: string | null;
-  quantizations: string[];
-  execution_readiness: PublicRecipeExecutionReadiness; execution_readiness_basis: PublicRecipeExecutionReadinessBasis; execution_readiness_detail: string;
-  execution_harness: string; runtime_distribution: string; source_bundle_sha256: string; artifact_count: number;
-  topology_name: string; topology_mode: string; node_count: number;
-  topology_roles: Array<{name: string; count: number; endpoint_owner: boolean}>;
-  fabric: {connectivity: "none" | "connected" | "full_mesh" | "switch"; minimum_bandwidth_mbps: number};
-  expected_download_bytes: number; maximum_installed_bytes_per_node: number; maximum_runtime_memory_bytes_per_node: number;
-  release_version: string | null; release_released_at: string | null; local: PublicRecipeLocalState;
-};
-export type PublicRecipeList = {repository: string; commit: string; recipes: PublicRecipe[]};
-export type PublicRecipePreview = PublicRecipe & {source: "global" | "recipe_library"; changes_since_local: PublicRecipeRelease[]};
+// Public catalog responses are generated from the canonical Controller OpenAPI
+// document. Keep these aliases thin so the UI cannot drift into a second DTO.
+export type PublicRecipe = components["schemas"]["PublicRecipeListItem"];
+export type PublicRecipeCapability = PublicRecipe["capabilities"][number];
+export type PublicRecipeExecutionReadiness = PublicRecipe["execution_readiness"];
+export type PublicRecipeExecutionReadinessBasis = PublicRecipe["execution_readiness_basis"];
+export type PublicRecipeQualificationBasis = PublicRecipe["qualification_basis"];
+export type PublicRecipeAlignment = PublicRecipe["alignment"];
+export type PublicRecipeChange = components["schemas"]["PublicRecipeChange"];
+export type PublicRecipeRelease = components["schemas"]["PublicRecipeRelease"];
+export type PublicRecipeLocalState = components["schemas"]["PublicRecipeLocalState"];
+export type PublicRecipeList = components["schemas"]["PublicRecipeListResponse"];
+export type PublicRecipePreview = components["schemas"]["PublicRecipePreviewResponse"];
 export type ManagedCatalogSyncSummary = components["schemas"]["ManagedCatalogSyncResponse"];
 export type ManagedCatalogSyncInput = components["schemas"]["ManagedCatalogSyncRequest"];
 export type LibraryPlacementPreviewInput = components["schemas"]["LibraryPlacementPreviewRequest"];
@@ -300,6 +285,7 @@ export interface LibraryApi {
   artifactJobResultUrl(jobId: string, sha256: string): string;
 }
 export interface ControlApi extends LibraryApi {
+  listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList>;
   fleetProfiles(signal?: AbortSignal): Promise<FleetProfileList>;
   fleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfile>;
   createFleetProfile(input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;

@@ -29,7 +29,7 @@ import {friendlyModelName, humanizeIdentifier} from "./library-technical-details
 type Navigate = (event: MouseEvent<HTMLAnchorElement>, path: string) => void;
 type SparkFilter = "" | "1" | "2" | "3" | "4+";
 type UpdatedFilter = "" | "7" | "30" | "90" | "365";
-type LocalFilter = "" | PublicRecipe["local"]["status"] | "needs-review" | "custom" | "withdrawn";
+type LocalFilter = "" | Extract<PublicRecipe["local"]["status"], "not-imported" | "current" | "update-available"> | "withdrawn";
 type BooleanFilter = "" | "true" | "false";
 
 export type ManagedCatalogWithdrawal = ManagedCatalogSyncSummary["withdrawn_recipes"][number];
@@ -41,9 +41,7 @@ export type LibraryWorkcellFilters = {
   local: LocalFilter;
   model: string;
   modelFamily: string;
-  qualification: "" | PublicRecipe["qualification"];
   quantization: string;
-  readiness: "" | PublicRecipe["execution_readiness"];
   repository: string;
   runtime: string;
   sourceOwner: string;
@@ -52,12 +50,12 @@ export type LibraryWorkcellFilters = {
 };
 
 export const EMPTY_LIBRARY_WORKCELL_FILTERS: LibraryWorkcellFilters = {
-  abliterated: "", capabilities: [], installedOn: "", local: "", model: "", modelFamily: "", qualification: "", quantization: "", readiness: "",
+  abliterated: "", capabilities: [], installedOn: "", local: "", model: "", modelFamily: "", quantization: "",
   repository: "", runtime: "", sourceOwner: "", sparks: "", updated: "",
 };
 
 const FILTER_QUERY_KEYS: Array<keyof LibraryWorkcellFilters> = [
-  "abliterated", "installedOn", "local", "model", "modelFamily", "qualification", "quantization", "readiness", "repository", "runtime", "sourceOwner", "sparks", "updated",
+  "abliterated", "installedOn", "local", "model", "modelFamily", "quantization", "repository", "runtime", "sourceOwner", "sparks", "updated",
 ];
 
 /** Keep model collection filters addressable so a copied URL opens the same result set. */
@@ -82,15 +80,14 @@ export function libraryFiltersToSearch(filters: LibraryWorkcellFilters, params =
 }
 
 export type LibraryRecipeRecord = {
-  catalog?: PublicRecipe;
-  custom: boolean;
+  catalog: PublicRecipe;
   key: string;
-  managed: boolean;
   model?: LibraryModel["model"];
   modelCapabilities?: LibraryModel["model_capabilities"];
   modelKey: string;
   modelTitle: string;
   modelVersion?: LibraryModel["model_version"];
+  modelLinkageError?: string;
   recipe?: LibraryRecipeSummary;
   title: string;
   withdrawal?: ManagedCatalogWithdrawal;
@@ -120,53 +117,40 @@ function normalizedCapabilities(recipe: LibraryRecipeSummary): PublicRecipeCapab
 }
 
 export function buildLibraryRecipeRecords(snapshot: LibrarySnapshot, publicRecipes: PublicRecipe[]): LibraryRecipeRecord[] {
-  const catalogByLocalId = new Map(publicRecipes.flatMap(recipe => recipe.local.recipe_id ? [[recipe.local.recipe_id, recipe] as const] : []));
-  const records: LibraryRecipeRecord[] = [];
+  const localByRecipeId = new Map<string, {model: LibraryModel["model"]; modelCapabilities?: LibraryModel["model_capabilities"]; modelVersion?: LibraryModel["model_version"]; recipe: LibraryRecipeSummary}>();
   for (const libraryModel of snapshot.models) {
-    // The model-version projection is the authority for the exact payload.
-    // Keep the legacy-shaped `model` field only as a transport fallback; it
-    // must never let a recipe title become the model identity shown in UI.
-    const model = libraryModel.model_version?.identity ?? libraryModel.model;
-    const modelTitle = libraryModel.model_version?.metadata?.title?.trim()
-      || libraryModel.model_version?.version?.trim()
-      || friendlyModelName(model);
     for (const recipe of libraryModel.recipes) {
-      const catalog = catalogByLocalId.get(recipe.recipe_id);
-      records.push({
-        catalog,
-        custom: !catalog,
-        key: recipe.recipe_id,
-        managed: Boolean(catalog),
-        model,
-        modelCapabilities: libraryModel.model_capabilities,
-        modelKey: modelVersionKey(model),
-        modelTitle,
-        modelVersion: libraryModel.model_version,
-        recipe,
-        title: recipe.title,
-        withdrawnInstalled: false,
-      });
+      // Local operational state is joined only to a repository recipe below.
+      // An old local or workload record must never become a second recipe source.
+      localByRecipeId.set(recipe.recipe_id, {model: libraryModel.model, modelCapabilities: libraryModel.model_capabilities, modelVersion: libraryModel.model_version, recipe});
     }
   }
-  for (const recipe of snapshot.unlinked_recipes) {
-    const catalog = catalogByLocalId.get(recipe.recipe_id);
-    records.push({catalog, custom: !catalog, key: recipe.recipe_id, managed: Boolean(catalog), modelKey: "unlinked", modelTitle: "Unlinked", recipe, title: recipe.title, withdrawnInstalled: false});
-  }
-  const linkedCatalogUris = new Set(records.flatMap(record => record.catalog ? [record.catalog.uri] : []));
-  for (const catalog of publicRecipes) {
-    if (linkedCatalogUris.has(catalog.uri)) continue;
-    records.push({
+  return publicRecipes.map(catalog => {
+    const local = catalog.local.recipe_id ? localByRecipeId.get(catalog.local.recipe_id) : undefined;
+    const model = local?.model;
+    const modelVersion = local?.modelVersion;
+    const modelTitle = modelVersion?.metadata?.title?.trim()
+      || modelVersion?.version?.trim()
+      || catalog.model_version_title.trim()
+      || catalog.model_title.trim()
+      || (model ? friendlyModelName(model) : "Model metadata unavailable");
+    const modelLinkageError = local && (!modelVersion || modelVersion.state === "unknown")
+      ? "The Controller could not resolve this model version. Refresh Library and retry."
+      : undefined;
+    return {
       catalog,
-      custom: false,
       key: catalog.uri,
-      managed: true,
-      modelKey: "unlinked",
-      modelTitle: "Model identity unavailable",
+      model,
+      modelCapabilities: local?.modelCapabilities,
+      modelKey: model ? modelVersionKey(model) : "",
+      modelTitle,
+      modelVersion,
+      modelLinkageError,
+      recipe: local?.recipe,
       title: catalog.title,
       withdrawnInstalled: false,
-    });
-  }
-  return records;
+    };
+  });
 }
 
 export function applyManagedCatalogWithdrawals(
@@ -185,8 +169,6 @@ export function applyManagedCatalogWithdrawals(
     if (!withdrawal) return record;
     return {
       ...record,
-      custom: false,
-      managed: true,
       withdrawal,
       withdrawnInstalled: installedRecipeIds.has(withdrawal.recipe_id),
     };
@@ -223,10 +205,7 @@ function updatedMatches(record: LibraryRecipeRecord, days: UpdatedFilter, now: D
 
 function localMatches(record: LibraryRecipeRecord, local: LocalFilter): boolean {
   if (!local) return true;
-  if (local === "custom") return record.custom;
   if (local === "withdrawn") return record.withdrawnInstalled;
-  if (!record.catalog) return false;
-  if (local === "needs-review") return ["different-revision", "local-ahead", "conflict"].includes(record.catalog.local.status);
   return record.catalog.local.status === local;
 }
 
@@ -248,48 +227,24 @@ export function filterLibraryRecipeRecords(records: LibraryRecipeRecord[], filte
       && (!filters.runtime || catalog?.runtime_distribution === filters.runtime)
       && (!filters.quantization || catalog?.quantizations.includes(filters.quantization))
       && updatedMatches(record, filters.updated, now)
-      && (!filters.qualification || catalog?.qualification === filters.qualification)
-      && (!filters.readiness || catalog?.execution_readiness === filters.readiness)
       && localMatches(record, filters.local)
       && filters.capabilities.every(capability => capabilityValues.includes(capability));
   });
 }
 
-export function deriveLibraryModels(records: LibraryRecipeRecord[]): Array<{key: string; title: string; count: number; model?: LibraryModel["model"]}> {
-  const models = new Map<string, {key: string; title: string; count: number; model?: LibraryModel["model"]}>();
-  for (const record of records) {
-    const existing = models.get(record.modelKey);
-    if (existing) existing.count += 1;
-    else models.set(record.modelKey, {key: record.modelKey, title: record.modelTitle, count: 1, model: record.model});
-  }
-  return [...models.values()].sort((left, right) => left.title.localeCompare(right.title));
-}
-
-function recipeStatus(record: LibraryRecipeRecord): string {
-  if (!record.recipe) return "Awaiting automatic sync";
-  if (record.recipe.runs.some(run => run.state === "running" && run.healthy)) return "Running";
-  if (record.recipe.runs.some(run => run.state === "running")) return "Running · attention";
-  if (record.recipe.installations.some(installation => installation.state === "installed")) return "Installed";
-  if (record.recipe.selected_revision?.lifecycle === "resolved") return "Available";
-  return "Needs review";
-}
-
 function localStatus(record: LibraryRecipeRecord): string {
   if (record.withdrawnInstalled) return "Withdrawn upstream · installed";
-  if (record.custom) return "Custom recipe";
   const status = record.catalog?.local.status;
   if (status === "update-available") return "Update available";
   if (status === "current") return "Catalog current";
   if (status === "not-imported") return "Pending automatic sync";
-  if (status === "different-revision") return "Different revision";
-  if (status === "local-ahead") return "Local revision ahead";
-  return status === "conflict" ? "Identity conflict" : "Managed catalog";
+  return "Repository recipe";
 }
 
 function releaseStatus(record: LibraryRecipeRecord): string {
   if (record.withdrawnInstalled) return "Catalog updates unavailable";
+  if (record.modelLinkageError) return record.modelLinkageError;
   const catalog = record.catalog;
-  if (!catalog) return record.managed ? "Managed catalog recipe" : "Custom recipe";
   if (catalog.local.status === "update-available") return `Update available · v${catalog.local.release_version ?? "?"} → v${catalog.release_version ?? "?"}`;
   if (catalog.local.status === "current") return `v${catalog.release_version ?? catalog.local.release_version ?? "?"} · catalog current`;
   return localStatus(record);
@@ -418,12 +373,9 @@ export function LibraryWorkcell({
   const matchingRecords = useMemo(() => filterLibraryRecipeRecords(allRecords, filters, query)
     .filter(record => !filters.installedOn
       || (filters.installedOn === "not-installed" ? installedNodeIds(record, fleet).length === 0 : installedNodeIds(record, fleet).includes(filters.installedOn))), [allRecords, filters, fleet, query]);
-  const models = useMemo(() => deriveLibraryModels(matchingRecords), [matchingRecords]);
   const selectedRecord = route.kind === "recipe" ? allRecords.find(record => record.recipe?.recipe_id === route.recipeId) : undefined;
-  const selectedModelKey = route.kind === "model" ? (route.unlinked ? "unlinked" : route.modelKey) : selectedRecord?.modelKey;
-  const visibleRecords = route.kind === "model" && route.unlinked
-    ? matchingRecords.filter(record => record.modelKey === "unlinked")
-    : selectedModelKey ? matchingRecords.filter(record => record.modelKey === selectedModelKey) : matchingRecords;
+  const selectedModelKey = route.kind === "model" ? route.modelKey : selectedRecord?.modelKey;
+  const visibleRecords = selectedModelKey ? matchingRecords.filter(record => record.modelKey === selectedModelKey) : matchingRecords;
   const selectedRecords = selectedRecord ? [selectedRecord] : selectedModelKey ? allRecords.filter(record => record.modelKey === selectedModelKey) : [];
   const selectedModelIdentity = selectedRecords.find(record => record.model)?.model;
   const selectedModelRecipeIds = selectionRecipeIds(selectedRecords);
@@ -541,6 +493,10 @@ export function LibraryWorkcell({
 
   async function runGroupNow(record: LibraryRecipeRecord, group: LibraryPlacementGroup, retry = false) {
     if (runStarting || runActive) return;
+    if (record.modelLinkageError) {
+      setRunError(record.modelLinkageError);
+      return;
+    }
     if (!record.recipe || !record.recipe.selected_revision?.id || record.recipe.selected_revision.lifecycle !== "resolved") {
       setRunError("This recipe has no resolved revision to run.");
       return;
@@ -666,9 +622,7 @@ export function LibraryWorkcell({
               <th scope="col"><span>Sparks</span><select aria-label="Sparks" value={filters.sparks} onChange={event => updateFilter("sparks", event.target.value as SparkFilter)}><option value="">Any count</option><option value="1">1 Spark</option><option value="2">2 Sparks</option><option value="3">3 Sparks</option><option value="4+">4+ Sparks</option></select></th>
               <th scope="col"><span>Creator</span><select aria-label="Creator" value={filters.sourceOwner} onChange={event => updateFilter("sourceOwner", event.target.value)}><option value="">All creators</option>{creators.map(value => <option key={value} value={value}>{value}</option>)}</select></th>
               <th scope="col"><span>Updated</span><select aria-label="Updated" value={filters.updated} onChange={event => updateFilter("updated", event.target.value as UpdatedFilter)}><option value="">Any time</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select></th>
-              <th scope="col"><span>Readiness</span><select aria-label="Readiness" value={filters.readiness} onChange={event => updateFilter("readiness", event.target.value as LibraryWorkcellFilters["readiness"])}><option value="">Any readiness</option><option value="executable">Executable</option><option value="integration-required">Integration required</option><option value="not-executable">Not executable</option><option value="not-declared">Not declared</option></select></th>
               <th scope="col"><span>Capabilities</span><select aria-label="Capabilities" value="" onChange={event => { const value = event.target.value as PublicRecipeCapability; if (value && !filters.capabilities.includes(value)) updateFilter("capabilities", [...filters.capabilities, value]); }}><option value="">{filters.capabilities.length ? `${filters.capabilities.length} selected · add…` : "Any capability"}</option>{CAPABILITIES.map(option => <option key={option.value} value={option.value} disabled={filters.capabilities.includes(option.value)}>{option.label}</option>)}</select></th>
-              <th scope="col"><span>Qualification</span><select aria-label="Qualification" value={filters.qualification} onChange={event => updateFilter("qualification", event.target.value as LibraryWorkcellFilters["qualification"])}><option value="">Any status</option><option value="cataloged">Accepted</option><option value="candidate">Candidate</option></select></th>
               <th scope="col"><span>Repository</span><select aria-label="Repository" value={filters.repository} onChange={event => updateFilter("repository", event.target.value)}><option value="">All repositories</option>{repositories.map(value => <option key={value} value={value}>{repositoryLabel(value)}</option>)}</select></th>
               <th scope="col"><span>Download</span></th><th scope="col"><span>Disk / Spark</span></th><th scope="col"><span>Memory / Spark</span></th><th scope="col"><span>Action</span></th>
             </tr></thead>
@@ -677,11 +631,11 @@ export function LibraryWorkcell({
               const locations = installedNodeIds(record, fleet).map(nodeId => { const node = fleet?.nodes.find(item => item.id === nodeId); return node ? nodeDisplayName(node) : nodeId; });
               return <tr className={selectedRecord?.key === record.key ? "is-selected" : ""} key={record.key} draggable={Boolean(record.recipe)} onDragStart={event => onDragStart(event, record)} onDragEnd={() => { setDraggedRecipe(undefined); setDropNodeId(""); }}>
                 <td>{locations.length ? locations.join(" · ") : "Not installed"}</td>
-                <td>{record.recipe ? <a aria-current={selectedRecord?.key === record.key ? "page" : undefined} href={recipeLibraryPath(record.recipe.recipe_id)} onClick={event => onNavigate(event, recipeLibraryPath(record.recipe!.recipe_id))}>{record.title}</a> : <strong>{record.title}</strong>}<small>{releaseStatus(record)}</small></td>
+                <td>{record.recipe ? <a aria-current={selectedRecord?.key === record.key ? "page" : undefined} href={recipeLibraryPath(record.recipe.recipe_id)} onClick={event => onNavigate(event, recipeLibraryPath(record.recipe!.recipe_id))}>{record.title}</a> : <strong>{record.title}</strong>}<small className={record.modelLinkageError ? "is-error" : undefined}>{releaseStatus(record)}</small></td>
                 <td>{recordModelFamily(record)}</td><td>{record.modelTitle}</td><td>{catalog?.quantizations.join(" · ") || "—"}</td><td>{catalog ? humanizeIdentifier(catalog.runtime_distribution) : "—"}</td><td>{recordIsAbliterated(record) ? "True" : "False"}</td><td>{catalog?.node_count ?? "—"}</td><td>{catalog?.source_owner ?? "—"}</td><td>{catalog?.release_released_at ?? "—"}</td>
-                <td>{catalog ? humanizeIdentifier(catalog.execution_readiness) : "—"}</td><td>{recordCapabilities(record).map(value => CAPABILITIES.find(option => option.value === value)?.label ?? value).join(" · ") || "—"}</td><td>{catalog ? (catalog.qualification === "cataloged" ? "Accepted" : "Candidate") : "Custom"}</td><td>{catalog?.source_repository ? <a href={catalog.source_repository} target="_blank" rel="noreferrer">{repositoryLabel(catalog.source_repository)}<span className="visually-hidden"> opens in a new tab</span></a> : "—"}</td>
+                <td>{recordCapabilities(record).map(value => CAPABILITIES.find(option => option.value === value)?.label ?? value).join(" · ") || "—"}</td><td>{catalog.source_repository ? <a href={catalog.source_repository} target="_blank" rel="noreferrer">{repositoryLabel(catalog.source_repository)}<span className="visually-hidden"> opens in a new tab</span></a> : "—"}</td>
                 <td>{catalog ? formatBytes(catalog.expected_download_bytes) : "—"}</td><td>{catalog ? formatBytes(catalog.maximum_installed_bytes_per_node) : "—"}</td><td>{catalog ? formatBytes(catalog.maximum_runtime_memory_bytes_per_node) : "—"}</td>
-                <td><button type="button" className="button secondary" disabled={!record.recipe} title={!record.recipe ? "Waiting for automatic repository synchronization." : undefined} onClick={() => { void preparePlacement(record); }}>{placementRecipe?.key === record.key ? (placementLoading ? "Checking Sparks…" : "Choose a Spark") : record.recipe ? "Run" : "Syncing…"}</button></td>
+                <td><button type="button" className="button secondary" disabled={!record.recipe && !record.modelLinkageError} title={record.modelLinkageError || (!record.recipe ? "Waiting for automatic repository synchronization." : undefined)} onClick={() => { if (record.modelLinkageError) void onRefresh(new AbortController().signal); else void preparePlacement(record); }}>{record.modelLinkageError ? "Retry" : placementRecipe?.key === record.key ? (placementLoading ? "Checking Sparks…" : "Choose a Spark") : record.recipe ? "Run" : "Syncing…"}</button></td>
               </tr>;
             })}</tbody>
           </table>
