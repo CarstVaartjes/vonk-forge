@@ -2058,6 +2058,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(evidence.oci_image_digest, format!("sha256:{image_digest}"));
+        assert_eq!(
+            evidence.oci_archive_path,
+            archive_root.join(&assignment.oci_archive_sha256)
+        );
         assert_eq!(std::fs::read(&evidence.oci_archive_path).unwrap(), archive);
         assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), model);
         assert_eq!(
@@ -2097,6 +2101,17 @@ mod tests {
             )
             .unwrap();
         assert_eq!(cached, reused);
+        assert!(
+            !archive_root
+                .join(format!("{}.partial", assignment.oci_archive_sha256))
+                .exists()
+        );
+        assert!(
+            std::fs::read_dir(&archive_root)
+                .unwrap()
+                .flatten()
+                .all(|entry| !entry.file_name().to_string_lossy().contains("partial"))
+        );
         assert_eq!(
             importer.distribution_runtime_arguments(
                 &evidence.oci_archive_sha256,
@@ -2108,6 +2123,16 @@ mod tests {
         );
         let requests = server.join().unwrap();
         assert_eq!(requests.len(), 4);
+        let archive_gets = requests
+            .iter()
+            .filter(|request| {
+                String::from_utf8_lossy(request).contains(&format!(
+                    "/agent/v1/distribution/objects/{}",
+                    assignment.oci_archive_sha256
+                ))
+            })
+            .count();
+        assert_eq!(archive_gets, 1);
         assert!(requests.iter().all(|request| {
             String::from_utf8_lossy(request)
                 .to_ascii_lowercase()
