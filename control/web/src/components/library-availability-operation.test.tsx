@@ -54,7 +54,7 @@ test("keeps NAS, integrity, and build failure details bounded and actionable", (
     state: "failed",
     failure: {code: "capacity_insufficient", detail: "Not enough NAS space.", recovery_actions: ["free_space"], retryable: true, required_bytes: 200, free_bytes: 100, shortfall_bytes: 100},
     members: [
-      {key: "model-cache", state: "failed", progress: running("verify", 80, 100), failure: {code: "integrity_mismatch", detail: "The selected bytes failed verification.", recovery_actions: ["download_again"], retryable: false, preserved: "Previous valid object retained."}},
+      {key: "model-cache", state: "failed", progress: running("verify", 80, 100), failure: {code: "integrity_mismatch", detail: "The selected bytes failed verification. Previous valid object retained.", recovery_actions: ["download_again"], retryable: false}},
       {key: "runtime-image", state: "failed", progress: running("build", 0), failure: {code: "build_failed", detail: "Image build failed at step 8.", recovery_actions: ["retry", "force_rebuild"], retryable: true, log_excerpt: "Step 8: compiling attention kernels\nAuthorization: Bearer secret"}},
     ],
   })} onRetry={retry}/>);

@@ -64,22 +64,22 @@ function recoveryList(value: unknown): {codes: string[]; labels: string[]} {
  */
 export function availabilityFailure(value: unknown, fallbackDetail = "The availability operation could not complete."): AvailabilityFailure {
   const root = objectValue(value);
-  const nested = objectValue(root?.failure) ?? objectValue(root?.error) ?? root;
-  const code = boundedText(nested?.code ?? nested?.error_code, "availability.operation_failed", 128);
-  const detail = boundedText(nested?.detail ?? nested?.message ?? nested?.summary ?? (typeof value === "string" ? value : undefined), fallbackDetail);
-  const retryAfter = nested?.retry_after_seconds ?? nested?.retry_after;
+  const nested = objectValue(root?.failure) ?? root;
+  const code = boundedText(nested?.code, "availability.operation_failed", 128);
+  const detail = boundedText(nested?.detail ?? (typeof value === "string" ? value : undefined), fallbackDetail);
+  const retryAfter = nested?.retry_after_seconds;
   const retryAfterSeconds = typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter >= 0
     ? Math.min(86_400, Math.floor(retryAfter))
     : undefined;
-  const retryAt = typeof (nested?.retry_time ?? nested?.retry_at ?? nested?.next_retry_at) === "string"
-    ? boundedText(nested?.retry_time ?? nested?.retry_at ?? nested?.next_retry_at, "")
+  const retryAt = typeof nested?.retry_time === "string"
+    ? boundedText(nested.retry_time, "")
     : undefined;
   const progress = objectValue(nested?.progress) ?? objectValue(root?.progress);
-  const recovery = recoveryList(nested?.recovery ?? nested?.recovery_actions ?? nested?.next_actions ?? nested?.actions);
-  const progressBytes = progress?.completed_bytes ?? progress?.downloaded_bytes;
-  const preserved = boundedText(nested?.preserved ?? nested?.retained ?? progress?.preserved, "", 256)
+  const recovery = recoveryList(nested?.recovery_actions);
+  const progressBytes = progress?.completed_bytes;
+  const preserved = boundedText(progress?.preserved, "", 256)
     || (typeof progressBytes === "number" && progressBytes > 0 ? `${progressBytes} bytes of progress retained.` : undefined);
-  const operationId = boundedText(nested?.operation_id ?? root?.operation_id, "", 128) || undefined;
+  const operationId = boundedText(root?.id, "", 128) || undefined;
   const logExcerpt = safeLog(nested?.log_excerpt ?? nested?.log ?? nested?.logs);
   const bytes = (key: string): number | undefined => {
     const raw = nested?.[key];
@@ -91,8 +91,8 @@ export function availabilityFailure(value: unknown, fallbackDetail = "The availa
 /** Return the shared retry decision without exposing the API DTO in UI code. */
 export function availabilityRetryable(value: unknown): boolean {
   const root = objectValue(value);
-  const nested = objectValue(root?.failure) ?? objectValue(root?.error) ?? root;
-  return nested?.retryable === true || Boolean(nested?.retryable === undefined && root?.state === "failed" && root?.result && typeof root.result === "object" && (root.result as Record<string, unknown>).retryable === true);
+  const nested = objectValue(root?.failure) ?? root;
+  return nested?.retryable === true;
 }
 
 function retryLabel(seconds: number): string {

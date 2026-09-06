@@ -192,6 +192,16 @@ export type ModelCacheUpdateResponse = components["schemas"]["ModelCacheUpdateRe
 export type ModelCacheUpdatesResponse = components["schemas"]["ModelCacheUpdatesResponse"];
 export type ModelCacheOperationsResponse = components["schemas"]["ModelCacheOperationsResponse"];
 export type ModelCacheRetryInput = components["schemas"]["ModelCacheRetryRequest"];
+export type ModelCacheAccessResumeInput = components["schemas"]["ModelCacheAccessResumeRequest"];
+export type ModelCacheAccessResumeResponse = components["schemas"]["ModelCacheOperationResponse"];
+export type AvailabilityOperationFailure = components["schemas"]["AvailabilityOperationFailure"];
+export type OperationProgress = components["schemas"]["OperationProgress"];
+export type RecipeImageAvailabilityAction = components["schemas"]["RecipeImageAvailabilityAction"];
+export type RecipeImageAvailabilityChild = components["schemas"]["RecipeImageAvailabilityChild"];
+export type RecipeImageAvailabilityInput = components["schemas"]["RecipeImageAvailabilityStart"];
+export type RecipeImageAvailabilityRetryInput = components["schemas"]["RecipeImageAvailabilityRetry"];
+export type RecipeImageAvailabilityOperation = components["schemas"]["RecipeImageAvailabilityResponse"];
+export type RecipeImageAvailabilityList = components["schemas"]["RecipeImageAvailabilityListResponse"];
 export type RunSwitchRetryInput = components["schemas"]["RunSwitchRetryRequest"];
 export type LibraryPlacementPreviewInput = components["schemas"]["LibraryPlacementPreviewRequest"];
 export type LibraryPlacementPreview = components["schemas"]["LibraryPlacementPreview"];
@@ -265,6 +275,11 @@ export interface ControlApi extends LibraryApi {
   modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse>;
   modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;
   retryModelCacheOperation(operationId: string, input: ModelCacheRetryInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse>;
+  checkModelCacheAccessAndResume(operationId: string, input: ModelCacheAccessResumeInput, signal?: AbortSignal): Promise<ModelCacheAccessResumeResponse>;
+  recipeAvailabilityStart(input: RecipeImageAvailabilityInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
+  recipeAvailabilityList(recipeRevisionId?: string, state?: RecipeImageAvailabilityOperation["state"], cursor?: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityList>;
+  recipeAvailabilityOperation(operationId: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
+  retryRecipeAvailability(operationId: string, input: RecipeImageAvailabilityRetryInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation>;
   visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot>;
   fleetEvidence(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
   nodeStatuses(signal?: AbortSignal): Promise<FleetEvidenceResponse>;
