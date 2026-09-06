@@ -124,6 +124,7 @@ class RecipeImageBuilder(Protocol):
         recipe: RecipeDefinition,
         runtime: Mapping[str, object],
         *,
+        operation_id: str,
         build_input_sha256: str,
         force: bool,
         progress: Callable[[Mapping[str, object]], None],
@@ -1245,6 +1246,7 @@ class RecipeImageAvailabilityService:
                 build_receipt = self._builder(
                     recipe,
                     runtime,
+                    operation_id=operation_id,
                     build_input_sha256=build_input_sha256,
                     force=force_rebuild,
                     progress=report,

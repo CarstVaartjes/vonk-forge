@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+from vonk_control.operation_api import admin_openapi_schema
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityView
 from vonk_control.recipe_image_availability_api import (
+    RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS,
     _progress,
     _view_document,
     install_recipe_image_availability_routes,
@@ -74,6 +76,9 @@ def test_openapi_uses_typed_recipe_models_and_conflict_schema() -> None:
     schema = app.openapi()
     start = schema["paths"]["/api/v1/library/recipe-image-availability"]["post"]
     listing = schema["paths"]["/api/v1/library/recipe-image-availability"]["get"]
+    retry = schema["paths"][
+        "/api/v1/library/recipe-image-availability/{operation_id}/retry"
+    ]["post"]
     assert start["responses"]["202"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "RecipeImageAvailabilityResponse"
     )
@@ -83,3 +88,9 @@ def test_openapi_uses_typed_recipe_models_and_conflict_schema() -> None:
     assert listing["responses"]["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
         "RecipeImageAvailabilityListResponse"
     )
+    assert retry["responses"]["409"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "RecipeImageAvailabilityErrorResponse"
+    )
+    admin = admin_openapi_schema(app)
+    for (method, path), operation_id in RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS.items():
+        assert admin["paths"][path][method]["operationId"] == operation_id

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
@@ -10,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control.models import Base, CatalogDocumentRevision, Job
+from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision, Job
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
@@ -167,6 +168,58 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(tmp_path: 
     assert failed.supported_actions == ("retry",)
 
 
+def test_builder_capacity_wait_remains_durable_queue_after_automatic_limit(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-capacity-wait", recipe)
+
+    def builder(*_: object, **__: object) -> dict[str, object]:
+        raise RecipeImageAvailabilityError(
+            "recipe_image.build_capacity_wait",
+            "all compatible builders are currently occupied",
+            retryable=True,
+            retry_after_seconds=1,
+            recovery_actions=("resume", "retry"),
+        )
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id, *, force=False: (recipe, _build_runtime()),
+        builder=builder,
+        clock=lambda: datetime.now(UTC),
+        automatic_attempt_limit=1,
+    )
+    queued = service.start(
+        "revision-capacity-wait", actor="operator", request_id="w" * 36
+    )
+
+    assert service.run_pending() == 1
+    waiting = service.get(queued.id)
+    assert waiting.state == "queued"
+    assert waiting.failure is not None
+    assert waiting.failure["code"] == "recipe_image.build_capacity_wait"
+
+    with sessions.begin() as session:
+        operation = session.get(Job, queued.id)
+        assert operation is not None
+        operation.payload = dict(operation.payload) | {
+            "retry_after_at": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+        }
+
+    assert service.run_pending() == 1
+    still_waiting = service.get(queued.id)
+    assert still_waiting.state == "queued"
+    assert still_waiting.attempt == 2
+    assert still_waiting.failure is not None
+    assert still_waiting.failure["code"] == "recipe_image.build_capacity_wait"
+
+
 def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> None:
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
@@ -291,6 +344,113 @@ def test_claim_identity_uses_authoritative_image_and_running_claim_is_not_repeat
     claim = service.claim_pending(owner_id="worker-a")
     assert claim and claim[0].image_identity == IMAGE_DIGEST
     assert service.claim_pending(owner_id="worker-b") == ()
+
+
+def test_postgres_claims_are_fenced_and_respect_build_capacity(
+    tmp_path: Path, postgres_engine
+) -> None:
+    Base.metadata.create_all(postgres_engine)
+    sessions = sessionmaker(postgres_engine, expire_on_commit=False)
+    image_recipe = _recipe("recipe-image.json")
+    build_recipe = _recipe("recipe-source-build.json")
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        session.add_all(
+            [
+                CatalogDocument(
+                    id="document-pg-image",
+                    kind="recipe",
+                    publisher=image_recipe.identity.publisher,
+                    slug=image_recipe.identity.slug,
+                    title=image_recipe.metadata.title,
+                    created_by="test",
+                    created_at=now,
+                    updated_at=now,
+                ),
+                CatalogDocument(
+                    id="document-pg-build",
+                    kind="recipe",
+                    publisher=build_recipe.identity.publisher,
+                    slug=build_recipe.identity.slug,
+                    title=build_recipe.metadata.title,
+                    created_by="test",
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+        session.flush()
+        image_revision = _add_revision(session, "revision-pg-image", image_recipe)
+        image_revision.document_id = "document-pg-image"
+        build_revision = _add_revision(session, "revision-pg-build", build_recipe)
+        build_revision.document_id = "document-pg-build"
+
+    def authority(revision_id: str, *, force: bool = False):
+        del force
+        if revision_id == "revision-pg-image":
+            return image_recipe, _runtime()
+        return build_recipe, _build_runtime()
+
+    def new_service(root: Path) -> RecipeImageAvailabilityService:
+        return RecipeImageAvailabilityService(
+            sessions,
+            storage=FilesystemRuntimeImageStorage(root),
+            authority=authority,
+            transport=Transport(),
+            clock=lambda: datetime.now(UTC),
+            max_parallel=2,
+            max_parallel_builds=1,
+            claim_lease_seconds=10,
+        )
+
+    first = new_service(tmp_path / "first")
+    second = new_service(tmp_path / "second")
+    image = first.start(
+        "revision-pg-image", actor="operator", request_id="p" * 36
+    )
+    build_a = first.start(
+        "revision-pg-build", actor="operator", request_id="q" * 36
+    )
+    build_b = first.start(
+        "revision-pg-build", actor="operator", request_id="r" * 36
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claims = tuple(
+            executor.map(
+                lambda service: service.claim_pending(limit=1, owner_id="pg-worker"),
+                (first, second),
+            )
+        )
+    claimed = [claim for batch in claims for claim in batch]
+    assert len(claimed) == 2
+    assert len({claim.operation_id for claim in claimed}) == 2
+    assert len({claim.operation_id for claim in claimed} & {image.id}) <= 1
+    build_claims = [
+        claim for claim in claimed if claim.operation_id in {build_a.id, build_b.id}
+    ]
+    assert len(build_claims) == 1
+    assert {claim.operation_id for claim in claimed} <= {image.id, build_a.id, build_b.id}
+
+    # The live build lease fences its sibling even when another worker asks for
+    # a fresh claim; the worker cannot evade the global build cap.
+    assert first.claim_pending(limit=1, owner_id="pg-worker-c") == ()
+
+    build_claim = build_claims[0]
+    with sessions.begin() as session:
+        operation = session.get(Job, build_claim.operation_id)
+        assert operation is not None
+        operation.updated_at = datetime.now(UTC) - timedelta(seconds=10)
+        operation.payload = dict(operation.payload) | {
+            "claim_until": (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+        }
+        sibling = session.get(Job, build_b.id if build_claim.operation_id == build_a.id else build_a.id)
+        assert sibling is not None
+        sibling.updated_at = datetime.now(UTC) + timedelta(seconds=10)
+    reclaimed = first.claim_pending(limit=1, owner_id="pg-worker-d")
+    assert len(reclaimed) == 1
+    assert reclaimed[0].operation_id == build_claim.operation_id
+    assert first.claim_pending(limit=1, owner_id="pg-worker-e") == ()
 
 
 def test_same_immutable_image_reuses_preparation_across_recipe_revisions(tmp_path: Path) -> None:
