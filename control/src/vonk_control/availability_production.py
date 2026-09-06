@@ -199,13 +199,33 @@ def build_recipe_image_availability(
                             "recipe_image.build_input_missing",
                             "cached Recipe build has no exact input identity",
                         )
-                    package_handle = {"build_input_sha256": resolution.build_input_sha256}
+                    image_digest = getattr(resolution, "image_digest", None)
+                    if isinstance(image_digest, str) and image_digest.startswith("sha256:"):
+                        image_digest = image_digest[7:]
+                    if not isinstance(image_digest, str) or len(image_digest) != 64:
+                        image_digest = resolution.input_intent_sha256
+                    package_handle = {
+                        "build_input_sha256": resolution.build_input_sha256,
+                        "image_digest": image_digest,
+                        "image_reference": f"localhost/vonk/recipe-build@sha256:{image_digest}",
+                    }
                 else:
                     # Builder selection and final input binding happen only at
                     # dispatch. Persist the immutable intent so saturation can
                     # queue a durable parent operation.
                     if resolution is not None:
-                        package_handle = {"input_intent_sha256": resolution.input_intent_sha256}
+                        package_handle = {
+                            "input_intent_sha256": resolution.input_intent_sha256,
+                            # A source-build operation has no final image until
+                            # dispatch. Compile a provisional runtime identity
+                            # so the durable parent can queue without a builder;
+                            # the verified build receipt replaces it on success.
+                            "image_digest": resolution.input_intent_sha256,
+                            "image_reference": (
+                                "localhost/vonk/recipe-build@sha256:"
+                                f"{resolution.input_intent_sha256}"
+                            ),
+                        }
             try:
                 runtime = _compile_consistent_runtime(
                     recipe,
@@ -297,6 +317,7 @@ def build_recipe_image_availability(
                             or (
                                 job.kind == "recipe.image.availability.v2"
                                 and isinstance(job.payload, Mapping)
+                                and not isinstance(job.payload.get("image_result"), Mapping)
                                 and isinstance(job.payload.get("runtime"), Mapping)
                                 and job.payload["runtime"].get("builder_node_id") == node_id
                             )
