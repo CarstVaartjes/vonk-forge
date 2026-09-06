@@ -38,7 +38,7 @@ from vonk_control.operation_api import merge_operation_providers
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-from .test_agent_api import NODE_A, NODE_B, agent_headers
+from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system
 
 
 def _target(node: str, *, image: bool = False) -> SimpleNamespace:
