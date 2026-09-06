@@ -11,7 +11,7 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
     RecipeJobFile,
@@ -29,6 +29,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
@@ -38,9 +39,64 @@ from .test_recipe_operations import (
 )
 
 
-def running_artifact_service(tmp_path):
+def _configure_artifact_recipe(document: dict[str, object]) -> None:
+    document["interfaces"] = [
+        {
+            "adapter": "image-job",
+            "path": "/outputs",
+            "input": {
+                "path": "/inputs",
+                "required": True,
+                "media_types": ["image/png"],
+                "max_bytes": 32 * 1024**2,
+            },
+            "output": {
+                "path": "/outputs",
+                "max_total_bytes": 4096,
+                "slots": [
+                    {
+                        "id": "image",
+                        "label": "Image",
+                        "description": "Generated image",
+                        "media_types": ["image/png"],
+                        "extensions": [".png"],
+                        "min_files": 1,
+                        "max_files": 1,
+                        "max_file_bytes": 1024,
+                        "max_total_bytes": 4096,
+                    }
+                ],
+            },
+        }
+    ]
+    document["parameters"] = [
+        {
+            "name": "prompt",
+            "description": "Prompt",
+            "type": "string",
+            "default": "",
+            "change_effect": "restart",
+        },
+        {
+            "name": "seed",
+            "description": "Seed",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 100,
+            "change_effect": "restart",
+        },
+    ]
+
+
+def running_artifact_service(tmp_path, *, recipe_transform=None):
+    def transform(document: dict[str, object]) -> None:
+        _configure_artifact_recipe(document)
+        if recipe_transform is not None:
+            recipe_transform(document)
+
     sessions, recipe_operations, queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path
+        tmp_path, recipe_transform=transform
     )
     installed = installed_recipe(
         recipe_operations,
@@ -49,65 +105,6 @@ def running_artifact_service(tmp_path):
         nodes,
         request_id="00000000-0000-4000-8000-000000000101",
     )
-    with sessions.begin() as session:
-        installation = session.get(RecipeInstallation, installed.owner_id)
-        revision = session.get(
-            CatalogDocumentRevision,
-            installation.recipe_revision_id,
-        )
-        document = dict(revision.document)
-        document["interfaces"] = [
-            {
-                "adapter": "image-job",
-                "path": "/outputs",
-                "input": {
-                    "path": "/inputs",
-                    "required": True,
-                    "media_types": ["image/png"],
-                    "max_bytes": 32 * 1024**2,
-                },
-                "output": {
-                    "path": "/outputs",
-                    "max_total_bytes": 4096,
-                    "slots": [
-                        {
-                            "id": "image",
-                            "label": "Image",
-                            "description": "Generated image",
-                            "media_types": ["image/png"],
-                            "extensions": [".png"],
-                            "min_files": 1,
-                            "max_files": 1,
-                            "max_file_bytes": 1024,
-                            "max_total_bytes": 4096,
-                        }
-                    ],
-                },
-            }
-        ]
-        document["parameters"] = [
-            {
-                "name": "prompt",
-                "description": "Prompt",
-                "type": "string",
-                "default": "",
-                "change_effect": "restart",
-            },
-            {
-                "name": "seed",
-                "description": "Seed",
-                "type": "integer",
-                "default": 0,
-                "minimum": 0,
-                "maximum": 100,
-                "change_effect": "restart",
-            },
-        ]
-        session.execute(
-            update(CatalogDocumentRevision)
-            .where(CatalogDocumentRevision.id == revision.id)
-            .values(document=document)
-        )
     run_plan = recipe_operations.preview_run(installed.owner_id, "image-job")
     activated = recipe_operations.activate_job_run(
         run_plan,
@@ -284,11 +281,24 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         document = copy.deepcopy(revision.document)
         document["parameters"][1]["maximum"] = 99
-        session.execute(
-            update(CatalogDocumentRevision)
-            .where(CatalogDocumentRevision.id == revision.id)
-            .values(document=document)
+        parsed = RecipeDefinition.model_validate(document)
+        replacement = CatalogDocumentRevision(
+            document_id=revision.document_id,
+            kind=revision.kind,
+            publisher=revision.publisher,
+            slug=revision.slug,
+            revision_number=revision.revision_number + 1,
+            schema_version=2,
+            state="active",
+            document=parsed.model_dump(mode="json"),
+            content_digest=content_sha256(parsed),
+            projected={},
+            created_by="admin",
+            created_at=revision.created_at,
         )
+        session.add(replacement)
+        session.flush()
+        installation.recipe_revision_id = replacement.id
 
     with pytest.raises(ArtifactJobError, match="request key"):
         service.create(**request)
@@ -540,22 +550,14 @@ def test_artifact_job_server_contract_rejects_client_escalation(
 def test_artifact_job_dispatches_exact_signed_output_mapping(
     tmp_path, media_type: str, extension: str
 ) -> None:
-    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
-        tmp_path
-    )
-    with sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
-        installation = session.get(RecipeInstallation, run.installation_id)
-        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
-        document = copy.deepcopy(revision.document)
+    def transform(document: dict[str, object]) -> None:
         slot = document["interfaces"][0]["output"]["slots"][0]
         slot["media_types"] = [media_type]
         slot["extensions"] = [extension]
-        session.execute(
-            update(CatalogDocumentRevision)
-            .where(CatalogDocumentRevision.id == revision.id)
-            .values(document=document)
-        )
+
+    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path, recipe_transform=transform
+    )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000130")
     request["output_limits"] = {
         **request["output_limits"],
@@ -592,22 +594,14 @@ def test_artifact_job_dispatches_exact_signed_output_mapping(
 
 
 def test_artifact_job_rejects_unrepresentable_output_media_mapping(tmp_path) -> None:
-    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
-        tmp_path
-    )
-    with sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
-        installation = session.get(RecipeInstallation, run.installation_id)
-        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
-        document = copy.deepcopy(revision.document)
+    def transform(document: dict[str, object]) -> None:
         slot = document["interfaces"][0]["output"]["slots"][0]
         slot["media_types"] = ["image/avif", "image/png"]
         slot["extensions"] = [".avif", ".png"]
-        session.execute(
-            update(CatalogDocumentRevision)
-            .where(CatalogDocumentRevision.id == revision.id)
-            .values(document=document)
-        )
+
+    _sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path, recipe_transform=transform
+    )
 
     with pytest.raises(ArtifactJobError, match="output slot contract"):
         service.create(
@@ -616,14 +610,7 @@ def test_artifact_job_rejects_unrepresentable_output_media_mapping(tmp_path) -> 
 
 
 def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) -> None:
-    sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
-        tmp_path
-    )
-    with sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
-        installation = session.get(RecipeInstallation, run.installation_id)
-        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
-        document = copy.deepcopy(revision.document)
+    def transform(document: dict[str, object]) -> None:
         duplicate = copy.deepcopy(document["interfaces"][0]["output"]["slots"][0])
         duplicate.update(
             {
@@ -634,11 +621,10 @@ def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) ->
             }
         )
         document["interfaces"][0]["output"]["slots"].append(duplicate)
-        session.execute(
-            update(CatalogDocumentRevision)
-            .where(CatalogDocumentRevision.id == revision.id)
-            .values(document=document)
-        )
+
+    _sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
+        tmp_path, recipe_transform=transform
+    )
 
     with pytest.raises(ArtifactJobError, match="extensions"):
         service.create(
@@ -649,15 +635,8 @@ def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) ->
 def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
     tmp_path,
 ) -> None:
-    sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
-        tmp_path
-    )
-    media_type = "application/vnd.example.custom"
-    with sessions.begin() as session:
-        run = session.get(RecipeRun, run_id)
-        installation = session.get(RecipeInstallation, run.installation_id)
-        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
-        document = copy.deepcopy(revision.document)
+    def transform(document: dict[str, object]) -> None:
+        media_type = "application/vnd.example.custom"
         output = document["interfaces"][0]["output"]
         short = output["slots"][0]
         short.update(
@@ -679,11 +658,11 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
             }
         )
         output["slots"].append(detailed)
-        session.execute(
-            update(CatalogDocumentRevision)
-            .where(CatalogDocumentRevision.id == revision.id)
-            .values(document=document)
-        )
+
+    sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
+        tmp_path, recipe_transform=transform
+    )
+    media_type = "application/vnd.example.custom"
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000134")
     request["output_limits"] = {
         **request["output_limits"],

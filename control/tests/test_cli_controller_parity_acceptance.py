@@ -664,7 +664,14 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     from .test_recipe_operations import NOW as fixture_now
     from .test_recipe_operations import setup_services
 
-    sessions, lifecycle, _queue, _mapping, _build, node_ids = setup_services(tmp_path)
+    def model_transform(document: dict[str, object]) -> None:
+        document["source"]["repository"] = (
+            "https://huggingface.co/vonk-forge/synthetic-tiny"
+        )
+
+    sessions, lifecycle, _queue, _mapping, _build, node_ids = setup_services(
+        tmp_path, model_transform=model_transform
+    )
     now = fixture_now
 
     class ProductionPhases:
