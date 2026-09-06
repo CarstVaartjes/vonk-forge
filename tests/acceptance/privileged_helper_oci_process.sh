@@ -39,6 +39,8 @@ trap cleanup EXIT
 # The native ARM64 runner owns these disposable paths; no laptop socket or host bind is used.
 getent group vonk-agent >/dev/null || groupadd --system --gid 10001 vonk-agent
 getent passwd vonk-agent >/dev/null || useradd --system --uid 10001 --gid vonk-agent --no-create-home --shell /usr/sbin/nologin vonk-agent
+agent_uid=$(id -u vonk-agent)
+agent_gid=$(id -g vonk-agent)
 install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper /var/lib/vonk-forge/helper/requests
 install -d -o root -g root -m 0755 /run/vonk-forge-agent /run/vonk-forge-package-helper
@@ -136,8 +138,10 @@ for path in \
   /var/lib/vonk-forge-agent/run-metadata \
   /var/lib/vonk-forge-agent/run-metadata/$run_id; do
   stat -c '%u:%g:%a:%F' "$path" >>"$report_root/custody-paths.txt"
-  test "$(stat -c '%u:%g:%a:%F' "$path")" = '10001:10001:700:directory'
+  test "$(stat -c '%u:%g:%a:%F' "$path")" = "$agent_uid:$agent_gid:700:directory"
 done
+printf 'host_agent_uid=%s\nhost_agent_gid=%s\ncontainer_uid=10001\n' \
+  "$agent_uid" "$agent_gid" >"$report_root/custody-identity.txt"
 for path in \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary/config.json \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf \
