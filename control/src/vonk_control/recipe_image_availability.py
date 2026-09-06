@@ -36,7 +36,7 @@ from .runtime_image_preparation import (
 )
 
 SCHEMA_VERSION = 2
-OPERATION_KIND = "recipe.image.availability.v1"
+OPERATION_KIND = "recipe.image.availability.v2"
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_AUTOMATIC_ATTEMPTS = 3
 _MAX_OPERATOR_RETRIES = 3
@@ -341,8 +341,6 @@ class RecipeImageAvailabilityService:
         self._max_parallel_builds = max_parallel_builds
         self._builder_admission = builder_admission
         self._claim_lease_seconds = claim_lease_seconds
-        self._pull_slots = threading.BoundedSemaphore(max_parallel)
-        self._build_slots = threading.BoundedSemaphore(max_parallel_builds)
         self._identity_locks: dict[str, threading.Lock] = {}
         self._identity_locks_guard = threading.Lock()
 
@@ -376,6 +374,16 @@ class RecipeImageAvailabilityService:
         effective_execution_key = _optional_digest(
             effective_execution_key, field="effective_execution_key"
         )
+        existing = self._request_replay(
+            request_id,
+            recipe_revision_id=recipe_revision_id,
+            force=force or force_download or force_rebuild,
+            model_digest=model_digest,
+            build_input_sha256=build_input_sha256,
+            effective_execution_key=effective_execution_key,
+        )
+        if existing is not None:
+            return existing
         if self._authority is None:
             raise RecipeImageAvailabilityError(
                 "recipe_image.metadata_refresh_unavailable", "latest recipe metadata could not be refreshed"
@@ -467,27 +475,20 @@ class RecipeImageAvailabilityService:
             encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
             existing = session.scalar(select(Job).where(Job.request_id == request_id))
             if existing is not None:
-                if existing.kind != OPERATION_KIND or existing.payload_digest != hashlib.sha256(encoded).hexdigest():
+                existing_payload = existing.payload if isinstance(existing.payload, Mapping) else {}
+                existing_force = bool(
+                    existing_payload.get("force_download") is True
+                    or existing_payload.get("force_rebuild") is True
+                )
+                if (
+                    existing.kind != OPERATION_KIND
+                    or existing_payload.get("recipe_revision_id") != recipe_revision_id
+                    or existing_force != bool(force_download or force_rebuild)
+                ):
                     raise RecipeImageAvailabilityError(
                         "recipe_image.request_key_reused", "request key was already used for another operation"
                     )
                 return self._view(existing)
-            active = session.scalars(
-                select(Job).where(
-                    Job.kind == OPERATION_KIND,
-                    Job.state.in_(("queued", "running", "partial")),
-                )
-            )
-            for candidate in active:
-                candidate_payload = candidate.payload if isinstance(candidate.payload, Mapping) else {}
-                if (
-                    candidate_payload.get("recipe_revision_id") == recipe_revision_id
-                    and candidate_payload.get("recipe_content_sha256") == computed_digest
-                    and candidate_payload.get("identity_key") == identity_key
-                    and candidate_payload.get("force_download") is force_download
-                    and candidate_payload.get("force_rebuild") is force_rebuild
-                ):
-                    return self._view(candidate)
             now = self._clock()
             operation = Job(
                 id=str(uuid.uuid4()),
@@ -507,6 +508,48 @@ class RecipeImageAvailabilityService:
             session.add(operation)
             session.flush()
             return self._view(operation)
+
+    def _request_replay(
+        self,
+        request_id: str,
+        *,
+        recipe_revision_id: str,
+        force: bool,
+        model_digest: str | None,
+        build_input_sha256: str | None,
+        effective_execution_key: str | None,
+    ) -> RecipeImageAvailabilityView | None:
+        with self._sessions() as session:
+            existing = session.scalar(select(Job).where(Job.request_id == request_id))
+            if existing is None:
+                return None
+            payload = existing.payload if isinstance(existing.payload, Mapping) else {}
+            existing_force = bool(
+                payload.get("force_download") is True
+                or payload.get("force_rebuild") is True
+            )
+            if (
+                existing.kind != OPERATION_KIND
+                or payload.get("recipe_revision_id") != recipe_revision_id
+                or existing_force != force
+                or (
+                    model_digest is not None
+                    and payload.get("model_digest") != model_digest
+                )
+                or (
+                    build_input_sha256 is not None
+                    and payload.get("build_input_sha256") != build_input_sha256
+                )
+                or (
+                    effective_execution_key is not None
+                    and payload.get("effective_execution_key") != effective_execution_key
+                )
+            ):
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.request_key_reused",
+                    "request key was already used for another operation",
+                )
+            return self._view(existing)
 
     def get(self, operation_id: str) -> RecipeImageAvailabilityView:
         with self._sessions() as session:
@@ -590,7 +633,7 @@ class RecipeImageAvailabilityService:
                 select(Job).where(
                     Job.kind == OPERATION_KIND,
                     Job.state.in_(("queued", "running", "partial")),
-                ).order_by(Job.updated_at, Job.id).limit(limit * 8).with_for_update()
+                ).order_by(Job.updated_at, Job.id).limit(limit * 8).with_for_update(skip_locked=True)
             ))
             active_builds = 0
             active_pulls = 0
@@ -820,22 +863,21 @@ class RecipeImageAvailabilityService:
                 raise RecipeImageAvailabilityError(
                     "recipe_image.build_input_missing", "exact build input digest is missing"
                 )
-            with self._build_slots:
-                if self._builder_admission is not None:
-                    self._builder_admission(recipe, runtime)
-                self._update_progress(operation_id, "build", total_bytes=None)
-                build_receipt = None if force_rebuild else self._stored_build_receipt(build_input_sha256)
-                if build_receipt is None:
-                    def report(value: Mapping[str, object]) -> None:
-                        self._update_progress(operation_id, "build", detail=value)
+            if self._builder_admission is not None:
+                self._builder_admission(recipe, runtime)
+            self._update_progress(operation_id, "build", total_bytes=None)
+            build_receipt = None if force_rebuild else self._stored_build_receipt(build_input_sha256)
+            if build_receipt is None:
+                def report(value: Mapping[str, object]) -> None:
+                    self._update_progress(operation_id, "build", detail=value)
 
-                    build_receipt = self._builder(
-                        recipe,
-                        runtime,
-                        build_input_sha256=build_input_sha256,
-                        force=force_rebuild,
-                        progress=report,
-                    )
+                build_receipt = self._builder(
+                    recipe,
+                    runtime,
+                    build_input_sha256=build_input_sha256,
+                    force=force_rebuild,
+                    progress=report,
+                )
             if not isinstance(build_receipt, Mapping):
                 raise RecipeImageAvailabilityError("recipe_image.build_invalid", "builder returned no receipt")
             self._update_progress(operation_id, "verify")
@@ -849,16 +891,15 @@ class RecipeImageAvailabilityService:
                 force=False,
             )
         total = _known_total(runtime)
-        with self._pull_slots:
-            self._update_progress(operation_id, "download", total_bytes=total)
-            receipt = prepare_runtime_image(
-                recipe,
-                runtime=runtime,
-                storage=self._storage,
-                transport=self._transport,
-                now=self._clock(),
-                force=force_download,
-            )
+        self._update_progress(operation_id, "download", total_bytes=total)
+        receipt = prepare_runtime_image(
+            recipe,
+            runtime=runtime,
+            storage=self._storage,
+            transport=self._transport,
+            now=self._clock(),
+            force=force_download,
+        )
         self._update_progress(
             operation_id,
             "verify",

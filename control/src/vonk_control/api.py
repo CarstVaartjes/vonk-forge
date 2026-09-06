@@ -1490,7 +1490,7 @@ def production_app() -> FastAPI:
     from .logging import DatabaseJobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .model_cache import ModelCacheService
-    from .models import CatalogDocumentRevision, Job
+    from .models import AgentNode, CatalogDocumentRevision, Job
     from .operation_api import durable_operation_services
     from .presence import ManagementAddressPolicy
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
@@ -1503,6 +1503,11 @@ def production_app() -> FastAPI:
         prepare_runtime_image,
         resolve_persisted_runtime_image_receipt,
     )
+    from .recipe_image_availability import (
+        RecipeImageAvailabilityError,
+        RecipeImageAvailabilityService,
+    )
+    from .recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
     from .settings import Settings
     from .telemetry import TelemetryRepository
     from .worker_authority import WorkerAuthorityService
@@ -1738,6 +1743,11 @@ def production_app() -> FastAPI:
         clock=clock,
         maximum_age_seconds=30,
     )
+    recipe_builds = RecipeBuildService(
+        sessions,
+        bundles=database_bundles,
+        inventory_max_age=300,
+    )
     recipe_operations = RecipeOperationService(
         sessions,
         install_admission=InstallAdmissionService(
@@ -1755,11 +1765,7 @@ def production_app() -> FastAPI:
         agent_jobs=agent_services.operations,
         clock=clock,
         route_publications=recipe_routes,
-        builds=RecipeBuildService(
-            sessions,
-            bundles=database_bundles,
-            inventory_max_age=300,
-        ),
+        builds=recipe_builds,
         mappings=ClusterMappingService(sessions),
     )
     run_switch_operations = RunSwitchOperationService(
@@ -1864,6 +1870,152 @@ def production_app() -> FastAPI:
         reader=recipe_library,
         clock=clock,
     )
+    availability_plans: dict[str, Any] = {}
+
+    def availability_authority(
+        revision_id: str,
+    ) -> tuple[RecipeDefinition, Mapping[str, object]]:
+        # Refresh the reviewed library before binding the requested immutable
+        # revision.  The sync may advance the catalog head, but never changes
+        # the requested revision or any running pin.
+        managed_catalog_sync.automatic()
+        with sessions() as session:
+            revision = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id == revision_id,
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
+            )
+            if revision is None:
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.recipe_unavailable",
+                    "selected recipe revision is unavailable or inactive",
+                )
+            recipe = RecipeDefinition.model_validate(revision.document)
+            entities = resolve_recipe_entities(session, revision.document)
+            package_handle: Mapping[str, object] | None = None
+            if recipe.execution.mode == "build":
+                nodes = list(
+                    session.scalars(
+                        select(AgentNode).where(AgentNode.state == "active")
+                    )
+                )
+                builder = next(
+                    (
+                        node
+                        for node in nodes
+                        if node.architecture == "linux-arm64"
+                        and "recipe.build.v1" in (node.capabilities or [])
+                    ),
+                    None,
+                )
+                if builder is None:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.build_unavailable",
+                        "no active compatible Recipe builder is available",
+                    )
+                plan = recipe_builds.plan(revision_id, builder.id, now=clock())
+                availability_plans[plan.build_input_sha256] = plan
+                package_handle = {"build_input_sha256": plan.build_input_sha256}
+            roles = recipe.topology.roles
+            role = roles[0].name if roles else "entrypoint"
+            runtime_spec = compile_runtime_spec(
+                recipe,
+                resolved_entities=entities,
+                role=role,
+                rank=0,
+                package_handle=package_handle,
+            )
+            runtime = runtime_spec.get("runtime")
+            if not isinstance(runtime, Mapping):
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.runtime_invalid",
+                    "compiled runtime projection is unavailable",
+                )
+            return recipe, dict(runtime) | (
+                {"build_input_sha256": package_handle["build_input_sha256"]}
+                if package_handle is not None
+                else {}
+            )
+
+    def availability_builder(
+        recipe: RecipeDefinition,
+        runtime: Mapping[str, object],
+        *,
+        build_input_sha256: str,
+        force: bool,
+        progress: Callable[[Mapping[str, object]], None],
+    ) -> Mapping[str, object]:
+        del recipe, runtime, force
+        plan = availability_plans.get(build_input_sha256)
+        if plan is None:
+            raise RecipeImageAvailabilityError(
+                "recipe_image.build_input_missing",
+                "canonical build plan is unavailable",
+            )
+        operation = recipe_operations.build(
+            plan,
+            build_input_sha256=build_input_sha256,
+            actor="recipe-image-availability",
+            request_id=str(uuid.uuid4()),
+        )
+        while operation.state not in {"succeeded", "failed", "expired"}:
+            progress({"step": "build", "completed_bytes": 0})
+            time.sleep(0.5)
+            with sessions() as session:
+                row = session.get(Job, operation.id)
+                if row is None:
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.build_unavailable",
+                        "durable build operation disappeared",
+                        retryable=True,
+                    )
+                operation = type(operation)(
+                    operation.id,
+                    operation.kind,
+                    operation.owner_id,
+                    row.state,
+                    operation.plan_digest,
+                    operation.nodes,
+                    dict(row.result) if isinstance(row.result, Mapping) else None,
+                )
+        if operation.state != "succeeded" or not isinstance(operation.result, Mapping):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.build_failed",
+                "canonical Recipe build failed",
+                retryable=True,
+                step="build",
+            )
+        return dict(operation.result) | {"build_id": operation.owner_id}
+
+    def availability_receipt_writer(
+        session: Any,
+        recipe_revision_id: str,
+        content_digest: str,
+        execution_key: str,
+        receipt: Any,
+    ) -> None:
+        persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=recipe_revision_id,
+            original_content_digest=content_digest,
+            effective_execution_key=execution_key,
+            receipt=receipt,
+            verified_at=clock(),
+        )
+
+    recipe_image_availability = RecipeImageAvailabilityService(
+        sessions,
+        storage=runtime_image_storage,
+        authority=availability_authority,
+        transport=runtime_image_transport,
+        builder=availability_builder,
+        clock=clock,
+        receipt_writer=availability_receipt_writer,
+        max_parallel=4,
+        max_parallel_builds=1,
+    )
     audits_store = SqlAuditStore(sessions, clock)
     app = create_app(
         jobs=job_service,
@@ -1919,6 +2071,7 @@ def production_app() -> FastAPI:
         library_placements=library_placements,
         agent_upgrades=agent_upgrades,
         model_cache=model_cache,
+        recipe_image_availability=recipe_image_availability,
     )
     web_root = Path(__file__).resolve().parent / "web"
     if web_root.is_dir():
