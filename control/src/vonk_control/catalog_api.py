@@ -18,11 +18,20 @@ from .catalog_service import (
     CatalogService,
 )
 from .catalog_sync import CatalogSyncError, CatalogSyncView
+from .recipe_library_types import RecipeLibraryError
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SEMVER = (
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+_RECIPE_LIBRARY_UNAVAILABLE_CODES = frozenset(
+    {
+        "recipe_library.unavailable",
+        "recipe_library.transient",
+        "recipe_package.unavailable",
+        "recipe_package.transient",
+    }
 )
 
 CATALOG_OPERATION_IDS = {
@@ -143,6 +152,17 @@ def _catalog_problem(
 
 def _problem(request: Request, error: CatalogError) -> JSONResponse:
     status_code = 409 if isinstance(error, CatalogConflict) else 422
+    return _catalog_problem(
+        request,
+        status_code=status_code,
+        code=error.code,
+        detail=error.detail,
+    )
+
+
+def _recipe_library_problem(request: Request, error: RecipeLibraryError) -> JSONResponse:
+    """Map bounded reader failures to the managed-sync HTTP contract."""
+    status_code = 503 if error.code in _RECIPE_LIBRARY_UNAVAILABLE_CODES else 422
     return _catalog_problem(
         request,
         status_code=status_code,
@@ -342,6 +362,10 @@ def install_catalog_routes(
                 code=error.code,
                 detail=error.detail,
             )
+        except CatalogError as error:
+            return _problem(request, error)
+        except RecipeLibraryError as error:
+            return _recipe_library_problem(request, error)
         audits.append(
             AuditRecord(
                 request.state.request_id,
