@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+env:
+  RECIPE_LIBRARY_REVISION: 48b00c1f5f1bbd46ea7141d491b63f2697271923
+  VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+
 # A new commit supersedes an older PR check. Tag releases use separate groups,
 # so one valid version can never evict another version from GitHub's pending
 # concurrency slot.
@@ -421,6 +425,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out exact canonical recipe library
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: ${{ env.RECIPE_LIBRARY_REVISION }}
+          path: .recipe-library
+          persist-credentials: false
+      - name: Record canonical recipe library source
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
+          test "$resolved" = "$RECIPE_LIBRARY_REVISION"
+          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -489,6 +507,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out exact canonical recipe library
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: ${{ env.RECIPE_LIBRARY_REVISION }}
+          path: .recipe-library
+          persist-credentials: false
+      - name: Record canonical recipe library source
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
+          test "$resolved" = "$RECIPE_LIBRARY_REVISION"
+          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
