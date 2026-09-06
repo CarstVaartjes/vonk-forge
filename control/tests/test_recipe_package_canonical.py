@@ -5,7 +5,6 @@ import gzip
 import hashlib
 import io
 import json
-import os
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,12 +22,12 @@ from vonk_control.recipe_packages import (
     RecipePackageError,
 )
 
-ROOT = Path(os.environ.get("VONK_RECIPE_CANDIDATE_ROOT", "/private/tmp/vonk-forge-recipes-contract-conversion-final"))
+from tests.recipe_library_source import recipe_library_root
+
+ROOT = recipe_library_root()
 
 
 def _fixture() -> tuple[dict[str, object], dict[str, object], bytes]:
-    if not (ROOT / "catalog-index.json").is_file():
-        pytest.skip("final recipe candidate checkout is not available")
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
     row = index["recipes"][0]
     package = (ROOT / row["package"]["path"]).read_bytes()
@@ -177,8 +176,6 @@ def test_published_index_imports_all_models_including_unreferenced_versions(
     tmp_path: Path,
 ) -> None:
     index_path = ROOT / "catalog-index.json"
-    if not index_path.is_file():
-        pytest.skip("published recipe corpus checkout is not available")
     index = json.loads(index_path.read_text(encoding="utf-8"))
     model_documents = [entry["document"] for entry in index["catalog_entities"]]
     recipe_models = {

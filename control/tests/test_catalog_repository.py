@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
-from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -11,12 +9,9 @@ from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.catalog_repository import CatalogRepository, sensitive_document_path
 from vonk_control.models import Base
 
-CANDIDATE_ROOT = Path(
-    os.environ.get(
-        "VONK_RECIPE_CANDIDATE_ROOT",
-        "/private/tmp/vonk-forge-recipes-contract-conversion-final",
-    )
-)
+from tests.recipe_library_source import recipe_library_root
+
+RECIPE_LIBRARY_ROOT = recipe_library_root()
 
 
 def test_repository_allocates_canonical_revision_numbers() -> None:
@@ -27,7 +22,9 @@ def test_repository_allocates_canonical_revision_numbers() -> None:
             session,
             clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
         )
-        index = json.loads((CANDIDATE_ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+        index = json.loads(
+            (RECIPE_LIBRARY_ROOT / "catalog-index.json").read_text(encoding="utf-8")
+        )
         document = index["catalog_entities"][0]["document"]
         draft = service.create_draft(document, actor="test")
         service.resolve(draft.id, actor="test")

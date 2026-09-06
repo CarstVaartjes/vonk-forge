@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import copy
 import json
-import os
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,12 +20,9 @@ from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision
 from vonk_control.run_switch_contract import RunSwitchPreviewRequest
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-ROOT = Path(
-    os.environ.get(
-        "VONK_LIBRARY_CORPUS_ROOT",
-        "/private/tmp/vonk-forge-recipes-qwen38-vllm-main57",
-    )
-)
+from tests.recipe_library_source import recipe_library_root
+
+ROOT = recipe_library_root()
 
 
 def _insert_canonical_rows(

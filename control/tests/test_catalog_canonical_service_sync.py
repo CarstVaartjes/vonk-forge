@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -16,12 +15,9 @@ from vonk_control.recipe_library import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
 
-ROOT = Path(
-    os.environ.get(
-        "VONK_RECIPE_CANDIDATE_ROOT",
-        "/private/tmp/vonk-forge-recipes-contract-conversion-final",
-    )
-)
+from tests.recipe_library_source import recipe_library_root
+
+ROOT = recipe_library_root()
 
 
 class Reader:
