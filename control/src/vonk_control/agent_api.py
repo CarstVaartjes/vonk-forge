@@ -52,6 +52,7 @@ from .auth import (
 )
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
+    MAX_COMPILED_EXECUTION_PLAN_BYTES,
     validate_compiled_launch_payload,
 )
 from .distribution import DistributionError, DistributionService
@@ -2442,7 +2443,16 @@ def install_agent_routes(
                     status_code=409,
                     detail="recipe specification execution receipts are stale",
                 )
-        return _json_response(spec)
+        encoded_spec = canonical_message(spec)
+        if len(encoded_spec) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification compiled execution plan is too large",
+            )
+        return Response(
+            content=encoded_spec,
+            media_type="application/json",
+        )
 
     def workload_helper_service() -> WorkloadHelperAuthorityService:
         required = services.workload_helper_authority if services is not None else None

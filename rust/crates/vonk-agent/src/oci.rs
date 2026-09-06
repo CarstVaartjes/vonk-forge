@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::{
-    RecipeRunInspectionBinding, canonical_json as canonical_protocol_json,
-    hex_sha256 as protocol_sha256,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES, RecipeRunInspectionBinding,
+    canonical_json as canonical_protocol_json, hex_sha256 as protocol_sha256,
 };
 
 use crate::{
@@ -51,6 +51,7 @@ pub struct OciRuntime<'a, R> {
 }
 
 pub const MAX_MANAGED_RECIPE_RUNS: usize = 64;
+const MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES;
 const MAX_RUN_DIRECTORY_ENTRIES: usize = 4096;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -318,7 +319,11 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .join(&spec.identity.execution_sha256);
         self.materialize_compiled_models(spec, &distribution_root, installation_id)?;
         self.verify_compiled_image_archive(spec)?;
-        atomic_write(&installation, "spec.json", &serde_json::to_vec(spec)?)?;
+        let encoded_spec = serde_json::to_vec(spec)?;
+        if encoded_spec.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
+            return Err(OciError::Artifact);
+        }
+        atomic_write(&installation, "spec.json", &encoded_spec)?;
         atomic_write(
             &installation,
             "recipe-content.sha256",
@@ -1088,11 +1093,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let metadata = fs::symlink_metadata(&path)?;
         if !metadata.file_type().is_file()
             || metadata.file_type().is_symlink()
-            || metadata.len() > 64 * 1024
+            || metadata.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64
         {
             return Err(OciError::Artifact);
         }
-        serde_json::from_slice(&read_regular_file(&path, 64 * 1024)?).map_err(OciError::Json)
+        serde_json::from_slice(&read_regular_file(
+            &path,
+            MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64,
+        )?)
+        .map_err(OciError::Json)
     }
 
     pub fn verify_installation(&self, installation_id: &str) -> Result<(), OciError> {

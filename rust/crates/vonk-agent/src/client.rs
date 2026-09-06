@@ -14,8 +14,9 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
-    HostRuntimeAction, HostRuntimeRequest, RecipeRunInspectionBinding, RecipeRunObservationReceipt,
-    canonical_json, hex_sha256, parse_strict,
+    HostRuntimeAction, HostRuntimeRequest, MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    RecipeRunInspectionBinding, RecipeRunObservationReceipt, canonical_json, hex_sha256,
+    parse_strict,
 };
 
 use crate::{
@@ -30,6 +31,7 @@ use crate::{
 };
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
+const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES;
 const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 
@@ -286,7 +288,7 @@ impl AgentHttpClient {
             return Ok(None);
         }
         classify_status(status)?;
-        let body = bounded_body(response).await?;
+        let body = bounded_claim_body(response).await?;
         parse_claim_response(status.as_u16(), &body)
     }
 
@@ -498,7 +500,7 @@ impl AgentHttpClient {
             .send()
             .await?;
         classify_status(response.status())?;
-        let body = bounded_body(response).await?;
+        let body = bounded_claim_body(response).await?;
         let spec: CompiledExecutionPlan =
             serde_json::from_slice(&body).map_err(|_| ClientError::Protocol)?;
         spec.validate().map_err(|_| ClientError::Protocol)?;
@@ -1272,7 +1274,7 @@ impl AgentHttpClient {
 pub fn parse_claim_response(status: u16, body: &[u8]) -> Result<Option<AgentClaim>, ClientError> {
     match status {
         204 if body.is_empty() => Ok(None),
-        200 if body.len() <= MAX_BODY_BYTES => {
+        200 if body.len() <= MAX_CLAIM_BODY_BYTES => {
             let claim: AgentClaim = parse_strict(body).map_err(|_| ClientError::Protocol)?;
             claim.validate().map_err(|_| ClientError::Protocol)?;
             Ok(Some(claim))
@@ -1294,6 +1296,10 @@ fn classify_status(status: StatusCode) -> Result<(), ClientError> {
 
 async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
     bounded_body_limit(response, MAX_BODY_BYTES).await
+}
+
+async fn bounded_claim_body(response: reqwest::Response) -> Result<Vec<u8>, ClientError> {
+    bounded_body_limit(response, MAX_CLAIM_BODY_BYTES).await
 }
 
 async fn sha256_path(path: &Path, expected_bytes: u64) -> Result<String, ClientError> {

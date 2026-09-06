@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentProtocolError,
     AgentResult,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     canonical_message,
     schema_validator,
     validate_schema_message,
@@ -668,6 +669,22 @@ def test_shared_schema_validator_and_parser_reject_oversized_canonical_documents
         parser(raw)
     with pytest.raises(AgentProtocolError, match="large"):
         validate_schema_message(name, raw)
+
+
+@pytest.mark.parametrize("operation", ["recipe.install", "recipe.start"])
+def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
+    operation: str,
+) -> None:
+    corpus_payload = {"compiled_execution_plan": {"artifact": "x" * (516 * 1024)}}
+    claim = AgentClaim.parse(claim_for_operation(operation, corpus_payload))
+    assert claim.operation.value == operation
+
+    oversized = {"value": "x" * MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES}
+    with pytest.raises(AgentProtocolError, match="large"):
+        AgentClaim.parse(claim_for_operation(operation, oversized))
+
+    with pytest.raises(AgentProtocolError, match="large"):
+        AgentClaim.parse(claim_for_operation("node.probe", corpus_payload))
 
 
 @pytest.mark.parametrize("name", ["agent-job.schema.json", "agent-result.schema.json"])

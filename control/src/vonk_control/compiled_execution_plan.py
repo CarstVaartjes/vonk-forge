@@ -26,6 +26,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Literal
 
+from vonk_agent_protocol import (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    canonical_message,
+)
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -41,6 +45,7 @@ Identifier = Annotated[
     str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 ]
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+MAX_COMPILED_EXECUTION_PLAN_BYTES = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
 _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 
 
@@ -936,6 +941,12 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
     """
 
     payload = _mapping(value, "compiled launch plan")
+    try:
+        encoded = canonical_message(payload)
+    except ValueError as error:
+        raise CompiledExecutionPlanError("compiled launch plan is not JSON") from error
+    if len(encoded) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
+        raise CompiledExecutionPlanError("compiled launch plan is too large")
     expected = {
         "schema_version",
         "identity",

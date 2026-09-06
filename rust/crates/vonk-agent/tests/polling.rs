@@ -5,7 +5,10 @@ use serde_json::json;
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
-use vonk_agent_protocol::{AgentClaim, AgentDirective, AgentProgress, canonical_json, hex_sha256};
+use vonk_agent_protocol::{
+    AgentClaim, AgentDirective, AgentProgress, MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    canonical_json, hex_sha256,
+};
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
@@ -156,5 +159,22 @@ fn claim_response_parser_enforces_status_size_and_protocol() {
     assert_eq!(
         parsed.operation_id,
         claim(1, "2099-01-01T00:00:00+00:00").operation_id
+    );
+
+    let mut large_claim = claim(1, "2099-01-01T00:00:00+00:00");
+    large_claim.payload.as_object_mut().unwrap().insert(
+        "compiled_execution_plan".to_owned(),
+        json!({"artifact": "x".repeat(516 * 1024)}),
+    );
+    large_claim.payload_digest = hex_sha256(&canonical_json(&large_claim.payload).unwrap());
+    let large_body = canonical_json(&large_claim).unwrap();
+    assert!(large_body.len() > 512 * 1024);
+    assert!(vonk_agent::client::parse_claim_response(200, &large_body).is_ok());
+    assert!(
+        vonk_agent::client::parse_claim_response(
+            200,
+            &vec![b'x'; MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + 1]
+        )
+        .is_err()
     );
 }

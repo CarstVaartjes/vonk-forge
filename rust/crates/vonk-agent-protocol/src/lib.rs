@@ -10,6 +10,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub const MAX_HOST_RUNTIME_ARGUMENTS: usize = 512;
+pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024;
+pub const MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY: &str = "vonk.recipe-run-observation-helper";
 const RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN: &[u8] = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\0";
 
@@ -251,8 +253,14 @@ impl AgentClaim {
             return Err(ProtocolError::Identity("claim operation"));
         }
         let payload = canonical_json(&self.payload)?;
+        let maximum_bytes = if matches!(self.operation.as_str(), "recipe.install" | "recipe.start")
+        {
+            MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+        } else {
+            MAX_DOCUMENT_BYTES
+        };
         if !self.payload.is_object()
-            || payload.len() > 64 * 1024
+            || payload.len() > maximum_bytes
             || hex_sha256(&payload) != self.payload_digest
         {
             return Err(ProtocolError::Identity("claim payload digest"));
@@ -359,7 +367,8 @@ pub struct AgentProgress {
 impl AgentProgress {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)?;
-        if !self.progress.is_object() || canonical_json(&self.progress)?.len() > 64 * 1024 {
+        if !self.progress.is_object() || canonical_json(&self.progress)?.len() > MAX_DOCUMENT_BYTES
+        {
             return Err(ProtocolError::Identity("progress document"));
         }
         Ok(())
@@ -1214,6 +1223,25 @@ mod recipe_start_tests {
             Value::String("2026-09-01T14:00:00+02:00".to_owned()),
         );
         assert!(parsed_start(non_utc_deadline).is_err());
+    }
+
+    #[test]
+    fn authenticated_launch_claims_use_the_dedicated_document_ceiling() {
+        let mut payload = start_payload(1, 0, None, None, None);
+        payload
+            .as_object_mut()
+            .unwrap()
+            .get_mut("compiled_execution_plan")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert("artifact".to_owned(), Value::String("x".repeat(516 * 1024)));
+        assert!(claim(payload).validate().is_ok());
+
+        let oversized = serde_json::json!({
+            "value": "x".repeat(MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES)
+        });
+        assert!(claim(oversized).validate().is_err());
     }
 }
 
