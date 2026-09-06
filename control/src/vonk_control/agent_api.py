@@ -374,10 +374,7 @@ class EnrollmentListResponse(BaseModel):
 
 
 class AgentRuntimeIdentityRequest(BaseModel):
-    # Runtime identity is an extensible envelope.  Newer agents may add
-    # attestations or diagnostics; the Controller only consumes the stable
-    # identity fields below and must not reject an otherwise compatible agent.
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="forbid")
     architecture: Literal["linux-amd64", "linux-arm64"]
     semantic_version: str = Field(
         pattern=r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
@@ -405,12 +402,8 @@ class AgentRuntimeIdentityRequest(BaseModel):
 
 
 class ClaimRequest(BaseModel):
-    # Claims are a version-skew boundary.  Unknown top-level fields are
-    # intentionally ignored so a newer Spark can still claim work from this
-    # Controller; operation safety comes from the negotiated capability
-    # intersection below.
-    model_config = ConfigDict(extra="ignore")
-    lease_seconds: int = Field(default=30, ge=1, le=300)
+    model_config = ConfigDict(extra="forbid")
+    lease_seconds: int = Field(default=30, ge=1, le=300, strict=True)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
     hostname: str | None = Field(
         default=None,
@@ -424,7 +417,7 @@ class ClaimRequest(BaseModel):
     protocol_version: int = Field(default=3, ge=1, le=2_147_483_647, strict=True)
     capabilities: list[str] | None = Field(default=None, max_length=128)
     runtime_identity: AgentRuntimeIdentityRequest
-    wait_seconds: int = Field(default=0, ge=0, le=60)
+    wait_seconds: int = Field(default=0, ge=0, le=60, strict=True)
 
 
 class AgentUpgradePackageRequest(BaseModel):

@@ -1564,34 +1564,59 @@ def test_unknown_claim_capability_is_ignored_while_known_capabilities_negotiate(
         assert node.protocol_version == 3
 
 
-def test_newer_claim_fields_and_runtime_attestations_are_forward_compatible(
+@pytest.mark.parametrize(
+    ("field", "nested"),
+    (("future_claim_field", False), ("future_attestation", True)),
+)
+def test_claim_rejects_unknown_structural_fields(
     agent_system,
+    field: str,
+    nested: bool,
 ) -> None:
-    client, services, _, _clock = agent_system
+    client, _services, _, _clock = agent_system
+    payload = {
+        "capabilities": CAPABILITIES,
+        "lease_seconds": 30,
+        "node_id": NODE_A,
+        "protocol_version": 3,
+        "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
+    }
+    if nested:
+        payload["runtime_identity"] = {
+            **PACKAGED_RUNTIME_IDENTITY,
+            field: {"format": "v2"},
+        }
+    else:
+        payload[field] = {"version": 4}
 
+    response = client.post(
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ("lease_seconds", "wait_seconds"))
+def test_claim_rejects_string_encoded_numeric_fields(
+    agent_system,
+    field: str,
+) -> None:
+    client, _services, _, _clock = agent_system
     response = client.post(
         "/agent/v1/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "capabilities": CAPABILITIES,
-            "lease_seconds": 30,
             "node_id": NODE_A,
             "protocol_version": 3,
-            "future_claim_field": {"version": 4},
-            "runtime_identity": {
-                **PACKAGED_RUNTIME_IDENTITY,
-                "future_attestation": {"format": "v2"},
-            },
+            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
+            field: "30",
         },
     )
 
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.semantic_version == PACKAGED_RUNTIME_IDENTITY["semantic_version"]
-        assert node.last_seen_at is not None
-        assert session.get(AgentPresence, NODE_A) is not None
+    assert response.status_code == 422
 
 
 def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact_fence_validation(
