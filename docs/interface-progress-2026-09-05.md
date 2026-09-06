@@ -39,12 +39,12 @@ This is a fresh launch with one current contract and no legacy catalog path.
 | P2 independent validator | Published validator `26a2dfa8` reads the canonical contract; v1.0.3 passed its independent secret and package-identity checks. | Recheck final combined consumer revision. |
 | P3 catalog / database | Canonical persistence, typed lists/details, all-page pagination and ordered multi-Model details integrated. | Fresh OrbStack PostgreSQL imported 92 Models / 85 Recipes and retained 13 unlinked Models; [exact evidence](evidence/fresh-launch-catalog-postgres-acceptance-2026-09-06.md). Recheck final database additions. |
 | P4 downloads / secrets | Optional Controller/worker HF token, anonymous public downloads and [documentation](model-cache-huggingface-auth.md) integrated. | Deployed gated-download observation. |
-| P5 cache / Run / profiles | NAS caches, explicit profile scope/Idle, durable preparation/distribution phases and artifact receipts integrated locally. | Runtime/helper OCI path, current-Recipe receipt authorization and bounded retry are integrated. Actual composed helper-process execution and combined acceptance remain pending; direct OrbStack Docker import/start is not that proof. |
+| P5 cache / Run / profiles | NAS caches, explicit profile scope/Idle, durable preparation/distribution phases and artifact receipts integrated locally. Signed native helper import/start/restart passed at `d2f3e24d`. | Live Controller-to-Spark distribution and physical inference remain unobserved. |
 | P6 website | Canonical compact catalog and plain-language explanation deployed. | Recipe refresh propagation; website evidence does not establish Controller behavior. |
-| P7 Controller web / API / CLI | Paired lists, Model NAS download, Recipe placement, profiles, artifact jobs and rich Fleet surfaces integrated. Retired routes and generated clients removed. Retry UI passed 199 Vitest tests and 18 Library browser journeys; creator attribution passed seven focused tests and its browser journey. | CI at `8ced8a0a` passed Admin web behavior and generated clients. CLI records 97 focused and 23 connected parity tests. Deployed user/agent workflows remain to be observed. |
+| P7 Controller web / API / CLI | Paired lists, Model NAS download, Recipe placement, profiles, artifact jobs and rich Fleet surfaces integrated. Retired routes and generated clients removed. Combined web passes 216 Vitest tests, build, regenerated clients and the Recipe availability Chromium journey. | Combined Controller/CLI run passed 1,940 tests with 14 skips and four failures; all four are fixed and the affected checks pass as described below. Deployed user/agent workflows remain to be observed. |
 | P8 upstream refresh | Reviewed first batch published in v1.0.2; DS4, SparkInfer, GLM and LTX follow-up repairs published in v1.0.3. Every Recipe is represented in the exact QA ledger below. | Real pinned engine parsing remains unverified for 68 Recipes; container start and physical inference remain unverified for the corpus. |
-| P9 acceptance / cleanup | Fresh catalog/PostgreSQL checks and independent UI review recorded. | Retired authoring modules removed. Controller packaging and signed helper policy integrated. Combined suite fixes, actual composed helper execution, compatible consumer publication/deployment, then physical Spark observations remain. |
-| P10 availability / recovery | [Implementation brief](library-availability-design-2026-09-06.md) committed. Model transfer, image preparation, web/CLI and public explanation have separate owners under Sol. | Parallel nonblocking transfers/builds, fair scheduling, provider-aware backoff, durable progress, guided errors, Refresh and forced download/rebuild are in development. They are not yet integrated or deployed. |
+| P9 acceptance / cleanup | Fresh catalog/PostgreSQL checks, independent UI review, packaged image transport and signed native helper execution recorded. Retired authoring modules removed. | Combined checks, compatible consumer publication/deployment, then physical Spark observations remain. |
+| P10 availability / recovery | [Implementation brief](library-availability-design-2026-09-06.md) implemented and whole-merged under Sol review. Parallel transfers/builds, fair scheduling, provider-aware backoff, durable independent progress, guided errors, Refresh and forced download/rebuild are integrated. | Publication and deployed NAS observations remain. |
 
 The platform now consumes the exact PR74 main revision in its CI fixture
 receipt and both public-contract dependency receipts. The contract source tree
@@ -185,8 +185,25 @@ PostgreSQL checks cover claims, restart fencing and the canonical compiler plus
 real ModelCache child. Root `3a964a43` additionally preserves completed image
 state/bytes while a Model is pending or failed, maps actual ModelCache byte
 counters, retains unknown totals and avoids unsupported aggregate ETA claims.
-The final UI bindings/browser journeys and terminal integrity-repair linkage
-remain under verification before publication.
+The final UI/CLI branch `75d20485` and terminal integrity repair `ac342b23`
+are whole-merged and independently reviewed. Integrity recovery obtains a
+fresh canonical repair plan, relinks the new Model child and retains a completed
+image. The connected regression proves repair through parent completion with
+one image transport call. Terminal access errors offer Check access and resume;
+the browser journey covers reload, parallel children and image-only force.
+Combined web validation passes 216 tests and build. Generated clients reproduce
+without a diff. Twelve additional availability implementation inputs extend
+the supply-chain verifier; all 82 verifier tests and final regeneration/verification
+pass. Combined Controller/CLI preflight passed 1,940 tests with 14 skips and
+four failures. The root Activity fix `bb1793f6` translates only a missing cache
+operation into the global provider's `KeyError` contract, allowing profile and
+Run operations to be found. Current CLI-follow assertions and the missing
+uncertain-response fixture provider were corrected; all 51 affected
+CLI/cache/Activity checks pass. The full CLI module also passed all 93 tests.
+The fourth failure used an old hardcoded Model digest. The fixture correction
+`41fe9501` computes the exact canonical Model hash and checks its Recipe binding;
+the full production API file passes with current producer contracts and actual
+OrbStack PostgreSQL. Final CI remains the combined publication gate.
 
 ## Remaining runtime and deployment checks
 
@@ -232,6 +249,7 @@ approximately 2.35 TB free; this is not proof of the named cache volume's free
 space. Authenticated UGREEN Docker UI access is available for the supported
 project redeploy. No Model downloads have started. After publication and
 deployment, inspect the official cache inventory/storage endpoint, generate
-fresh download previews, submit the returned plan digests and retain the
+fresh per-Model download previews, deduplicate by Model content digest, submit
+the returned plan digests and retain the
 durable operation IDs. Preserve existing secrets, named volumes and valid
 cached files; do not substitute direct NAS downloads for the Controller API.
