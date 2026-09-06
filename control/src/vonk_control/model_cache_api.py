@@ -21,6 +21,7 @@ from .model_cache_contract import (
     ModelCacheDownloadPreviewRequest,
     ModelCacheDownloadPreviewResponse,
     ModelCacheDownloadRequest,
+    ModelCacheAccessResumeRequest,
     ModelCacheEvictionPreviewRequest,
     ModelCacheEvictionPreviewResponse,
     ModelCacheEvictRequest,
@@ -34,6 +35,7 @@ from .model_cache_contract import (
     ModelCacheUpdatesResponse,
 )
 from .operation_api import bounded_error_responses
+from .operation_contract import AvailabilityOperationFailure
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/v1/model-cache"): "getModelCacheInventory",
@@ -53,6 +55,8 @@ MODEL_CACHE_OPERATION_IDS = {
         "getModelCacheOperation",
     ("post", "/api/v1/model-cache/operations/{operation_id}/retry"):
         "retryModelCacheOperation",
+    ("post", "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume"):
+        "checkModelCacheAccessAndResume",
 }
 
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -110,6 +114,11 @@ def install_model_cache_routes(
         return HTTPException(status_code=503, detail=unavailable)
 
     def operation_response(operation: Any) -> ModelCacheOperationResponse:
+        result = None if operation.result is None else dict(operation.result)
+        failure = None
+        raw_failure = getattr(operation, "failure", None)
+        if isinstance(raw_failure, Mapping):
+            failure = AvailabilityOperationFailure.model_validate(raw_failure)
         return ModelCacheOperationResponse.model_validate(
             {
                 "schema_version": 2,
@@ -121,12 +130,8 @@ def install_model_cache_routes(
                 "artifact_set_sha256": operation.artifact_set_sha256,
                 "plan_digest": operation.plan_digest,
                 "progress": dict(operation.progress),
-                "result": (
-                    None
-                    if operation.result is None
-                    else dict(operation.result)
-                ),
-                "last_error": operation.last_error,
+                "result": result,
+                "failure": failure,
                 "created_at": operation.created_at,
                 "updated_at": operation.updated_at,
                 "completed_at": operation.completed_at,
@@ -504,6 +509,45 @@ def install_model_cache_routes(
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             raise error(exc, "model cache operation retry unavailable") from None
         audit(request, actor, "model-cache.retry", operation_id, result.id)
+        return operation_response(result)
+
+    @app.post(
+        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
+        response_model=ModelCacheOperationResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="checkModelCacheAccessAndResume",
+    )
+    def check_access_and_resume(
+        body: ModelCacheAccessResumeRequest,
+        request: Request,
+        operation_id: Annotated[str, Path(pattern=_UUID)],
+        actor: Actor = authenticated,
+    ) -> ModelCacheOperationResponse:
+        require_mutation(
+            actor,
+            "POST",
+            "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
+        )
+        try:
+            result = cache().check_access_and_resume(
+                operation_id,
+                actor=actor.subject,
+                request_key=body.request_key,
+                artifact_set_sha256=body.artifact_set_sha256,
+                plan_digest=body.plan_digest,
+            )
+        except HTTPException:
+            raise
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise error(exc, "model cache access recheck unavailable") from None
+        audit(
+            request,
+            actor,
+            "model-cache.check-access-and-resume",
+            operation_id,
+            result.id,
+        )
         return operation_response(result)
 
 class ModelCacheOperationProvider:

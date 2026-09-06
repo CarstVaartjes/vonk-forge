@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -146,6 +147,62 @@ class OperationFailureEvidence(BaseModel):
     detail: str | None = Field(default=None, max_length=1024)
     retryable: bool = False
     uncertain: bool = False
+
+
+class AvailabilityRecoveryAction(StrEnum):
+    RETRY = "retry"
+    RESUME = "resume"
+    DOWNLOAD_AGAIN = "download_again"
+    FORCE_REBUILD = "force_rebuild"
+    OPEN_MODEL_ACCESS = "open_model_access"
+    CONFIGURE_HF_TOKEN = "configure_hf_token"
+    CHECK_ACCESS_AND_RESUME = "check_access_and_resume"
+    FREE_SPACE = "free_space"
+    INSPECT = "inspect"
+
+
+class AvailabilityOperationFailure(BaseModel):
+    """Shared failure wire contract for model and image availability."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")
+    detail: str = Field(min_length=1, max_length=512)
+    recovery_actions: list[AvailabilityRecoveryAction] = Field(default_factory=list, max_length=8)
+    retryable: bool = False
+    retry_time: str | None = Field(default=None, max_length=64)
+    retry_after_seconds: int | None = Field(default=None, ge=0)
+    log_excerpt: str | None = Field(default=None, max_length=1024)
+    required_bytes: int | None = Field(default=None, ge=0)
+    free_bytes: int | None = Field(default=None, ge=0)
+    shortfall_bytes: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_retry_and_capacity(self) -> AvailabilityOperationFailure:
+        if self.retry_after_seconds is not None and self.retry_time is None:
+            raise ValueError("retry_after_seconds requires retry_time")
+        if self.retry_time is not None:
+            if re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+                self.retry_time,
+            ) is None:
+                raise ValueError("retry_time must be RFC3339")
+            try:
+                parsed = datetime.fromisoformat(self.retry_time.replace("Z", "+00:00"))
+            except ValueError as error:
+                raise ValueError("retry_time must be RFC3339") from error
+            if parsed.tzinfo is None:
+                raise ValueError("retry_time must include a timezone")
+        capacity = (self.required_bytes, self.free_bytes, self.shortfall_bytes)
+        if any(value is not None for value in capacity):
+            if any(value is None for value in capacity):
+                raise ValueError("capacity fields must be complete when present")
+            assert self.required_bytes is not None
+            assert self.free_bytes is not None
+            assert self.shortfall_bytes is not None
+            if self.shortfall_bytes != max(0, self.required_bytes - self.free_bytes):
+                raise ValueError("shortfall_bytes does not match required and free bytes")
+        return self
 
 
 class OperationEvidenceProvenance(BaseModel):
@@ -363,6 +420,8 @@ __all__ = [
     "OperationEvidenceDownload",
     "OperationEvidenceProvenance",
     "OperationFailureEvidence",
+    "AvailabilityRecoveryAction",
+    "AvailabilityOperationFailure",
     "OperationMemberProgress",
     "OperationPhase",
     "OperationProgress",

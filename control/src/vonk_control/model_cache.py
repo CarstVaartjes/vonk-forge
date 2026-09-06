@@ -17,10 +17,11 @@ import re
 import shutil
 import threading
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit
 
@@ -38,17 +39,25 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
 )
+from .logging import redact_text
+from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
 
 SCHEMA_VERSION = 2
 SOURCE_POLICY = "nas-first"
 _DIGEST_LENGTH = 64
-_MAX_ARTIFACTS = 128
+_MAX_ARTIFACTS = 1024
 _MAX_MANIFEST_BYTES = 1_048_576
 _CHUNK_BYTES = 1024 * 1024
 _MAX_HTTP_REDIRECTS = 3
 _MAX_OPERATION_ATTEMPTS = 3
 _MAX_OPERATOR_RETRIES = 3
+_DEFAULT_MAX_PARALLEL_DOWNLOADS = 4
+_MAX_PARALLEL_DOWNLOADS = 16
+_RETRY_BASE_SECONDS = 5
+_RETRY_MAX_SECONDS = 300
+_MAX_RETRY_HINT_SECONDS = 365 * 24 * 60 * 60
+_TRANSFER_CLAIM_SECONDS = 120
 _HF_CANONICAL_HOST = "huggingface.co"
 _USE_MANIFEST_BYTES = object()
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
@@ -58,9 +67,18 @@ _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 class ModelCacheError(RuntimeError):
     """Base error carrying a stable API code and bounded operator detail."""
 
-    def __init__(self, code: str, detail: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        *,
+        retry_after_seconds: int | None = None,
+        recovery: str | None = None,
+    ) -> None:
         self.code = code
         self.detail = detail[:512]
+        self.retry_after_seconds = retry_after_seconds
+        self.recovery = recovery
         super().__init__(self.detail)
 
 
@@ -100,6 +118,12 @@ def _retryable_failure(error: BaseException | str) -> bool:
     text = f"{code} {detail}".casefold()
     if any(marker in text for marker in _TERMINAL_FAILURE_MARKERS):
         return False
+    if code in {
+        "model_cache.rate_limited",
+        "model_cache.source_truncated",
+        "model_cache.source_unavailable",
+    }:
+        return True
     if isinstance(error, httpx.HTTPError):
         response = getattr(error, "response", None)
         status = getattr(response, "status_code", None)
@@ -130,6 +154,58 @@ def _retryable_failure(error: BaseException | str) -> bool:
             "uncertain",
         )
     )
+
+
+def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | None:
+    """Parse Retry-After and standard provider rate-limit reset hints."""
+
+    values: list[int] = []
+    raw_retry = headers.get("retry-after")
+    if raw_retry:
+        try:
+            if raw_retry.strip().isdigit():
+                values.append(max(0, int(raw_retry.strip())))
+            else:
+                retry_at = datetime.strptime(
+                    raw_retry.strip(), "%a, %d %b %Y %H:%M:%S GMT"
+                ).replace(tzinfo=UTC)
+                values.append(max(0, int((retry_at - now).total_seconds())))
+        except (TypeError, ValueError):
+            pass
+    for name in ("ratelimit-reset", "x-ratelimit-reset"):
+        raw_reset = headers.get(name)
+        if not raw_reset:
+            continue
+        try:
+            reset = int(raw_reset.strip())
+        except (TypeError, ValueError):
+            continue
+        # Providers use both a delta and a Unix timestamp.  Values near the
+        # current epoch are timestamps; small values are delays.
+        values.append(max(0, reset - int(now.timestamp())) if reset > 1_000_000_000 else max(0, reset))
+    raw_rate_limit = headers.get("ratelimit") or headers.get("RateLimit")
+    if raw_rate_limit:
+        # The IETF RateLimit draft permits policy parameters such as `RateLimit:
+        # "resolvers";r=0;t=123`.  The `t` value is a delta in seconds.
+        values.extend(
+            int(match.group(1))
+            for match in re.finditer(
+                r"(?:^|;)\s*t\s*=\s*(\d+)\s*(?=;|$)", raw_rate_limit
+            )
+        )
+    return min(max(values), _MAX_RETRY_HINT_SECONDS) if values else None
+
+
+def _huggingface_access_url(source: str) -> str:
+    """Return a safe model page URL without revision or signed query data."""
+
+    parsed = urlsplit(source)
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) >= 1 and "resolve" in parts:
+        parts = parts[: parts.index("resolve")]
+    if len(parts) < 2:
+        return "https://huggingface.co/"
+    return "https://huggingface.co/" + "/".join(parts[:2])
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,6 +421,7 @@ class CacheOperationView:
     updated_at: str
     completed_at: str | None
     retryable: bool = False
+    failure: Mapping[str, object] | None = None
 
 
 def _sha256_json(value: object) -> str:
@@ -724,6 +801,67 @@ def _same_model_artifact_identity(
     return bool(selected) and all(current.get(key) == identity for key, identity in selected.items())
 
 
+def _model_lineage_signature(document: Mapping[str, object]) -> tuple[object, object, object]:
+    """Return the authoritative logical model and representation identity.
+
+    Some catalog model-version documents carry a nested ``identity.model``
+    reference while older model documents use the top-level identity. The
+    nested reference is preferred because an upstream revision can legitimately
+    change the display slug without changing the logical model lineage.
+    """
+
+    identity = document.get("identity")
+    identity = identity if isinstance(identity, Mapping) else {}
+    nested = identity.get("model")
+    nested = nested if isinstance(nested, Mapping) else {}
+    publisher = nested.get("publisher", identity.get("publisher"))
+    slug = nested.get("slug", identity.get("slug"))
+    variant = nested.get("variant", identity.get("variant"))
+    if variant is None:
+        variant = document.get("variant")
+    representation = document.get("format")
+    return (
+        (publisher, slug),
+        variant,
+        json.dumps(representation, sort_keys=True, separators=(",", ":"))
+        if representation is not None
+        else None,
+    )
+
+
+def _supersedes_revision(
+    revision: CatalogDocumentRevision, current: CatalogDocumentRevision
+) -> bool:
+    document = revision.document
+    projected = revision.projected if isinstance(revision.projected, Mapping) else {}
+    value = document.get("supersedes") if isinstance(document, Mapping) else None
+    if value is None:
+        value = projected.get("supersedes")
+    values = value if isinstance(value, list) else [value]
+    for item in values:
+        if isinstance(item, str) and item == current.content_digest:
+            return True
+        if isinstance(item, Mapping):
+            if item.get("content_sha256") == current.content_digest:
+                return True
+            if (
+                item.get("publisher") == current.publisher
+                and item.get("slug") == current.slug
+            ):
+                return True
+    return False
+
+
+def _revision_identity(row: CatalogDocumentRevision | None) -> dict[str, object] | None:
+    if row is None or not isinstance(row.content_digest, str):
+        return None
+    return {
+        "publisher": row.publisher,
+        "slug": row.slug,
+        "content_sha256": row.content_digest,
+    }
+
+
 class ModelCacheService:
     """Resolve, download, verify, repair and evict NAS model artifact sets."""
 
@@ -733,6 +871,7 @@ class ModelCacheService:
         root: Path,
         *,
         reserve_bytes: int = 10 * 1024**3,
+        max_parallel_downloads: int = _DEFAULT_MAX_PARALLEL_DOWNLOADS,
         clock: callable | None = None,
         http_client: httpx.Client | None = None,
         fixture_sources: bool = False,
@@ -747,6 +886,14 @@ class ModelCacheService:
             raise ValueError("model cache root must not be a symlink")
         if not isinstance(reserve_bytes, int) or isinstance(reserve_bytes, bool) or reserve_bytes < 0:
             raise ValueError("model cache reserve must be a non-negative integer")
+        if (
+            not isinstance(max_parallel_downloads, int)
+            or isinstance(max_parallel_downloads, bool)
+            or not 1 <= max_parallel_downloads <= _MAX_PARALLEL_DOWNLOADS
+        ):
+            raise ValueError(
+                "model cache parallel downloads must be between 1 and 16"
+            )
         root.mkdir(parents=True, exist_ok=True, mode=0o750)
         for child in ("objects", "partials", "quarantine", "manifests"):
             directory = root / child
@@ -756,6 +903,7 @@ class ModelCacheService:
         self._sessions = sessions
         self._root = root
         self._reserve_bytes = reserve_bytes
+        self._max_parallel_downloads = max_parallel_downloads
         self._clock = clock or (lambda: datetime.now(UTC))
         self._http = http_client
         # Local file and caller-supplied HTTP sources are useful for isolated
@@ -771,6 +919,26 @@ class ModelCacheService:
             Path(huggingface_token_path) if huggingface_token_path is not None else None
         )
         self._lock = threading.RLock()
+        self._closed = threading.Event()
+        self._claim_owner = uuid.uuid4().hex
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_parallel_downloads,
+            thread_name_prefix="vonk-model-cache",
+        )
+        self._background_operations: dict[str, dict[str, object]] = {}
+        self._digest_events: dict[str, threading.Event] = {}
+        self._hf_cooldown_until: datetime | None = None
+
+    def close(self) -> None:
+        """Stop the Controller-wide transfer pool during service shutdown."""
+
+        self._closed.set()
+        # Let active streams observe the shutdown signal and checkpoint before
+        # releasing the service. HTTP clients have bounded read timeouts, so
+        # this wait is finite while preventing post-shutdown DB/file writes.
+        self._executor.shutdown(wait=True, cancel_futures=True)
+        with self._lock:
+            self._advance_background_operations()
 
     @property
     def root(self) -> Path:
@@ -1292,6 +1460,7 @@ class ModelCacheService:
             artifacts[digest] = {
                 "baseline_bytes": baseline,
                 "received_bytes": 0,
+                "started_at": _iso(self._clock()),
             }
             total_bytes += remaining
         return {
@@ -1328,7 +1497,7 @@ class ModelCacheService:
     ) -> dict[str, object]:
         """Persist a transfer ledger when resuming an older schema-2 row."""
         with self._session(write=True) as session:
-            operation = session.get(ModelCacheOperation, operation_id)
+            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
             if operation is None:
                 raise ModelCacheNotFound(
                     "model_cache.operation_missing", "cache operation was not found"
@@ -1350,6 +1519,14 @@ class ModelCacheService:
                     "model_cache.operation_missing", "cache operation was not found"
                 )
             return self._transfer_totals(operation.payload)
+
+    def _transfer_state_for_operation(self, operation_id: str) -> Mapping[str, object] | None:
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None or not isinstance(operation.payload, Mapping):
+                return None
+            value = operation.payload.get("transfer")
+            return value if isinstance(value, Mapping) else None
 
     def _ensure_set(
         self,
@@ -1435,8 +1612,9 @@ class ModelCacheService:
         downloaded_bytes: int = 0,
         expected_bytes: int | None | object = _USE_MANIFEST_BYTES,
         current_artifact_key: str | None = None,
+        transfer: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
-        return {
+        document: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "phase": phase,
             "completed_artifacts": completed_artifacts,
@@ -1449,6 +1627,57 @@ class ModelCacheService:
             ),
             "current_artifact_key": current_artifact_key,
         }
+        if expected_bytes is not None:
+            document["total_bytes_known"] = True
+        else:
+            document["total_bytes_known"] = False
+        members: list[dict[str, object]] = []
+        aggregate_rate = 0.0
+        aggregate_eta: float | None = None
+        counted_rates: set[str] = set()
+        raw_artifacts = transfer.get("artifacts") if isinstance(transfer, Mapping) else None
+        if isinstance(raw_artifacts, Mapping):
+            now = self._clock()
+            for spec in manifest.artifacts:
+                raw = raw_artifacts.get(spec.sha256, {})
+                entry = dict(raw) if isinstance(raw, Mapping) else {}
+                baseline = entry.get("baseline_bytes")
+                baseline = baseline if type(baseline) is int and baseline >= 0 else 0
+                received = entry.get("received_bytes")
+                received = received if type(received) is int and received >= 0 else 0
+                completed = min(spec.expected_bytes, baseline + received)
+                started = entry.get("started_at")
+                rate: float | None = None
+                if isinstance(started, str):
+                    try:
+                        elapsed = max(0.001, (now - datetime.fromisoformat(started)).total_seconds())
+                    except (TypeError, ValueError):
+                        elapsed = 0.0
+                    if elapsed and received:
+                        rate = received / elapsed
+                        if spec.sha256 not in counted_rates:
+                            aggregate_rate += rate
+                            counted_rates.add(spec.sha256)
+                state = "completed" if completed >= spec.expected_bytes else (
+                    "downloading" if received else "queued"
+                )
+                members.append({
+                    "member_id": spec.key,
+                    "phase": "verify" if phase == "verifying" else phase,
+                    "completed_bytes": completed,
+                    "total_bytes": spec.expected_bytes,
+                    "bytes_per_second": rate,
+                    "state": state,
+                })
+            if aggregate_rate and expected_bytes is not None and downloaded_bytes < expected_bytes:
+                aggregate_eta = max(0.0, (expected_bytes - downloaded_bytes) / aggregate_rate)
+        if members:
+            document["members"] = members
+        if aggregate_rate:
+            document["bytes_per_second"] = aggregate_rate
+        if aggregate_eta is not None:
+            document["eta_seconds"] = aggregate_eta
+        return document
 
     def _run_download(
         self,
@@ -1482,48 +1711,38 @@ class ModelCacheService:
         )
         self._set_operation_state(operation_id, "running")
         completed = 0
-        processed_digests: set[str] = set()
         try:
             with self._session(write=True) as session:
                 self._ensure_set(
                     session,
                     manifest,
                 )
-            for spec in manifest.artifacts:
-                self._set_operation_progress(
-                    operation_id,
-                    manifest,
-                    phase="verifying" if force else "downloading",
-                    completed_artifacts=completed,
-                    downloaded_bytes=self._operation_transfer_snapshot(operation_id)[1],
-                    expected_bytes=planned_total,
-                    current_artifact_key=spec.key,
+            unique_specs = list(_unique_artifacts(manifest.artifacts).values())
+            self._set_operation_progress(
+                operation_id,
+                manifest,
+                phase="verifying" if force else "downloading",
+                completed_artifacts=0,
+                downloaded_bytes=self._operation_transfer_snapshot(operation_id)[1],
+                expected_bytes=planned_total,
+                current_artifact_key=None,
+                transfer=transfer,
+            )
+            # Each background operation has its own SQLAlchemy sessions and
+            # digest-specific partial paths.  The single Controller-wide pool
+            # bounds concurrent transfer work across all selected operations.
+            for spec in unique_specs:
+                self._download_one_unique(
+                    spec,
+                    set_digest,
+                    operation_id=operation_id,
+                    force=force,
+                    interrupt_after_bytes=interrupt_after_bytes,
                 )
-                if spec.sha256 in processed_digests:
-                    # Multiple logical entries may intentionally point at the
-                    # same immutable object.  Count the entry for coverage,
-                    # but never transfer or count its bytes twice.
-                    completed += 1
-                    continue
-                if not force and self._object_is_verified(spec):
-                    self._mark_artifact_verified(spec, set_digest)
-                else:
-                    # A forced repair always transfers a fresh payload.  The
-                    # existing object is kept in place until the fresh part
-                    # has passed both size and digest verification.
-                    self._download_artifact(
-                        spec,
-                        set_digest,
-                        operation_id=operation_id,
-                        completed_artifacts=completed,
-                        force=force,
-                        interrupt_after_bytes=interrupt_after_bytes,
-                    )
-                processed_digests.add(spec.sha256)
-                completed += 1
-                # The transfer ledger records only bytes received from the
-                # source during this operation.  Reused verified objects and
-                # pre-existing partial checkpoints never contribute here.
+            # Count logical manifest entries after all unique objects have
+            # completed. Shared digests therefore remain one network transfer
+            # while every selected file still reaches the complete stage.
+            completed = len(manifest.artifacts)
             self._set_operation_progress(
                 operation_id,
                 manifest,
@@ -1532,6 +1751,7 @@ class ModelCacheService:
                 downloaded_bytes=self._operation_transfer_snapshot(operation_id)[1],
                 expected_bytes=planned_total,
                 current_artifact_key=None,
+                transfer=self._transfer_state_for_operation(operation_id),
             )
             with self._session(write=True) as session:
                 row = session.get(ModelCacheSet, set_digest)
@@ -1555,6 +1775,53 @@ class ModelCacheService:
             self._finish_partial(operation_id, set_digest, manifest, str(error) or "download interrupted")
         except (ModelCacheError, OSError, httpx.HTTPError, ValueError) as error:
             self._finish_failed(operation_id, set_digest, manifest, error)
+
+    def _download_one_unique(
+        self,
+        spec: ArtifactSpec,
+        set_digest: str,
+        *,
+        operation_id: str,
+        force: bool,
+        interrupt_after_bytes: int | None,
+    ) -> None:
+        while True:
+            with self._lock:
+                event = self._digest_events.get(spec.sha256)
+                owner = event is None
+                if owner:
+                    event = threading.Event()
+                    self._digest_events[spec.sha256] = event
+            if owner:
+                break
+            # A second selected Model/Recipe waits for the first immutable
+            # digest transfer, then reuses its verified object. This prevents
+            # concurrent writers from sharing a partial path or replacing a
+            # valid object out of order.
+            event.wait(timeout=_TRANSFER_CLAIM_SECONDS)
+            if not force and self._object_is_verified(spec):
+                self._mark_artifact_verified(spec, set_digest)
+                return
+            with self._lock:
+                if self._digest_events.get(spec.sha256) is event and event.is_set():
+                    self._digest_events.pop(spec.sha256, None)
+        try:
+            if not force and self._object_is_verified(spec):
+                self._mark_artifact_verified(spec, set_digest)
+                return
+            self._download_artifact(
+                spec,
+                set_digest,
+                operation_id=operation_id,
+                completed_artifacts=0,
+                force=force,
+                interrupt_after_bytes=interrupt_after_bytes,
+            )
+        finally:
+            with self._lock:
+                current = self._digest_events.pop(spec.sha256, None)
+                if current is not None:
+                    current.set()
 
     def _download_artifact(
         self,
@@ -1594,6 +1861,16 @@ class ModelCacheService:
             mode = "ab" if effective_offset else "wb"
             with part.open(mode) as output:
                 while True:
+                    if self._closed.is_set():
+                        self._checkpoint_artifact(
+                            spec,
+                            operation_id=operation_id,
+                            set_digest=set_digest,
+                            actual_bytes=received,
+                            state="partial",
+                            completed_artifacts=completed_artifacts,
+                        )
+                        raise InterruptedError("model cache service is shutting down")
                     if hasattr(stream, "read"):
                         chunk = stream.read(_CHUNK_BYTES)
                     else:
@@ -1607,6 +1884,7 @@ class ModelCacheService:
                         raise ModelCacheStorageError(
                             "model_cache.source_size_mismatch",
                             "source returned more bytes than the immutable artifact pin",
+                            recovery="download_again",
                         )
                     output.write(chunk)
                     output.flush()
@@ -1642,6 +1920,7 @@ class ModelCacheService:
             raise ModelCacheStorageError(
                 "model_cache.source_truncated",
                 "source ended before the immutable artifact size",
+                recovery="resume",
             )
         if not self._verify_file(part, spec):
             self._checkpoint_artifact(
@@ -1654,6 +1933,7 @@ class ModelCacheService:
             raise ModelCacheStorageError(
                 "model_cache.digest_mismatch",
                 "downloaded artifact failed SHA-256 verification",
+                recovery="download_again",
             )
         self._publish_object(spec, part)
         self._mark_artifact_verified(spec, set_digest)
@@ -1748,9 +2028,9 @@ class ModelCacheService:
 
         Hugging Face commonly redirects a resolve URL to a signed CDN URL.
         Redirects are followed manually so an Authorization header is never
-        copied to an arbitrary host. Public files are requested anonymously;
-        a bearer token is used only after the canonical authority reports a
-        gated/private response.
+        copied to an arbitrary host. A configured token is sent only on the
+        canonical authority request; without a token file, the request stays
+        anonymous until the authority reports that access is required.
         """
         current_url = source
         try:
@@ -1761,6 +2041,19 @@ class ModelCacheService:
         authenticated = False
         token: str | None = None
         token_loaded = False
+        if source_is_huggingface and self._huggingface_token_path is not None:
+            # A configured token is used on the canonical request so gated
+            # files do not incur a public anonymous request. It is never
+            # copied to a redirect/CDN host.
+            token = self._load_huggingface_token()
+            token_loaded = True
+            if token is None:
+                raise ModelCacheStorageError(
+                    "model_cache.credentials_invalid",
+                    "Hugging Face credential file is unavailable; configure HF_TOKEN_FILE",
+                    recovery="credentials_invalid",
+                )
+            authenticated = True
         for redirect_count in range(_MAX_HTTP_REDIRECTS + 1):
             request_headers = dict(headers)
             if authenticated and _is_hf_canonical_url(current_url):
@@ -1771,6 +2064,15 @@ class ModelCacheService:
             request = client.build_request("GET", current_url, headers=request_headers)
             response = client.send(request, stream=True)
             status_code = response.status_code
+            if status_code == 429:
+                retry_after = _retry_after_seconds(response.headers, now=self._clock())
+                response.close()
+                raise ModelCacheStorageError(
+                    "model_cache.rate_limited",
+                    "artifact provider rate limited this download; it will resume automatically",
+                    retry_after_seconds=retry_after,
+                    recovery="resume",
+                )
             if status_code in {401, 403} and _is_hf_canonical_url(current_url):
                 if not token_loaded:
                     token = self._load_huggingface_token()
@@ -1783,11 +2085,15 @@ class ModelCacheService:
                 if authenticated:
                     raise ModelCacheStorageError(
                         "model_cache.credentials_denied",
-                        "Hugging Face credentials were rejected; verify token scope and repository access",
+                        "Hugging Face could not authorize this download; verify account access and token scope at "
+                        f"{_huggingface_access_url(source)}; then use Check access and resume",
+                        recovery="access_denied",
                     )
                 raise ModelCacheStorageError(
                     "model_cache.credentials_missing",
-                    "Hugging Face credentials are required for this gated model; configure HF_TOKEN_FILE",
+                    "Hugging Face access is required; request access at "
+                    f"{_huggingface_access_url(source)} and configure HF_TOKEN_FILE, then use Check access and resume",
+                    recovery="access_required",
                 )
             if status_code in {301, 302, 303, 307, 308}:
                 location = response.headers.get("location")
@@ -1831,8 +2137,9 @@ class ModelCacheService:
             raw = read_runtime_secret(path)
         except (OSError, RuntimeSecretError):
             raise ModelCacheStorageError(
-                "model_cache.credentials_missing",
+                "model_cache.credentials_invalid",
                 "Hugging Face credential file is unavailable; configure HF_TOKEN_FILE",
+                recovery="credentials_invalid",
             ) from None
         value = raw.strip()
         if not value:
@@ -1843,11 +2150,13 @@ class ModelCacheService:
             raise ModelCacheStorageError(
                 "model_cache.credentials_invalid",
                 "Hugging Face credential file must contain one ASCII bearer token",
+                recovery="credentials_invalid",
             ) from None
         if any(character.isspace() for character in token) or "\x00" in token:
             raise ModelCacheStorageError(
                 "model_cache.credentials_invalid",
                 "Hugging Face credential file must contain one bearer token",
+                recovery="credentials_invalid",
             )
         return token
 
@@ -1878,7 +2187,9 @@ class ModelCacheService:
     def _publish_object(self, spec: ArtifactSpec, part: Path) -> None:
         if not self._verify_file(part, spec):
             raise ModelCacheStorageError(
-                "model_cache.digest_mismatch", "cache artifact failed verification"
+                "model_cache.digest_mismatch",
+                "cache artifact failed verification",
+                recovery="download_again",
             )
         target = self._object_path(spec.sha256)
         target.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
@@ -1907,13 +2218,13 @@ class ModelCacheService:
         completed_artifacts: int = 0,
     ) -> None:
         now = self._clock()
-        with self._session(write=True) as session:
+        with self._lock, self._session(write=True) as session:
             artifact = session.get(ModelCacheArtifact, spec.sha256)
             if artifact is not None:
                 artifact.actual_bytes = actual_bytes
                 artifact.state = state
                 artifact.updated_at = now
-            operation = session.get(ModelCacheOperation, operation_id)
+            operation = session.get(ModelCacheOperation, operation_id, with_for_update=True)
             if operation is not None:
                 manifest = ArtifactSetManifest.from_document(operation.payload["manifest"])
                 payload = dict(operation.payload)
@@ -1948,6 +2259,11 @@ class ModelCacheService:
                     and value.get("received_bytes", 0) >= 0
                 )
                 payload["transfer"] = transfer
+                claim = payload.get("claim")
+                if isinstance(claim, Mapping) and claim.get("owner") == self._claim_owner:
+                    payload["claim"] = dict(claim) | {
+                        "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS))
+                    }
                 operation.payload = payload
                 old_progress = operation.progress if isinstance(operation.progress, Mapping) else {}
                 old_downloaded = old_progress.get("downloaded_bytes")
@@ -1962,6 +2278,7 @@ class ModelCacheService:
                     downloaded_bytes=max(old_downloaded, received),
                     expected_bytes=total,
                     current_artifact_key=spec.key,
+                    transfer=transfer,
                 )
                 operation.current_artifact_key = spec.key
                 operation.updated_at = now
@@ -1973,7 +2290,7 @@ class ModelCacheService:
 
     def _mark_artifact_verified(self, spec: ArtifactSpec, set_digest: str) -> None:
         now = self._clock()
-        with self._session(write=True) as session:
+        with self._lock, self._session(write=True) as session:
             artifact = session.get(ModelCacheArtifact, spec.sha256)
             if artifact is not None:
                 artifact.actual_bytes = spec.expected_bytes
@@ -2021,6 +2338,24 @@ class ModelCacheService:
             if operation is not None:
                 operation.state = "partial"
                 operation.last_error = detail[:512]
+                operation.payload = dict(operation.payload) | {
+                    "failure": {
+                        "code": "model_cache.interrupted",
+                        "detail": f"{detail[:480]}; preserved bytes remain available to resume",
+                        "retryable": True,
+                        "recovery": "resume",
+                        "retry_time": None,
+                        "retry_after_seconds": None,
+                        "required_bytes": None,
+                        "free_bytes": None,
+                        "shortfall_bytes": None,
+                    }
+                }
+                operation.payload = {
+                    key: value
+                    for key, value in operation.payload.items()
+                    if key != "claim"
+                }
                 _total, received = self._transfer_totals(operation.payload)
                 operation.progress = self._progress(
                     manifest,
@@ -2033,6 +2368,12 @@ class ModelCacheService:
                     downloaded_bytes=received,
                     expected_bytes=_total,
                     current_artifact_key=operation.current_artifact_key,
+                    transfer=(
+                        operation.payload.get("transfer")
+                        if isinstance(operation.payload, Mapping)
+                        and isinstance(operation.payload.get("transfer"), Mapping)
+                        else None
+                    ),
                 )
                 operation.updated_at = now
 
@@ -2042,13 +2383,28 @@ class ModelCacheService:
         set_digest: str,
         manifest: ArtifactSetManifest,
         error: BaseException,
+        failed_artifact_key: str | None = None,
     ) -> None:
         detail = (
             error.detail
             if isinstance(error, ModelCacheError)
             else f"{type(error).__name__}: {str(error)[:400]}"
         )
+        detail = redact_text(detail)[:512]
         now = self._clock()
+        required_bytes = free_bytes = shortfall_bytes = None
+        if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+            try:
+                required_bytes = manifest.expected_bytes
+                free_bytes = self.storage_summary().free_bytes
+                shortfall_bytes = max(0, required_bytes - free_bytes)
+            except (OSError, RuntimeError, ValueError):
+                pass
+        failure_code = getattr(error, "code", None)
+        if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+            failure_code = "model_cache.capacity"
+        if not isinstance(failure_code, str) or re.fullmatch(r"[a-z][a-z0-9_.:-]{0,95}", failure_code) is None:
+            failure_code = "model_cache.operation_failed"
         with self._session(write=True) as session:
             row = session.get(ModelCacheSet, set_digest)
             if row is not None:
@@ -2080,16 +2436,44 @@ class ModelCacheService:
                 bounded_retry = retryable and automatic_attempts < _MAX_OPERATION_ATTEMPTS
                 operation.state = "queued" if bounded_retry else "failed"
                 operation.last_error = detail[:512]
+                retry_delay = getattr(error, "retry_after_seconds", None)
+                if type(retry_delay) is not int or retry_delay < 0:
+                    retry_delay = min(
+                        _RETRY_MAX_SECONDS,
+                        _RETRY_BASE_SECONDS * (2 ** max(0, automatic_attempts - 1)),
+                    )
+                next_retry = now + timedelta(seconds=retry_delay)
                 retry.update(
                     automatic_attempts=automatic_attempts,
                     operator_retries=operator_retries,
+                    next_retry_at=_iso(next_retry) if bounded_retry else None,
+                    retry_after_seconds=retry_delay if bounded_retry else None,
                 )
+                provider_rate_limited = getattr(error, "code", None) == "model_cache.rate_limited"
+                if provider_rate_limited and self._manifest_has_huggingface_source(manifest):
+                    self._record_huggingface_cooldown(next_retry)
+                failure_payload = {
+                    "code": failure_code,
+                    "detail": detail[:512],
+                    "retryable": retryable,
+                    "automatic_exhausted": retryable and not bounded_retry,
+                    "recovery": getattr(error, "recovery", None)
+                    or ("capacity" if failure_code == "model_cache.capacity" else None)
+                    or ("resume" if bounded_retry else "retry"),
+                    "retry_time": _iso(next_retry)
+                    if bounded_retry or provider_rate_limited
+                    else None,
+                    "retry_after_seconds": retry_delay
+                    if bounded_retry or provider_rate_limited
+                    else None,
+                    "required_bytes": required_bytes,
+                    "free_bytes": free_bytes,
+                    "shortfall_bytes": shortfall_bytes,
+                }
+                if isinstance(failed_artifact_key, str):
+                    failure_payload["artifact_key"] = failed_artifact_key
                 operation.payload = dict(operation.payload) | {
-                    "failure": {
-                        "code": getattr(error, "code", type(error).__name__),
-                        "retryable": retryable,
-                        "automatic_exhausted": retryable and not bounded_retry,
-                    },
+                    "failure": failure_payload,
                     "retry": retry,
                 }
                 if bounded_retry:
@@ -2101,6 +2485,11 @@ class ModelCacheService:
                     operation.completed_at = None
                 else:
                     operation.completed_at = now
+                operation.payload = {
+                    key: value
+                    for key, value in operation.payload.items()
+                    if key != "claim"
+                }
                 operation.updated_at = now
 
     def retry(
@@ -2181,6 +2570,267 @@ class ModelCacheService:
             session.flush()
             return self._operation_view(operation)
 
+    def check_access_and_resume(
+        self,
+        operation_id: str,
+        *,
+        actor: str,
+        request_key: str,
+        artifact_set_sha256: str,
+        plan_digest: str,
+    ) -> CacheOperationView:
+        """Recheck terminal HF access, then queue the exact retained transfer.
+
+        Authentication failures are deliberately terminal for automatic
+        scheduling.  This action is the explicit operator boundary after the
+        configured token file or upstream access has changed.  It never
+        rebuilds a manifest or changes the pinned revision.
+        """
+
+        request_key = _request_key(request_key)
+        requested_set = _optional_digest(artifact_set_sha256)
+        requested_plan = _optional_digest(plan_digest)
+        assert requested_set is not None and requested_plan is not None
+        auth_codes = {
+            "model_cache.credentials_missing",
+            "model_cache.credentials_denied",
+            "model_cache.credentials_invalid",
+        }
+        with self._lock, self._session(write=True) as session:
+            previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            if previous is None:
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            if (
+                previous.artifact_set_sha256 != requested_set
+                or previous.plan_digest != requested_plan
+            ):
+                raise ModelCacheConflict(
+                    "model_cache.identity_mismatch",
+                    "access recheck identity does not match the persisted operation",
+                )
+            existing = session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key
+                )
+            )
+            if existing is not None:
+                if existing.id == previous.id:
+                    raise ModelCacheConflict(
+                        "model_cache.request_key_reused",
+                        "access recheck requires a new operator request key",
+                    )
+                if (
+                    existing.kind == previous.kind
+                    and existing.artifact_set_sha256 == previous.artifact_set_sha256
+                    and existing.plan_digest == previous.plan_digest
+                ):
+                    return self._operation_view(existing)
+                raise ModelCacheConflict(
+                    "model_cache.request_key_reused",
+                    "request key was already used for another cache operation",
+                )
+            failure = previous.payload.get("failure", {})
+            if (
+                previous.kind not in {"download", "repair"}
+                or previous.state != "failed"
+                or not isinstance(failure, Mapping)
+                or failure.get("code") not in auth_codes
+            ):
+                raise ModelCacheConflict(
+                    "model_cache.access_recheck_unavailable",
+                    "the operation does not have a terminal Hugging Face access failure",
+                )
+            prior_check = previous.payload.get("access_recheck")
+            if (
+                isinstance(prior_check, Mapping)
+                and prior_check.get("request_key") == request_key
+            ):
+                return self._operation_view(previous)
+            manifest = ArtifactSetManifest.from_document(
+                previous.payload.get("manifest", {})
+            )
+            failed_artifact_key = (
+                failure.get("artifact_key")
+                if isinstance(failure.get("artifact_key"), str)
+                else previous.current_artifact_key
+            )
+
+        try:
+            self._check_huggingface_access(
+                manifest,
+                failed_artifact_key=(
+                    failed_artifact_key
+                    if isinstance(failed_artifact_key, str)
+                    else None
+                ),
+            )
+        except (ModelCacheStorageError, httpx.HTTPError, OSError) as error:
+            if _retryable_failure(error):
+                self._finish_failed(
+                    operation_id,
+                    requested_set,
+                    manifest,
+                    error,
+                    failed_artifact_key=(
+                        failed_artifact_key
+                        if isinstance(failed_artifact_key, str)
+                        else None
+                    ),
+                )
+                return self.get_operation(operation_id)
+            if not isinstance(error, ModelCacheStorageError):
+                raise
+            safe_detail = redact_text(error.detail)[:512]
+            now = self._clock()
+            failure_payload = {
+                "code": error.code,
+                "detail": safe_detail,
+                "retryable": False,
+                "automatic_exhausted": True,
+                "recovery": error.recovery or "check_access_and_resume",
+                "retry_time": None,
+                "retry_after_seconds": None,
+                "required_bytes": None,
+                "free_bytes": None,
+                "shortfall_bytes": None,
+            }
+            if isinstance(failed_artifact_key, str):
+                failure_payload["artifact_key"] = failed_artifact_key
+            with self._lock, self._session(write=True) as session:
+                previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+                if previous is None:
+                    raise ModelCacheNotFound(
+                        "model_cache.operation_missing", "cache operation was not found"
+                    )
+                previous.state = "failed"
+                previous.last_error = safe_detail
+                previous.completed_at = now
+                previous.updated_at = now
+                previous.payload = dict(previous.payload) | {
+                    "failure": failure_payload,
+                    "access_recheck": {
+                        "request_key": request_key,
+                        "checked_at": _iso(now),
+                        "authorized": False,
+                    },
+                }
+                previous.payload.pop("claim", None)
+                return self._operation_view(previous)
+
+        now = self._clock()
+        with self._lock, self._session(write=True) as session:
+            previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            if previous is None:
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            payload = dict(previous.payload)
+            payload.pop("failure", None)
+            payload.pop("result", None)
+            payload.pop("claim", None)
+            retry = payload.get("retry")
+            retry = dict(retry) if isinstance(retry, Mapping) else {}
+            retry.update(automatic_attempts=1, next_retry_at=None, retry_after_seconds=None)
+            payload["retry"] = retry
+            payload["resume_of"] = previous.id
+            payload["access_recheck"] = {
+                "request_key": request_key,
+                "checked_at": _iso(now),
+                "authorized": True,
+            }
+            total, received = self._transfer_totals(payload)
+            prior_progress = previous.progress if isinstance(previous.progress, Mapping) else {}
+            progress = self._progress(
+                manifest,
+                phase="queued",
+                completed_artifacts=(
+                    int(prior_progress.get("completed_artifacts", 0))
+                    if type(prior_progress.get("completed_artifacts")) is int
+                    else 0
+                ),
+                downloaded_bytes=received,
+                expected_bytes=total,
+                current_artifact_key=(
+                    previous.current_artifact_key
+                    if isinstance(previous.current_artifact_key, str)
+                    else None
+                ),
+                transfer=(
+                    payload.get("transfer")
+                    if isinstance(payload.get("transfer"), Mapping)
+                    else None
+                ),
+            )
+            operation = ModelCacheOperation(
+                request_key=request_key,
+                schema_version=SCHEMA_VERSION,
+                kind=previous.kind,
+                state="queued",
+                attempt=1,
+                artifact_set_sha256=previous.artifact_set_sha256,
+                plan_digest=previous.plan_digest,
+                payload=payload,
+                progress=progress,
+                actor=actor,
+                current_artifact_key=previous.current_artifact_key,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(operation)
+            session.flush()
+            return self._operation_view(operation)
+
+    def _check_huggingface_access(
+        self,
+        manifest: ArtifactSetManifest,
+        *,
+        failed_artifact_key: str | None = None,
+    ) -> None:
+        unique_specs = _unique_artifacts(manifest.artifacts)
+        exact = next(
+            (
+                spec
+                for spec in unique_specs.values()
+                if failed_artifact_key in {spec.key, spec.artifact_id}
+            ),
+            None,
+        ) if failed_artifact_key else None
+        if exact is not None and _is_hf_canonical_url(exact.source):
+            specs = [exact]
+        else:
+            # A missing key can occur after an interrupted/recovered worker.
+            # Probe one representative per model repository rather than every
+            # shard while still checking public and gated dependencies.
+            by_repository: dict[str, ArtifactSpec] = {}
+            for spec in unique_specs.values():
+                if _is_hf_canonical_url(spec.source):
+                    by_repository.setdefault(_huggingface_access_url(spec.source), spec)
+            specs = list(by_repository.values())
+        if not specs:
+            raise ModelCacheConflict(
+                "model_cache.access_recheck_unavailable",
+                "the persisted operation has no canonical Hugging Face source to check",
+            )
+        client = self._http
+        owns_client = client is None
+        if client is None:
+            client = httpx.Client(
+                follow_redirects=False,
+                timeout=httpx.Timeout(30.0),
+                trust_env=False,
+            )
+        try:
+            for spec in specs:
+                response = self._open_http_response(
+                    client, spec.source, {"Range": "bytes=0-0"}
+                )
+                response.close()
+        finally:
+            if owns_client:
+                client.close()
+
     def _set_operation_state(
         self,
         operation_id: str,
@@ -2200,8 +2850,22 @@ class ModelCacheService:
                     operation.attempt = max(1, int(operation.attempt))
             operation.state = state
             operation.updated_at = now
+            if state == "running":
+                operation.payload = {
+                    key: value
+                    for key, value in operation.payload.items()
+                    if key != "failure"
+                }
             if result is not None:
-                operation.payload = dict(operation.payload) | {"result": dict(result)}
+                payload = dict(operation.payload) | {"result": dict(result)}
+                payload.pop("failure", None)
+                operation.payload = payload
+            if state in {"succeeded", "failed", "cancelled"}:
+                operation.payload = {
+                    key: value
+                    for key, value in operation.payload.items()
+                    if key != "claim"
+                }
             if state in {"succeeded", "failed", "cancelled"}:
                 operation.completed_at = now
 
@@ -2215,6 +2879,7 @@ class ModelCacheService:
         downloaded_bytes: int,
         current_artifact_key: str | None,
         expected_bytes: int | None = None,
+        transfer: Mapping[str, object] | None = None,
     ) -> None:
         now = self._clock()
         with self._session(write=True) as session:
@@ -2233,6 +2898,16 @@ class ModelCacheService:
                 downloaded_bytes=max(old_downloaded, downloaded_bytes),
                 expected_bytes=expected_bytes,
                 current_artifact_key=current_artifact_key,
+                transfer=(
+                    transfer
+                    if transfer is not None
+                    else (
+                        operation.payload.get("transfer")
+                        if isinstance(operation.payload, Mapping)
+                        and isinstance(operation.payload.get("transfer"), Mapping)
+                        else None
+                    )
+                ),
             )
             operation.current_artifact_key = current_artifact_key
             operation.state = "running"
@@ -2304,6 +2979,7 @@ class ModelCacheService:
     @staticmethod
     def _operation_view(operation: ModelCacheOperation) -> CacheOperationView:
         result = operation.payload.get("result") if isinstance(operation.payload, Mapping) else None
+        failure = ModelCacheService._canonical_failure(operation)
         return CacheOperationView(
             id=operation.id,
             request_key=operation.request_key,
@@ -2319,18 +2995,89 @@ class ModelCacheService:
             updated_at=_iso(operation.updated_at) or "",
             completed_at=_iso(operation.completed_at),
             retryable=(
-                isinstance(operation.payload, Mapping)
-                and isinstance(operation.payload.get("failure"), Mapping)
-                and operation.payload["failure"].get("retryable") is True
+                failure is not None and failure["retryable"] is True
             ),
+            failure=failure,
         )
+
+    @staticmethod
+    def _canonical_failure(
+        operation: ModelCacheOperation,
+    ) -> Mapping[str, object] | None:
+        raw = operation.payload.get("failure") if isinstance(operation.payload, Mapping) else None
+        if not isinstance(raw, Mapping):
+            return None
+        semantic_codes = {
+            "model_cache.credentials_missing": "access_required",
+            "model_cache.credentials_denied": "access_denied",
+            "model_cache.credentials_invalid": "credentials_invalid",
+            "model_cache.rate_limited": "rate_limited",
+            "model_cache.digest_mismatch": "integrity_mismatch",
+            "model_cache.source_size_mismatch": "integrity_mismatch",
+            "model_cache.capacity": "capacity",
+            "model_cache.interrupted": "interrupted",
+        }
+        code = semantic_codes.get(
+            str(raw.get("code", "model_cache.operation_failed")),
+            str(raw.get("code", "model_cache.operation_failed")),
+        )
+        recovery = raw.get("recovery")
+        recovery_actions = {
+            "access_required": [
+                "open_model_access",
+                "configure_hf_token",
+                "check_access_and_resume",
+            ],
+            "access_denied": ["open_model_access", "check_access_and_resume"],
+            "credentials_invalid": [
+                "configure_hf_token",
+                "check_access_and_resume",
+            ],
+            "resume": ["resume"],
+            "download_again": ["download_again"],
+            "retry": ["retry"],
+            "capacity": ["free_space", "resume"],
+            "check_access_and_resume": ["check_access_and_resume"],
+        }
+        actions = (
+            recovery_actions.get(recovery, ["inspect"])
+            if isinstance(recovery, str) and recovery
+            else ["inspect"]
+        )
+        retry_time = raw.get("retry_time")
+        retry_after = raw.get("retry_after_seconds")
+        if not isinstance(retry_time, str):
+            retry_time = None
+            retry_after = None
+        capacity = {
+            key: raw.get(key)
+            for key in ("required_bytes", "free_bytes", "shortfall_bytes")
+        }
+        if not all(type(capacity[key]) is int and capacity[key] >= 0 for key in capacity):
+            capacity = {key: None for key in capacity}
+        return AvailabilityOperationFailure.model_validate(
+            {
+                "code": code,
+                "detail": redact_text(
+                    raw.get("detail") or operation.last_error or "model cache operation failed"
+                )[:512],
+                "recovery_actions": actions,
+                "retryable": raw.get("retryable") is True,
+                "retry_time": retry_time,
+                "retry_after_seconds": retry_after,
+                "log_excerpt": redact_text(raw.get("detail"))[:1024]
+                if raw.get("detail")
+                else None,
+                **capacity,
+            }
+        ).model_dump(mode="json")
 
     def resume_operations(self, *, limit: int = 16) -> int:
         """Return durable cache work for the Controller worker to resume.
 
         Startup must not perform network or disk transfers inline.  The
-        worker calls :meth:`run_pending` after it has claimed its process
-        loop, so an API restart only discovers outstanding work here.
+        worker calls :meth:`tick` after it has claimed its process loop, so an
+        API restart only discovers outstanding work here.
         """
         if not 1 <= limit <= 100:
             raise ValueError("cache operation limit is invalid")
@@ -2354,37 +3101,460 @@ class ModelCacheService:
         return min(count, limit)
 
     def run_pending(self, *, limit: int = 1) -> int:
-        """Process a bounded batch of durable cache operations in the worker."""
+        """Process a bounded batch synchronously for maintenance and tests.
+
+        Production worker dispatch uses :meth:`tick`, which only claims and
+        submits work to the Controller-wide bounded pool.  This synchronous
+        method intentionally remains available to deterministic maintenance
+        callers and fixture tests.
+        """
         if not 1 <= limit <= 16:
             raise ValueError("cache worker batch limit is invalid")
+        rows = self._claim_operations(limit=limit, respect_backoff=False)
+        for operation_id, kind in rows:
+            if kind == "evict":
+                self._run_eviction(operation_id)
+            else:
+                self._run_download(operation_id, force=kind == "repair")
+        return len(rows)
+
+    def tick(self, *, limit: int | None = None) -> int:
+        """Claim and submit due operations without blocking the worker loop."""
+
+        if self._closed.is_set():
+            return 0
+
+        # A caller-supplied Session is intentionally retained for synchronous
+        # fixture/maintenance use only. Background tasks must obtain isolated
+        # sessions from a sessionmaker; SQLAlchemy Session is not thread safe.
+        if isinstance(self._sessions, Session):
+            return self.run_pending(limit=1)
+        requested = self._max_parallel_downloads if limit is None else limit
+        if not 1 <= requested <= _MAX_PARALLEL_DOWNLOADS:
+            raise ValueError("cache worker batch limit is invalid")
         with self._lock:
-            with self._session() as session:
-                rows = list(
+            completed = self._advance_background_operations()
+            capacity = max(
+                0,
+                self._max_parallel_downloads
+                - sum(
+                    len(
+                        [
+                            future
+                            for future in record.get("futures", [])
+                            if isinstance(future, Future) and not future.done()
+                        ]
+                    )
+                    for record in self._background_operations.values()
+                ),
+            )
+            if not capacity:
+                return completed
+            claimed = self._claim_operations(limit=min(requested, capacity), respect_backoff=True)
+            for operation_id, kind in claimed:
+                if kind == "evict":
+                    future = self._executor.submit(self._run_eviction, operation_id)
+                    self._background_operations[operation_id] = {
+                        "kind": kind,
+                        "futures": [future],
+                    }
+                    continue
+                self._schedule_background_download(
+                    operation_id,
+                    force=kind == "repair",
+                    capacity=1,
+                )
+            # Allocate one transfer to every selected operation first, then
+            # round-robin remaining slots. A large Model cannot monopolize the
+            # Controller pool while another selected Model waits at zero.
+            while True:
+                capacity = self._available_transfer_slots()
+                if capacity <= 0:
+                    break
+                progressed = False
+                for operation_id in list(self._background_operations):
+                    before = self._available_transfer_slots()
+                    record = self._background_operations.get(operation_id, {})
+                    futures = record.get("futures", []) if isinstance(record, Mapping) else []
+                    pending = sum(
+                        1
+                        for future in futures
+                        if isinstance(future, Future) and not future.done()
+                    )
+                    self._fill_background_slots(operation_id, pending + 1)
+                    if self._available_transfer_slots() < before:
+                        progressed = True
+                    if self._available_transfer_slots() <= 0:
+                        break
+                if not progressed:
+                    break
+            return completed + len(claimed)
+
+    def _available_transfer_slots(self) -> int:
+        return max(
+            0,
+            self._max_parallel_downloads
+            - sum(
+                len(
+                    [
+                        future
+                        for future in record.get("futures", [])
+                        if isinstance(future, Future) and not future.done()
+                    ]
+                )
+                for record in self._background_operations.values()
+            ),
+        )
+
+    def _schedule_background_download(
+        self, operation_id: str, *, force: bool, capacity: int
+    ) -> None:
+        with self._session() as session:
+            operation = session.get(ModelCacheOperation, operation_id)
+            if operation is None:
+                raise ModelCacheNotFound("model_cache.operation_missing", "cache operation was not found")
+            manifest = ArtifactSetManifest.from_document(operation.payload.get("manifest", {}))
+            set_digest = operation.artifact_set_sha256
+        if set_digest is None:
+            raise ModelCacheConflict("model_cache.set_missing", "cache operation has no artifact set")
+        transfer = self._ensure_transfer_state(operation_id, manifest, force=force)
+        planned_total = transfer.get("total_bytes")
+        planned_total = planned_total if type(planned_total) is int and planned_total >= 0 else None
+        with self._session(write=True) as session:
+            self._ensure_set(session, manifest)
+        self._set_operation_state(operation_id, "running")
+        specs = list(_unique_artifacts(manifest.artifacts).values())
+        record: dict[str, object] = {
+            "kind": "repair" if force else "download",
+            "set_digest": set_digest,
+            "manifest": manifest,
+            "force": force,
+            "specs": specs,
+            "next_index": 0,
+            "completed": 0,
+            "futures": [],
+            "future_specs": {},
+            "planned_total": planned_total,
+        }
+        self._background_operations[operation_id] = record
+        self._set_operation_progress(
+            operation_id,
+            manifest,
+            phase="verifying" if force else "downloading",
+            completed_artifacts=0,
+            expected_bytes=planned_total,
+            downloaded_bytes=self._operation_transfer_snapshot(operation_id)[1],
+            current_artifact_key=None,
+            transfer=transfer,
+        )
+        self._fill_background_slots(operation_id, capacity)
+
+    def _fill_background_slots(self, operation_id: str, capacity: int) -> None:
+        record = self._background_operations.get(operation_id)
+        if record is None:
+            return
+        specs = record["specs"]
+        if not isinstance(specs, list):
+            return
+        futures = record["futures"]
+        if not isinstance(futures, list):
+            futures = []
+            record["futures"] = futures
+        pending = sum(1 for future in futures if isinstance(future, Future) and not future.done())
+        while pending < capacity and int(record["next_index"]) < len(specs):
+            spec = specs[int(record["next_index"])]
+            record["next_index"] = int(record["next_index"]) + 1
+            future = self._executor.submit(
+                self._download_one_unique,
+                spec,
+                str(record["set_digest"]),
+                operation_id=operation_id,
+                force=bool(record["force"]),
+                interrupt_after_bytes=None,
+            )
+            futures.append(future)
+            future_specs = record.get("future_specs")
+            if isinstance(future_specs, dict):
+                future_specs[future] = spec.key
+            pending += 1
+
+    def _advance_background_operations(self) -> int:
+        self._renew_background_claims()
+        finished = 0
+        for operation_id, record in list(self._background_operations.items()):
+            futures = record.get("futures", [])
+            if not isinstance(futures, list):
+                futures = []
+            done = [future for future in futures if isinstance(future, Future) and future.done()]
+            future_specs = record.get("future_specs")
+            future_specs = future_specs if isinstance(future_specs, dict) else {}
+            first_error = record.get("failure")
+            for future in done:
+                if future in futures:
+                    futures.remove(future)
+                failed_artifact_key = future_specs.pop(future, None)
+                try:
+                    future.result()
+                except BaseException as error:
+                    if first_error is None:
+                        first_error = error
+                        record["failure"] = error
+                        record["failure_artifact_key"] = failed_artifact_key
+                    for other in futures:
+                        if isinstance(other, Future):
+                            other.cancel()
+            if first_error is not None:
+                # A cancelled Future may still be running. Keep the durable
+                # claim and record until every sibling has settled, so a
+                # late checkpoint cannot resurrect a failed operation or
+                # overwrite its terminal failure payload.
+                if futures:
+                    continue
+                manifest = record["manifest"]
+                if isinstance(manifest, ArtifactSetManifest):
+                    if isinstance(first_error, InterruptedError):
+                        self._finish_partial(
+                            operation_id,
+                            str(record["set_digest"]),
+                            manifest,
+                            str(first_error) or "download interrupted",
+                        )
+                    else:
+                        self._finish_failed(
+                            operation_id,
+                            str(record["set_digest"]),
+                            manifest,
+                            first_error,
+                            failed_artifact_key=(
+                                record.get("failure_artifact_key")
+                                if isinstance(record.get("failure_artifact_key"), str)
+                                else None
+                            ),
+                        )
+                self._background_operations.pop(operation_id, None)
+                finished += 1
+                continue
+            specs = record.get("specs", [])
+            if int(record.get("next_index", 0)) >= len(specs) and not futures:
+                manifest = record["manifest"]
+                if isinstance(manifest, ArtifactSetManifest):
+                    self._finish_background_success(
+                        operation_id,
+                        str(record["set_digest"]),
+                        manifest,
+                        record.get("planned_total"),
+                    )
+                self._background_operations.pop(operation_id, None)
+                finished += 1
+            else:
+                capacity = max(
+                    0,
+                    self._max_parallel_downloads
+                    - sum(
+                        len(
+                            [
+                                current
+                                for current in item.get("futures", [])
+                                if isinstance(current, Future) and not current.done()
+                            ]
+                        )
+                        for item in self._background_operations.values()
+                    ),
+                )
+                pending = sum(
+                    1
+                    for future in futures
+                    if isinstance(future, Future) and not future.done()
+                )
+                self._fill_background_slots(operation_id, pending + min(1, capacity))
+        return finished
+
+    def _renew_background_claims(self) -> None:
+        if not self._background_operations:
+            return
+        now = self._clock()
+        with self._session(write=True) as session:
+            for operation_id in self._background_operations:
+                operation = session.get(ModelCacheOperation, operation_id)
+                if operation is None or not isinstance(operation.payload, Mapping):
+                    continue
+                claim = operation.payload.get("claim")
+                if isinstance(claim, Mapping) and claim.get("owner") == self._claim_owner:
+                    operation.payload = dict(operation.payload) | {
+                        "claim": dict(claim)
+                        | {"expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS))}
+                    }
+                    operation.updated_at = now
+
+    def _finish_background_success(
+        self,
+        operation_id: str,
+        set_digest: str,
+        manifest: ArtifactSetManifest,
+        planned_total: object,
+    ) -> None:
+        self._set_operation_progress(
+            operation_id,
+            manifest,
+            phase="completed",
+            completed_artifacts=len(manifest.artifacts),
+            downloaded_bytes=self._operation_transfer_snapshot(operation_id)[1],
+            expected_bytes=planned_total if type(planned_total) is int else None,
+            current_artifact_key=None,
+            transfer=self._transfer_state_for_operation(operation_id),
+        )
+        now = self._clock()
+        with self._session(write=True) as session:
+            row = session.get(ModelCacheSet, set_digest)
+            if row is not None:
+                row.state = "cached"
+                row.verified_bytes = manifest.expected_bytes
+                row.verified_at = now
+                row.updated_at = now
+                row.last_accessed_at = now
+                row.last_error = None
+        self._set_operation_state(
+            operation_id,
+            "succeeded",
+            result={
+                "schema_version": SCHEMA_VERSION,
+                "artifact_set_sha256": set_digest,
+                "coverage": "complete",
+            },
+        )
+
+    def _claim_operations(
+        self, *, limit: int, respect_backoff: bool
+    ) -> list[tuple[str, str]]:
+        now = self._clock()
+        claimed: list[tuple[str, str]] = []
+        with self._session(write=True) as session:
+            if respect_backoff:
+                cooldown_rows = list(
                     session.scalars(
                         select(ModelCacheOperation)
-                        .where(
-                            ModelCacheOperation.kind.in_(
-                                ["download", "repair", "evict"]
-                            )
-                        )
-                        .where(
-                            ModelCacheOperation.state.in_(
-                                ["queued", "running", "partial"]
-                            )
-                        )
-                        .order_by(
-                            ModelCacheOperation.updated_at,
-                            ModelCacheOperation.id,
-                        )
-                        .limit(limit)
+                        .where(ModelCacheOperation.kind.in_(["download", "repair"]))
+                        .where(ModelCacheOperation.state.in_(["queued", "running", "partial", "failed"]))
+                        .order_by(ModelCacheOperation.updated_at.desc())
+                        .limit(256)
                     )
                 )
-            for row in rows:
-                if row.kind == "evict":
-                    self._run_eviction(row.id)
-                else:
-                    self._run_download(row.id, force=row.kind == "repair")
-            return len(rows)
+                self._refresh_huggingface_cooldown(cooldown_rows, now)
+            rows = list(
+                session.scalars(
+                    select(ModelCacheOperation)
+                    .where(ModelCacheOperation.kind.in_(["download", "repair", "evict"]))
+                    .where(ModelCacheOperation.state.in_(["queued", "running", "partial"]))
+                    .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
+                    .limit(max(limit * 4, limit))
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            for operation in rows:
+                if len(claimed) >= limit:
+                    break
+                payload = dict(operation.payload) if isinstance(operation.payload, Mapping) else {}
+                retry = payload.get("retry")
+                retry = dict(retry) if isinstance(retry, Mapping) else {}
+                if respect_backoff:
+                    retry_at = retry.get("next_retry_at")
+                    if isinstance(retry_at, str):
+                        try:
+                            if datetime.fromisoformat(retry_at) > now:
+                                continue
+                        except ValueError:
+                            continue
+                    if (
+                        self._hf_cooldown_until is not None
+                        and self._hf_cooldown_until > now
+                        and self._payload_has_huggingface_source(payload)
+                    ):
+                        continue
+                claim = payload.get("claim")
+                claim = dict(claim) if isinstance(claim, Mapping) else None
+                if claim is not None:
+                    owner = claim.get("owner")
+                    expires = claim.get("expires_at")
+                    active_background = self._background_operations.get(operation.id)
+                    if owner == self._claim_owner and active_background is not None:
+                        continue
+                    if owner != self._claim_owner:
+                        try:
+                            if isinstance(expires, str) and datetime.fromisoformat(expires) > now:
+                                continue
+                        except ValueError:
+                            pass
+                        if operation.state == "running":
+                            operation.state = "partial"
+                payload["claim"] = {
+                    "owner": self._claim_owner,
+                    "expires_at": _iso(now + timedelta(seconds=_TRANSFER_CLAIM_SECONDS)),
+                }
+                operation.payload = payload
+                operation.updated_at = now
+                claimed.append((operation.id, operation.kind))
+        return claimed
+
+    @staticmethod
+    def _payload_has_huggingface_source(payload: Mapping[str, object]) -> bool:
+        raw_manifest = payload.get("manifest")
+        if not isinstance(raw_manifest, Mapping):
+            return False
+        raw_artifacts = raw_manifest.get("artifacts")
+        if not isinstance(raw_artifacts, list):
+            return False
+        for raw_artifact in raw_artifacts:
+            if not isinstance(raw_artifact, Mapping):
+                continue
+            source = raw_artifact.get("source")
+            if not isinstance(source, str):
+                continue
+            try:
+                host = urlsplit(source).hostname
+            except ValueError:
+                host = None
+            if _is_hf_authority(host):
+                return True
+        return False
+
+    @classmethod
+    def _manifest_has_huggingface_source(cls, manifest: ArtifactSetManifest) -> bool:
+        return cls._payload_has_huggingface_source(manifest.document())
+
+    def _record_huggingface_cooldown(self, until: datetime) -> None:
+        with self._lock:
+            if self._hf_cooldown_until is None or until > self._hf_cooldown_until:
+                self._hf_cooldown_until = until
+
+    def _refresh_huggingface_cooldown(
+        self, rows: Sequence[ModelCacheOperation], now: datetime
+    ) -> None:
+        """Reconstruct HF throttling after restart from durable failure rows."""
+
+        latest = self._hf_cooldown_until
+        for operation in rows:
+            payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+            if not self._payload_has_huggingface_source(payload):
+                continue
+            failure = payload.get("failure")
+            if not isinstance(failure, Mapping) or failure.get("code") not in {
+                "model_cache.rate_limited",
+                "rate_limited",
+            }:
+                continue
+            retry_at = failure.get("retry_time")
+            if not isinstance(retry_at, str):
+                retry = payload.get("retry")
+                retry_at = retry.get("next_retry_at") if isinstance(retry, Mapping) else None
+            if not isinstance(retry_at, str):
+                continue
+            try:
+                candidate = _datetime(datetime.fromisoformat(retry_at))
+            except ValueError:
+                continue
+            if candidate > now and (latest is None or candidate > latest):
+                latest = candidate
+        self._hf_cooldown_until = latest if latest is not None and latest > now else None
 
     def repair_preview(self, artifact_set_sha256: str) -> dict[str, object]:
         digest = _optional_digest(artifact_set_sha256)
@@ -2961,30 +4131,78 @@ class ModelCacheService:
     def _update_flags(
         self, session: Session, row: ModelCacheSet, manifest: ArtifactSetManifest
     ) -> tuple[bool, bool]:
-        model_update = False
+        model_update = self._model_update_candidate(session, manifest) is not None
         recipe_update = False
-        ref = manifest.model_version_ref
-        if isinstance(ref, Mapping):
-            latest = session.scalar(
-                select(CatalogDocumentRevision)
-                .where(
-                    CatalogDocumentRevision.kind == "model",
-                    CatalogDocumentRevision.publisher == ref.get("publisher"),
-                    CatalogDocumentRevision.slug == ref.get("slug"),
-                    CatalogDocumentRevision.state == "active",
-                )
-                .order_by(CatalogDocumentRevision.revision_number.desc())
-            )
-            model_update = bool(
-                latest is not None
-                and not _same_model_artifact_identity(latest, manifest)
-            )
         if row.recipe_revision_sha256 is not None:
             latest_recipe = self._latest_recipe_digest(
                 session, row.recipe_revision_sha256
             )
             recipe_update = latest_recipe is not None and latest_recipe != row.recipe_revision_sha256
         return model_update, recipe_update
+
+    @staticmethod
+    def _model_update_candidate(
+        session: Session, manifest: ArtifactSetManifest
+    ) -> tuple[CatalogDocumentRevision, CatalogDocumentRevision] | None:
+        current, candidates = ModelCacheService._model_update_candidates(session, manifest)
+        if current is None or len(candidates) != 1:
+            return None
+        return current, candidates[0]
+
+    @staticmethod
+    def _model_update_candidates(
+        session: Session, manifest: ArtifactSetManifest
+    ) -> tuple[CatalogDocumentRevision | None, list[CatalogDocumentRevision]]:
+        ref = manifest.model_version_ref
+        if not isinstance(ref, Mapping):
+            return None, []
+        current_digest = ref.get("content_sha256")
+        current = None
+        if isinstance(current_digest, str):
+            current = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.content_digest == current_digest,
+                    CatalogDocumentRevision.state == "active",
+                )
+            )
+        if current is None:
+            current = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.publisher == ref.get("publisher"),
+                    CatalogDocumentRevision.slug == ref.get("slug"),
+                    CatalogDocumentRevision.state == "active",
+                ).order_by(CatalogDocumentRevision.revision_number.asc())
+            )
+        if current is None:
+            return None, []
+        current_signature = _model_lineage_signature(current.document)
+        candidates: list[CatalogDocumentRevision] = []
+        for candidate in session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.state == "active",
+            )
+        ):
+            if candidate.content_digest == current.content_digest:
+                continue
+            same_lineage = _model_lineage_signature(candidate.document) == current_signature
+            if not same_lineage and not _supersedes_revision(candidate, current):
+                continue
+            if not _same_model_artifact_identity(candidate, manifest) and (
+                candidate.revision_number > current.revision_number
+                or _datetime(candidate.created_at) > _datetime(current.created_at)
+                or _supersedes_revision(candidate, current)
+            ):
+                candidates.append(candidate)
+        # Multiple incomparable successors are deliberately exposed as
+        # ambiguous; choosing one by wall-clock order would hide a catalog
+        # lineage decision from operators.
+        explicit = [item for item in candidates if _supersedes_revision(item, current)]
+        if explicit:
+            return current, explicit if len(explicit) == 1 else explicit
+        return current, candidates
 
     @staticmethod
     def _latest_recipe_digest(session: Session, digest: str) -> str | None:
@@ -3056,19 +4274,24 @@ class ModelCacheService:
                 manifest = ArtifactSetManifest.from_document(row.manifest)
                 model_update, recipe_update = self._update_flags(session, row, manifest)
                 latest_model = None
+                model_update_from = None
+                model_update_to = None
+                model_update_candidates: list[dict[str, object]] = []
+                model_update_ambiguous = False
                 latest_recipe = None
-                if model_update and isinstance(manifest.model_version_ref, Mapping):
-                    latest = session.scalar(
-                        select(CatalogDocumentRevision)
-                        .where(
-                            CatalogDocumentRevision.kind == "model",
-                            CatalogDocumentRevision.publisher == manifest.model_version_ref.get("publisher"),
-                            CatalogDocumentRevision.slug == manifest.model_version_ref.get("slug"),
-                            CatalogDocumentRevision.state == "active",
-                        )
-                        .order_by(CatalogDocumentRevision.revision_number.desc())
-                    )
-                    latest_model = latest.content_digest if latest is not None else None
+                current_model, candidates = self._model_update_candidates(session, manifest)
+                if current_model is not None and len(candidates) == 1:
+                    latest = candidates[0]
+                    latest_model = latest.content_digest
+                    model_update_from = _revision_identity(current_model)
+                    model_update_to = _revision_identity(latest)
+                elif current_model is not None and candidates:
+                    model_update_ambiguous = True
+                    model_update_candidates = [
+                        identity
+                        for candidate in candidates
+                        if (identity := _revision_identity(candidate)) is not None
+                    ]
                 if recipe_update and row.recipe_revision_sha256 is not None:
                     latest_recipe = self._latest_recipe_digest(
                         session, row.recipe_revision_sha256
@@ -3079,6 +4302,10 @@ class ModelCacheService:
                         "artifact_set_sha256": row.artifact_set_sha256,
                         "model_version_sha256": row.model_version_sha256,
                         "latest_model_version_sha256": latest_model,
+                        "model_update_from": model_update_from,
+                        "model_update_to": model_update_to,
+                        "model_update_ambiguous": model_update_ambiguous,
+                        "model_update_candidates": model_update_candidates,
                         "recipe_revision_sha256": row.recipe_revision_sha256,
                         "latest_recipe_revision_sha256": latest_recipe,
                         "model_update_available": model_update,

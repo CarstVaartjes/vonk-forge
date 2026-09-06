@@ -76,6 +76,19 @@ def test_recipe_library_sync_interval_is_bounded(monkeypatch) -> None:
         Settings.from_env_and_secrets()
 
 
+def test_recipe_build_parallel_preparations_defaults_and_bounds(monkeypatch) -> None:
+    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
+    monkeypatch.delenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", raising=False)
+    assert Settings.from_env_and_secrets().recipe_build_parallel_preparations == 2
+
+    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "3")
+    assert Settings.from_env_and_secrets().recipe_build_parallel_preparations == 3
+
+    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "5")
+    with pytest.raises(SettingsError, match="recipe build parallel preparations"):
+        Settings.from_env_and_secrets()
+
+
 def test_agent_release_api_uses_only_public_origin_or_internal_relay(
     monkeypatch,
 ) -> None:
@@ -589,3 +602,25 @@ def test_production_worker_settings_can_explicitly_disable_agent_runtime(
 
     assert settings.internal_api_token == b"w" * 32
     assert settings.management_cidrs == "10.0.0.0/24"
+
+
+def test_worker_recipe_build_parallel_preparations_defaults_and_bounds(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "database-url"
+    token = tmp_path / "worker-api-token"
+    database.write_text("postgresql://control:test@postgres/control")
+    token.write_text("w" * 32)
+    monkeypatch.setenv("VONK_DEPLOYMENT_MODE", "production")
+    monkeypatch.setenv("VONK_DATABASE_URL_FILE", str(database))
+    monkeypatch.setenv("VONK_WORKER_API_TOKEN_FILE", str(token))
+    monkeypatch.setenv("VONK_MANAGEMENT_CIDRS", "10.0.0.0/24")
+    monkeypatch.delenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", raising=False)
+    assert WorkerSettings.from_env_and_secrets().recipe_build_parallel_preparations == 2
+
+    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "3")
+    assert WorkerSettings.from_env_and_secrets().recipe_build_parallel_preparations == 3
+
+    monkeypatch.setenv("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "5")
+    with pytest.raises(SettingsError, match="recipe build parallel preparations"):
+        WorkerSettings.from_env_and_secrets()

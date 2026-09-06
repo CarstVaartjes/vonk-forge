@@ -237,8 +237,13 @@ class RecipeOperationService:
         build_input_sha256: str,
         actor: str,
         request_id: str,
+        force: bool = False,
     ) -> RecipeOperationView:
-        existing = self._idempotent(request_id, "recipe.build.v1", build_input_sha256)
+        existing = (
+            None
+            if force
+            else self._idempotent(request_id, "recipe.build.v1", build_input_sha256)
+        )
         if existing is not None:
             if existing.state != "succeeded":
                 with self._sessions() as session:
@@ -258,6 +263,7 @@ class RecipeOperationService:
             if (
                 build is not None
                 and build.state == "succeeded"
+                and not force
                 and build.build_input_sha256 == plan.build_input_sha256
                 and build.builder_node_id == plan.builder_node_id
             ):
@@ -293,7 +299,42 @@ class RecipeOperationService:
                 or build.builder_node_id != plan.builder_node_id
             ):
                 raise RecipeOperationConflict("recipe build preview is stale")
-            if build.state == "failed":
+            if force and build.state == "succeeded":
+                active = session.scalar(
+                    select(Job)
+                    .where(
+                        Job.kind == "recipe.build.v1",
+                        Job.state.in_(("queued", "running")),
+                        Job.payload["owner_id"].as_string() == build.id,
+                        Job.payload["plan_digest"].as_string()
+                        == build.build_input_sha256,
+                    )
+                    .order_by(Job.updated_at.desc())
+                    .limit(1)
+                )
+                if active is not None:
+                    return self._view(active)
+                if self._builds is None:
+                    raise RecipeOperationConflict("recipe build service is unavailable")
+                self._release(session, "recipe-build", build.id, now)
+                self._builds.reserve_in_session(session, plan, now=now)
+                build.state = "building"
+                build.error = None
+                build.updated_at = now
+                job = self._queue_in_session(
+                    session,
+                    kind="recipe.build.v1",
+                    owner_kind="recipe-build",
+                    owner_id=build.id,
+                    plan_digest=plan.build_input_sha256,
+                    actor=actor,
+                    request_id=request_id,
+                    node_payloads=((plan.builder_node_id, plan.agent_payload),),
+                    authority_digest=plan.build_input_sha256,
+                    now=now,
+                    job_context={"force_rebuild": True},
+                )
+            elif build.state == "failed":
                 previous = session.scalar(
                     select(Job)
                     .where(
@@ -317,7 +358,7 @@ class RecipeOperationService:
                     request_id=request_id,
                     now=now,
                 )
-            else:
+            elif build.state == "planned":
                 if build.state != "planned":
                     raise RecipeOperationConflict("recipe build preview is stale")
                 if self._builds is None:
@@ -337,6 +378,8 @@ class RecipeOperationService:
                     authority_digest=plan.build_input_sha256,
                     now=now,
                 )
+            else:
+                raise RecipeOperationConflict("recipe build preview is stale")
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
@@ -1807,10 +1850,21 @@ class RecipeOperationService:
             build = session.get(RecipeBuild, owner_id, with_for_update=True)
             if build is None or build.builder_node_id != node_id:
                 raise RecipeOperationConflict("recipe build authority is invalid")
+            force_rebuild = job.payload.get("force_rebuild") is True
             if succeeded:
-                _record_build_evidence(session, build, evidence, now=now)
+                _record_build_evidence(
+                    session,
+                    build,
+                    evidence,
+                    now=now,
+                    replace_existing=force_rebuild,
+                )
             else:
-                build.state = "failed"
+                # A forced rebuild is an attempt to replace a still-valid
+                # receipt.  Keep that receipt authoritative if the new
+                # attempt fails; the availability operation itself reports
+                # the failed attempt and remains retryable.
+                build.state = "succeeded" if force_rebuild else "failed"
                 build.error = str(evidence.get("reason", "agent build failed"))[:512]
                 build.updated_at = now
         elif job.kind == "recipe.image.import.v1":
@@ -3424,6 +3478,7 @@ def _record_build_evidence(
     evidence: Mapping[str, object],
     *,
     now: datetime,
+    replace_existing: bool = False,
 ) -> None:
     # A retried build may already be present in this transaction's identity map
     # with the previous attempt's upload fields. Refresh under the row lock so
@@ -3460,9 +3515,12 @@ def _record_build_evidence(
         or not isinstance(findings, (list, tuple))
         or bool(findings)
         or policy.get("dockerfile") != build.plan.get("dockerfile")
-        or build.image_digest not in {None, image_digest}
-        or build.oci_layout_sha256 not in {None, layout_digest}
-        or build.image_bytes not in {None, image_bytes}
+        or (not replace_existing and build.image_digest not in {None, image_digest})
+        or (
+            not replace_existing
+            and build.oci_layout_sha256 not in {None, layout_digest}
+        )
+        or (not replace_existing and build.image_bytes not in {None, image_bytes})
     ):
         raise RecipeOperationConflict("recipe build evidence is invalid")
     build.state = "succeeded"

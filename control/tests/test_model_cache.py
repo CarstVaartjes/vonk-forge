@@ -21,6 +21,7 @@ from vonk_control.distribution import (
 from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheService,
+    _retry_after_seconds,
     _retryable_failure,
 )
 from vonk_control.model_cache_api import (
@@ -29,6 +30,7 @@ from vonk_control.model_cache_api import (
     model_cache_operation_provider,
 )
 from vonk_control.model_cache_contract import (
+    ModelCacheAccessResumeRequest,
     ModelCacheDownloadRequest,
     ModelCacheEvictionPreviewRequest,
     ModelCacheEvictRequest,
@@ -636,6 +638,44 @@ def test_model_cache_retry_classification_rejects_terminal_http_and_storage_erro
     assert _retryable_failure(OSError(errno.ETIMEDOUT, "timed out")) is True
 
 
+def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
+    now = datetime(2026, 9, 5, 12, tzinfo=UTC)
+    assert _retry_after_seconds({"retry-after": "7"}, now=now) == 7
+    assert _retry_after_seconds({"ratelimit-reset": "30"}, now=now) == 30
+    assert _retry_after_seconds(
+        {"x-ratelimit-reset": str(int(now.timestamp()) + 11)}, now=now
+    ) == 11
+    assert _retry_after_seconds(
+        {"RateLimit": '"resolvers";r=0;t=123'}, now=now
+    ) == 123
+    assert _retry_after_seconds(
+        {"Retry-After": "7", "RateLimit": '"resolvers";r=0;t=123'}, now=now
+    ) == 123
+    assert _retry_after_seconds(
+        {"RateLimit": '"resolvers";r=0;t=123junk'}, now=now
+    ) is None
+    assert _retry_after_seconds(
+        {"RateLimit": '"resolvers";r=0;t=999999999999999999999'}, now=now
+    ) == 365 * 24 * 60 * 60
+
+
+def test_worker_prefers_nonblocking_cache_tick_when_available() -> None:
+    calls: list[str] = []
+
+    class Jobs:
+        def claim(self, *_args, **_kwargs):
+            raise AssertionError("generic jobs should not run before cache tick")
+
+    class Cache:
+        def tick(self):
+            calls.append("tick")
+            return True
+
+    worker = Worker(Jobs(), "worker", {}, model_cache=Cache())
+    assert worker.run_once() is True
+    assert calls == ["tick"]
+
+
 def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -819,6 +859,11 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
     assert "protected" not in ModelCacheEvictionPreviewRequest.model_fields
     assert set(ModelCacheDownloadRequest.model_fields) >= {"request_key", "plan_digest"}
     assert set(ModelCacheEvictRequest.model_fields) >= {"request_key", "plan_digest"}
+    assert set(ModelCacheAccessResumeRequest.model_fields) >= {
+        "request_key",
+        "artifact_set_sha256",
+        "plan_digest",
+    }
     with pytest.raises(ValueError):
         ModelCacheDownloadRequest(
             request_key="00000000-0000-4000-8000-000000000011",
@@ -879,6 +924,7 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
         "/api/v1/model-cache/operations",
         "/api/v1/model-cache/operations/{operation_id}",
         "/api/v1/model-cache/operations/{operation_id}/retry",
+        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
     }
 
 

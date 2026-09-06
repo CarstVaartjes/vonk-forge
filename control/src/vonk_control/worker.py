@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -132,6 +132,8 @@ class Worker:
         reconciliations=None,
         recipes=None,
         model_cache=None,
+        background_services: Sequence[Callable[[], object]] = (),
+        background_closers: Sequence[Callable[[], object]] = (),
         loop_heartbeat: Callable[[], object] | None = None,
     ) -> None:
         self._jobs = jobs
@@ -143,8 +145,24 @@ class Worker:
         self._reconciliations = reconciliations
         self._recipes = recipes
         self._model_cache = model_cache
+        self._background_services = tuple(background_services)
+        self._background_closers = tuple(background_closers)
         self._loop_heartbeat = loop_heartbeat
         self._source_cursor = 0
+        self._closed = False
+
+    def close(self) -> None:
+        """Close worker-owned executors while leaving durable work resumable."""
+
+        if self._closed:
+            return
+        self._closed = True
+        for closer in self._background_closers:
+            closer()
+        if self._model_cache is not None:
+            close = getattr(self._model_cache, "close", None)
+            if callable(close):
+                close()
 
     def run_once(self) -> bool:
         if self._housekeeping is not None:
@@ -158,6 +176,10 @@ class Worker:
             sources.append(self._recipes.tick)
         if self._model_cache is not None:
             sources.append(self._run_model_cache)
+        sources.extend(
+            lambda service=service: bool(service())
+            for service in self._background_services
+        )
         sources.append(self._run_generic)
         if self._source_cursor >= len(sources):
             self._source_cursor = 0
@@ -173,6 +195,9 @@ class Worker:
         return advanced
 
     def _run_model_cache(self) -> bool:
+        tick = getattr(self._model_cache, "tick", None)
+        if callable(tick):
+            return bool(tick())
         return bool(self._model_cache.run_pending(limit=1))
 
     def _run_generic(self) -> bool:
@@ -232,7 +257,12 @@ def assemble_production_worker(
     artifact_job_reconcile_interval_seconds: int,
     artifact_job_reconcile_batch_limit: int,
     model_cache=None,
+    background_services: Sequence[Callable[[], object]] = (),
+    background_closers: Sequence[Callable[[], object]] = (),
     agent_artifact_root: Path | None = None,
+    recipe_image_artifact_root: Path | None = None,
+    recipe_image_parallel_preparations: int = 4,
+    recipe_build_parallel_preparations: int = 2,
     compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
@@ -299,6 +329,11 @@ def assemble_production_worker(
         clock=clock,
         maximum_age_seconds=120,
     )
+    recipe_builds = RecipeBuildService(
+        sessions,
+        bundles=DatabaseSourceBundleStore(sessions),
+        inventory_max_age=300,
+    )
     lifecycle = RecipeOperationService(
         sessions,
         install_admission=InstallAdmissionService(
@@ -316,11 +351,7 @@ def assemble_production_worker(
         agent_jobs=agent_jobs,
         clock=clock,
         route_publications=recipe_routes,
-        builds=RecipeBuildService(
-            sessions,
-            bundles=DatabaseSourceBundleStore(sessions),
-            inventory_max_age=300,
-        ),
+        builds=recipe_builds,
         mappings=ClusterMappingService(sessions),
     )
     run_switch_operations = RunSwitchOperationService(
@@ -351,6 +382,26 @@ def assemble_production_worker(
             clock=clock,
         ),
     )
+    worker_background_services = tuple(background_services)
+    worker_background_closers = tuple(background_closers)
+    if recipe_image_artifact_root is not None:
+        from .availability_production import build_recipe_image_availability
+
+        image_production = build_recipe_image_availability(
+            sessions,
+            artifact_root=recipe_image_artifact_root,
+            managed_catalog_sync=None,
+            recipe_builds=recipe_builds,
+            recipe_operations=lifecycle,
+            model_cache=model_cache,
+            clock=clock,
+            max_parallel=recipe_image_parallel_preparations,
+            max_parallel_builds=recipe_build_parallel_preparations,
+            with_scheduler=True,
+        )
+        assert image_production.scheduler is not None
+        worker_background_services += (image_production.scheduler.tick,)
+        worker_background_closers += (image_production.close,)
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
     artifact_jobs = ArtifactJobService(
         sessions,
@@ -380,6 +431,8 @@ def assemble_production_worker(
         reconciliations=reconciliations,
         recipes=recipe_operations,
         model_cache=model_cache,
+        background_services=worker_background_services,
+        background_closers=worker_background_closers,
         loop_heartbeat=loop_heartbeat,
     )
 
@@ -455,6 +508,7 @@ if __name__ == "__main__":
         sessions,
         settings.model_cache_root,
         reserve_bytes=settings.model_cache_reserve_bytes,
+        max_parallel_downloads=settings.model_cache_parallel_downloads,
         clock=clock,
         huggingface_token_path=settings.huggingface_token_path,
     )
@@ -585,6 +639,13 @@ if __name__ == "__main__":
         artifact_job_reconcile_batch_limit=settings.artifact_job_reconcile_batch_limit,
         model_cache=model_cache,
         agent_artifact_root=settings.agent_artifact_root,
+        recipe_image_artifact_root=settings.agent_artifact_root,
+        recipe_image_parallel_preparations=(
+            settings.recipe_image_parallel_preparations
+        ),
+        recipe_build_parallel_preparations=(
+            settings.recipe_build_parallel_preparations
+        ),
         compiled_plan_provider=execution_plans.compile_installation,
         runtime_image_preparer=prepare_runtime_image_receipt,
         loop_heartbeat=WorkerHeartbeatRecorder(
@@ -593,6 +654,9 @@ if __name__ == "__main__":
             clock=clock,
         ).completed_loop,
     )
-    while True:
-        if not worker.run_once():
-            time.sleep(1)
+    try:
+        while True:
+            if not worker.run_once():
+                time.sleep(1)
+    finally:
+        worker.close()

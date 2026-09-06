@@ -39,7 +39,7 @@ def _service(
     )
 
 
-def test_public_huggingface_download_is_anonymous(tmp_path: Path) -> None:
+def test_configured_huggingface_token_is_used_on_canonical_request(tmp_path: Path) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -54,6 +54,24 @@ def test_public_huggingface_download_is_anonymous(tmp_path: Path) -> None:
     finally:
         client.close()
 
+    assert len(requests) == 1
+    assert requests[0].headers["authorization"] == "Bearer hf_should_not_be_used"
+
+
+def test_public_huggingface_download_is_anonymous_without_token_file(tmp_path: Path) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"public model")
+
+    service, client = _service(tmp_path, handler)
+    try:
+        response = service._open_http_response(client, SOURCE, {})
+        assert response.read() == b"public model"
+        response.close()
+    finally:
+        client.close()
     assert len(requests) == 1
     assert "authorization" not in requests[0].headers
 
@@ -104,8 +122,7 @@ def test_gated_huggingface_download_retries_with_bearer_token(tmp_path: Path) ->
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if request.headers.get("authorization") is None:
-            return httpx.Response(401)
+        assert request.headers.get("authorization") == "Bearer hf_gated_secret"
         return httpx.Response(200, content=b"gated model")
 
     service, client = _service(tmp_path, handler, token="hf_gated_secret")
@@ -116,9 +133,8 @@ def test_gated_huggingface_download_retries_with_bearer_token(tmp_path: Path) ->
     finally:
         client.close()
 
-    assert len(requests) == 2
-    assert "authorization" not in requests[0].headers
-    assert requests[1].headers["authorization"] == "Bearer hf_gated_secret"
+    assert len(requests) == 1
+    assert requests[0].headers["authorization"] == "Bearer hf_gated_secret"
 
 
 def test_gated_huggingface_download_reports_missing_credentials_without_secret(
@@ -164,8 +180,7 @@ def test_huggingface_cdn_redirect_is_allowed_and_bearer_is_stripped(
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if len(requests) == 1:
-            return httpx.Response(401)
-        if len(requests) == 2:
+            assert request.headers["authorization"] == "Bearer hf_cdn_secret"
             return httpx.Response(302, headers={"location": cdn})
         return httpx.Response(
             206,
@@ -181,9 +196,9 @@ def test_huggingface_cdn_redirect_is_allowed_and_bearer_is_stripped(
     finally:
         client.close()
 
-    assert requests[1].headers["authorization"] == "Bearer hf_cdn_secret"
-    assert "authorization" not in requests[2].headers
-    assert str(requests[2].url) == cdn
+    assert requests[0].headers["authorization"] == "Bearer hf_cdn_secret"
+    assert "authorization" not in requests[1].headers
+    assert str(requests[1].url) == cdn
 
 
 def test_huggingface_redirect_to_arbitrary_host_is_rejected(tmp_path: Path) -> None:

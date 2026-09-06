@@ -176,6 +176,9 @@ class Settings:
     artifact_job_retention_seconds: int = 7 * 24 * 60 * 60
     model_cache_root: Path = Path("/state/model-cache")
     model_cache_reserve_bytes: int = 10 * 1024**3
+    model_cache_parallel_downloads: int = 4
+    recipe_image_parallel_preparations: int = 4
+    recipe_build_parallel_preparations: int = 2
     huggingface_token_path: Path | None = None
 
     @property
@@ -301,6 +304,15 @@ class Settings:
             model_cache_reserve_bytes = int(
                 os.environ.get("VONK_MODEL_CACHE_RESERVE_BYTES", str(10 * 1024**3))
             )
+            model_cache_parallel_downloads = int(
+                os.environ.get("VONK_MODEL_CACHE_PARALLEL_DOWNLOADS", "4")
+            )
+            recipe_image_parallel_preparations = int(
+                os.environ.get("VONK_RECIPE_IMAGE_PARALLEL_PREPARATIONS", "4")
+            )
+            recipe_build_parallel_preparations = int(
+                os.environ.get("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "2")
+            )
         except ValueError as error:
             raise SettingsError(
                 "artifact and model cache storage settings must be integers"
@@ -320,6 +332,18 @@ class Settings:
         if not 0 <= model_cache_reserve_bytes <= 1024**4:
             raise SettingsError(
                 "model cache reserve must be between zero and one TiB"
+            )
+        if not 1 <= model_cache_parallel_downloads <= 16:
+            raise SettingsError(
+                "model cache parallel downloads must be between 1 and 16"
+            )
+        if not 1 <= recipe_image_parallel_preparations <= 16:
+            raise SettingsError(
+                "recipe image parallel preparations must be between 1 and 16"
+            )
+        if not 1 <= recipe_build_parallel_preparations <= recipe_image_parallel_preparations:
+            raise SettingsError(
+                "recipe build parallel preparations must not exceed image preparations"
             )
         controller_ca_path = (
             _secret_path("VONK_CONTROLLER_CA_FILE") if agent_enabled else None
@@ -551,6 +575,9 @@ class Settings:
                 "VONK_MODEL_CACHE_ROOT", "/state/model-cache"
             ),
             model_cache_reserve_bytes=model_cache_reserve_bytes,
+            model_cache_parallel_downloads=model_cache_parallel_downloads,
+            recipe_image_parallel_preparations=recipe_image_parallel_preparations,
+            recipe_build_parallel_preparations=recipe_build_parallel_preparations,
             huggingface_token_path=_optional_secret_path("VONK_HF_TOKEN_FILE"),
         )
 
@@ -574,6 +601,9 @@ class WorkerSettings:
     artifact_job_reconcile_batch_limit: int
     model_cache_root: Path = Path("/state/model-cache")
     model_cache_reserve_bytes: int = 10 * 1024**3
+    model_cache_parallel_downloads: int = 4
+    recipe_image_parallel_preparations: int = 4
+    recipe_build_parallel_preparations: int = 2
     huggingface_token_path: Path | None = None
 
     @classmethod
@@ -658,6 +688,15 @@ class WorkerSettings:
             model_cache_reserve_bytes = int(
                 os.environ.get("VONK_MODEL_CACHE_RESERVE_BYTES", str(10 * 1024**3))
             )
+            model_cache_parallel_downloads = int(
+                os.environ.get("VONK_MODEL_CACHE_PARALLEL_DOWNLOADS", "4")
+            )
+            recipe_image_parallel_preparations = int(
+                os.environ.get("VONK_RECIPE_IMAGE_PARALLEL_PREPARATIONS", "4")
+            )
+            recipe_build_parallel_preparations = int(
+                os.environ.get("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "2")
+            )
         except ValueError as error:
             raise SettingsError(
                 "artifact job worker settings must be integers"
@@ -682,6 +721,18 @@ class WorkerSettings:
             raise SettingsError(
                 "model cache reserve must be between zero and one TiB"
             )
+        if not 1 <= model_cache_parallel_downloads <= 16:
+            raise SettingsError(
+                "model cache parallel downloads must be between 1 and 16"
+            )
+        if not 1 <= recipe_image_parallel_preparations <= 16:
+            raise SettingsError(
+                "recipe image parallel preparations must be between 1 and 16"
+            )
+        if not 1 <= recipe_build_parallel_preparations <= recipe_image_parallel_preparations:
+            raise SettingsError(
+                "recipe build parallel preparations must not exceed image preparations"
+            )
         return cls(
             database_url=database_url,
             deployment_mode=mode,
@@ -704,5 +755,8 @@ class WorkerSettings:
                 "VONK_MODEL_CACHE_ROOT", "/state/model-cache"
             ),
             model_cache_reserve_bytes=model_cache_reserve_bytes,
+            model_cache_parallel_downloads=model_cache_parallel_downloads,
+            recipe_image_parallel_preparations=recipe_image_parallel_preparations,
+            recipe_build_parallel_preparations=recipe_build_parallel_preparations,
             huggingface_token_path=_optional_secret_path("VONK_HF_TOKEN_FILE"),
         )
