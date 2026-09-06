@@ -5,7 +5,6 @@ import gzip
 import hashlib
 import io
 import json
-import os
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,39 +32,27 @@ from vonk_control.recipe_packages import (
 )
 from vonk_control.source_bundles import SourceBundleStore
 
+from tests.recipe_library_source import recipe_library_root
+
 
 def _publisher_fixture() -> tuple[Path, Path, dict[str, object]]:
-    candidates = [
-        (
-            Path(os.environ.get("VONK_RECIPE_PACKAGE_FIXTURE", "/private/tmp/vonk-recipe-package-fixture")),
-            Path(os.environ.get("VONK_RECIPE_PACKAGE_INDEX", "/private/tmp/vonk-forge-recipes-packages/catalog-index.json")),
-        ),
-        (
-            Path(os.environ.get("VONK_RECIPE_CANDIDATE_ROOT", "/private/tmp/vonk-forge-recipes-contract-conversion-final")) / "packages",
-            Path(os.environ.get("VONK_RECIPE_CANDIDATE_ROOT", "/private/tmp/vonk-forge-recipes-contract-conversion-final")) / "catalog-index.json",
-        ),
-    ]
-    for fixture, index_path in candidates:
-        if not index_path.is_file():
-            continue
-        descriptor = json.loads(index_path.read_text(encoding="utf-8"))
-        entities = descriptor.get("catalog_entities")
-        recipes = descriptor.get("recipes")
-        if (
-            isinstance(entities, list)
-            and all(
-                isinstance(row, dict)
-                and isinstance(row.get("document"), dict)
-                and row["document"].get("kind") == "model"
-                and row["document"].get("schema_version") == 2
-                for row in entities
-            )
-            and isinstance(recipes, list)
-            and recipes
-            and (fixture / Path(recipes[0]["package"]["path"]).name).is_file()
-        ):
-            return fixture, index_path, descriptor
-    pytest.skip("canonical recipe publisher fixture is unavailable")
+    root = recipe_library_root()
+    index_path = root / "catalog-index.json"
+    descriptor = json.loads(index_path.read_text(encoding="utf-8"))
+    entities = descriptor.get("catalog_entities")
+    recipes = descriptor.get("recipes")
+    assert isinstance(entities, list)
+    assert all(
+        isinstance(row, dict)
+        and isinstance(row.get("document"), dict)
+        and row["document"].get("kind") == "model"
+        and row["document"].get("schema_version") == 2
+        for row in entities
+    )
+    assert isinstance(recipes, list) and recipes
+    fixture = root / "packages"
+    assert (root / recipes[0]["package"]["path"]).is_file()
+    return fixture, index_path, descriptor
 
 
 def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_packages(

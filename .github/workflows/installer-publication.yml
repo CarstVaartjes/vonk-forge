@@ -795,12 +795,43 @@ jobs:
     environment: installer-canary-${{ needs.authority.outputs.channel }}
     permissions:
       contents: read
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+      VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
     steps:
       - name: Check out exact candidate acceptance suite
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ needs.authority.outputs.source_sha }}
+
+      - name: Resolve exact canonical recipe library source
+        id: recipe-library-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision=$(cat tests/acceptance/recipe-library-revision.txt)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact canonical recipe library
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: ${{ steps.recipe-library-source.outputs.revision }}
+          path: .recipe-library
+          persist-credentials: false
+
+      - name: Record canonical recipe library source
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ steps.recipe-library-source.outputs.revision }}
+        run: |
+          set -euo pipefail
+          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
+          test "$resolved" = "$EXPECTED_REVISION"
+          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
 
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
@@ -863,7 +894,8 @@ jobs:
             --generation "$VONK_ACCEPTANCE_GENERATION" \
             --output "$RUNNER_TEMP/accepted-compose-overlay.yml"
           export VONK_ACCEPTANCE_COMPOSE_OVERLAY="$RUNNER_TEMP/accepted-compose-overlay.yml"
-          uv run python tests/acceptance/test_spark_lifecycle.py run \
+          uv run --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
+            python tests/acceptance/test_spark_lifecycle.py run \
             --candidate-release "$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/release.json" \
             --baseline-release "$RUNNER_TEMP/spark-publication/installer-publication/objects/artifacts/$VONK_ACCEPTANCE_CHANNEL/releases/$VONK_ACCEPTANCE_GENERATION/acceptance-baseline/release.json" \
             --object-root "$RUNNER_TEMP/spark-publication/installer-publication/objects" \
