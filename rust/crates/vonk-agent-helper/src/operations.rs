@@ -1711,7 +1711,7 @@ fn validate_docker_run_with_archive(
     let mut no_new_privileges = false;
     let mut network: Option<&str> = None;
     let mut ipc_host = false;
-    let mut infiniband = false;
+    let infiniband = false;
     let mut memlock = false;
     let mut stack = false;
     let mut pids = false;
@@ -1720,8 +1720,11 @@ fn validate_docker_run_with_archive(
     let mut shm_size: Option<u64> = None;
     let mut user: Option<(u32, Option<u32>)> = None;
     let mut publishes = 0_usize;
+    let mut published_ports = BTreeSet::new();
     let mut environments = 0_usize;
     let mut listen_port = None;
+    let mut master_port = None;
+    let mut rank = None;
     let mut job_timeout_seconds = None;
     let mut gpu = false;
     let mut home = false;
@@ -1814,6 +1817,7 @@ fn validate_docker_run_with_archive(
                 index += 1;
                 network = match arguments.get(index).map(String::as_str) {
                     Some("none") => Some("none"),
+                    Some("bridge") => Some("bridge"),
                     _ => return Err(OperationError::InvalidOperation),
                 };
             }
@@ -1824,12 +1828,9 @@ fn validate_docker_run_with_archive(
                 }
                 ipc_host = true;
             }
-            "--device" if !infiniband || !gpu => {
+            "--device" if !gpu => {
                 index += 1;
                 match arguments.get(index).map(String::as_str) {
-                    Some("/dev/infiniband:/dev/infiniband") if !infiniband => {
-                        infiniband = true;
-                    }
                     Some("nvidia.com/gpu=all") if !gpu => gpu = true,
                     _ => return Err(OperationError::InvalidOperation),
                 }
@@ -1881,11 +1882,13 @@ fn validate_docker_run_with_archive(
             }
             "--publish" if publishes < 2 => {
                 index += 1;
-                if !valid_publication(
+                let (_, _, container_port) = parse_publication(
                     arguments
                         .get(index)
                         .ok_or(OperationError::InvalidOperation)?,
-                ) {
+                )
+                .ok_or(OperationError::InvalidOperation)?;
+                if !published_ports.insert(container_port) {
                     return Err(OperationError::InvalidOperation);
                 }
                 publishes += 1;
@@ -1905,6 +1908,25 @@ fn validate_docker_run_with_archive(
                         .filter(|port| (1024..=65535).contains(port))
                         .ok_or(OperationError::InvalidOperation)?;
                     if listen_port.replace(parsed).is_some() {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                }
+                if let Some(value) = value.strip_prefix("VONK_MASTER_PORT=") {
+                    let parsed = value
+                        .parse::<u16>()
+                        .ok()
+                        .filter(|port| (1024..=65535).contains(port))
+                        .ok_or(OperationError::InvalidOperation)?;
+                    if master_port.replace(parsed).is_some() {
+                        return Err(OperationError::InvalidOperation);
+                    }
+                }
+                if let Some(value) = value.strip_prefix("VONK_RANK=") {
+                    let parsed = value
+                        .parse::<u32>()
+                        .ok()
+                        .ok_or(OperationError::InvalidOperation)?;
+                    if rank.replace(parsed).is_some() {
                         return Err(OperationError::InvalidOperation);
                     }
                 }
@@ -2021,17 +2043,12 @@ fn validate_docker_run_with_archive(
         || memory.is_none()
         || memory_swap != memory
         || shm_size.is_none_or(|value| value > memory.unwrap_or_default())
-        || network != Some("none")
-        || publishes != 0
-        || (!detach && publishes != 0)
         || (detach && (inputs.is_some() || job_timeout_seconds.is_some()))
         || (!detach && (inputs.is_none() || job_timeout_seconds.is_none()))
-        || listen_port.is_some()
         || ipc_host
         || infiniband
         || memlock
         || stack
-        || gpu
         || !home
         || !xdg_cache_home
         || !tmpdir
@@ -2051,6 +2068,30 @@ fn validate_docker_run_with_archive(
                 .and_then(|value| value.to_str())
                 != Some(state_run_id)
         })
+    {
+        return Err(OperationError::InvalidOperation);
+    }
+    let endpoint_workload = listen_port.is_some();
+    let distributed_workload = master_port.is_some();
+    let bridge_workload = endpoint_workload || distributed_workload;
+    let expected_network = if bridge_workload { "bridge" } else { "none" };
+    let publication_ports_match = published_ports
+        .iter()
+        .all(|port| Some(*port) == listen_port || Some(*port) == master_port);
+    let endpoint_published = listen_port.is_some_and(|port| published_ports.contains(&port));
+    let rendezvous_published =
+        master_port.is_some_and(|port| rank == Some(0) && published_ports.contains(&port));
+    let nonzero_rendezvous_published = master_port.is_some_and(|port| {
+        rank != Some(0) && listen_port != Some(port) && published_ports.contains(&port)
+    });
+    if network != Some(expected_network)
+        || publishes != published_ports.len()
+        || !publication_ports_match
+        || (!bridge_workload && publishes != 0)
+        || (endpoint_workload && !endpoint_published)
+        || (distributed_workload && rank.is_none())
+        || (distributed_workload && rank == Some(0) && !rendezvous_published)
+        || nonzero_rendezvous_published
     {
         return Err(OperationError::InvalidOperation);
     }
@@ -2301,12 +2342,7 @@ fn require_safe_model_path(
         {
             return Err(OperationError::UnsafePath);
         }
-        if parent
-            .canonicalize()
-            .ok()
-            .as_deref()
-            == Some(canonical_model_root)
-        {
+        if parent.canonicalize().ok().as_deref() == Some(canonical_model_root) {
             return Ok(());
         }
         current = parent.to_path_buf();
@@ -2503,38 +2539,43 @@ fn parse_numeric_user(value: &str) -> Result<(u32, Option<u32>), OperationError>
     Ok((uid, gid))
 }
 
-fn valid_publication(value: &str) -> bool {
+fn parse_publication(value: &str) -> Option<(std::net::Ipv4Addr, u16, u16)> {
     let (address, ports) = if let Some(value) = value.strip_prefix('[') {
         let Some((address, ports)) = value.split_once("]:") else {
-            return false;
+            return None;
         };
         (address, ports)
     } else {
         let Some((address, ports)) = value.split_once(':') else {
-            return false;
+            return None;
         };
         (address, ports)
     };
-    let Ok(std::net::IpAddr::V4(address)) = address.parse::<std::net::IpAddr>() else {
-        return false;
+    let Ok(address) = address.parse::<std::net::Ipv4Addr>() else {
+        return None;
     };
     if address.is_unspecified()
         || address.is_loopback()
         || address.is_multicast()
         || address.is_link_local()
     {
-        return false;
+        return None;
     }
     let Some((host, container)) = ports.split_once(':') else {
-        return false;
+        return None;
     };
     if container.contains(':') {
-        return false;
+        return None;
     }
-    [host, container].iter().all(|part| {
-        part.parse::<u16>()
-            .is_ok_and(|port| (1024..=65535).contains(&port))
-    })
+    let host = host
+        .parse::<u16>()
+        .ok()
+        .filter(|port| (1024..=65535).contains(port))?;
+    let container = container
+        .parse::<u16>()
+        .ok()
+        .filter(|port| (1024..=65535).contains(port))?;
+    Some((address, host, container))
 }
 
 fn valid_environment(value: &str) -> bool {
@@ -2641,7 +2682,7 @@ mod tests {
     use super::{
         CommandOutput, CommandRunner, JobCancellationFence, ManagedRoots, OperationError,
         OperationExecutor, RuntimeImageReceipt, bounded_container_exit_code, finish_timed_out_job,
-        hex_sha256, parse_runtime_stop, valid_publication, validate_docker_run,
+        hex_sha256, parse_publication, parse_runtime_stop, validate_docker_run,
     };
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
@@ -2982,8 +3023,8 @@ mod tests {
 
     #[test]
     fn runtime_publications_require_an_explicit_routable_bind_address() {
-        assert!(valid_publication("192.168.1.211:8101:8000"));
-        assert!(valid_publication("192.168.100.10:29500:29500"));
+        assert!(parse_publication("192.168.1.211:8101:8000").is_some());
+        assert!(parse_publication("192.168.100.10:29500:29500").is_some());
 
         for value in [
             "8101:8000",
@@ -2996,7 +3037,7 @@ mod tests {
             "192.168.1.211:80:8000",
             "192.168.1.211:8101:80",
         ] {
-            assert!(!valid_publication(value), "{value}");
+            assert!(parse_publication(value).is_none(), "{value}");
         }
     }
 
@@ -3140,6 +3181,107 @@ mod tests {
     }
 
     #[test]
+    fn runtime_accepts_signed_bridge_endpoint_and_exact_cdi_gpu() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        fs::create_dir_all(&model).unwrap();
+        let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+        let network = arguments.iter().position(|value| value == "none").unwrap();
+        arguments[network] = "bridge".to_owned();
+        let image = arguments
+            .iter()
+            .position(|value| value.starts_with("localhost/vonk/"))
+            .unwrap();
+        arguments.splice(
+            image..image,
+            [
+                "--publish".to_owned(),
+                "192.168.1.211:8101:8000".to_owned(),
+                "--device".to_owned(),
+                "nvidia.com/gpu=all".to_owned(),
+                "--env".to_owned(),
+                "VONK_LISTEN_PORT=8000".to_owned(),
+            ],
+        );
+        assert!(validate_docker_run(&arguments, &roots, None).is_ok());
+
+        let mut wrong_device = arguments.clone();
+        let device = wrong_device
+            .iter()
+            .position(|value| value == "nvidia.com/gpu=all")
+            .unwrap();
+        wrong_device[device] = "vendor.example/gpu=all".to_owned();
+        assert!(validate_docker_run(&wrong_device, &roots, None).is_err());
+        let mut fabric = arguments;
+        let device = fabric
+            .iter()
+            .position(|value| value == "nvidia.com/gpu=all")
+            .unwrap();
+        fabric[device] = "/dev/infiniband:/dev/infiniband".to_owned();
+        assert!(validate_docker_run(&fabric, &roots, None).is_err());
+    }
+
+    #[test]
+    fn distributed_rank_zero_requires_only_signed_rendezvous_publication() {
+        let (_temp, roots) = runtime_fixture();
+        let model = artifact_path(&roots, 'a');
+        fs::create_dir_all(&model).unwrap();
+        let mut arguments = runtime_arguments(&roots, &[(model, "/models", true)]);
+        let network = arguments.iter().position(|value| value == "none").unwrap();
+        arguments[network] = "bridge".to_owned();
+        let image = arguments
+            .iter()
+            .position(|value| value.starts_with("localhost/vonk/"))
+            .unwrap();
+        arguments.splice(
+            image..image,
+            [
+                "--publish".to_owned(),
+                "192.168.1.211:29500:29500".to_owned(),
+                "--env".to_owned(),
+                "VONK_MASTER_PORT=29500".to_owned(),
+                "--env".to_owned(),
+                "VONK_RANK=0".to_owned(),
+            ],
+        );
+        assert!(validate_docker_run(&arguments, &roots, None).is_ok());
+
+        let mut wrong_port = arguments.clone();
+        let publication = wrong_port
+            .iter_mut()
+            .find(|value| value.starts_with("192.168.1.211:"))
+            .unwrap();
+        *publication = "192.168.1.211:29500:29501".to_owned();
+        assert!(validate_docker_run(&wrong_port, &roots, None).is_err());
+        let mut missing_publication = arguments.clone();
+        let publish = missing_publication
+            .iter()
+            .position(|value| value == "--publish")
+            .unwrap();
+        missing_publication.drain(publish..=publish + 1);
+        assert!(validate_docker_run(&missing_publication, &roots, None).is_err());
+
+        let mut worker_publication = arguments;
+        let rank = worker_publication
+            .iter()
+            .position(|value| value == "VONK_RANK=0")
+            .unwrap();
+        worker_publication[rank] = "VONK_RANK=1".to_owned();
+        let image = worker_publication
+            .iter()
+            .position(|value| value.starts_with("localhost/vonk/"))
+            .unwrap();
+        worker_publication.splice(
+            image..image,
+            [
+                "--publish".to_owned(),
+                "192.168.1.211:29500:29500".to_owned(),
+            ],
+        );
+        assert!(validate_docker_run(&worker_publication, &roots, None).is_err());
+    }
+
+    #[test]
     fn runtime_access_grants_exact_model_output_cache_and_run_tmp_acls() {
         let (_temp, roots) = runtime_fixture();
         let model = artifact_path(&roots, 'a');
@@ -3236,15 +3378,17 @@ mod tests {
                 format!("sha256:{}", "e".repeat(64)),
             ),
         ] {
-            assert!(executor
-                .require_image_receipt(
-                    &archive_sha256,
-                    &index,
-                    &platform,
-                    &local_reference,
-                    &config,
-                )
-                .is_err());
+            assert!(
+                executor
+                    .require_image_receipt(
+                        &archive_sha256,
+                        &index,
+                        &platform,
+                        &local_reference,
+                        &config,
+                    )
+                    .is_err()
+            );
         }
         let receipt: RuntimeImageReceipt = serde_json::from_slice(
             &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),

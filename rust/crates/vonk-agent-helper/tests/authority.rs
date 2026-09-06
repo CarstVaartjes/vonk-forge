@@ -675,7 +675,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         "--cap-drop=ALL".to_owned(),
         "--security-opt=no-new-privileges".to_owned(),
         "--network".to_owned(),
-        "none".to_owned(),
+        "bridge".to_owned(),
         "--pids-limit".to_owned(),
         "4096".to_owned(),
         "--memory".to_owned(),
@@ -689,11 +689,15 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         "--env".to_owned(),
         "VONK_RANK=0".to_owned(),
         "--env".to_owned(),
+        "VONK_LISTEN_PORT=8000".to_owned(),
+        "--env".to_owned(),
         "HOME=/outputs/cache/home".to_owned(),
         "--env".to_owned(),
         "XDG_CACHE_HOME=/outputs/cache".to_owned(),
         "--env".to_owned(),
         "TMPDIR=/outputs/tmp".to_owned(),
+        "--publish".to_owned(),
+        "192.168.1.211:8101:8000".to_owned(),
         "--mount".to_owned(),
         format!("type=bind,src={},dst=/models,readonly", model.display()),
         "--mount".to_owned(),
@@ -802,7 +806,13 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
             docker_run
                 .1
                 .windows(2)
-                .any(|values| values == ["--network", "none"])
+                .any(|values| values == ["--network", "bridge"])
+        );
+        assert!(
+            docker_run
+                .1
+                .windows(2)
+                .any(|values| { values == ["--publish", "192.168.1.211:8101:8000"] })
         );
     }
     let inspect = runtime_request(HostRuntimeAction::RunInspect, request.arguments.clone());
