@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
@@ -25,8 +24,6 @@ from .catalog_entities import (
     CatalogError,
     CatalogValidationError,
 )
-from .global_catalog import GlobalRecipeRevision
-from .import_report import ImportDisposition, ImportReportItem
 from .models import (
     CatalogDocument,
     CatalogDocumentHead,
@@ -71,14 +68,6 @@ class RecipeRevisionView:
     content_sha256: str | None
     created_by: str
     created_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class RemoteRecipeImportPreview:
-    remote: GlobalRecipeRevision
-    report: tuple[ImportReportItem, ...]
-    report_digest: str
-    source_sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,32 +366,6 @@ class CatalogService:
         if isinstance(identity, dict):
             identity["publisher"] = target_publisher
         return {"recipe": recipe, "test_report": report}
-
-    def preview_recipe_library(self, remote: GlobalRecipeRevision) -> RemoteRecipeImportPreview:
-        try:
-            recipe = RecipeDefinition.model_validate(remote.document)
-        except (TypeError, ValueError) as error:
-            raise CatalogValidationError("recipe_library.document_invalid", "remote recipe document is invalid") from error
-        digest = content_sha256(recipe)
-        if digest != remote.content_sha256:
-            raise CatalogValidationError("recipe_library.hash_mismatch", "recipe content does not match remote digest")
-        item = ImportReportItem(
-            source_path=f"recipes/{remote.slug}.json",
-            disposition=ImportDisposition.IMPORTED,
-            destination_path=f"recipes/{remote.slug}.json",
-            reason_code="recipe_library.materialized",
-            detail="remote recipe revision will be copied into PostgreSQL",
-            blocking=False,
-        )
-        encoded = json.dumps({"source_sha256": digest, "items": [asdict(item)]}, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-        return RemoteRecipeImportPreview(remote, (item,), hashlib.sha256(encoded).hexdigest(), digest)
-
-    def import_recipe_library_preview(self, actor: str, preview: RemoteRecipeImportPreview) -> RecipeRevisionView:
-        checked = self.preview_recipe_library(preview.remote)
-        if (checked.source_sha256, checked.report_digest) != (preview.source_sha256, preview.report_digest):
-            raise CatalogConflict("recipe_library.preview_changed", "remote recipe changed since preview")
-        return self.import_recipe_library(actor, library_commit=preview.remote.revision_id.replace("-", "")[:40], source_path=f"recipes/{preview.remote.slug}.json", document=preview.remote.document, expected_content_sha256=preview.source_sha256)
-
 
 def _get_active_recipe(session: Session, recipe_id: str) -> CatalogDocumentRevision | None:
     return session.scalar(
