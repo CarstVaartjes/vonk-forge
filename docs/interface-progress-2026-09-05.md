@@ -2,7 +2,7 @@
 
 Updated 2026-09-06. This replaces the earlier status snapshot. Platform
 integration is `codex/interface-integration` at
-`d8c32baa` (latest checked remote main `0ab88b4f` is included). Local checks, publication,
+`0b2db7a8` (latest checked remote main `0ab88b4f` is included). Local checks, publication,
 Controller deployment and physical Spark execution remain separate results.
 No local result below claims a deployed Controller or NVIDIA workload.
 
@@ -34,14 +34,14 @@ This is a fresh launch with one current contract and no legacy catalog path.
 
 | Packet | Integrated or published work | Remaining evidence |
 |---|---|---|
-| P1 producer | Model/Recipe definitions, author guide, schemas/examples, changed-only catalog and exact archives published in v1.0.2. | Engine verification below; source-refresh follow-ups. |
-| P2 independent validator | Published validator reads the canonical contract. v1.0.2 validation passed against platform `0ab88b4f`. | Recheck final combined consumer revision. |
+| P1 producer | Model/Recipe definitions, author guide, schemas/examples, changed-only catalog and exact archives published; v1.0.3 contains the 13 follow-up package repairs. | Engine verification below; physical serving remains separate. |
+| P2 independent validator | Published validator `26a2dfa8` reads the canonical contract; v1.0.3 passed its independent secret and package-identity checks. | Recheck final combined consumer revision. |
 | P3 catalog / database | Canonical persistence, typed lists/details, all-page pagination and ordered multi-Model details integrated. | Fresh OrbStack PostgreSQL imported 92 Models / 85 Recipes and retained 13 unlinked Models; [exact evidence](evidence/fresh-launch-catalog-postgres-acceptance-2026-09-06.md). Recheck final database additions. |
 | P4 downloads / secrets | Optional Controller/worker HF token, anonymous public downloads and [documentation](model-cache-huggingface-auth.md) integrated. | Deployed gated-download observation. |
 | P5 cache / Run / profiles | NAS caches, explicit profile scope/Idle, durable preparation/distribution phases and artifact receipts integrated locally. | Runtime/helper OCI path, current-Recipe receipt authorization and bounded retry are integrated. Actual composed helper-process execution and combined acceptance remain pending; direct OrbStack Docker import/start is not that proof. |
 | P6 website | Canonical compact catalog and plain-language explanation deployed. | Recipe refresh propagation; website evidence does not establish Controller behavior. |
-| P7 Controller web / API / CLI | Paired lists, Model NAS download, Recipe placement, profiles, artifact jobs and rich Fleet surfaces integrated. Retired routes and generated clients removed. | Final UI branch: 195 Vitest tests, 22 Playwright journeys and one optional skip. Root layout repair passed its desktop/mobile journey. Route cleanup: 49 API/client tests and web build passed. CLI records 97 focused and 23 connected parity tests. New retries require matching API/CLI/web coverage. |
-| P8 upstream refresh | Reviewed first batch and reports published in v1.0.2. | GLM, LTX and adapter follow-ups are being composed for the next release; all-Recipe engine checks are active. |
+| P7 Controller web / API / CLI | Paired lists, Model NAS download, Recipe placement, profiles, artifact jobs and rich Fleet surfaces integrated. Retired routes and generated clients removed. Retry UI passed 199 Vitest tests and 18 Library browser journeys; creator attribution passed seven focused tests and its browser journey. | CI at `8ced8a0a` passed Admin web behavior and generated clients. CLI records 97 focused and 23 connected parity tests. Deployed user/agent workflows remain to be observed. |
+| P8 upstream refresh | Reviewed first batch published in v1.0.2; DS4, SparkInfer, GLM and LTX follow-up repairs published in v1.0.3. Every Recipe is represented in the exact QA ledger below. | Real pinned engine parsing remains unverified for 68 Recipes; container start and physical inference remain unverified for the corpus. |
 | P9 acceptance / cleanup | Fresh catalog/PostgreSQL checks and independent UI review recorded. | Retired authoring modules removed. Controller packaging and signed helper policy integrated. Combined suite fixes, actual composed helper execution, compatible consumer publication/deployment, then physical Spark observations remain. |
 
 Root UI repair: `f8ee3122`. Route cleanup: `d6e7e188`, integrated at
@@ -65,7 +65,7 @@ snapshot must never remove previously valid entries or immutable revisions.
 
 ## Every-Recipe engine verification
 
-The complete v1.0.2 inventory is assigned to four groups: vLLM 34, SGLang/DS4
+The complete 85-Recipe inventory was assigned to four groups: vLLM 34, SGLang/DS4
 7, ComfyUI/Diffusers 23, and PyTorch pipeline 21. Total: 85 Recipes.
 Each per-Recipe result must bind the exact source and distinguish:
 
