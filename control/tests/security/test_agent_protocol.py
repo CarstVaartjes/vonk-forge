@@ -188,6 +188,7 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
     protocol_wheel_path = PROTOCOL_WHEEL
     contracts_wheel_path = PUBLIC_CONTRACTS_WHEEL
     packaging_lock = (ROOT / "control/packaging/public-contracts.lock").read_text()
+    packaging_source = tomllib.loads(packaging_lock)
     dockerignore_path = ROOT / ".dockerignore"
     dockerfile = (ROOT / "control/Dockerfile").read_text()
 
@@ -222,12 +223,16 @@ def test_release_artifacts_install_the_exact_protocol_wheel() -> None:
             "hash": f"sha256:{PROTOCOL_WHEEL_HASH}",
         }
     ]
+    revision = packaging_source["revision"]
+    assert len(revision) == 40 and set(revision) <= set("0123456789abcdef")
+    assert packaging_source["source"] == "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
+    assert packaging_source["branch"] == "main"
+    assert packaging_source["subdirectory"] == "contracts"
     assert contract_package["source"] == {
-        "git": "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#32b4c094ba0bf6376d419cb06357fe76b160d944"
+        "git": f"{packaging_source['source']}?subdirectory=contracts&branch=main#{revision}"
     }
     assert "wheels" not in contract_package
     assert 'branch = "main"' in packaging_lock
-    assert 'revision = "32b4c094ba0bf6376d419cb06357fe76b160d944"' in packaging_lock
     assert f'sha256 = "{PUBLIC_CONTRACTS_WHEEL_HASH}"' in packaging_lock
     assert "COPY control/pyproject.toml ./" in dockerfile
     assert "COPY control/src ./src" in dockerfile

@@ -294,6 +294,7 @@ def test_artifact_distribution_is_negotiated_and_serialized_as_a_mutation(
     parent_job = parent(sessions, clock)
     operation = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
     first = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, {})
+    clock.advance(seconds=1)
     second = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, {})
     capabilities = ["agent.runtime.rust.v1", operation]
 
