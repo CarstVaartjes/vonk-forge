@@ -816,8 +816,14 @@ def _model_lineage_signature(document: Mapping[str, object]) -> tuple[object, ob
     )
 
 
-def _supersedes_revision(document: Mapping[str, object], current: CatalogDocumentRevision) -> bool:
-    value = document.get("supersedes")
+def _supersedes_revision(
+    revision: CatalogDocumentRevision, current: CatalogDocumentRevision
+) -> bool:
+    document = revision.document
+    projected = revision.projected if isinstance(revision.projected, Mapping) else {}
+    value = document.get("supersedes") if isinstance(document, Mapping) else None
+    if value is None:
+        value = projected.get("supersedes")
     values = value if isinstance(value, list) else [value]
     for item in values:
         if isinstance(item, str) and item == current.content_digest:
@@ -900,6 +906,7 @@ class ModelCacheService:
             Path(huggingface_token_path) if huggingface_token_path is not None else None
         )
         self._lock = threading.RLock()
+        self._closed = threading.Event()
         self._claim_owner = uuid.uuid4().hex
         self._executor = ThreadPoolExecutor(
             max_workers=max_parallel_downloads,
@@ -912,7 +919,13 @@ class ModelCacheService:
     def close(self) -> None:
         """Stop the Controller-wide transfer pool during service shutdown."""
 
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._closed.set()
+        # Let active streams observe the shutdown signal and checkpoint before
+        # releasing the service. HTTP clients have bounded read timeouts, so
+        # this wait is finite while preventing post-shutdown DB/file writes.
+        self._executor.shutdown(wait=True, cancel_futures=True)
+        with self._lock:
+            self._advance_background_operations()
 
     @property
     def root(self) -> Path:
@@ -1835,6 +1848,16 @@ class ModelCacheService:
             mode = "ab" if effective_offset else "wb"
             with part.open(mode) as output:
                 while True:
+                    if self._closed.is_set():
+                        self._checkpoint_artifact(
+                            spec,
+                            operation_id=operation_id,
+                            set_digest=set_digest,
+                            actual_bytes=received,
+                            state="partial",
+                            completed_artifacts=completed_artifacts,
+                        )
+                        raise InterruptedError("model cache service is shutting down")
                     if hasattr(stream, "read"):
                         chunk = stream.read(_CHUNK_BYTES)
                     else:
@@ -1992,9 +2015,9 @@ class ModelCacheService:
 
         Hugging Face commonly redirects a resolve URL to a signed CDN URL.
         Redirects are followed manually so an Authorization header is never
-        copied to an arbitrary host. Public files are requested anonymously;
-        a bearer token is used only after the canonical authority reports a
-        gated/private response.
+        copied to an arbitrary host. A configured token is sent only on the
+        canonical authority request; without a token file, the request stays
+        anonymous until the authority reports that access is required.
         """
         current_url = source
         try:
@@ -2302,6 +2325,19 @@ class ModelCacheService:
             if operation is not None:
                 operation.state = "partial"
                 operation.last_error = detail[:512]
+                operation.payload = dict(operation.payload) | {
+                    "failure": {
+                        "code": "model_cache.interrupted",
+                        "detail": f"{detail[:480]}; preserved bytes remain available to resume",
+                        "retryable": True,
+                        "recovery": "resume",
+                        "retry_time": None,
+                        "retry_after_seconds": None,
+                        "required_bytes": None,
+                        "free_bytes": None,
+                        "shortfall_bytes": None,
+                    }
+                }
                 operation.payload = {
                     key: value
                     for key, value in operation.payload.items()
@@ -2531,6 +2567,12 @@ class ModelCacheService:
                     operation.attempt = max(1, int(operation.attempt))
             operation.state = state
             operation.updated_at = now
+            if state == "running":
+                operation.payload = {
+                    key: value
+                    for key, value in operation.payload.items()
+                    if key != "failure"
+                }
             if result is not None:
                 payload = dict(operation.payload) | {"result": dict(result)}
                 payload.pop("failure", None)
@@ -2730,6 +2772,9 @@ class ModelCacheService:
     def tick(self, *, limit: int | None = None) -> int:
         """Claim and submit due operations without blocking the worker loop."""
 
+        if self._closed.is_set():
+            return 0
+
         # A caller-supplied Session is intentionally retained for synchronous
         # fixture/maintenance use only. Background tasks must obtain isolated
         # sessions from a sessionmaker; SQLAlchemy Session is not thread safe.
@@ -2780,7 +2825,14 @@ class ModelCacheService:
                 progressed = False
                 for operation_id in list(self._background_operations):
                     before = self._available_transfer_slots()
-                    self._fill_background_slots(operation_id, 1)
+                    record = self._background_operations.get(operation_id, {})
+                    futures = record.get("futures", []) if isinstance(record, Mapping) else []
+                    pending = sum(
+                        1
+                        for future in futures
+                        if isinstance(future, Future) and not future.done()
+                    )
+                    self._fill_background_slots(operation_id, pending + 1)
                     if self._available_transfer_slots() < before:
                         progressed = True
                     if self._available_transfer_slots() <= 0:
@@ -2947,7 +2999,12 @@ class ModelCacheService:
                         for item in self._background_operations.values()
                     ),
                 )
-                self._fill_background_slots(operation_id, min(1, capacity))
+                pending = sum(
+                    1
+                    for future in futures
+                    if isinstance(future, Future) and not future.done()
+                )
+                self._fill_background_slots(operation_id, pending + min(1, capacity))
         return finished
 
     def _renew_background_claims(self) -> None:
@@ -3769,18 +3826,18 @@ class ModelCacheService:
             if candidate.content_digest == current.content_digest:
                 continue
             same_lineage = _model_lineage_signature(candidate.document) == current_signature
-            if not same_lineage and not _supersedes_revision(candidate.document, current):
+            if not same_lineage and not _supersedes_revision(candidate, current):
                 continue
             if not _same_model_artifact_identity(candidate, manifest) and (
                 candidate.revision_number > current.revision_number
                 or _datetime(candidate.created_at) > _datetime(current.created_at)
-                or _supersedes_revision(candidate.document, current)
+                or _supersedes_revision(candidate, current)
             ):
                 candidates.append(candidate)
         # Multiple incomparable successors are deliberately exposed as
         # ambiguous; choosing one by wall-clock order would hide a catalog
         # lineage decision from operators.
-        explicit = [item for item in candidates if _supersedes_revision(item.document, current)]
+        explicit = [item for item in candidates if _supersedes_revision(item, current)]
         if explicit:
             return current, explicit if len(explicit) == 1 else explicit
         return current, candidates

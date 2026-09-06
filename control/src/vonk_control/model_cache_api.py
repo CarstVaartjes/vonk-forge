@@ -124,6 +124,7 @@ def install_model_cache_routes(
                 "model_cache.digest_mismatch": "integrity_mismatch",
                 "model_cache.source_size_mismatch": "integrity_mismatch",
                 "model_cache.capacity": "capacity",
+                "model_cache.interrupted": "interrupted",
             }
             code = semantic_codes.get(
                 str(raw_failure.get("code", "model_cache.operation_failed")),
