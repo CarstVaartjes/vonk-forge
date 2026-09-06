@@ -45,16 +45,16 @@ class RecipeOperationWorker:
         self._run_switches = run_switches
 
     def tick(self) -> bool:
-        if self._fleet_profiles is not None and self._fleet_profiles.tick():
-            return True
-        if self._run_switches is not None and self._run_switches.tick():
-            return True
-        if self._recoveries is not None and self._recoveries.tick():
-            return True
+        progressed = False
+        # Parent operations depend on lifecycle observations and published routes.
+        # Give each coordinator a turn before servicing those dependencies.
+        for coordinator in (self._fleet_profiles, self._run_switches, self._recoveries):
+            if coordinator is not None:
+                progressed = coordinator.tick() or progressed
         if self._expire_initial_observation_deadline():
+            progressed = True
             if self._recoveries is not None:
                 self._recoveries.tick()
-            return True
         with self._sessions() as session:
             run_ids = tuple(
                 session.scalars(
@@ -79,7 +79,7 @@ class RecipeOperationWorker:
                         run.route_error = f"{type(error).__name__}: {error}"[:512]
                         run.updated_at = self._clock()
             return True
-        return self._routes.maintain(renew_before_seconds=10)
+        return self._routes.maintain(renew_before_seconds=10) or progressed
 
     def _expire_initial_observation_deadline(self) -> bool:
         now = self._clock()

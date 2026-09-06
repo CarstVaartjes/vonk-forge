@@ -3133,12 +3133,12 @@ class RunSwitchOperationService:
         rows = tuple(
             session.scalars(
                 select(RecipeRun)
-                .join(RunNode, RunNode.run_id == RecipeRun.id)
                 .where(
-                    RunNode.node_id.in_(node_ids),
+                    RecipeRun.id.in_(
+                        select(RunNode.run_id).where(RunNode.node_id.in_(node_ids))
+                    ),
                     RecipeRun.state.in_(_ACTIVE_RUN_STATES),
                 )
-                .distinct()
                 .order_by(RecipeRun.created_at, RecipeRun.id)
             )
         )
@@ -4098,7 +4098,7 @@ class RunSwitchOperationService:
                             getattr(child, "result", None),
                         )
                     except RunSwitchOperationConflict as error:
-                        self._fail(operation_id, str(error))
+                        self._mark_failed(job, str(error), now=now, progress=progress)
                         return True
                 item_total = len(persisted_plan.stops) if phase.kind == "stop" else 1
                 progress["child_operation_id"] = None
@@ -4166,7 +4166,11 @@ class RunSwitchOperationService:
                     retryable=_transient_distribution_exception(error),
                 )
                 return True
-        if execution.waiting and execution.operation_id is None:
+        if (
+            execution.waiting
+            and execution.operation_id is None
+            and phase.kind != "final_verify"
+        ):
             self._fail(operation_id, f"run-switch.{phase.kind}-waiting-without-child")
             return True
         if (
@@ -4196,7 +4200,21 @@ class RunSwitchOperationService:
             if execution.waiting:
                 progress["phase"] = phase.kind
                 progress["subphase"] = phase.subphase
-                if execution.result is not None:
+                if phase.kind == "final_verify" and execution.operation_id is None:
+                    started = progress.setdefault("final_verify_started_at", now.timestamp())
+                    if (
+                        type(started) not in (int, float)
+                        or not 0 <= now.timestamp() - started < 300
+                    ):
+                        self._mark_failed(
+                            job, "run-switch.final-verification-timeout",
+                            now=now, progress=progress,
+                        )
+                        return True
+                    # Keep one current observation while awaiting route publication.
+                    # Repeated polling must not grow durable phase receipts.
+                    progress["final_observation"] = dict(execution.result or {})
+                elif execution.result is not None:
                     results = list(progress.get("phase_results", []))
                     results.append(dict(execution.result))
                     progress["phase_results"] = results
@@ -4311,13 +4329,23 @@ class RunSwitchOperationService:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None:
                 return
-            job.state = "failed"
-            job.status_reason = reason[:512]
+            self._mark_failed(job, reason, now=_now(self._clock), retryable=retryable)
+
+    @staticmethod
+    def _mark_failed(
+        job: Job, reason: str, *, now: datetime, retryable: bool = False,
+        progress: dict[str, Any] | None = None,
+    ) -> None:
+        """Record failure using the caller's transaction and existing row lock."""
+
+        job.state = "failed"
+        job.status_reason = reason[:512]
+        if progress is None:
             progress = dict(job.result) if isinstance(job.result, Mapping) else {}
-            progress["failed_phase"] = progress.get("phase")
-            progress["retryable"] = retryable
-            job.result = progress
-            job.updated_at = _now(self._clock)
+        progress["failed_phase"] = progress.get("phase")
+        progress["retryable"] = retryable
+        job.result = progress
+        job.updated_at = now
 
     @staticmethod
     def _operation_view(job: Job) -> RunSwitchOperation:
