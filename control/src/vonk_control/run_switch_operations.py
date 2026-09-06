@@ -4024,6 +4024,10 @@ class RunSwitchOperationService:
                 return True
             if child.state not in _TERMINAL_STATES or child.state != "succeeded":
                 reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
+                evidence = _child_progress_payload(child)
+                detail = evidence.get("reason") or evidence.get("status_reason")
+                if isinstance(detail, str) and detail:
+                    reason += ": " + detail[:384]
                 if _transient_distribution_failure(child) and self._queue_transient_retry(
                     operation_id, child, phase_index=phase_index
                 ):

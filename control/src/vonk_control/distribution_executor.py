@@ -998,9 +998,11 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
 
     @staticmethod
     def _cache_state(state: object) -> str:
-        if state in {"downloading", "verifying", "partial"}:
+        if state == "partial":
             return "running"
-        if state in {"queued", "succeeded", "failed"}:
+        if state == "cancelled":
+            return "failed"
+        if state in {"queued", "running", "succeeded", "failed"}:
             return str(state)
         return "unknown"
 

@@ -281,6 +281,10 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared:
     projected = executor.get(cache_view.id)
     assert projected.state == "queued"
     assert projected.progress["completed_bytes"] == 3
+    cache_view.state = "running"
+    assert executor.get(cache_view.id).state == "running"
+    cache_view.state = "cancelled"
+    assert executor.get(cache_view.id).state == "failed"
     if image_prepared:
         plan.storage = SimpleNamespace(missing_nas_bytes=12)
     else:
