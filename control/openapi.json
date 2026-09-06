@@ -4818,8 +4818,8 @@
           },
           "source_kind": {
             "enum": [
-              "model-version",
-              "recipe-revision",
+              "model",
+              "recipe",
               "model-capability-evidence"
             ],
             "title": "Source Kind",
@@ -4861,46 +4861,6 @@
           "evidence_digest"
         ],
         "title": "LibraryCapabilityProvenance",
-        "type": "object"
-      },
-      "LibraryCatalogReference": {
-        "additionalProperties": false,
-        "description": "A content addressed catalog identity retained in a Library response.",
-        "properties": {
-          "content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Content Sha256",
-            "type": "string"
-          },
-          "kind": {
-            "enum": [
-              "model-group",
-              "model",
-              "model-version"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "publisher": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Publisher",
-            "type": "string"
-          },
-          "slug": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Slug",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "publisher",
-          "slug",
-          "content_sha256"
-        ],
-        "title": "LibraryCatalogReference",
         "type": "object"
       },
       "LibraryInstallationSummary": {
@@ -4959,20 +4919,10 @@
         "additionalProperties": false,
         "properties": {
           "model": {
-            "$ref": "#/components/schemas/ModelVersionIdentity"
+            "$ref": "#/components/schemas/LibraryModelIdentity"
           },
           "model_capabilities": {
             "$ref": "#/components/schemas/LibraryCapabilityInventory"
-          },
-          "model_version": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelVersionFacts"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "page_local": {
             "const": true,
@@ -4996,234 +4946,19 @@
         "title": "LibraryModel",
         "type": "object"
       },
-      "LibraryModelArtifact": {
+      "LibraryModelIdentity": {
         "additionalProperties": false,
+        "description": "Content-addressed identity for a canonical Model document.",
         "properties": {
-          "download_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
-            "title": "Download Bytes",
-            "type": "integer"
-          },
-          "id": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Id",
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
             "type": "string"
-          },
-          "installed_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
-            "title": "Installed Bytes",
-            "type": "integer"
           },
           "kind": {
-            "enum": [
-              "huggingface.file",
-              "http.file",
-              "oci.artifact"
-            ],
+            "const": "model",
+            "default": "model",
             "title": "Kind",
-            "type": "string"
-          },
-          "path": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Path",
-            "type": "string"
-          },
-          "repository": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Repository",
-            "type": "string"
-          },
-          "revision": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Revision",
-            "type": "string"
-          },
-          "roles": {
-            "items": {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 16,
-            "minItems": 1,
-            "title": "Roles",
-            "type": "array"
-          },
-          "sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Sha256",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "path",
-          "kind",
-          "repository",
-          "revision",
-          "sha256",
-          "download_bytes",
-          "installed_bytes",
-          "roles"
-        ],
-        "title": "LibraryModelArtifact",
-        "type": "object"
-      },
-      "LibraryModelDefinition": {
-        "additionalProperties": false,
-        "properties": {
-          "architecture": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Architecture",
-            "type": "string"
-          },
-          "identity": {
-            "$ref": "#/components/schemas/LibraryCatalogReference"
-          },
-          "metadata": {
-            "$ref": "#/components/schemas/LibraryModelMetadata"
-          },
-          "model_group": {
-            "$ref": "#/components/schemas/LibraryCatalogReference"
-          }
-        },
-        "required": [
-          "identity",
-          "model_group",
-          "architecture",
-          "metadata"
-        ],
-        "title": "LibraryModelDefinition",
-        "type": "object"
-      },
-      "LibraryModelFamily": {
-        "additionalProperties": false,
-        "properties": {
-          "family": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Family",
-            "type": "string"
-          },
-          "identity": {
-            "$ref": "#/components/schemas/LibraryCatalogReference"
-          },
-          "metadata": {
-            "$ref": "#/components/schemas/LibraryModelMetadata"
-          }
-        },
-        "required": [
-          "identity",
-          "family",
-          "metadata"
-        ],
-        "title": "LibraryModelFamily",
-        "type": "object"
-      },
-      "LibraryModelFormat": {
-        "additionalProperties": false,
-        "properties": {
-          "container": {
-            "enum": [
-              "gguf",
-              "safetensors"
-            ],
-            "title": "Container",
-            "type": "string"
-          },
-          "precision": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Precision",
-            "type": "string"
-          },
-          "quantization": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Quantization",
-            "type": "string"
-          }
-        },
-        "required": [
-          "container",
-          "precision",
-          "quantization"
-        ],
-        "title": "LibraryModelFormat",
-        "type": "object"
-      },
-      "LibraryModelLimits": {
-        "additionalProperties": false,
-        "properties": {
-          "context_tokens": {
-            "anyOf": [
-              {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Context Tokens"
-          },
-          "frames": {
-            "anyOf": [
-              {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Frames"
-          },
-          "resolution_pixels": {
-            "anyOf": [
-              {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolution Pixels"
-          },
-          "sample_rate_hz": {
-            "anyOf": [
-              {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sample Rate Hz"
-          }
-        },
-        "title": "LibraryModelLimits",
-        "type": "object"
-      },
-      "LibraryModelLineage": {
-        "additionalProperties": false,
-        "properties": {
-          "derivation": {
-            "maxLength": 2000,
-            "title": "Derivation",
             "type": "string"
           },
           "publisher": {
@@ -5232,322 +4967,19 @@
             "title": "Publisher",
             "type": "string"
           },
-          "relation": {
-            "enum": [
-              "official",
-              "derived",
-              "quantized"
-            ],
-            "title": "Relation",
+          "slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Slug",
             "type": "string"
-          },
-          "source_model": {
-            "$ref": "#/components/schemas/LibraryCatalogReference"
           }
         },
         "required": [
           "publisher",
-          "relation",
-          "source_model",
-          "derivation"
+          "slug",
+          "content_sha256"
         ],
-        "title": "LibraryModelLineage",
-        "type": "object"
-      },
-      "LibraryModelMetadata": {
-        "additionalProperties": false,
-        "properties": {
-          "description": {
-            "maxLength": 4000,
-            "title": "Description",
-            "type": "string"
-          },
-          "tags": {
-            "items": {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            "maxItems": 20,
-            "title": "Tags",
-            "type": "array"
-          },
-          "title": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "description",
-          "tags"
-        ],
-        "title": "LibraryModelMetadata",
-        "type": "object"
-      },
-      "LibraryModelParameters": {
-        "additionalProperties": false,
-        "properties": {
-          "active": {
-            "anyOf": [
-              {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Active"
-          },
-          "total": {
-            "anyOf": [
-              {
-                "maximum": 9.223372036854776e+18,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total"
-          }
-        },
-        "title": "LibraryModelParameters",
-        "type": "object"
-      },
-      "LibraryModelSizes": {
-        "additionalProperties": false,
-        "properties": {
-          "download_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
-            "title": "Download Bytes",
-            "type": "integer"
-          },
-          "installed_bytes": {
-            "maximum": 9.223372036854776e+18,
-            "minimum": 0.0,
-            "title": "Installed Bytes",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "download_bytes",
-          "installed_bytes"
-        ],
-        "title": "LibraryModelSizes",
-        "type": "object"
-      },
-      "LibraryModelSource": {
-        "additionalProperties": false,
-        "properties": {
-          "repository": {
-            "maxLength": 512,
-            "minLength": 1,
-            "title": "Repository",
-            "type": "string"
-          },
-          "revision": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Revision",
-            "type": "string"
-          }
-        },
-        "required": [
-          "repository",
-          "revision"
-        ],
-        "title": "LibraryModelSource",
-        "type": "object"
-      },
-      "LibraryModelVersionFacts": {
-        "additionalProperties": false,
-        "description": "Exact schema-valid model-version facts, with unknown fields fail-closed.",
-        "properties": {
-          "artifacts": {
-            "items": {
-              "$ref": "#/components/schemas/LibraryModelArtifact"
-            },
-            "maxItems": 512,
-            "title": "Artifacts",
-            "type": "array"
-          },
-          "availability": {
-            "anyOf": [
-              {
-                "enum": [
-                  "active",
-                  "withdrawn",
-                  "superseded"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Availability"
-          },
-          "dependencies": {
-            "items": {
-              "$ref": "#/components/schemas/LibraryCatalogReference"
-            },
-            "maxItems": 32,
-            "title": "Dependencies",
-            "type": "array"
-          },
-          "family": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelFamily"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "format": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelFormat"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "identity": {
-            "$ref": "#/components/schemas/ModelVersionIdentity"
-          },
-          "limits": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelLimits"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "lineage": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelLineage"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelMetadata"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryCatalogReference"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model_definition": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelDefinition"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "parameters": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelParameters"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reasons": {
-            "items": {
-              "$ref": "#/components/schemas/vonk_control__library_contract__ProjectionReason"
-            },
-            "maxItems": 16,
-            "title": "Reasons",
-            "type": "array"
-          },
-          "schema_version": {
-            "const": 2,
-            "default": 2,
-            "title": "Schema Version",
-            "type": "integer"
-          },
-          "sizes": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelSizes"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "source": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelSource"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "state": {
-            "enum": [
-              "resolved",
-              "unknown"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "version": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version"
-          }
-        },
-        "required": [
-          "state",
-          "identity",
-          "artifacts",
-          "dependencies"
-        ],
-        "title": "LibraryModelVersionFacts",
+        "title": "LibraryModelIdentity",
         "type": "object"
       },
       "LibraryPlacementApplication": {
@@ -6283,7 +5715,7 @@
           "model": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ModelVersionIdentity"
+                "$ref": "#/components/schemas/LibraryModelIdentity"
               },
               {
                 "type": "null"
@@ -6292,16 +5724,6 @@
           },
           "model_capabilities": {
             "$ref": "#/components/schemas/LibraryCapabilityInventory"
-          },
-          "model_version": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LibraryModelVersionFacts"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "operational_state": {
             "$ref": "#/components/schemas/OperationalState"
@@ -6334,16 +5756,6 @@
             "title": "Schema Version",
             "type": "integer"
           },
-          "selected_revision": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RecipeRevisionSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "topology": {
             "anyOf": [
               {
@@ -6358,7 +5770,6 @@
         "required": [
           "generated_at",
           "recipe",
-          "selected_revision",
           "definition",
           "topology",
           "operational_state",
@@ -6371,9 +5782,20 @@
       "LibraryRecipeIdentity": {
         "additionalProperties": false,
         "properties": {
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
           "description": {
             "maxLength": 4096,
             "title": "Description",
+            "type": "string"
+          },
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
             "type": "string"
           },
           "recipe_id": {
@@ -6387,16 +5809,6 @@
             "title": "Slug",
             "type": "string"
           },
-          "source_kind": {
-            "enum": [
-              "local",
-              "workload_run",
-              "global",
-              "recipe_library"
-            ],
-            "title": "Source Kind",
-            "type": "string"
-          },
           "title": {
             "maxLength": 200,
             "minLength": 1,
@@ -6406,10 +5818,11 @@
         },
         "required": [
           "recipe_id",
+          "publisher",
           "slug",
+          "content_sha256",
           "title",
-          "description",
-          "source_kind"
+          "description"
         ],
         "title": "LibraryRecipeIdentity",
         "type": "object"
@@ -6475,6 +5888,11 @@
             "title": "Capabilities",
             "type": "array"
           },
+          "content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Sha256",
+            "type": "string"
+          },
           "description": {
             "maxLength": 4096,
             "title": "Description",
@@ -6503,6 +5921,12 @@
           "installations_truncated": {
             "title": "Installations Truncated",
             "type": "boolean"
+          },
+          "publisher": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Publisher",
+            "type": "string"
           },
           "reasons": {
             "items": {
@@ -6544,30 +5968,10 @@
             "title": "Runs Truncated",
             "type": "boolean"
           },
-          "selected_revision": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RecipeRevisionSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "slug": {
             "maxLength": 128,
             "minLength": 1,
             "title": "Slug",
-            "type": "string"
-          },
-          "source_kind": {
-            "enum": [
-              "local",
-              "workload_run",
-              "global",
-              "recipe_library"
-            ],
-            "title": "Source Kind",
             "type": "string"
           },
           "title": {
@@ -6592,11 +5996,11 @@
         },
         "required": [
           "recipe_id",
+          "publisher",
           "slug",
+          "content_sha256",
           "title",
           "description",
-          "source_kind",
-          "selected_revision",
           "capabilities",
           "topology_name",
           "installations",
@@ -8637,41 +8041,6 @@
           "model_version_sha256"
         ],
         "title": "ModelDeletionPreviewRequest",
-        "type": "object"
-      },
-      "ModelVersionIdentity": {
-        "additionalProperties": false,
-        "properties": {
-          "content_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Content Sha256",
-            "type": "string"
-          },
-          "kind": {
-            "const": "model-version",
-            "title": "Kind",
-            "type": "string"
-          },
-          "publisher": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Publisher",
-            "type": "string"
-          },
-          "slug": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Slug",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "publisher",
-          "slug",
-          "content_sha256"
-        ],
-        "title": "ModelVersionIdentity",
         "type": "object"
       },
       "NodeConnection": {
@@ -10927,64 +10296,6 @@
           "complete"
         ],
         "title": "RecipePresence",
-        "type": "object"
-      },
-      "RecipeRevisionSummary": {
-        "additionalProperties": false,
-        "properties": {
-          "content_sha256": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Content Sha256"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "id": {
-            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-            "title": "Id",
-            "type": "string"
-          },
-          "lifecycle": {
-            "enum": [
-              "draft",
-              "blocked",
-              "resolved",
-              "deprecated"
-            ],
-            "title": "Lifecycle",
-            "type": "string"
-          },
-          "revision_number": {
-            "maximum": 2147483647.0,
-            "minimum": 1.0,
-            "title": "Revision Number",
-            "type": "integer"
-          },
-          "schema_version": {
-            "const": 1,
-            "default": 1,
-            "title": "Schema Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "revision_number",
-          "lifecycle",
-          "content_sha256",
-          "created_at"
-        ],
-        "title": "RecipeRevisionSummary",
         "type": "object"
       },
       "RecipeRole": {

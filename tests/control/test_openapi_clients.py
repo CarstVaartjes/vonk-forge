@@ -65,7 +65,7 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
     assert "chain_pem" not in serialized
 
 
-def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
+def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None:
     schema = json.loads(OPENAPI.read_text())
     components = schema["components"]["schemas"]
     operations = _operations(schema)
@@ -73,20 +73,15 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
     assert set(library_model["properties"]) == {
         "model",
         "model_capabilities",
-        "model_version",
         "page_local",
         "recipes",
     }
     assert library_model["properties"]["model"] == {
-        "$ref": "#/components/schemas/ModelVersionIdentity"
+        "$ref": "#/components/schemas/LibraryModelIdentity"
     }
     assert library_model["properties"]["model_capabilities"] == {
         "$ref": "#/components/schemas/LibraryCapabilityInventory"
     }
-    assert library_model["properties"]["model_version"]["anyOf"] == [
-        {"$ref": "#/components/schemas/LibraryModelVersionFacts"},
-        {"type": "null"},
-    ]
     assert components["LibraryRecipeSummary"]["properties"][
         "recipe_capabilities"
     ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
@@ -96,24 +91,20 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
     assert components["LibraryRecipeDetail"]["properties"][
         "recipe_capabilities"
     ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
-    assert components["LibraryModelVersionFacts"]["properties"]["schema_version"][
-        "const"
-    ] == 2
     assert components["LibraryCapabilityInventory"]["properties"]["schema_version"][
         "const"
     ] == 2
-    model_identity = components["ModelVersionIdentity"]
-    assert model_identity["properties"]["kind"]["const"] == "model-version"
+    model_identity = components["LibraryModelIdentity"]
+    assert model_identity["properties"]["kind"]["const"] == "model"
     assert set(model_identity["required"]) == {
-        "kind",
         "publisher",
         "slug",
         "content_sha256",
     }
-    assert (
-        components["RecipeRevisionSummary"]["properties"]["schema_version"]["const"]
-        == 1
-    )
+    recipe_identity = components["LibraryRecipeIdentity"]
+    assert "source_kind" not in recipe_identity["properties"]
+    assert "content_sha256" in recipe_identity["properties"]
+    assert "selected_revision" not in components["LibraryRecipeSummary"]["properties"]
     assert "minItems" not in library_model["properties"]["recipes"]
     recipe_list = components["LibraryRecipeList"]
     assert "minItems" not in recipe_list["properties"]["recipes"]
@@ -121,11 +112,9 @@ def test_library_contract_uses_exact_model_versions_and_v1_revisions() -> None:
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/LibraryRecipeList"}
 
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    assert 'model: components["schemas"]["ModelVersionIdentity"];' in typescript
-    assert "schema_version: 1;" in typescript
-    python_client = (PYTHON_CLIENT / "models/recipe_revision_summary.py").read_text()
-    assert "schema_version: Union[Literal[1], Unset] = 1" in python_client
+    assert "ModelVersionIdentity" not in components
+    assert "LibraryModelVersionFacts" not in components
+    assert "RecipeRevisionSummary" not in components
 
 
 def test_repair_manifest_is_v2_while_upgrade_package_remains_v1() -> None:
@@ -425,8 +414,7 @@ def test_generated_openapi_removes_retired_catalog_recipe_operations() -> None:
 def test_generated_library_contract_drops_legacy_visual_artifact_identity() -> None:
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
     assert "VisualArtifact" not in schema
-    assert "LibraryModelArtifact" in schema
-    assert "include_paths" not in schema["LibraryModelArtifact"]["properties"]
+    assert "LibraryModelArtifact" not in schema
 
 
 
