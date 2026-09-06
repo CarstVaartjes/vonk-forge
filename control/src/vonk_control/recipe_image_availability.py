@@ -584,14 +584,29 @@ class RecipeImageAvailabilityService:
             operation = None
             list_operations = getattr(self._model_cache, "list_operations", None)
             if callable(list_operations):
-                for candidate in list_operations(limit=100):
+                candidates = [
+                    candidate
+                    for candidate in list_operations(limit=100)
                     if (
                         candidate.artifact_set_sha256 == artifact_set_sha256
-                        and candidate.plan_digest == plan_digest
                         and candidate.state in {"queued", "running", "partial", "succeeded", "failed"}
-                    ):
-                        operation = candidate
-                        break
+                    )
+                ]
+                state_rank = {"succeeded": 0, "queued": 1, "running": 1, "partial": 1, "failed": 2}
+                operation = min(
+                    candidates,
+                    key=lambda candidate: (state_rank.get(candidate.state, 3), str(candidate.id)),
+                    default=None,
+                )
+                if operation is not None and operation.state == "failed":
+                    actions = operation.failure
+                    actions = actions.get("recovery_actions", []) if isinstance(actions, Mapping) else []
+                    if "download_again" in actions:
+                        operation = self._start_model_repair(
+                            operation,
+                            actor=actor,
+                            parent_request_key=parent_request_key,
+                        )
             if operation is None:
                 operation = self._model_cache.start_download(
                     actor=actor,
@@ -625,6 +640,54 @@ class RecipeImageAvailabilityService:
             "progress": dict(operation.progress),
         }
 
+    def _start_model_repair(
+        self,
+        operation: object,
+        *,
+        actor: str,
+        parent_request_key: str,
+    ) -> object:
+        """Start a fresh content-addressed repair without deleting valid bytes."""
+
+        artifact_set_sha256 = getattr(operation, "artifact_set_sha256", None)
+        if not isinstance(artifact_set_sha256, str):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.model_cache_invalid",
+                "integrity failure did not retain an artifact-set identity",
+                retryable=True,
+                recovery_actions=("retry",),
+            )
+        repair_preview = getattr(self._model_cache, "repair_preview", None)
+        start_repair = getattr(self._model_cache, "start_repair", None)
+        if not callable(repair_preview) or not callable(start_repair):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.model_cache_unavailable",
+                "ModelCache does not expose the canonical repair workflow",
+                retryable=True,
+                recovery_actions=("retry",),
+            )
+        preview = repair_preview(artifact_set_sha256)
+        plan_digest = preview.get("plan_digest") if isinstance(preview, Mapping) else None
+        if not isinstance(plan_digest, str):
+            raise RecipeImageAvailabilityError(
+                "recipe_image.model_cache_invalid",
+                "ModelCache returned an incomplete repair plan",
+                retryable=True,
+                recovery_actions=("retry",),
+            )
+        request_key = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"vonk:recipe-availability-model-repair:{artifact_set_sha256}:{parent_request_key}",
+            )
+        )
+        return start_repair(
+            actor=actor,
+            request_key=request_key,
+            artifact_set_sha256=artifact_set_sha256,
+            plan_digest=plan_digest,
+        )
+
     def _resume_model_child(
         self,
         child: Mapping[str, object] | None,
@@ -643,15 +706,21 @@ class RecipeImageAvailabilityService:
                 reused = None
                 list_operations = getattr(self._model_cache, "list_operations", None)
                 if callable(list_operations):
-                    for candidate in list_operations(limit=100):
+                    candidates = [
+                        candidate
+                        for candidate in list_operations(limit=100)
                         if (
                             candidate.id != child_id
                             and candidate.artifact_set_sha256 == operation.artifact_set_sha256
-                            and candidate.plan_digest == operation.plan_digest
                             and candidate.state in {"queued", "running", "partial", "succeeded"}
-                        ):
-                            reused = candidate
-                            break
+                        )
+                    ]
+                    state_rank = {"succeeded": 0, "queued": 1, "running": 1, "partial": 1}
+                    reused = min(
+                        candidates,
+                        key=lambda candidate: (state_rank.get(candidate.state, 2), str(candidate.id)),
+                        default=None,
+                    )
                 if reused is not None:
                     operation = reused
                 else:
@@ -664,6 +733,15 @@ class RecipeImageAvailabilityService:
                     actions = operation.failure
                     actions = actions.get("recovery_actions", []) if isinstance(actions, Mapping) else []
                     if (
+                        "download_again" in actions
+                        and isinstance(operation.artifact_set_sha256, str)
+                    ):
+                        operation = self._start_model_repair(
+                            operation,
+                            actor=actor,
+                            parent_request_key=parent_request_key,
+                        )
+                    elif (
                         "check_access_and_resume" in actions
                         and isinstance(operation.artifact_set_sha256, str)
                         and isinstance(operation.plan_digest, str)
@@ -797,7 +875,12 @@ class RecipeImageAvailabilityService:
             previous_payload = previous.payload if isinstance(previous.payload, Mapping) else {}
             failure = previous_payload.get("failure", {})
             failure = failure if isinstance(failure, Mapping) else {}
-            if failure.get("retryable") is not True:
+            recovery_actions = failure.get("recovery_actions", [])
+            explicit_repair = (
+                isinstance(recovery_actions, list)
+                and "download_again" in recovery_actions
+            )
+            if failure.get("retryable") is not True and not explicit_repair:
                 raise RecipeImageAvailabilityError("recipe_image.not_retryable", "operation failure is terminal")
             retry = previous_payload.get("retry", {})
             retry_count = int(retry.get("operator_retries", 0)) if isinstance(retry, Mapping) else 0

@@ -730,6 +730,125 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(tmp_path: Path
     assert cache.called["plan_digest"] == "d" * 64
 
 
+def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-integrity-repair", recipe)
+
+    failed = SimpleNamespace(
+        id="model-download",
+        request_key="model-download-request",
+        state="running",
+        artifact_set_sha256="c" * 64,
+        plan_digest="d" * 64,
+        progress={"phase": "download", "completed_bytes": 4, "total_bytes": 10, "total_bytes_known": True},
+        failure=None,
+    )
+    repaired = SimpleNamespace(
+        id="model-repair",
+        request_key="model-repair-request",
+        state="succeeded",
+        artifact_set_sha256="c" * 64,
+        plan_digest="e" * 64,
+        progress={"phase": "download", "completed_bytes": 10, "total_bytes": 10, "total_bytes_known": True},
+        failure=None,
+    )
+
+    class ModelCache:
+        def __init__(self) -> None:
+            self.failed = False
+            self.repair_calls: list[dict[str, object]] = []
+
+        def download_preview(self, **_: object) -> dict[str, object]:
+            return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
+
+        def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
+            return SimpleNamespace(
+                digest="c" * 64,
+                document=lambda: {"model_versions": [], "artifacts": []},
+            )
+
+        def list_operations(self, **_: object) -> tuple[object, ...]:
+            return (failed,)
+
+        def start_download(self, **_: object) -> SimpleNamespace:
+            raise AssertionError("the existing ModelCache child should be reused")
+
+        def get_operation(self, operation_id: str) -> SimpleNamespace:
+            if operation_id == repaired.id:
+                return repaired
+            if self.failed:
+                failed.state = "failed"
+                failed.failure = {
+                    "code": "integrity_mismatch",
+                    "detail": "downloaded bytes did not match the pinned digest",
+                    "recovery_actions": ["download_again"],
+                    "retryable": False,
+                    "retry_time": None,
+                    "retry_after_seconds": None,
+                    "log_excerpt": "digest mismatch",
+                    "required_bytes": 10,
+                    "free_bytes": 100,
+                    "shortfall_bytes": 0,
+                }
+            return failed
+
+        def repair_preview(self, artifact_set_sha256: str) -> dict[str, object]:
+            assert artifact_set_sha256 == "c" * 64
+            return {"plan_digest": "e" * 64}
+
+        def start_repair(self, **kwargs: object) -> SimpleNamespace:
+            self.repair_calls.append(kwargs)
+            return repaired
+
+    model_cache = ModelCache()
+    transport = Transport()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id, *, force=False: (recipe, _runtime()),
+        transport=transport,
+        model_cache=model_cache,
+        clock=lambda: datetime.now(UTC),
+    )
+    parent = service.start(
+        "revision-integrity-repair",
+        actor="operator",
+        request_id="i" * 36,
+    )
+    assert service.run_pending() == 1
+    partial = service.get(parent.id)
+    assert partial.state == "partial"
+    assert transport.calls == 1
+
+    model_cache.failed = True
+    with sessions.begin() as session:
+        row = session.get(Job, parent.id)
+        assert row is not None
+        row.payload = dict(row.payload) | {"retry_after_at": "2000-01-01T00:00:00+00:00"}
+    assert service.run_pending() == 1
+    assert service.get(parent.id).state == "failed"
+
+    resumed = service.retry(parent.id, actor="operator", request_id="j" * 36)
+    assert resumed.model_child is not None
+    assert resumed.model_child["id"] == repaired.id
+    assert len(model_cache.repair_calls) == 1
+    assert model_cache.repair_calls[0]["artifact_set_sha256"] == "c" * 64
+    assert model_cache.repair_calls[0]["plan_digest"] == "e" * 64
+
+    assert service.run_pending() == 1
+    completed = service.get(resumed.id)
+    assert completed.state == "succeeded"
+    assert completed.result is not None
+    assert completed.result["model_child"]["id"] == repaired.id
+    assert transport.calls == 1
+
+
 def test_force_download_is_a_distinct_operation_for_same_revision(tmp_path: Path) -> None:
     recipe = _recipe("recipe-image.json")
     engine = create_engine("sqlite:///:memory:")
