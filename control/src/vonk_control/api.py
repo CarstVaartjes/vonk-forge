@@ -90,17 +90,26 @@ from .model_cache_api import (
 )
 from .operation_api import (
     AgentsResponse,
+    AuditEventResponse,
+    AuditResponse,
+    AuthorityResponse,
+    ChangeResponse,
     EndpointResponse,
     FleetStatusResponse,
+    HealthzResponse,
+    IdentityHistoryResponse,
     JobDetailResponse,
     JobLogsResponse,
     JobProgress,
+    JobResponse,
     JobResumeResponse,
     JobsResponse,
     OperationApiServices,
     OperationDetailResponse,
     OperationPage,
     OperationsResponse,
+    ProposalPreviewResponse,
+    ReadyzResponse,
     _global_get_operation,
     _global_list_operations,
     bounded_error_responses,
@@ -128,7 +137,7 @@ _RECIPE_IMAGE_UPLOAD = re.compile(
 )
 _LOGIN_PATH = "/api/v1/auth/login"
 _TELEMETRY_PATH = "/agent/v1/telemetry"
-_MAX_TELEMETRY_BODY_BYTES = 64 * 1024
+_MAX_TELEMETRY_BODY_BYTES = 1_048_576
 _ARTIFACT_INPUT_UPLOAD = re.compile(
     r"/api/v1/artifact-jobs/[0-9a-f-]{36}/inputs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z"
 )
@@ -429,37 +438,36 @@ def refresh_fleet_metrics(
 
 
 class JobRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     kind: str = Field(min_length=1, max_length=80)
     authority_revision: str = Field(min_length=1, max_length=128)
-    targets: list[str] = Field(max_length=64)
-    payload: dict[str, object]
-
-
-class JobResponse(BaseModel):
-    id: str
-    state: str
+    targets: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
+        max_length=64
+    )
+    payload: dict[str, object] = Field(max_length=128)
 
 
 class ProposalChangeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     path: str = Field(min_length=1, max_length=512)
     document: dict[str, object]
 
 
 class ProposalRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     base_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     changes: list[ProposalChangeRequest] = Field(min_length=1, max_length=32)
 
 
 class ChangeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
     proposal_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class NodeProfileUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid", strict=True, str_strip_whitespace=True
+    )
     display_name: str = Field(
         min_length=1,
         max_length=80,
@@ -790,13 +798,13 @@ def create_app(
         cursor_codec=cursor_codec,
     )
 
-    @app.get("/api/v1/healthz")
-    def healthz() -> dict[str, str]:
-        return {"status": "ok"}
+    @app.get("/api/v1/healthz", response_model=HealthzResponse)
+    def healthz() -> HealthzResponse:
+        return HealthzResponse(status="ok")
 
-    @app.get("/api/v1/readyz")
-    def readyz() -> dict[str, str]:
-        return {"status": "ready"}
+    @app.get("/api/v1/readyz", response_model=ReadyzResponse)
+    def readyz() -> ReadyzResponse:
+        return ReadyzResponse(status="ready")
 
     @app.get("/metrics", include_in_schema=False)
     def platform_metrics(request: Request) -> Response:
@@ -1076,13 +1084,13 @@ def create_app(
     def endpoint_view(
         alias: str = ApiPath(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$"),
         _actor: Actor = authenticated_actor,
-    ) -> Mapping[str, object]:
+    ) -> EndpointResponse:
         if operations is None:
             raise HTTPException(
                 status_code=503, detail="endpoint publication unavailable"
             )
         try:
-            return operations.endpoint(alias)
+            return EndpointResponse.model_validate(operations.endpoint(alias))
         except KeyError:
             raise HTTPException(status_code=404, detail="endpoint not found") from None
         except RuntimeError:
@@ -1096,34 +1104,47 @@ def create_app(
         responses=bounded_error_responses(401, 503),
         operation_id="listAgents",
     )
-    def agent_list(_actor: Actor = authenticated_actor) -> dict[str, object]:
+    def agent_list(_actor: Actor = authenticated_actor) -> AgentsResponse:
         if operations is None:
             raise HTTPException(status_code=503, detail="agent projection unavailable")
         try:
-            return {"agents": list(operations.agents())}
+            return AgentsResponse(agents=list(operations.agents()))
         except RuntimeError:
             raise HTTPException(
                 status_code=503, detail="agent projection unavailable"
             ) from None
 
-    @app.get("/api/v1/authority")
+    @app.get(
+        "/api/v1/authority",
+        response_model=AuthorityResponse,
+        responses=bounded_error_responses(401, 503),
+        operation_id="getAuthority",
+    )
     def authority_view(
         revision: str | None = None, _actor: Actor = authenticated_actor
-    ) -> dict[str, object]:
+    ) -> AuthorityResponse:
         if admin is None:
             raise HTTPException(status_code=503, detail="authority unavailable")
         resolved = revision or admin.authority.head()
         snapshot = admin.authority.inspect(resolved)
-        return {
-            "revision": snapshot.revision,
-            "documents": dict(snapshot.documents),
-            "dependencies": dict(snapshot.dependencies),
-        }
+        return AuthorityResponse(
+            revision=snapshot.revision,
+            documents=dict(snapshot.documents),
+            dependencies={
+                path: list(dependencies)
+                for path, dependencies in snapshot.dependencies.items()
+            },
+        )
 
-    @app.post("/api/v1/proposals")
+    @app.post(
+        "/api/v1/proposals",
+        response_model=ProposalPreviewResponse,
+        responses=bounded_error_responses(401, 403, 422, 503),
+        operation_id="previewProposal",
+    )
     def proposal_preview(
         body: ProposalRequest, authenticated: Actor = authenticated_actor
-    ) -> dict[str, object]:
+    ) -> ProposalPreviewResponse:
         require_mutation_role(authenticated, "/api/v1/proposals")
         if admin is None:
             raise HTTPException(status_code=503, detail="authority unavailable")
@@ -1132,20 +1153,26 @@ def create_app(
             body.base_revision,
             [AuthorityChange(change.path, change.document) for change in body.changes],
         )
-        return {
-            "base_revision": preview.base_revision,
-            "digest": preview.digest,
-            "patch": base64.b64encode(preview.patch).decode(),
-            "affected_documents": list(preview.affected_documents),
-            "validation_results": list(preview.validation_results),
-        }
+        return ProposalPreviewResponse(
+            base_revision=preview.base_revision,
+            digest=preview.digest,
+            patch=base64.b64encode(preview.patch).decode(),
+            affected_documents=list(preview.affected_documents),
+            validation_results=list(preview.validation_results),
+        )
 
-    @app.post("/api/v1/changes", status_code=status.HTTP_202_ACCEPTED)
+    @app.post(
+        "/api/v1/changes",
+        response_model=ChangeResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="submitChange",
+    )
     def submit_change(
         body: ChangeRequest,
         request: Request,
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> ChangeResponse:
         require_mutation_role(authenticated, "/api/v1/changes")
         if admin is None or admin.changes is None:
             raise HTTPException(status_code=503, detail="change submission unavailable")
@@ -1161,7 +1188,7 @@ def create_app(
                 (),
             )
         )
-        return dict(result)
+        return ChangeResponse.model_validate(result)
 
     @app.post(
         "/api/v1/jobs",
@@ -1200,7 +1227,7 @@ def create_app(
                 tuple(body.targets),
             )
         )
-        return JobResponse(id=str(job.id), state=str(job.state))
+        return JobResponse(id=job.id, state=job.state)
 
     @app.get(
         "/api/v1/jobs",
@@ -1216,7 +1243,7 @@ def create_app(
         ),
         target: str | None = Query(default=None, pattern=r"^spk_[0-9a-f]{32}$"),
         _actor: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> JobsResponse:
         try:
             page, next_cursor, total = jobs.list_page(
                 limit=limit,
@@ -1228,12 +1255,12 @@ def create_app(
             raise HTTPException(
                 status_code=422, detail="job cursor is invalid"
             ) from None
-        return {
-            "jobs": [
+        return JobsResponse(
+            jobs=[
                 {
-                    "id": str(job.id),
-                    "state": str(job.state),
-                    "kind": str(job.kind),
+                    "id": job.id,
+                    "state": job.state,
+                    "kind": job.kind,
                     "created_at": (
                         job.created_at.replace(tzinfo=UTC)
                         if job.created_at.tzinfo is None
@@ -1242,9 +1269,9 @@ def create_app(
                 }
                 for job in page
             ],
-            "next_cursor": next_cursor,
-            "total": total,
-        }
+            next_cursor=next_cursor,
+            total=total,
+        )
 
     @app.get(
         "/api/v1/operations",
@@ -1309,28 +1336,42 @@ def create_app(
             ) from None
         return operation_detail_response(item)
 
-    @app.get("/api/v1/audit")
-    def audit_view(_actor: Actor = authenticated_actor) -> dict[str, object]:
-        return {
-            "events": [
-                {
-                    "request_id": event.request_id,
-                    "actor": event.actor,
-                    "action": event.action,
-                    "authority_revision": event.authority_revision,
-                    "targets": list(event.targets),
-                    "occurred_at": event.occurred_at.isoformat()
-                    if event.occurred_at is not None
-                    else None,
-                }
+    @app.get(
+        "/api/v1/audit",
+        response_model=AuditResponse,
+        responses=bounded_error_responses(401),
+        operation_id="listAuditEvents",
+    )
+    def audit_view(_actor: Actor = authenticated_actor) -> AuditResponse:
+        return AuditResponse(
+            events=[
+                AuditEventResponse(
+                    request_id=event.request_id,
+                    actor=event.actor,
+                    action=event.action,
+                    authority_revision=event.authority_revision,
+                    targets=list(event.targets),
+                    occurred_at=(
+                        event.occurred_at.isoformat()
+                        if event.occurred_at is not None
+                        else None
+                    ),
+                )
                 for event in audits.list()
             ]
-        }
+        )
 
-    @app.get("/api/v1/identity-history", operation_id="listIdentityHistory")
-    def identity_history_view(_actor: Actor = authenticated_actor) -> dict[str, object]:
-        return {
-            "identities": [
+    @app.get(
+        "/api/v1/identity-history",
+        response_model=IdentityHistoryResponse,
+        responses=bounded_error_responses(401),
+        operation_id="listIdentityHistory",
+    )
+    def identity_history_view(
+        _actor: Actor = authenticated_actor,
+    ) -> IdentityHistoryResponse:
+        return IdentityHistoryResponse(
+            identities=[
                 {
                     "node_id": record.node_id,
                     "agent_state": record.agent_state,
@@ -1342,7 +1383,7 @@ def create_app(
                 }
                 for record in audits.identity_history()
             ]
-        }
+        )
 
     @app.get(
         "/api/v1/jobs/{job_id}",
@@ -1430,14 +1471,14 @@ def create_app(
     )
     def job_log_list(
         job_id: str, authenticated: Actor = authenticated_actor
-    ) -> dict[str, object]:
+    ) -> JobLogsResponse:
         if authenticated.role not in {"operator", "administrator"}:
             raise HTTPException(status_code=403, detail="insufficient role")
         if job_logs is None:
             raise HTTPException(status_code=503, detail="job logs unavailable")
         try:
             jobs.get(job_id)
-            return {"job_id": job_id, "digests": list(job_logs.list(job_id))}
+            return JobLogsResponse(job_id=job_id, digests=list(job_logs.list(job_id)))
         except (KeyError, ValueError):
             raise HTTPException(status_code=404, detail="job not found") from None
 
