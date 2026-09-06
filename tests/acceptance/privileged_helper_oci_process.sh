@@ -17,6 +17,7 @@ registry_name=vonk-helper-proof-registry
 image_base=localhost:5001/vonk/helper-tiny
 image_name="$image_base:v1"
 image_platform="$image_base:arm64"
+local_image=''
 image_ref=''
 helper_pid=''
 fixture_dir=$(mktemp -d)
@@ -84,7 +85,9 @@ registry_digest=$(curl --fail --silent --show-error --head \
   | awk -F': ' 'tolower($1) == "docker-content-digest" {gsub("\r", "", $2); print $2; exit}')
 test -n "$registry_digest"
 test "$registry_digest" != "$platform_digest"
-image_ref="$image_platform@$platform_digest"
+local_image="localhost/vonk/compiled-runtime-${platform_digest#sha256:}"
+docker tag "$image_platform" "$local_image"
+image_ref="$local_image@$platform_digest"
 config_id=$(docker image inspect "$image_platform" --format '{{.Id}}')
 docker image inspect "$image_ref" >"$report_root/source-image-ref-inspect.json"
 docker save --output "$fixture_dir/image.oci.tar" "$image_ref"
@@ -126,7 +129,7 @@ export VONK_HELPER_REQUEST_ROOT=/run/vonk-forge-agent/runtime-requests
 "$probe_binary" setup >"$report_root/setup.log"
 chown root:vonk-agent /etc/vonk-forge-agent/observation-receipt.pub
 chmod 0640 /etc/vonk-forge-agent/observation-receipt.pub
-for ref in "$image_ref" "$image_platform" "$image_name"; do
+for ref in "$image_ref" "$local_image" "$image_platform" "$image_name"; do
   docker image rm "$ref" >>"$report_root/source-image-removal.log" 2>&1 || true
 done
 if docker image inspect "$image_ref" >/dev/null 2>&1; then
