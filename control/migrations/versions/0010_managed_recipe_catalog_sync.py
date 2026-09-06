@@ -26,6 +26,21 @@ def _nullable_lower_hex(column: str, length: int) -> str:
 
 
 def upgrade() -> None:
+    # Fresh databases have the canonical identities from 0000.  An existing
+    # database already at 0009 still has the legacy local tables; preserve its
+    # non-destructive upgrade path until a dedicated data migration can bind
+    # those rows to canonical identities.
+    tables = set(sa.inspect(op.get_bind()).get_table_names())
+    recipe_table = (
+        "catalog_documents.id"
+        if "catalog_documents" in tables
+        else "local_recipes.id"
+    )
+    revision_table = (
+        "catalog_document_revisions.id"
+        if "catalog_document_revisions" in tables
+        else "local_recipe_revisions.id"
+    )
     op.create_table(
         "recipe_library_sync_runs",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -143,12 +158,10 @@ def upgrade() -> None:
             _lower_hex("remote_commit", 40),
             name="ck_managed_recipe_library_links_commit",
         ),
-        sa.ForeignKeyConstraint(
-            ["recipe_id"], ["local_recipes.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["recipe_id"], [recipe_table], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(
             ["local_revision_id"],
-            ["local_recipe_revisions.id"],
+            [revision_table],
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(

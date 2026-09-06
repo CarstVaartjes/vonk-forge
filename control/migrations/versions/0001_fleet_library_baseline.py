@@ -6,7 +6,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0001_fleet_library_baseline"
-down_revision = None
+down_revision = "0000_canonical_catalog_baseline"
 branch_labels = None
 depends_on = None
 
@@ -200,21 +200,6 @@ def upgrade() -> None:
     op.create_index(op.f('ix_fleet_profile_applications_current_operation_id'), 'fleet_profile_applications', ['current_operation_id'], unique=False)
     op.create_index(op.f('ix_fleet_profile_applications_profile_id'), 'fleet_profile_applications', ['profile_id'], unique=False)
     op.create_index(op.f('ix_fleet_profile_applications_state'), 'fleet_profile_applications', ['state'], unique=False)
-    op.create_table('local_recipes',
-    sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('slug', sa.String(length=128), nullable=False),
-    sa.Column('title', sa.String(length=200), nullable=False),
-    sa.Column('description', sa.Text(), nullable=False),
-    sa.Column('source_kind', sa.String(length=16), nullable=False),
-    sa.Column('created_by', sa.String(length=200), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
-    sa.CheckConstraint("source_kind IN ('local','workload_run','global','recipe_library')", name='ck_local_recipes_source_kind'),
-    sa.CheckConstraint('slug = lower(slug) AND length(slug) BETWEEN 2 AND 128', name='ck_local_recipes_slug'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('slug')
-    )
-    op.create_index(op.f('ix_local_recipes_source_kind'), 'local_recipes', ['source_kind'], unique=False)
     op.create_table('observations',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('node_id', sa.String(length=36), nullable=False),
@@ -411,29 +396,6 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('job_id', 'digest')
     )
     op.create_index(op.f('ix_job_log_entries_created_at'), 'job_log_entries', ['created_at'], unique=False)
-    op.create_table('local_recipe_revisions',
-    sa.Column('id', sa.String(length=36), nullable=False),
-    sa.Column('recipe_id', sa.String(length=36), nullable=False),
-    sa.Column('revision_number', sa.Integer(), nullable=False),
-    sa.Column('lifecycle', sa.String(length=16), nullable=False),
-    sa.Column('schema_version', sa.Integer(), nullable=False),
-    sa.Column('document', sa.JSON(), nullable=False),
-    sa.Column('content_sha256', sa.String(length=64), nullable=True),
-    sa.Column('created_by', sa.String(length=200), nullable=False),
-    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-    sa.CheckConstraint("content_sha256 IS NULL OR (length(content_sha256) = 64 AND content_sha256 = lower(content_sha256) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(content_sha256, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0)", name='ck_local_recipe_revisions_content_digest'),
-    sa.CheckConstraint("lifecycle != 'resolved' OR content_sha256 IS NOT NULL", name='ck_local_recipe_revisions_resolved_digest'),
-    sa.CheckConstraint("lifecycle IN ('draft','blocked','resolved','deprecated')", name='ck_local_recipe_revisions_lifecycle'),
-    sa.CheckConstraint('revision_number >= 1', name='ck_local_recipe_revisions_number'),
-    sa.CheckConstraint('schema_version >= 1', name='ck_local_recipe_revisions_schema'),
-    sa.ForeignKeyConstraint(['recipe_id'], ['local_recipes.id'], ondelete='CASCADE'),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('recipe_id', 'content_sha256', name='uq_local_recipe_revision_content'),
-    sa.UniqueConstraint('recipe_id', 'revision_number', name='uq_local_recipe_revision_number')
-    )
-    op.create_index(op.f('ix_local_recipe_revisions_content_sha256'), 'local_recipe_revisions', ['content_sha256'], unique=False)
-    op.create_index(op.f('ix_local_recipe_revisions_lifecycle'), 'local_recipe_revisions', ['lifecycle'], unique=False)
-    op.create_index(op.f('ix_local_recipe_revisions_recipe_id'), 'local_recipe_revisions', ['recipe_id'], unique=False)
     op.create_table('node_artifacts',
     sa.Column('id', sa.String(length=36), nullable=False),
     sa.Column('node_id', sa.String(length=36), nullable=False),
@@ -571,7 +533,7 @@ def upgrade() -> None:
     sa.CheckConstraint("length(global_content_sha256) = 64 AND global_content_sha256 = lower(global_content_sha256) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(global_content_sha256, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_recipe_global_links_digest'),
     sa.CheckConstraint("sync_state IN ('current','local-ahead','remote-ahead','unavailable')", name='ck_recipe_global_links_state'),
     sa.CheckConstraint('global_revision >= 1', name='ck_recipe_global_links_revision'),
-    sa.ForeignKeyConstraint(['recipe_id'], ['local_recipes.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['recipe_id'], ['catalog_documents.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('recipe_id'),
     sa.UniqueConstraint('global_publisher', 'global_slug', name='uq_recipe_global_link_identity')
     )
@@ -587,7 +549,7 @@ def upgrade() -> None:
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.CheckConstraint("length(source_sha256) = 64 AND source_sha256 = lower(source_sha256) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(source_sha256, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_recipe_imports_source_digest'),
     sa.CheckConstraint("source_kind IN ('local','workload_run','global','recipe_library')", name='ck_recipe_imports_source_kind'),
-    sa.ForeignKeyConstraint(['recipe_id'], ['local_recipes.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['recipe_id'], ['catalog_documents.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('source_kind', 'source_sha256', name='uq_recipe_import_source')
     )
@@ -731,7 +693,7 @@ def upgrade() -> None:
     sa.CheckConstraint('generation >= 1', name='ck_cluster_mappings_generation'),
     sa.CheckConstraint('node_count >= 1', name='ck_cluster_mappings_node_count'),
     sa.ForeignKeyConstraint(['endpoint_owner_node_id'], ['agent_nodes.node_id'], ondelete='RESTRICT'),
-    sa.ForeignKeyConstraint(['recipe_revision_id'], ['local_recipe_revisions.id'], ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['recipe_revision_id'], ['catalog_document_revisions.id'], ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('placement_digest')
     )
@@ -798,7 +760,7 @@ def upgrade() -> None:
     sa.CheckConstraint('image_bytes IS NULL OR image_bytes > 0', name='ck_recipe_builds_image_size'),
     sa.CheckConstraint('oci_layout_sha256 IS NULL OR length(oci_layout_sha256) = 64', name='ck_recipe_builds_layout_digest'),
     sa.ForeignKeyConstraint(['builder_node_id'], ['agent_nodes.node_id'], ondelete='RESTRICT'),
-    sa.ForeignKeyConstraint(['recipe_revision_id'], ['local_recipe_revisions.id'], ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['recipe_revision_id'], ['catalog_document_revisions.id'], ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('recipe_revision_id', 'builder_node_id', 'build_input_sha256', name='uq_recipe_build_input_builder')
     )
@@ -828,7 +790,7 @@ def upgrade() -> None:
     sa.Column('created_by', sa.String(length=200), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.CheckConstraint("length(report_sha256) = 64 AND report_sha256 = lower(report_sha256) AND length(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(report_sha256, '0', ''), '1', ''), '2', ''), '3', ''), '4', ''), '5', ''), '6', ''), '7', ''), '8', ''), '9', ''), 'a', ''), 'b', ''), 'c', ''), 'd', ''), 'e', ''), 'f', '')) = 0", name='ck_recipe_test_reports_digest'),
-    sa.ForeignKeyConstraint(['recipe_revision_id'], ['local_recipe_revisions.id'], ondelete='CASCADE'),
+    sa.ForeignKeyConstraint(['recipe_revision_id'], ['catalog_document_revisions.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('recipe_revision_id', 'report_sha256', name='uq_recipe_test_report_digest')
     )
@@ -887,7 +849,7 @@ def upgrade() -> None:
     sa.CheckConstraint("state IN ('planned','installing','installed','partial','failed','uninstalled')", name='ck_recipe_installations_state'),
     sa.ForeignKeyConstraint(['mapping_id'], ['cluster_mappings.id'], ondelete='RESTRICT'),
     sa.ForeignKeyConstraint(['recipe_build_id'], ['recipe_builds.id'], ondelete='RESTRICT'),
-    sa.ForeignKeyConstraint(['recipe_revision_id'], ['local_recipe_revisions.id'], ondelete='RESTRICT'),
+    sa.ForeignKeyConstraint(['recipe_revision_id'], ['catalog_document_revisions.id'], ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('plan_digest')
     )
@@ -1082,10 +1044,6 @@ def downgrade() -> None:
     op.drop_table('node_inventory_snapshots')
     op.drop_index(op.f('ix_node_artifacts_node_id'), table_name='node_artifacts')
     op.drop_table('node_artifacts')
-    op.drop_index(op.f('ix_local_recipe_revisions_recipe_id'), table_name='local_recipe_revisions')
-    op.drop_index(op.f('ix_local_recipe_revisions_lifecycle'), table_name='local_recipe_revisions')
-    op.drop_index(op.f('ix_local_recipe_revisions_content_sha256'), table_name='local_recipe_revisions')
-    op.drop_table('local_recipe_revisions')
     op.drop_index(op.f('ix_job_log_entries_created_at'), table_name='job_log_entries')
     op.drop_table('job_log_entries')
     op.drop_index(op.f('ix_jobs_state'), table_name='jobs')
@@ -1115,8 +1073,6 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_observations_node_id'), table_name='observations')
     op.drop_index('ix_observations_kind_node_observed', table_name='observations')
     op.drop_table('observations')
-    op.drop_index(op.f('ix_local_recipes_source_kind'), table_name='local_recipes')
-    op.drop_table('local_recipes')
     op.drop_index('ix_fleet_stream_events_node_id', table_name='fleet_stream_events')
     op.drop_index('ix_fleet_stream_events_expires_id', table_name='fleet_stream_events')
     op.drop_table('fleet_stream_events')

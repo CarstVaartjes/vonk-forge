@@ -44,8 +44,6 @@ EXPECTED_BASELINE_TABLES = {
     "job_attempts",
     "job_log_entries",
     "jobs",
-    "local_recipe_revisions",
-    "local_recipes",
     "managed_recipe_library_links",
     "model_cache_artifacts",
     "model_cache_operations",
@@ -71,6 +69,7 @@ EXPECTED_BASELINE_TABLES = {
     "recipe_source_bundles",
     "source_bundle_archives",
     "recipe_test_reports",
+    "runtime_image_receipts",
     "reconciliation_cancellations",
     "reconciliation_completion_generation",
     "reconciliation_operations",
@@ -161,6 +160,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
     versions = Path(__file__).resolve().parents[1] / "migrations/versions"
 
     assert sorted(path.name for path in versions.glob("*.py")) == [
+        "0000_canonical_catalog_baseline.py",
         "0001_fleet_library_baseline.py",
         "0002_fleet_node_profile_events.py",
         "0003_agent_reenrollment_grants.py",
@@ -180,6 +180,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0017_artifact_distribution_assignments.py",
         "0018_canonical_catalog_documents.py",
         "0019_recipe_builds_canonical_revision.py",
+        "0020_runtime_image_receipts.py",
     ]
 
 
@@ -340,7 +341,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            == "0019_recipe_builds_revision_fk"
+                == "0020_runtime_image_receipts"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -470,7 +471,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0019_recipe_builds_revision_fk"
+                == "0020_runtime_image_receipts"
         )
 
 
@@ -552,7 +553,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0019_recipe_builds_revision_fk"
+                == "0020_runtime_image_receipts"
         )
 
 
@@ -587,11 +588,13 @@ def test_existing_database_is_upgraded_to_accept_reenrollment_grants(
         )
 
 
-def test_fresh_baseline_is_reversible(tmp_path: Path) -> None:
+def test_fresh_baseline_is_forward_only_and_canonical(tmp_path: Path) -> None:
     url = f"sqlite:///{tmp_path / 'control.sqlite'}"
     config = _config(url)
     command.upgrade(config, "head")
-    command.downgrade(config, "base")
 
     tables = set(inspect(create_engine(url)).get_table_names())
-    assert tables <= {"alembic_version"}
+    assert "local_recipes" not in tables
+    assert "local_recipe_revisions" not in tables
+    assert "catalog_documents" in tables
+    assert "runtime_image_receipts" in tables
