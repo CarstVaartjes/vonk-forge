@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from vonk_control.models import Base, CatalogDocumentRevision
 from vonk_control.recipe_library import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 ROOT = Path(os.environ.get("VONK_RECIPE_CANDIDATE_ROOT", "/private/tmp/vonk-forge-recipes-contract-conversion-final"))
 
@@ -31,7 +34,24 @@ class Reader:
 
     def fetch(self, uri: str) -> RecipeLibraryItem:
         self.fetches.append(uri)
-        return self.snapshot.items[0]
+        return next(item for item in self.snapshot.items if item.uri == uri)
+
+
+def _item_with_document(item: RecipeLibraryItem, document: dict[str, object]) -> RecipeLibraryItem:
+    recipe = RecipeDefinition.model_validate(document)
+    digest = content_sha256(recipe)
+    return replace(
+        item,
+        content_sha256=digest,
+        uri=f"vonk://catalog/{item.publisher}/{item.slug}@sha256:{digest}",
+        document=recipe.model_dump(mode="json"),
+        tags=tuple(recipe.metadata.tags),
+        release_history=(),
+        package_handle=None,
+        package_sha256=None,
+        source_bundle=None,
+        source_bundle_sha256=None,
+    )
 
 
 def _fixture(tmp_path: Path) -> tuple[sessionmaker, CatalogService, Reader, RecipeLibraryItem]:
@@ -85,6 +105,89 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
         revisions = session.scalars(select(CatalogDocumentRevision)).all()
         assert len([row for row in revisions if row.kind == "model"]) == 92
         assert len([row for row in revisions if row.kind == "recipe"]) == 1
+
+
+def test_sync_imports_canonical_recipe_without_readiness_tags(tmp_path: Path) -> None:
+    sessions, service, reader, item = _fixture(tmp_path)
+    document = deepcopy(item.document)
+    document["metadata"]["tags"] = []  # type: ignore[index]
+    replacement = _item_with_document(item, document)
+    reader.snapshot = RecipeLibrarySnapshot(
+        reader.snapshot.commit,
+        (replacement,),
+        reader.snapshot.repository,
+        reader.snapshot.catalog_entities,
+    )
+
+    result = _sync(sessions, service, reader).sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit=reader.snapshot.commit,
+    )
+
+    assert result.state == "current"
+    assert result.imported_count == 1
+    assert result.problems == ()
+
+
+def test_sync_fails_closed_for_unresolvable_canonical_recipe(tmp_path: Path) -> None:
+    sessions, service, reader, item = _fixture(tmp_path)
+    document = deepcopy(item.document)
+    document["models"][0]["model"]["content_sha256"] = "0" * 64  # type: ignore[index]
+    replacement = _item_with_document(item, document)
+    reader.snapshot = RecipeLibrarySnapshot(
+        reader.snapshot.commit,
+        (replacement,),
+        reader.snapshot.repository,
+        reader.snapshot.catalog_entities,
+    )
+
+    result = _sync(sessions, service, reader).sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit=reader.snapshot.commit,
+    )
+
+    assert result.state == "partial"
+    assert result.skipped_count == 1
+    assert result.problems[0]["code"] == "catalog.model_reference_missing"
+    with sessions() as session:
+        assert session.scalars(select(CatalogDocumentRevision).where(CatalogDocumentRevision.kind == "recipe")).all() == []
+
+
+def test_recipe_metadata_tags_do_not_change_execution_identity(tmp_path: Path) -> None:
+    sessions, service, _reader, item = _fixture(tmp_path)
+    service.import_recipe_library(
+        "test",
+        library_commit=item.library_commit,
+        source_path=item.source_path,
+        document=item.document,
+        expected_content_sha256=item.content_sha256,
+        dependency_documents=item.dependencies,
+    )
+    document = deepcopy(item.document)
+    document["metadata"]["tags"] = ["editorial-only"]  # type: ignore[index]
+    replacement = _item_with_document(item, document)
+    service.import_recipe_library(
+        "test",
+        library_commit=replacement.library_commit,
+        source_path=replacement.source_path,
+        document=replacement.document,
+        expected_content_sha256=replacement.content_sha256,
+        dependency_documents=replacement.dependencies,
+    )
+
+    with sessions() as session:
+        revisions = session.scalars(
+            select(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.kind == "recipe")
+            .order_by(CatalogDocumentRevision.revision_number)
+        ).all()
+        assert len(revisions) == 2
+        assert revisions[0].content_digest != revisions[1].content_digest
+        assert revisions[0].execution_key == revisions[1].execution_key
 
 
 def test_automatic_sync_reuses_same_commit_without_refetch(tmp_path: Path) -> None:
