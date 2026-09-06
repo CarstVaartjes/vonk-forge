@@ -835,7 +835,7 @@ class RecipeImageAvailabilityService:
                 select(Job).where(
                     Job.kind == OPERATION_KIND,
                     Job.state == "running",
-                )
+                ).with_for_update()
             ))
             rows = list(session.scalars(
                 select(Job).where(
