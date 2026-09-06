@@ -9,6 +9,7 @@ import type {LibraryPlacementGroup} from "./library-action-types";
 import {useLibraryNodeName} from "./library-node-names";
 import {LibraryRecipeFit} from "./library-recipe-fit";
 import {LibraryRecipeVisual} from "./library-recipe-visual";
+import "./library-recipe-detail.css";
 
 export function LibraryRecipeAuthority({api, detail, snapshot, onRefresh: _onRefresh, onBusyChange}: {api: ControlApi; detail: RecipeDetail; snapshot?: LibrarySnapshot; onRefresh?: (signal: AbortSignal) => Promise<void>; onBusyChange?(busy: boolean): void}) {
   const documents = detail.model_documents;

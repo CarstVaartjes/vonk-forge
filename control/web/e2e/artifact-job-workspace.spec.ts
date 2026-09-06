@@ -9,29 +9,14 @@ const reviewDirectory = resolve(import.meta.dirname, "../../../.impeccable/revie
 type FixtureMode = "normal" | "empty" | "failed";
 const fixtureStates = new WeakMap<Page, {mode: FixtureMode}>();
 
-function artifactCatalogRecipe() {
-  return {
-    publisher: "vonk-forge", slug: "qwen-chat", title: "Qwen Chat", description: "Repository recipe", tags: [],
-    uri: `vonk://catalog/vonk-forge/qwen-chat@sha256:${"b".repeat(64)}`, content_sha256: "b".repeat(64),
-    model_publisher: "qwen", model_slug: "3", model_title: "Qwen 3", model_version_publisher: "qwen", model_version_slug: "3-bf16", model_version_title: "Qwen 3 BF16",
-    source_owner: null, source_repository: null, alignment: "standard", capabilities: ["chat"], qualification: "cataloged",
-    qualification_basis: "explicit-accepted-metadata", qualification_detail: "Accepted.", precision: "BF16", quantizations: ["BF16"],
-    execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "Executable.", execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64), artifact_count: 1,
-    topology_name: "pair", topology_mode: "distributed", node_count: 2, topology_roles: [], fabric: {connectivity: "connected", minimum_bandwidth_mbps: 10_000},
-    expected_download_bytes: 120, maximum_installed_bytes_per_node: 80, maximum_runtime_memory_bytes_per_node: 100, release_version: "1.0.0", release_released_at: "2026-09-01",
-    local: {status: "current", recipe_id: "recipe-chat", revision_number: 3, content_sha256: "a".repeat(64), release_version: "1.0.0"},
-  };
-}
-
 function artifactDetail() {
-  const detail = structuredClone(fullLibraryDetail) as typeof fullLibraryDetail & {visual_recipe: Record<string, unknown> & {interfaces: unknown[]}};
+  const detail = structuredClone(fullLibraryDetail);
   detail.recipe.title = "Aurora media workcell";
   detail.recipe.description = "A bounded artifact workflow with durable controller evidence.";
-  detail.visual_recipe = {
-    ...detail.visual_recipe,
+  detail.definition = {
+    ...detail.definition,
     metadata: {title: detail.recipe.title, description: detail.recipe.description, tags: ["artifact", "media"]},
-    model_license: null,
-    parameters: [{name: "seed", description: "Reproducible generation seed.", type: "integer", default: 42, minimum: 0, maximum: 2_147_483_647, allowed_values: [], pattern: null, change_effect: "restart"}],
+    settings: {kind: "job", knobs: {seed: {value: 42, change_effect: "restart"}}},
     interfaces: [{
       adapter: "artifact-job", path: "/outputs", timeout_seconds: 3600,
       input: {
@@ -64,7 +49,7 @@ function artifactDetail() {
         ],
       },
     }],
-  };
+  } as typeof detail.definition;
   detail.operational_state.runs = [{
     installation_id: "installation-chat", mapping_id: "mapping-chat", node_ids: ["node-alpha", "node-beta"], recipe_revision_id: "revision-chat",
     route_state: "published", run_id: runId, state: "running",
@@ -107,7 +92,6 @@ async function installArtifactFixture(page: Page) {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === "/api/v1/auth/session") return route.fulfill({json: {subject: "admin", role: "administrator", expires_at: "2099-01-01T00:00:00Z"}});
-    if (path === "/api/v1/catalog/public-recipes") return route.fulfill({json: {repository: "fixture", commit: "a".repeat(40), recipes: [artifactCatalogRecipe()]}});
     if (path === "/api/v1/library") return route.fulfill({json: librarySnapshot});
     if (path === "/api/v1/library/recipes/recipe-chat") return route.fulfill({json: detail});
     if (path === "/api/v1/artifact-jobs/capabilities") return route.fulfill({json: {
@@ -140,9 +124,8 @@ test("renders the real artifact workcell with durable active and multi-output hi
   const workcell = page.getByRole("region", {name: "Create artifacts"});
   await expect(workcell).toBeVisible();
   await expect(workcell.getByText("Run ready for jobs")).toBeVisible();
-  const fit = page.getByRole("region", {name: "Model variant and memory fit"});
-  await expect(fit.getByText("Comfortable")).toBeVisible();
-  await expect(fit).toContainText("2 Sparks");
+  const fit = page.getByRole("region", {name: "Model and memory fit"});
+  await expect(fit.getByText("Unknown")).toBeVisible();
   const interfaceSelector = workcell.getByRole("combobox", {name: "Job interface"});
   await interfaceSelector.selectOption({label: "Video Job · 1 bounded slot"});
   await expect(workcell.getByLabel("Source clip")).toHaveAttribute("accept", "video/mp4,.mp4");
@@ -197,7 +180,7 @@ test("exposes explicit empty and failed retry recovery states", async ({page}) =
 test("keeps variant evidence and native input contracts accessible without phone overflow", async ({page}) => {
   await page.setViewportSize({width: 390, height: 844});
   await page.goto("/library/recipes/recipe-chat");
-  const fit = page.getByRole("region", {name: "Model variant and memory fit"});
+  const fit = page.getByRole("region", {name: "Model and memory fit"});
   await expect(fit).toBeVisible();
   const rows = await fit.locator(":scope > div").evaluateAll(elements => elements.map(element => ({
     left: Math.round(element.getBoundingClientRect().left),

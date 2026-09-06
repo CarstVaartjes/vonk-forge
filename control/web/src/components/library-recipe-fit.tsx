@@ -1,5 +1,6 @@
 import type {LibraryRecipeDetail} from "../api/types";
 import {formatBytes} from "../lib/fleet";
+import {selectedRecipeFiles} from "./library-recipe-files";
 
 export type RecipeMemoryFit = "comfortable" | "tight" | "impossible" | "unknown";
 export function recipeMemoryFit(detail: LibraryRecipeDetail): {fit: RecipeMemoryFit; groupsEvaluated: number; bestHeadroomBytes?: number} {
@@ -12,5 +13,7 @@ export function recipeMemoryFit(detail: LibraryRecipeDetail): {fit: RecipeMemory
 export function LibraryRecipeFit({detail}: {detail: LibraryRecipeDetail}) {
   const fit = recipeMemoryFit(detail);
   const title = detail.model_documents[0]?.model_document.identity.model.title ?? "Model metadata unavailable";
-  return <section className="recipe-fit-strip" aria-label="Model and memory fit"><div><span>Models in Recipe</span><strong>{detail.model_documents.length}</strong><small>{title}{detail.model_documents.length > 1 ? ` + ${detail.model_documents.length - 1} more` : ""}</small></div><div><span>Model bytes</span><strong>{formatBytes(detail.model_documents.reduce((sum, item) => sum + item.model_document.files.reduce((bytes, file) => bytes + file.size_bytes, 0), 0))}</strong><small>Owned by the exact Model manifests</small></div><div><span>Memory fit</span><strong>{fit.fit[0]!.toUpperCase() + fit.fit.slice(1)}</strong><small>{fit.bestHeadroomBytes === undefined ? "No bounded placement evidence yet." : `${formatBytes(fit.bestHeadroomBytes)} best headroom across ${fit.groupsEvaluated} complete groups.`}</small></div></section>;
+  const selected = selectedRecipeFiles(detail.model_documents);
+  const modelBytes = selected.unresolved.length ? "Unknown" : formatBytes(selected.files.reduce((sum, file) => sum + file.size_bytes, 0));
+  return <section className="recipe-fit-strip" aria-label="Model and memory fit"><div><span>Models in Recipe</span><strong>{detail.model_documents.length}</strong><small>{title}{detail.model_documents.length > 1 ? ` + ${detail.model_documents.length - 1} more` : ""}</small></div><div><span>Model bytes</span><strong>{modelBytes}</strong><small>{selected.unresolved.length ? "Recipe Model file selection is incomplete." : "Selected files from the exact Model manifests"}</small></div><div><span>Memory fit</span><strong>{fit.fit[0]!.toUpperCase() + fit.fit.slice(1)}</strong><small>{fit.bestHeadroomBytes === undefined ? "No bounded placement evidence yet." : `${formatBytes(fit.bestHeadroomBytes)} best headroom across ${fit.groupsEvaluated} complete groups.`}</small></div></section>;
 }

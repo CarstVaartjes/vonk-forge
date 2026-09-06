@@ -88,10 +88,10 @@ export function LibraryWorkcell({api: _api, detail: _detail, fleet: _fleet, filt
   const selectedRecipes = matching.filter(record => record.modelKey === selectedModelKey && record.recipe);
   const recipePaneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (route.kind !== "model" || typeof window === "undefined" || window.innerWidth > 760) return;
+    if ((!filters.model && route.kind !== "model") || typeof window === "undefined" || window.innerWidth > 760) return;
     if (recipePaneRef.current && typeof recipePaneRef.current.scrollIntoView === "function") recipePaneRef.current.scrollIntoView({block: "start"});
     recipePaneRef.current?.focus({preventScroll: true});
-  }, [route.kind, selectedModelKey]);
+  }, [filters.model, route.kind, selectedModelKey]);
   return <section className="library-workcell" aria-label="Models and recipes">
     <div className="library-workcell-toolbar">
       <label>Find models or recipes<input type="search" aria-label="Search Library" value={query} onChange={event => onQueryChange(event.target.value)} placeholder="Search names, slugs, capabilities" /></label>
