@@ -14,6 +14,8 @@ mkdir -p "$report_root"
 chmod 0700 "$report_root"
 
 registry_name=vonk-helper-proof-registry
+run_id=40000000-0000-4000-8000-000000000004
+run_name=vonk-$run_id
 image_base=localhost:5001/vonk/helper-tiny
 image_name="$image_base:v1"
 image_platform="$image_base:arm64"
@@ -29,7 +31,7 @@ cleanup() {
     kill "$helper_pid" 2>/dev/null || true
     wait "$helper_pid" 2>/dev/null || true
   fi
-  docker rm --force vonk-proof-run "$registry_name" >/dev/null 2>&1 || true
+  docker rm --force "$run_name" "$registry_name" >/dev/null 2>&1 || true
   rm -rf "$fixture_dir"
 }
 trap cleanup EXIT
@@ -41,7 +43,6 @@ install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper /var/lib/vonk-forge/helper/requests
 install -d -o root -g root -m 0755 /run/vonk-forge-agent /run/vonk-forge-package-helper
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent /var/lib/vonk-forge-agent/oci-archives /run/vonk-forge-agent/runtime-requests
-install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/models
 runtime_probe=/run/vonk-forge-agent/privileged_oci_process_probe
 runtime_fixture=/run/vonk-forge-agent/compiled_workload_v2.json
 install -o root -g vonk-agent -m 0750 "$probe_binary" "$runtime_probe"
@@ -99,23 +100,23 @@ chown vonk-agent:vonk-agent "/var/lib/vonk-forge-agent/oci-archives/$archive_sha
 chmod 0600 "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
 
 install -d -o vonk-agent -g vonk-agent -m 0700 \
-  /var/lib/vonk-forge/models/primary \
-  /var/lib/vonk-forge/models/dependency-qwen3-8-27b-dspark-b3c99101 \
-  /var/lib/vonk-forge/models/support \
-  /var/lib/vonk-forge-agent/runs/proof-run/outputs/tmp/proof-run \
-  /var/lib/vonk-forge-agent/run-metadata/proof-run \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/primary \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101 \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/support \
+  /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/$run_id \
+  /var/lib/vonk-forge-agent/run-metadata/$run_id \
   /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache
 for path in \
-  /var/lib/vonk-forge/models/primary/config.json \
-  /var/lib/vonk-forge/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json \
-  /var/lib/vonk-forge/models/support/__init__.py; do
+  /var/lib/vonk-forge-agent/installations/proof-install/models/primary/config.json \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/support/__init__.py; do
   printf 'helper-process-proof\n' >"$path"
   chown vonk-agent:vonk-agent "$path"
   chmod 0600 "$path"
 done
-printf '{}\n' >/var/lib/vonk-forge-agent/run-metadata/proof-run/runtime.json
-chown vonk-agent:vonk-agent /var/lib/vonk-forge-agent/run-metadata/proof-run/runtime.json
-chmod 0600 /var/lib/vonk-forge-agent/run-metadata/proof-run/runtime.json
+printf '{}\n' >/var/lib/vonk-forge-agent/run-metadata/$run_id/runtime.json
+chown vonk-agent:vonk-agent /var/lib/vonk-forge-agent/run-metadata/$run_id/runtime.json
+chmod 0600 /var/lib/vonk-forge-agent/run-metadata/$run_id/runtime.json
 
 export VONK_HELPER_ARCHIVE_SHA="$archive_sha"
 export VONK_HELPER_ARCHIVE_BYTES="$archive_bytes"
@@ -176,12 +177,12 @@ sudo -u vonk-agent -g vonk-agent env \
   "$probe_binary" start | tee "$report_root/start.log"
 
 sleep 6
-docker logs vonk-proof-run >"$report_root/container-first.log" 2>&1
+docker logs "$run_name" >"$report_root/container-first.log" 2>&1
 grep -q 'uid=10001' "$report_root/container-first.log"
 grep -q 'cache-created' "$report_root/container-first.log"
 grep -q 'tmp-fresh' "$report_root/container-first.log"
 test "$(cat /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/helper-cache-ok)" = cache-created
-docker rm vonk-proof-run >"$report_root/container-first-remove.log"
+docker rm "$run_name" >"$report_root/container-first-remove.log"
 sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_SHA="$archive_sha" \
   VONK_HELPER_ARCHIVE_BYTES="$archive_bytes" \
@@ -194,9 +195,9 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_REQUEST_ROOT="$VONK_HELPER_REQUEST_ROOT" \
   "$probe_binary" start | tee "$report_root/start-reuse.log"
 
-docker inspect vonk-proof-run >"$report_root/container-inspect.json"
+docker inspect "$run_name" >"$report_root/container-inspect.json"
 sleep 6
-docker logs vonk-proof-run >"$report_root/container.log" 2>&1 || true
+docker logs "$run_name" >"$report_root/container.log" 2>&1 || true
 
 grep -q '"--network","none"' "$report_root/start.log"
 grep -q '"--tmpfs"' "$report_root/start.log"
@@ -215,6 +216,6 @@ grep -q 'cache-reused' "$report_root/container.log"
 grep -q 'tmp-fresh' "$report_root/container.log"
 test -f /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/home/helper-entrypoint-ok
 test "$(cat /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/helper-cache-ok)" = cache-created
-test -f /var/lib/vonk-forge-agent/runs/proof-run/outputs/tmp/proof-run/helper-tmp-ok
+test -f /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/helper-tmp-ok
 printf 'helper-process-proof=passed\narchive_sha256=%s\narchive_bytes=%s\nimage_ref=%s\nplatform_digest=%s\nconfig_id=%s\n' \
   "$archive_sha" "$archive_bytes" "$image_ref" "$platform_digest" "$config_id" | tee "$report_root/summary.txt"

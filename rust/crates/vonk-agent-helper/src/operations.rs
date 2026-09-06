@@ -2159,7 +2159,7 @@ fn validate_docker_run_with_archive(
     {
         return Err(OperationError::InvalidOperation);
     }
-    let canonical_model_root = canonical_model_root(roots, agent_data_owner_uid)?;
+    let canonical_model_root = canonical_model_root(roots, &models, agent_data_owner_uid)?;
     let mut model_files = 0_usize;
     let mut model_bytes = 0_u64;
     for path in &models {
@@ -2318,9 +2318,6 @@ fn finish_timed_out_job(
 }
 
 fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool {
-    if !source.starts_with(&roots.models) {
-        return false;
-    }
     if target.len() > MAX_COMPILED_MODEL_PATH_BYTES
         || (target != "/models"
             && (!target.starts_with("/models/")
@@ -2329,7 +2326,10 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
     {
         return false;
     }
-    let relative = source.strip_prefix(&roots.models).ok();
+    let Some(model_root) = runtime_model_root(source, roots) else {
+        return false;
+    };
+    let relative = source.strip_prefix(model_root).ok();
     let components = relative
         .into_iter()
         .flat_map(Path::components)
@@ -2444,23 +2444,54 @@ fn collect_model_tree(
 
 fn canonical_model_root(
     roots: &ManagedRoots,
+    models: &[PathBuf],
     agent_data_owner_uid: Option<u32>,
 ) -> Result<PathBuf, OperationError> {
     let agent_data = &roots.agent_data;
-    let models = agent_data.join("models");
-    for path in [agent_data, &models] {
+    let installations = agent_data.join("installations");
+    let model_root = models
+        .first()
+        .and_then(|path| runtime_model_root(path, roots))
+        .ok_or(OperationError::UnsafePath)?;
+    if models
+        .iter()
+        .any(|path| runtime_model_root(path, roots).as_deref() != Some(model_root.as_path()))
+    {
+        return Err(OperationError::UnsafePath);
+    }
+    for path in [agent_data, &installations, &model_root] {
         require_safe_directory(path, agent_data_owner_uid)?;
     }
     let canonical_agent_data = agent_data
         .canonicalize()
         .map_err(|_| OperationError::UnsafePath)?;
-    let canonical_models = models
+    let canonical_installations = installations
         .canonicalize()
         .map_err(|_| OperationError::UnsafePath)?;
-    if canonical_models.parent() != Some(canonical_agent_data.as_path()) {
+    let canonical_models = model_root
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    if canonical_installations.parent() != Some(canonical_agent_data.as_path())
+        || canonical_models.parent().and_then(Path::parent)
+            != Some(canonical_installations.as_path())
+    {
         return Err(OperationError::UnsafePath);
     }
     Ok(canonical_models)
+}
+
+fn runtime_model_root(source: &Path, roots: &ManagedRoots) -> Option<PathBuf> {
+    let installations = roots.agent_data.join("installations");
+    let relative = source.strip_prefix(&installations).ok()?;
+    let mut components = relative.components();
+    let installation = match components.next()? {
+        Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()) => value,
+        _ => return None,
+    };
+    if !matches!(components.next(), Some(Component::Normal(value)) if value == "models") {
+        return None;
+    }
+    Some(installations.join(installation).join("models"))
 }
 
 fn require_safe_directory(
@@ -2977,7 +3008,7 @@ mod tests {
     fn runtime_fixture() -> (TempDir, ManagedRoots) {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(&temp.path().join("data"));
-        fs::create_dir_all(roots.agent_data.join("models").join("sha256")).unwrap();
+        fs::create_dir_all(runtime_models(&roots).join("sha256")).unwrap();
         fs::create_dir_all(
             roots
                 .agent_data
@@ -2995,11 +3026,17 @@ mod tests {
     }
 
     fn artifact_path(roots: &ManagedRoots, key: char) -> PathBuf {
-        roots
-            .agent_data
-            .join("models")
+        runtime_models(roots)
             .join("sha256")
             .join(key.to_string().repeat(64))
+    }
+
+    fn runtime_models(roots: &ManagedRoots) -> PathBuf {
+        roots
+            .agent_data
+            .join("installations")
+            .join("installation-1")
+            .join("models")
     }
 
     fn runtime_arguments(roots: &ManagedRoots, mounts: &[(PathBuf, &str, bool)]) -> Vec<String> {
@@ -3216,7 +3253,7 @@ mod tests {
     #[test]
     fn runtime_accepts_selection_scoped_nested_model_files_beyond_legacy_limit() {
         let (_temp, roots) = runtime_fixture();
-        let model_set = roots.agent_data.join("models").join("a".repeat(64));
+        let model_set = runtime_models(&roots).join("a".repeat(64));
         let primary = model_set.join("primary");
         let draft = model_set.join("draft");
         fs::create_dir_all(&primary).unwrap();
@@ -3260,7 +3297,7 @@ mod tests {
         assert_eq!(plan["security"]["host_network"], false);
 
         let (_temp, roots) = runtime_fixture();
-        let model_set = roots.agent_data.join("models").join(
+        let model_set = runtime_models(&roots).join(
             plan["identity"]["model_artifact_set_sha256"]
                 .as_str()
                 .unwrap(),
@@ -3664,20 +3701,14 @@ mod tests {
         fs::create_dir_all(&tokenizer).unwrap();
 
         let invalid_single_mounts = [
-            (roots.agent_data.join("models"), "/models", true),
-            (
-                roots.agent_data.join("models").join("sha256"),
-                "/models",
-                true,
-            ),
-            (
-                roots.agent_data.join("models").join("a".repeat(64)),
-                "/models",
-                true,
-            ),
+            (runtime_models(&roots), "/models", true),
+            (runtime_models(&roots).join("sha256"), "/models", true),
+            (runtime_models(&roots).join("a".repeat(64)), "/models", true),
             (
                 roots
                     .agent_data
+                    .join("installations")
+                    .join("installation-1")
                     .join("models")
                     .join("sha256")
                     .join("..")
@@ -3720,9 +3751,7 @@ mod tests {
 
         let too_many = (0..4097)
             .map(|index| {
-                let source = roots
-                    .agent_data
-                    .join("models")
+                let source = runtime_models(&roots)
                     .join("sha256")
                     .join(format!("{index:064x}"));
                 fs::create_dir(&source).unwrap();
@@ -3748,10 +3777,36 @@ mod tests {
     }
 
     #[test]
+    fn runtime_accepts_installation_model_root_and_rejects_legacy_model_root() {
+        let (_temp, roots) = runtime_fixture();
+        let current_model = artifact_path(&roots, 'a');
+        fs::create_dir_all(&current_model).unwrap();
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(current_model, "/models", true)]),
+                &roots,
+                None,
+            )
+            .is_ok()
+        );
+
+        let legacy_model = roots.models.join("sha256").join("b".repeat(64));
+        fs::create_dir_all(&legacy_model).unwrap();
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(legacy_model, "/models", true)]),
+                &roots,
+                None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn runtime_rejects_symlinked_model_ancestors_and_canonical_escapes() {
         {
             let (temp, roots) = runtime_fixture();
-            let models = roots.agent_data.join("models");
+            let models = runtime_models(&roots);
             fs::remove_dir_all(&models).unwrap();
             let outside_models = temp.path().join("outside-models");
             let outside_model = outside_models.join("sha256").join("a".repeat(64));
@@ -3771,7 +3826,7 @@ mod tests {
 
         {
             let (temp, roots) = runtime_fixture();
-            let model_root = roots.agent_data.join("models").join("sha256");
+            let model_root = runtime_models(&roots).join("sha256");
             fs::remove_dir(&model_root).unwrap();
             let outside_model_root = temp.path().join("outside-sha256");
             fs::create_dir_all(outside_model_root.join("a".repeat(64))).unwrap();
@@ -3793,7 +3848,12 @@ mod tests {
             let outside = temp.path().join("outside-agent-data");
             let agent_data = temp.path().join("agent-data-link");
             let roots = ManagedRoots::under(&agent_data);
-            let model = outside.join("models").join("sha256").join("a".repeat(64));
+            let model = outside
+                .join("installations")
+                .join("installation-1")
+                .join("models")
+                .join("sha256")
+                .join("a".repeat(64));
             fs::create_dir_all(&model).unwrap();
             fs::create_dir_all(outside.join("runs").join(RUN_ID).join("outputs")).unwrap();
             let metadata = outside.join("run-metadata").join(RUN_ID);
@@ -3826,8 +3886,9 @@ mod tests {
 
         for path in [
             roots.agent_data.clone(),
-            roots.agent_data.join("models"),
-            roots.agent_data.join("models").join("sha256"),
+            roots.agent_data.join("installations"),
+            runtime_models(&roots),
+            runtime_models(&roots).join("sha256"),
             model,
         ] {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o770)).unwrap();
