@@ -37,6 +37,7 @@ RUN test -x /usr/bin/skopeo \
         /usr/lib64/libeconf.so* \
         /usr/lib64/libgpg-error.so* \
         /usr/lib64/libgpgme.so* \
+        /usr/lib64/libgcc_s.so* \
         /usr/lib64/libpcre2-8.so* \
         /usr/lib64/libpam.so* \
         /usr/lib64/libpam_misc.so* \
@@ -53,8 +54,9 @@ RUN test -x /usr/bin/skopeo \
         /usr/lib64/librt.so* \
         /usr/lib64/libnss_dns.so* \
         /usr/lib64/libnss_files.so* \
+        /usr/lib64/ld-linux-*.so* \
         /lib/ld-linux-*.so*; do \
-        test -e "$library" && cp -a "$library" /skopeo-runtime/lib/ || true; \
+        test -e "$library" && cp -aL "$library" /skopeo-runtime/lib/ || true; \
     done
 
 FROM ${NODE_IMAGE} AS web
@@ -115,8 +117,7 @@ COPY --from=skopeo /etc/pki /etc/pki
 COPY --from=skopeo /etc/ssl /etc/ssl
 COPY --from=skopeo /usr/share/pki /usr/share/pki
 COPY --from=skopeo /usr/share/containers /usr/share/containers
-RUN printf '%s\n' /usr/local/lib/skopeo > /etc/ld.so.conf.d/skopeo.conf \
-    && apt-get update \
+RUN apt-get update \
     && apt-get install --yes --no-install-recommends patchelf \
     && skopeo_loader="$(find /usr/local/lib/skopeo -maxdepth 1 -type f -name 'ld-linux-*.so*' -print -quit)" \
     && test -n "$skopeo_loader" \
@@ -125,7 +126,6 @@ RUN printf '%s\n' /usr/local/lib/skopeo > /etc/ld.so.conf.d/skopeo.conf \
     && apt-get purge --yes patchelf \
     && apt-get autoremove --yes \
     && rm -rf /var/lib/apt/lists/* \
-    && ldconfig \
     && test -x /usr/bin/skopeo \
     && /usr/bin/skopeo --version \
     && test -f /etc/containers/policy.json \
