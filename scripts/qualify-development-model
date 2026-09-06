@@ -14,12 +14,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 QUALIFIER = ROOT / "scripts/qualify-recipe"
-DEFAULT_RECIPE = ROOT / "config/recipes/deepseek-v4-flash-0731-ds4-single.json"
+DEFAULT_LIBRARY_ROOT = Path(
+    os.environ.get("VONK_RECIPE_LIBRARY_ROOT", ROOT.parent / "vonk-forge-recipes")
+)
+DEFAULT_RECIPE_RELATIVE = Path(
+    "recipes/deepseek-v4-flash-0731-ds4-single.json"
+)
 
 
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--recipe", type=Path, default=DEFAULT_RECIPE)
+    parser.add_argument("--recipe", type=Path)
+    parser.add_argument("--library-root", type=Path, default=DEFAULT_LIBRARY_ROOT)
     parser.add_argument("--level", choices=("structural", "container"), default="container")
     parser.add_argument("--engine", default="docker")
     parser.add_argument("--endpoint-host", default="127.0.0.1")
@@ -100,16 +106,22 @@ def _atomic_write(path: Path, payload: bytes) -> None:
 
 def main() -> int:
     args = _arguments()
+    args.library_root = args.library_root.resolve()
+    if args.recipe is None:
+        args.recipe = args.library_root / DEFAULT_RECIPE_RELATIVE
+    elif not args.recipe.is_absolute():
+        args.recipe = args.library_root / args.recipe
+    args.recipe = args.recipe.resolve()
     command = [
         str(QUALIFIER),
         "--recipe",
         str(args.recipe),
+        "--library-root",
+        str(args.library_root),
         "--level",
         args.level,
         "--engine",
         args.engine,
-        "--endpoint-host",
-        args.endpoint_host,
         "--artifact-root",
         str(args.artifact_root),
         "--timeout-seconds",

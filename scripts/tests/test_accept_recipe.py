@@ -18,9 +18,12 @@ import pytest
 from vonk_control.fleet_projection import FleetSnapshot
 
 ROOT = Path(__file__).resolve().parents[2]
+LIBRARY_ROOT = Path(
+    os.environ.get("VONK_RECIPE_LIBRARY_ROOT", ROOT.parent / "vonk-forge-recipes")
+)
 SCRIPT = ROOT / "scripts/accept-recipe"
-DS4 = ROOT / "config/recipes/deepseek-v4-flash-0731-ds4-single.json"
-MIA = ROOT / "config/recipes/deepseek-v4-flash-0731-mia-dual.json"
+DS4 = LIBRARY_ROOT / "recipes/deepseek-v4-flash-0731-ds4-single.json"
+MIA = LIBRARY_ROOT / "recipes/deepseek-v4-flash-0731-mia-dual.json"
 NODE = "spk_0123456789abcdef0123456789abcdef"
 NODE_2 = "spk_fedcba9876543210fedcba9876543210"
 FLEET_SELECTORS = ("spark-3542", "spark-2297")
@@ -376,6 +379,8 @@ def _run(
             str(SCRIPT),
             "--recipe",
             str(recipe),
+            "--library-root",
+            str(LIBRARY_ROOT),
             "--nodes",
             nodes,
             "--api-base",
@@ -589,7 +594,10 @@ def test_catalog_inputs_resolve_entities_from_external_library_root(
             "runtime-distributions",
             "patch-bundles",
         ):
-            shutil.copytree(ROOT / "config" / directory, library_root / directory)
+            source = LIBRARY_ROOT / directory
+            if not source.is_dir():
+                source = ROOT / "config" / directory
+            shutil.copytree(source, library_root / directory)
 
         recipe = json.loads(DS4.read_text(encoding="utf-8"))
         _model_version, _distribution, references, documents = module._inputs(

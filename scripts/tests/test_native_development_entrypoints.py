@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+LIBRARY_ROOT = Path(os.environ.get("VONK_RECIPE_LIBRARY_ROOT", ROOT.parent / "vonk-forge-recipes"))
 SLICES = ROOT / "scripts/run-development-slices"
 QUALIFIER = ROOT / "scripts/qualify-development-model"
 
@@ -23,13 +24,16 @@ def test_development_slices_resolve_only_native_v1_inputs() -> None:
     assert json.loads(result.stdout) == {
         "model-multinode": {
             "context": "adapters/deepseek/mia-vllm",
-            "recipe": "config/recipes/deepseek-v4-flash-0731-mia-dual.json",
+            "recipe": "recipes/deepseek-v4-flash-0731-mia-dual.json",
         },
         "model-single": {
             "context": "adapters/deepseek/ds4",
-            "recipe": "config/recipes/deepseek-v4-flash-0731-ds4-single.json",
+            "recipe": "recipes/deepseek-v4-flash-0731-ds4-single.json",
         },
     }
+    assert not (ROOT / "config/recipes/deepseek-v4-flash-0731-ds4-single.json").exists()
+    assert (LIBRARY_ROOT / "recipes/deepseek-v4-flash-0731-ds4-single.json").is_file()
+    assert (LIBRARY_ROOT / "recipes/deepseek-v4-flash-0731-mia-dual.json").is_file()
 
 
 def test_development_model_qualifier_executes_native_structural_path(
@@ -40,7 +44,9 @@ def test_development_model_qualifier_executes_native_structural_path(
         [
             str(QUALIFIER),
             "--recipe",
-            "config/recipes/deepseek-v4-flash-0731-ds4-single.json",
+            str(LIBRARY_ROOT / "recipes/deepseek-v4-flash-0731-ds4-single.json"),
+            "--library-root",
+            str(LIBRARY_ROOT),
             "--level",
             "structural",
             "--output",
@@ -57,7 +63,7 @@ def test_development_model_qualifier_executes_native_structural_path(
     evidence = json.loads(output.read_text(encoding="utf-8"))
     assert evidence["passed"] is True
     assert evidence["status"] == "passed"
-    assert evidence["recipe"] == "deepseek-v4-flash-0731-ds4-single.json"
+    assert evidence["recipe"] == "deepseek-v4-flash-0731-ds4-single"
 
 
 def test_development_model_qualifier_refuses_a_symlink_output_before_resolution(

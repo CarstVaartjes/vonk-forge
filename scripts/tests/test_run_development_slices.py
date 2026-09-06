@@ -25,6 +25,9 @@ import pytest
 from vonk_control.fleet_projection import FleetSnapshot
 
 ROOT = Path(__file__).resolve().parents[2]
+LIBRARY_ROOT = Path(
+    os.environ.get("VONK_RECIPE_LIBRARY_ROOT", ROOT.parent / "vonk-forge-recipes")
+)
 RUNNER = ROOT / "scripts" / "run-development-slices"
 STATES = [
     "inventory-ready",
@@ -383,8 +386,8 @@ class SliceHandler(BaseHTTPRequestHandler):
             for index, path in enumerate(
                 (
                     ROOT / "control/tests/fixtures/recipes/dev-http-smoke/recipe.json",
-                    ROOT / "config/recipes/deepseek-v4-flash-0731-ds4-single.json",
-                    ROOT / "config/recipes/deepseek-v4-flash-0731-mia-dual.json",
+                    LIBRARY_ROOT / "recipes/deepseek-v4-flash-0731-ds4-single.json",
+                    LIBRARY_ROOT / "recipes/deepseek-v4-flash-0731-mia-dual.json",
                 ),
                 start=1,
             ):
@@ -1186,6 +1189,8 @@ def _run_model(
             "model-multinode",
             "--qualification-file",
             str(qualification),
+            "--library-root",
+            str(LIBRARY_ROOT),
             "--builder-node",
             NODE,
             "--target-node",
@@ -1237,6 +1242,8 @@ def _run_model_single(
             "model-single",
             "--qualification-file",
             str(qualification),
+            "--library-root",
+            str(LIBRARY_ROOT),
             "--builder-node",
             NODE,
             "--target-node",

@@ -25,13 +25,16 @@ from fleet_snapshot_contract import active_agents, is_ready_node, restart_identi
 
 ROOT = Path(__file__).resolve().parents[1]
 SYNTHETIC_ROOT = ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
+DEFAULT_LIBRARY_ROOT = Path(
+    os.environ.get("VONK_RECIPE_LIBRARY_ROOT", ROOT.parent / "vonk-forge-recipes")
+)
 NATIVE_INPUTS = {
     "model-single": {
-        "recipe": "config/recipes/deepseek-v4-flash-0731-ds4-single.json",
+        "recipe": "recipes/deepseek-v4-flash-0731-ds4-single.json",
         "context": "adapters/deepseek/ds4",
     },
     "model-multinode": {
-        "recipe": "config/recipes/deepseek-v4-flash-0731-mia-dual.json",
+        "recipe": "recipes/deepseek-v4-flash-0731-mia-dual.json",
         "context": "adapters/deepseek/mia-vllm",
     },
 }
@@ -628,8 +631,8 @@ class Runner:
             self.inference = inference_client
         default_recipes = {
             "synthetic": SYNTHETIC_ROOT / "recipe.json",
-            "model-single": ROOT / NATIVE_INPUTS["model-single"]["recipe"],
-            "model-multinode": ROOT / NATIVE_INPUTS["model-multinode"]["recipe"],
+            "model-single": args.library_root / NATIVE_INPUTS["model-single"]["recipe"],
+            "model-multinode": args.library_root / NATIVE_INPUTS["model-multinode"]["recipe"],
         }
         self.recipe_path = args.recipe or default_recipes[args.phase]
         try:
@@ -687,8 +690,6 @@ class Runner:
             if args.phase == "synthetic"
             else _content_root(args.library_root) / str(context_path)
         )
-        if args.phase != "synthetic" and not self.source_context.is_dir():
-            self.source_context = ROOT / str(context_path)
         self.qualification: dict[str, Any] | None = None
         qualification_sha256: str | None = None
         if args.phase == "synthetic":
@@ -1813,7 +1814,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument(
         "--library-root",
         type=Path,
-        default=ROOT,
+        default=DEFAULT_LIBRARY_ROOT,
         help="recipe-library checkout containing model entities and build contexts",
     )
     parser.add_argument("--catalog", type=Path)
@@ -1850,6 +1851,8 @@ def _arguments() -> argparse.Namespace:
     args.evidence_file = args.evidence_file.resolve()
     args.library_root = args.library_root.resolve()
     if args.recipe is not None:
+        if args.phase != "synthetic" and not args.recipe.is_absolute():
+            args.recipe = args.library_root / args.recipe
         args.recipe = args.recipe.resolve()
     if args.catalog is not None:
         args.catalog = args.catalog.resolve()
