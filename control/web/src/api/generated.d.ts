@@ -3656,6 +3656,8 @@ export interface components {
             recipe_document: components["schemas"]["RecipeDefinition"];
             /** Recipe Id */
             recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
             /** Run Returned Count */
             run_returned_count: number;
             /** Run Total Count */

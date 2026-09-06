@@ -147,6 +147,7 @@ class LibraryModelIdentity(_StrictModel):
 
 
 class LibraryRecipeSummary(LibraryRecipeIdentity):
+    recipe_revision_id: UuidId
     recipe_document: RecipeDefinition
     capabilities: list[Text64] = Field(max_length=64)
     topology_name: Text64 | None

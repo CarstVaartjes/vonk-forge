@@ -109,6 +109,7 @@ def _canonical_recipe_summary(
 ) -> LibraryRecipeSummary:
     return LibraryRecipeSummary(
         recipe_id=revision.document_id,
+        recipe_revision_id=revision.id,
         publisher=document.identity.publisher,
         slug=document.identity.slug,
         content_sha256=revision.content_digest,
