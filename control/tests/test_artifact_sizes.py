@@ -1,14 +1,11 @@
-import json
-from pathlib import Path
-
 import pytest
 from vonk_control.artifact_sizes import ArtifactSizeError, DeclaredArtifactSizeResolver
 
+from tests.canonical_recipe_fixtures import artifact_size_document
+
 
 def recipe():
-    return json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
-    )
+    return artifact_size_document()
 
 
 def test_declared_recipe_sizes_resolve_immutable_external_artifacts() -> None:
@@ -16,7 +13,8 @@ def test_declared_recipe_sizes_resolve_immutable_external_artifacts() -> None:
     artifacts = DeclaredArtifactSizeResolver().resolve(document)
 
     assert artifacts[0].source == (
-        "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
+        "https://example.com/models/synthetic-tiny@"
+        "0123456789abcdef0123456789abcdef01234567"
     )
     assert artifacts[0].size_bytes == 1024
     assert len(artifacts[0].digest) == 64

@@ -1,19 +1,17 @@
 from __future__ import annotations
 
 import copy
-import json
-from pathlib import Path
 
 import pytest
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_control.source_policy import SourcePolicyError, enforce_build_source_policy
 
+from tests.canonical_recipe_fixtures import source_policy_recipe
+
 
 @pytest.fixture
 def recipe() -> dict[str, object]:
-    return json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
-    )
+    return source_policy_recipe()
 
 
 def bundle_for(recipe: dict[str, object], dockerfile: str, **files: bytes):

@@ -1,15 +1,11 @@
-import json
-from pathlib import Path
-
 import pytest
 from vonk_control.topology import Placement, TopologyError, validate_topology
 
+from tests.canonical_recipe_fixtures import topology_document
+
 
 def multinode():
-    document = json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
-    )
-    document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
+    document = topology_document()
     document["topology"] = {
         "name": "triple-tp3",
         "mode": "tensor_parallel",
