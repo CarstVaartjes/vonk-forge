@@ -26,6 +26,9 @@ const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
 const MAX_RUNTIME_REQUEST_BYTES: u64 = 64 * 1024;
+const MAX_COMPILED_MODEL_FILES: usize = 4096;
+const MAX_COMPILED_MODEL_PATH_BYTES: usize = 512;
+const MAX_COMPILED_MODEL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const DOCKER_FIREWALL: &str = "/usr/lib/vonk-forge/vonk-forge-docker-firewall";
 const DOCKER_FIREWALL_CONFIG: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
 const RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION: u8 = 2;
@@ -259,10 +262,11 @@ struct RuntimeRequestOutcome {
 #[serde(deny_unknown_fields)]
 struct RuntimeImageReceipt {
     schema_version: u8,
-    registry_manifest_digest: String,
+    registry_index_digest: String,
+    platform_manifest_digest: String,
     archive_sha256: String,
     archive_bytes: u64,
-    local_config_id: String,
+    image_config_id: String,
     local_image_reference: String,
 }
 
@@ -1006,7 +1010,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             archive,
             archive_sha256,
             archive_bytes,
-            registry_manifest_digest,
+            registry_index_digest,
+            platform_manifest_digest,
             image_reference,
         ] = arguments
         else {
@@ -1022,8 +1027,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || archive != expected_archive
             || canonical_archive.parent() != Some(canonical_archive_root.as_path())
             || !lower_hex(archive_sha256, 64)
-            || !valid_oci_digest(registry_manifest_digest)
-            || embedded_digest != *registry_manifest_digest
+            || !valid_oci_digest(registry_index_digest)
+            || !valid_oci_digest(platform_manifest_digest)
+            || embedded_digest != *platform_manifest_digest
         {
             return Err(OperationError::InvalidOperation);
         }
@@ -1067,7 +1073,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::RuntimeImageIdentityInvalid);
         }
         self.write_image_receipt(
-            registry_manifest_digest,
+            registry_index_digest,
+            platform_manifest_digest,
             archive_sha256,
             expected_bytes,
             image_reference,
@@ -1084,16 +1091,19 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn runtime_image_inspect(&self, arguments: &[String]) -> Result<(), OperationError> {
         let [
             archive_sha256,
+            registry_index_digest,
+            platform_manifest_digest,
             image_reference,
-            registry_manifest_digest,
             user,
         ] = arguments
         else {
             return Err(OperationError::InvalidOperation);
         };
         let (_image, embedded_digest) = parse_local_image_reference(image_reference)?;
-        if &embedded_digest != registry_manifest_digest
+        if &embedded_digest != platform_manifest_digest
             || !lower_hex(archive_sha256, 64)
+            || !valid_oci_digest(registry_index_digest)
+            || !valid_oci_digest(platform_manifest_digest)
             || !numeric_non_root_user(user)
         {
             return Err(OperationError::InvalidOperation);
@@ -1108,14 +1118,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         self.require_image_receipt(
             archive_sha256,
-            registry_manifest_digest,
+            registry_index_digest,
+            platform_manifest_digest,
             image_reference,
             &inspected.0,
         )
     }
 
     fn runtime_start(&self, arguments: &[String]) -> Result<Option<i32>, OperationError> {
-        let [archive_sha256, image_reference, docker @ ..] = arguments else {
+        let [
+            archive_sha256,
+            registry_index_digest,
+            platform_manifest_digest,
+            image_reference,
+            docker @ ..,
+        ] = arguments
+        else {
             return Err(OperationError::InvalidOperation);
         };
         let validated = validate_docker_run_with_archive(
@@ -1123,9 +1141,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             &self.roots,
             self.runtime_request_owner_uid,
             Some(archive_sha256),
+            Some(registry_index_digest),
         )?;
         if image_reference != &validated.local_image_reference
             || archive_sha256 != &validated.archive_sha256
+            || registry_index_digest != &validated.registry_index_digest
+            || platform_manifest_digest != &validated.platform_manifest_digest
         {
             return Err(OperationError::InvalidOperation);
         }
@@ -1140,7 +1161,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let inspected = self.inspect_runtime_image(&validated.local_image_reference)?;
         self.require_image_receipt(
             archive_sha256,
-            &validated.registry_manifest_digest,
+            registry_index_digest,
+            platform_manifest_digest,
             &validated.local_image_reference,
             &inspected.0,
         )?;
@@ -1238,7 +1260,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn runtime_run_inspect(&self, arguments: &[String]) -> Result<bool, OperationError> {
-        let [archive_sha256, image_reference, docker @ ..] = arguments else {
+        let [
+            archive_sha256,
+            registry_index_digest,
+            platform_manifest_digest,
+            image_reference,
+            docker @ ..,
+        ] = arguments
+        else {
             return Err(OperationError::InvalidOperation);
         };
         let validated = validate_docker_run_with_archive(
@@ -1246,9 +1275,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             &self.roots,
             self.runtime_request_owner_uid,
             Some(archive_sha256),
+            Some(registry_index_digest),
         )?;
         if image_reference != &validated.local_image_reference
             || archive_sha256 != &validated.archive_sha256
+            || registry_index_digest != &validated.registry_index_digest
+            || platform_manifest_digest != &validated.platform_manifest_digest
             || !validated.detached
         {
             return Err(OperationError::InvalidOperation);
@@ -1257,7 +1289,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let inspected = self.inspect_runtime_image(&validated.local_image_reference)?;
         self.require_image_receipt(
             archive_sha256,
-            &validated.registry_manifest_digest,
+            registry_index_digest,
+            platform_manifest_digest,
             &validated.local_image_reference,
             &inspected.0,
         )?;
@@ -1294,7 +1327,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 return Err(OperationError::CommandFailed);
             }
         }
-        let cache_root = run.cache_home.parent().ok_or(OperationError::UnsafePath)?;
+        let cache_root = run.cache_root.as_path();
         let tmp_root = run.tmp_root.parent().ok_or(OperationError::UnsafePath)?;
         ensure_runtime_directory(cache_root)?;
         ensure_runtime_directory(&run.cache_home)?;
@@ -1448,7 +1481,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
 
     fn write_image_receipt(
         &self,
-        registry_manifest_digest: &str,
+        registry_index_digest: &str,
+        platform_manifest_digest: &str,
         archive_sha256: &str,
         archive_bytes: u64,
         local_image_reference: &str,
@@ -1459,7 +1493,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             &self.roots.runtime_image_receipts,
             fs::Permissions::from_mode(0o700),
         )?;
-        if !valid_oci_digest(registry_manifest_digest)
+        if !valid_oci_digest(registry_index_digest)
+            || !valid_oci_digest(platform_manifest_digest)
             || !lower_hex(archive_sha256, 64)
             || !valid_local_image_reference(local_image_reference)
             || !valid_oci_digest(local_config_id)
@@ -1469,10 +1504,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let path = self.roots.runtime_image_receipts.join(archive_sha256);
         let receipt = RuntimeImageReceipt {
             schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
-            registry_manifest_digest: registry_manifest_digest.to_owned(),
+            registry_index_digest: registry_index_digest.to_owned(),
+            platform_manifest_digest: platform_manifest_digest.to_owned(),
             archive_sha256: archive_sha256.to_owned(),
             archive_bytes,
-            local_config_id: local_config_id.to_owned(),
+            image_config_id: local_config_id.to_owned(),
             local_image_reference: local_image_reference.to_owned(),
         };
         let mut body = canonical_json(&receipt).map_err(|_| OperationError::InvalidArtifact)?;
@@ -1495,14 +1531,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn require_image_receipt(
         &self,
         archive_sha256: &str,
-        registry_manifest_digest: &str,
+        registry_index_digest: &str,
+        platform_manifest_digest: &str,
         local_image_reference: &str,
-        local_config_id: &str,
+        image_config_id: &str,
     ) -> Result<(), OperationError> {
         if !lower_hex(archive_sha256, 64)
-            || !valid_oci_digest(registry_manifest_digest)
+            || !valid_oci_digest(registry_index_digest)
+            || !valid_oci_digest(platform_manifest_digest)
             || !valid_local_image_reference(local_image_reference)
-            || !valid_oci_digest(local_config_id)
+            || !valid_oci_digest(image_config_id)
         {
             return Err(OperationError::InvalidOperation);
         }
@@ -1524,9 +1562,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .map_err(|_| OperationError::InvalidArtifact)?;
         if receipt.schema_version != RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION
             || receipt.archive_sha256 != archive_sha256
-            || receipt.registry_manifest_digest != registry_manifest_digest
+            || receipt.registry_index_digest != registry_index_digest
+            || receipt.platform_manifest_digest != platform_manifest_digest
             || receipt.local_image_reference != local_image_reference
-            || receipt.local_config_id != local_config_id
+            || receipt.image_config_id != image_config_id
         {
             return Err(OperationError::InvalidArtifact);
         }
@@ -1618,7 +1657,8 @@ fn bounded_container_exit_code(output: &CommandOutput) -> i32 {
 
 struct ValidatedDockerRun {
     local_image_reference: String,
-    registry_manifest_digest: String,
+    registry_index_digest: String,
+    platform_manifest_digest: String,
     archive_sha256: String,
     arguments: Vec<String>,
     detached: bool,
@@ -1628,6 +1668,7 @@ struct ValidatedDockerRun {
     models: Vec<PathBuf>,
     inputs: Option<PathBuf>,
     outputs: PathBuf,
+    cache_root: PathBuf,
     cache_home: PathBuf,
     tmp_root: PathBuf,
     runtime_contract: PathBuf,
@@ -1640,7 +1681,7 @@ fn validate_docker_run(
     roots: &ManagedRoots,
     agent_data_owner_uid: Option<u32>,
 ) -> Result<ValidatedDockerRun, OperationError> {
-    validate_docker_run_with_archive(arguments, roots, agent_data_owner_uid, None)
+    validate_docker_run_with_archive(arguments, roots, agent_data_owner_uid, None, None)
 }
 
 fn validate_docker_run_with_archive(
@@ -1648,6 +1689,7 @@ fn validate_docker_run_with_archive(
     roots: &ManagedRoots,
     agent_data_owner_uid: Option<u32>,
     archive_sha256: Option<&str>,
+    registry_index_digest: Option<&str>,
 ) -> Result<ValidatedDockerRun, OperationError> {
     if arguments.first().map(String::as_str) != Some("run") {
         return Err(OperationError::InvalidOperation);
@@ -1682,10 +1724,14 @@ fn validate_docker_run_with_archive(
     let mut listen_port = None;
     let mut job_timeout_seconds = None;
     let mut gpu = false;
+    let mut home = false;
+    let mut xdg_cache_home = false;
+    let mut tmpdir = false;
     let mut models = Vec::new();
     let mut model_sources = BTreeSet::new();
     let mut model_targets = BTreeSet::new();
     let mut outputs = None;
+    let mut cache_root = None;
     let mut inputs = None;
     let mut runtime_contract = None;
 
@@ -1872,6 +1918,9 @@ fn validate_docker_run_with_archive(
                         return Err(OperationError::InvalidOperation);
                     }
                 }
+                home |= value == "HOME=/outputs/cache/home";
+                xdg_cache_home |= value == "XDG_CACHE_HOME=/outputs/cache";
+                tmpdir |= value == "TMPDIR=/outputs/tmp";
                 environments += 1;
             }
             "--mount" => {
@@ -1895,6 +1944,12 @@ fn validate_docker_run_with_archive(
                     && outputs.is_none()
                 {
                     outputs = Some(source);
+                } else if target == "/outputs/cache"
+                    && !readonly
+                    && valid_runtime_cache_mount(&source, roots)
+                    && cache_root.is_none()
+                {
+                    cache_root = Some(source);
                 } else if target == "/inputs"
                     && readonly
                     && source.file_name().and_then(|value| value.to_str()) == Some("inputs")
@@ -1927,8 +1982,16 @@ fn validate_docker_run_with_archive(
         return Err(OperationError::InvalidOperation);
     }
     let (_image, embedded_digest) = parse_local_image_reference(&image_reference)?;
+    let registry_index_digest = registry_index_digest.unwrap_or(embedded_digest.as_str());
+    if !valid_oci_digest(registry_index_digest)
+        || archive_sha256.is_some_and(|digest| !lower_hex(digest, 64))
+    {
+        return Err(OperationError::InvalidOperation);
+    }
     let (uid, _gid) = user.ok_or(OperationError::InvalidOperation)?;
     let outputs = outputs.ok_or(OperationError::InvalidOperation)?;
+    let cache_root = cache_root.ok_or(OperationError::InvalidOperation)?;
+    require_safe_directory(&cache_root, agent_data_owner_uid)?;
     let runtime_contract = runtime_contract.ok_or(OperationError::InvalidOperation)?;
     let state_run_id = outputs
         .parent()
@@ -1969,6 +2032,9 @@ fn validate_docker_run_with_archive(
         || memlock
         || stack
         || gpu
+        || !home
+        || !xdg_cache_home
+        || !tmpdir
         || environments == 0
         || outputs.parent().and_then(Path::parent) != Some(roots.agent_data.join("runs").as_path())
         || runtime_contract.parent().and_then(Path::parent)
@@ -1989,14 +2055,25 @@ fn validate_docker_run_with_archive(
         return Err(OperationError::InvalidOperation);
     }
     if models.is_empty()
-        || models.len() > 4096
+        || models.len() > MAX_COMPILED_MODEL_FILES
         || models.len() > 1 && model_targets.contains("/models")
     {
         return Err(OperationError::InvalidOperation);
     }
     let canonical_model_root = canonical_model_root(roots, agent_data_owner_uid)?;
+    let mut model_files = 0_usize;
+    let mut model_bytes = 0_u64;
     for path in &models {
         require_safe_model_path(path, &canonical_model_root, agent_data_owner_uid)?;
+        collect_model_tree(
+            path,
+            agent_data_owner_uid,
+            &mut model_files,
+            &mut model_bytes,
+        )?;
+        if model_files > MAX_COMPILED_MODEL_FILES || model_bytes > MAX_COMPILED_MODEL_BYTES {
+            return Err(OperationError::InvalidOperation);
+        }
         let canonical = path
             .canonicalize()
             .map_err(|_| OperationError::UnsafePath)?;
@@ -2065,11 +2142,11 @@ fn validate_docker_run_with_archive(
     }
     let mut compiled_arguments = arguments.to_vec();
     compiled_arguments[index] = image_reference.clone();
-    let cache_home = outputs.join("cache/home");
     let tmp_root = outputs.join("tmp").join(state_run_id);
     Ok(ValidatedDockerRun {
         local_image_reference: image_reference,
-        registry_manifest_digest: embedded_digest,
+        registry_index_digest: registry_index_digest.to_owned(),
+        platform_manifest_digest: embedded_digest,
         archive_sha256: archive_sha256.unwrap_or_default().to_owned(),
         arguments: compiled_arguments,
         detached: detach,
@@ -2078,8 +2155,9 @@ fn validate_docker_run_with_archive(
         uid,
         models,
         inputs,
+        cache_root: cache_root.clone(),
         outputs,
-        cache_home,
+        cache_home: cache_root.join("home"),
         tmp_root,
         runtime_contract,
         host_endpoint_port: (network == Some("host")).then_some(listen_port).flatten(),
@@ -2143,6 +2221,14 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
     if !source.starts_with(&roots.models) {
         return false;
     }
+    if target.len() > MAX_COMPILED_MODEL_PATH_BYTES
+        || (target != "/models"
+            && (!target.starts_with("/models/")
+                || target.ends_with('/')
+                || !target.split('/').skip(1).all(valid_artifact_id)))
+    {
+        return false;
+    }
     let relative = source.strip_prefix(&roots.models).ok();
     let components = relative
         .into_iter()
@@ -2173,11 +2259,30 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
         .is_some_and(|value| value.split('/').all(valid_artifact_id))
 }
 
+fn valid_runtime_cache_mount(source: &Path, roots: &ManagedRoots) -> bool {
+    let Ok(relative) = source.strip_prefix(roots.agent_data.join("installations")) else {
+        return false;
+    };
+    let components = relative.components().collect::<Vec<_>>();
+    components.len() == 2
+        && components[1].as_os_str() == "runtime-cache"
+        && components[0]
+            .as_os_str()
+            .to_str()
+            .is_some_and(valid_artifact_id)
+}
+
 fn require_safe_model_path(
     path: &Path,
     canonical_model_root: &Path,
     required_owner_uid: Option<u32>,
 ) -> Result<(), OperationError> {
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    if !canonical_path.starts_with(canonical_model_root) {
+        return Err(OperationError::UnsafePath);
+    }
     let mut current = path.to_path_buf();
     let metadata = fs::symlink_metadata(&current).map_err(|_| OperationError::UnsafePath)?;
     if metadata.file_type().is_symlink()
@@ -2196,12 +2301,50 @@ fn require_safe_model_path(
         {
             return Err(OperationError::UnsafePath);
         }
-        if parent == canonical_model_root {
+        if parent
+            .canonicalize()
+            .ok()
+            .as_deref()
+            == Some(canonical_model_root)
+        {
             return Ok(());
         }
         current = parent.to_path_buf();
     }
     Err(OperationError::UnsafePath)
+}
+
+fn collect_model_tree(
+    path: &Path,
+    required_owner_uid: Option<u32>,
+    file_count: &mut usize,
+    total_bytes: &mut u64,
+) -> Result<(), OperationError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
+    if metadata.file_type().is_symlink()
+        || metadata.mode() & 0o022 != 0
+        || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
+    {
+        return Err(OperationError::UnsafePath);
+    }
+    if metadata.is_file() {
+        *file_count = file_count
+            .checked_add(1)
+            .ok_or(OperationError::InvalidOperation)?;
+        *total_bytes = total_bytes
+            .checked_add(metadata.len())
+            .ok_or(OperationError::InvalidOperation)?;
+        return Ok(());
+    }
+    if !metadata.is_dir() {
+        return Err(OperationError::UnsafePath);
+    }
+    let mut entries = fs::read_dir(path)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(fs::DirEntry::file_name);
+    for entry in entries {
+        collect_model_tree(&entry.path(), required_owner_uid, file_count, total_bytes)?;
+    }
+    Ok(())
 }
 
 fn canonical_model_root(
@@ -2645,6 +2788,14 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(&temp.path().join("data"));
         fs::create_dir_all(roots.agent_data.join("models").join("sha256")).unwrap();
+        fs::create_dir_all(
+            roots
+                .agent_data
+                .join("installations")
+                .join("installation-1")
+                .join("runtime-cache"),
+        )
+        .unwrap();
         fs::create_dir_all(roots.agent_data.join("runs").join(RUN_ID).join("outputs")).unwrap();
         fs::create_dir_all(roots.agent_data.join("runs").join(RUN_ID).join("inputs")).unwrap();
         let metadata = roots.agent_data.join("run-metadata").join(RUN_ID);
@@ -2700,6 +2851,10 @@ mod tests {
             "--env".to_owned(),
             "HOME=/outputs/cache/home".to_owned(),
             "--env".to_owned(),
+            "XDG_CACHE_HOME=/outputs/cache".to_owned(),
+            "--env".to_owned(),
+            "TMPDIR=/outputs/tmp".to_owned(),
+            "--env".to_owned(),
             "VONK_RUNTIME_SPEC=/run/vonk/runtime.json".to_owned(),
         ];
         for (source, target, readonly) in mounts {
@@ -2721,6 +2876,16 @@ mod tests {
                     .join("runs")
                     .join(RUN_ID)
                     .join("outputs")
+                    .display()
+            ),
+            "--mount".to_owned(),
+            format!(
+                "type=bind,src={},dst=/outputs/cache",
+                roots
+                    .agent_data
+                    .join("installations")
+                    .join("installation-1")
+                    .join("runtime-cache")
                     .display()
             ),
             "--mount".to_owned(),
@@ -2937,7 +3102,7 @@ mod tests {
         let validated = validate_docker_run(&arguments, &roots, None).unwrap();
         assert_eq!(validated.models.len(), 2);
         assert_eq!(
-            validated.registry_manifest_digest,
+            validated.platform_manifest_digest,
             plan["runtime"]["image_digest"].as_str().unwrap()
         );
         assert_eq!(validated.arguments.last().unwrap(), "/opt/vonk/bin/vllm");
@@ -2999,7 +3164,7 @@ mod tests {
         assert!(
             paths
                 .iter()
-                .any(|path| path.ends_with("outputs/cache/home"))
+                .any(|path| path.ends_with("installations/installation-1/runtime-cache/home"))
         );
         assert!(
             paths
@@ -3037,6 +3202,7 @@ mod tests {
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
         executor
             .write_image_receipt(
+                &format!("sha256:{}", "a".repeat(64)),
                 &registry_manifest,
                 &archive_sha256,
                 payload.len() as u64,
@@ -3047,19 +3213,47 @@ mod tests {
         executor
             .require_image_receipt(
                 &archive_sha256,
+                &format!("sha256:{}", "a".repeat(64)),
                 &registry_manifest,
                 &local_reference,
                 &config_id,
             )
             .unwrap();
+        for (index, platform, config) in [
+            (
+                format!("sha256:{}", "b".repeat(64)),
+                registry_manifest.clone(),
+                config_id.clone(),
+            ),
+            (
+                format!("sha256:{}", "a".repeat(64)),
+                format!("sha256:{}", "d".repeat(64)),
+                config_id.clone(),
+            ),
+            (
+                format!("sha256:{}", "a".repeat(64)),
+                registry_manifest.clone(),
+                format!("sha256:{}", "e".repeat(64)),
+            ),
+        ] {
+            assert!(executor
+                .require_image_receipt(
+                    &archive_sha256,
+                    &index,
+                    &platform,
+                    &local_reference,
+                    &config,
+                )
+                .is_err());
+        }
         let receipt: RuntimeImageReceipt = serde_json::from_slice(
             &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
         )
         .unwrap();
         assert_eq!(receipt.archive_sha256, archive_sha256);
         assert_eq!(receipt.archive_bytes, 17);
-        assert_eq!(receipt.registry_manifest_digest, registry_manifest);
-        assert_eq!(receipt.local_config_id, config_id);
+        assert_eq!(receipt.platform_manifest_digest, registry_manifest);
+        assert_eq!(receipt.image_config_id, config_id);
         assert_eq!(receipt.local_image_reference, local_reference);
     }
 
@@ -3085,6 +3279,7 @@ mod tests {
                 archive.display().to_string(),
                 archive_sha256.clone(),
                 payload.len().to_string(),
+                format!("sha256:{}", "a".repeat(64)),
                 registry_manifest.clone(),
                 local_reference.clone(),
             ])
@@ -3092,6 +3287,7 @@ mod tests {
         executor
             .require_image_receipt(
                 &archive_sha256,
+                &format!("sha256:{}", "a".repeat(64)),
                 &registry_manifest,
                 &local_reference,
                 &format!("sha256:{}", "c".repeat(64)),
