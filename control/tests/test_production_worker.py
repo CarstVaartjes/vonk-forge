@@ -69,12 +69,15 @@ def test_production_worker_does_not_claim_agent_owned_upgrade_parent(
     assert persisted.current_attempt == 0
 
 
-def test_recipe_worker_advances_fleet_profiles_before_route_maintenance() -> None:
+@pytest.mark.parametrize("coordinator", ["fleet_profiles", "run_switches", "recoveries"])
+def test_recipe_worker_services_routes_while_coordinators_are_active(tmp_path, coordinator) -> None:
     calls: list[str] = []
+    engine = create_engine(f"sqlite:///{tmp_path / 'fair-worker.sqlite'}")
+    Base.metadata.create_all(engine)
 
-    class Profiles:
+    class Coordinator:
         def tick(self) -> bool:
-            calls.append("profiles")
+            calls.append(coordinator)
             return True
 
     class Routes:
@@ -83,14 +86,14 @@ def test_recipe_worker_advances_fleet_profiles_before_route_maintenance() -> Non
             return False
 
     worker = RecipeOperationWorker(
-        None,
+        sessionmaker(engine, expire_on_commit=False),
         Routes(),
         clock=lambda: datetime(2026, 8, 6, tzinfo=UTC),
-        fleet_profiles=Profiles(),
+        **{coordinator: Coordinator()},
     )
 
     assert worker.tick() is True
-    assert calls == ["profiles"]
+    assert calls == [coordinator, "routes"]
 
 
 def test_production_builder_wires_reconciliation_and_housekeeping(
