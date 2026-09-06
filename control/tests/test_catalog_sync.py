@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
-from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.models import Base, CatalogDocumentRevision, RecipeLibrarySyncRun
 from vonk_control.recipe_library_types import (
     RecipeLibraryError,
     RecipeLibraryItem,
@@ -99,6 +99,13 @@ class FailOnceReader(Reader):
                 "recipe_library.unavailable", "transient recipe fetch failure"
             )
         return super().fetch(uri)
+
+
+class FailingListReader(Reader):
+    def list(self) -> RecipeLibrarySnapshot:
+        raise RecipeLibraryError(
+            "recipe_library.unavailable", "transient recipe index failure"
+        )
 
 
 def _sync(sessions, service, reader) -> ManagedRecipeCatalogSyncService:
@@ -338,3 +345,36 @@ def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(tmp_path:
         )
     with sessions() as session:
         assert session.scalars(select(CatalogDocumentRevision)).all() == []
+
+
+def test_sync_marks_reader_failure_failed_and_releases_active_slot(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    service = CatalogService(
+        sessions,
+        clock=lambda: datetime(2026, 9, 5, tzinfo=UTC),
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        source_bundles=SourceBundleStore(tmp_path / "bundles"),
+    )
+    failing_reader = FailingListReader(RecipeLibrarySnapshot("a" * 40, ()))
+    sync = _sync(sessions, service, failing_reader)
+    request_key = str(uuid.uuid4())
+
+    with pytest.raises(RecipeLibraryError, match="transient recipe index failure"):
+        sync.sync(request_key=request_key, trigger="manual", actor="test")
+
+    latest = sync.latest()
+    assert latest is not None
+    assert latest.state == "failed"
+    assert latest.problems[0]["code"] == "recipe_library.unavailable"
+    with sessions() as session:
+        run = session.scalar(
+            select(RecipeLibrarySyncRun).where(
+                RecipeLibrarySyncRun.request_key == request_key
+            )
+        )
+        assert run is not None
+        assert run.state == "failed"
+        assert run.active_slot is None
+        assert run.error_code == "recipe_library.unavailable"
