@@ -86,7 +86,14 @@ def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> No
                 "maximum": 64.0,
             }
         )
-    for name in ("apiKey", "accessToken", "privateKey", "passwordHash", "hf_token"):
+    for name in (
+        "apiKey",
+        "accessToken",
+        "privateKey",
+        "passwordHash",
+        "hf_token",
+        "github_token",
+    ):
         with pytest.raises(ArtifactJobError, match="contract"):
             _validate_parameter_definition(
                 {"name": name, "type": "string", "default": "secret"}

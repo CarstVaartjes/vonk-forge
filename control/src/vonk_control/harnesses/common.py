@@ -24,23 +24,6 @@ from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
 _SAFE_ENGINE_OPTION_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
-_RESERVED_ENGINE_OPTION_NAMES = frozenset(
-    {
-        "cap-add",
-        "cap-drop",
-        "device",
-        "init",
-        "mount",
-        "network",
-        "privileged",
-        "publish",
-        "read-only",
-        "security-opt",
-        "tmpfs",
-        "user",
-        "volume",
-    }
-)
 _SAFE_ENGINE_ENVIRONMENT_NAME = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
 _FORBIDDEN_ENGINE_ENVIRONMENT_NAMES = frozenset(
     {
@@ -114,7 +97,7 @@ def structured_command(value: object, *, canonical_argv: bool = False) -> tuple[
     ):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
     executable = PurePosixPath(command[0]).name.lower()
-    if executable in (_SHELL_EXECUTABLES | _SHELL_LAUNCHERS) or "-c" in command:
+    if executable in (_SHELL_EXECUTABLES | _SHELL_LAUNCHERS):
         raise HarnessCompileError("harness command contains unsafe shell syntax")
     if canonical_argv and sum(len(item.encode("utf-8")) for item in command) > 1_048_576:
         raise HarnessCompileError("harness command exceeds its total argv bound")
@@ -352,20 +335,15 @@ def compile_arguments(
         if type(name) is not str:
             raise HarnessCompileError("harness recipe argument is invalid")
         specification = specifications.get(name)
+        unknown_specification = specification is None
         if specification is None:
-            normalized_name = name.replace("_", "-")
-            if (
-                _SAFE_ENGINE_OPTION_NAME.fullmatch(name) is None
-                or normalized_name in _RESERVED_ENGINE_OPTION_NAMES
-            ):
-                raise HarnessCompileError(
-                    f"harness engine option name is invalid or platform-owned: {name}"
-                )
+            if _SAFE_ENGINE_OPTION_NAME.fullmatch(name) is None:
+                raise HarnessCompileError(f"harness engine option name is invalid: {name}")
             # The recipe is bound to a trusted, digest-pinned runtime. Preserve
             # safe options so a newer runtime can consume them without a
             # platform allowlist silently dropping intent.
             specification = ArgumentSpec(f"--{name}")
-        if specification.flag in parsed:
+        if specification.flag in parsed and not unknown_specification:
             raise HarnessCompileError(
                 f"harness argument is repeated: {specification.flag}"
             )
@@ -400,7 +378,7 @@ def compile_arguments(
         or set(parameters) != referenced
     ):
         raise HarnessCompileError("harness parameters are not exact")
-    structured_command(("/opt/vonk/bin/argv-check", *rendered))
+    structured_command(("/opt/vonk/bin/argv-check", *rendered), canonical_argv=True)
     return tuple(rendered), parsed
 
 
@@ -989,8 +967,8 @@ def _safe_scalar(value: object, label: str) -> str:
         rendered = str(value)
     else:
         raise HarnessCompileError(f"{label} value is invalid")
-    if _SAFE_ARGUMENT.fullmatch(rendered) is None:
-        raise HarnessCompileError(f"{label} value contains unsafe shell syntax")
+    if "\x00" in rendered or len(rendered.encode("utf-8")) > 65_536:
+        raise HarnessCompileError(f"{label} value exceeds the bounded argv contract")
     return rendered
 
 

@@ -100,7 +100,15 @@ def test_recipe_job_parameters_preserve_engine_names(name: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["apiKey", "accessToken", "privateKey", "passwordHash", "hf_token"]
+    "name",
+    [
+        "apiKey",
+        "accessToken",
+        "privateKey",
+        "passwordHash",
+        "hf_token",
+        "github_token",
+    ],
 )
 def test_recipe_job_parameters_reject_credential_names(name: str) -> None:
     claim_document, _result_document = documents()
