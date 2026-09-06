@@ -497,6 +497,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             });
             let download = {
                 let mut result = None;
+                let archive_root = self.runtime.data_root.join("oci-archives");
                 for attempt in 0..3_u32 {
                     let progress_sender = progress_sender.clone();
                     let current = self
@@ -504,6 +505,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         .download_distribution_with_progress(
                             &request.plan_digest,
                             &destination,
+                            &archive_root,
                             move |item| {
                                 progress_sender.send_replace(Some(item));
                             },
