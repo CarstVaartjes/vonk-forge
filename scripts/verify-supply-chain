@@ -16,6 +16,10 @@ from pathlib import Path
 
 IMAGE = re.compile(r"^[^\s@]+(?::[^\s@]+)?@sha256:[0-9a-f]{64}$")
 PROTOCOL_WHEEL = "inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl"
+PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
+PUBLIC_CONTRACT_WHEEL = (
+    "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
+)
 RETIRED_SBOMS = ("inventory/sbom/agent-python.spdx.json",)
 UV_LOCK_PACKAGE = re.compile(r"(?m)^\[\[package\]\]\n")
 UV_LOCK_SCALAR = re.compile(r'(?m)^(name|version) = "([^"\\\r\n]+)"$')
@@ -134,10 +138,13 @@ def rust_package_inputs(root: Path) -> tuple[str, ...]:
     return tuple(dict.fromkeys(paths))
 
 
-def recipe_catalog_inputs(root: Path) -> tuple[str, ...]:
-    """Return the immutable v1 recipe-authority inputs bound by the manifest."""
+def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
+    """Return the complete canonical recipe execution supply chain."""
 
     paths = [
+        ".github/workflows/validate-recipe-library.yml",
+        PUBLIC_CONTRACT_LOCK,
+        PUBLIC_CONTRACT_WHEEL,
         "schemas/global/catalog-entity-v1.schema.json",
         "schemas/global/recipe-v1.schema.json",
         "schemas/global/harness-evidence-v1.schema.json",
@@ -150,11 +157,30 @@ def recipe_catalog_inputs(root: Path) -> tuple[str, ...]:
         "control/src/vonk_control/library_contract.py",
         "control/src/vonk_control/recipe_routes.py",
         "control/src/vonk_control/models.py",
+        "control/src/vonk_control/api.py",
+        "control/src/vonk_control/worker.py",
+        "control/src/vonk_control/library_api.py",
+        "control/src/vonk_control/recipe_api.py",
+        "control/src/vonk_control/recipe_library_types.py",
+        "control/src/vonk_control/recipe_packages.py",
+        "control/src/vonk_control/catalog_sync.py",
+        "control/src/vonk_control/catalog_repository.py",
+        "control/src/vonk_control/recipe_runtime_specs.py",
+        "control/src/vonk_control/compiled_execution_plan.py",
+        "control/src/vonk_control/execution_plan_service.py",
+        "control/src/vonk_control/install_admission.py",
+        "control/src/vonk_control/run_admission.py",
+        "control/src/vonk_control/run_switch_contract.py",
+        "control/src/vonk_control/run_switch_api.py",
+        "control/src/vonk_control/run_switch_operations.py",
+        "control/src/vonk_control/distribution_executor.py",
+        "control/src/vonk_control/runtime_image_preparation.py",
+        "control/src/vonk_control/recipe_operation_worker.py",
+        "control/src/vonk_control/serving_execution.py",
+        "control/migrations/versions/0000_canonical_catalog_baseline.py",
         "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/migrations/versions/0002_fleet_node_profile_events.py",
         "control/migrations/versions/0003_agent_reenrollment_grants.py",
-        "scripts/accept-recipe",
-        "scripts/run-development-slices",
         "scripts/qualify-recipe",
         "scripts/import-recipe-library",
         "scripts/validate-recipe-library",
@@ -175,7 +201,56 @@ def recipe_catalog_inputs(root: Path) -> tuple[str, ...]:
                 path.relative_to(root).as_posix()
                 for path in sorted(directory.glob("*.json"))
             )
+    harnesses = root / "control/src/vonk_control/harnesses"
+    if not harnesses.is_dir():
+        raise ValueError("canonical recipe compiler harnesses are missing")
+    paths.extend(
+        path.relative_to(root).as_posix()
+        for path in sorted(harnesses.rglob("*.py"))
+        if path.is_file()
+    )
     return tuple(dict.fromkeys(paths))
+
+
+def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
+    """Bind the installed canonical contracts wheel to its reviewed revision."""
+
+    lock = tomllib.loads((root / PUBLIC_CONTRACT_LOCK).read_text())
+    expected = {
+        "source": "https://github.com/CarstVaartjes/vonk-forge-recipes.git",
+        "branch": "main",
+        "subdirectory": "contracts",
+        "package": "vonk-forge-public-contracts==0.1.0",
+        "wheel": PUBLIC_CONTRACT_WHEEL,
+    }
+    if any(lock.get(key) != value for key, value in expected.items()):
+        raise ValueError("public contract lock does not select the canonical package")
+    revision = lock.get("revision")
+    wheel_sha256 = lock.get("sha256")
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise ValueError("public contract source revision is invalid")
+    if (
+        not isinstance(wheel_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", wheel_sha256) is None
+    ):
+        raise ValueError("public contract wheel digest is invalid")
+    if digest((root / PUBLIC_CONTRACT_WHEEL).read_bytes()) != wheel_sha256:
+        raise ValueError("public contract wheel does not match its reviewed lock")
+    packages = [
+        package
+        for package in uv_lock_packages(control_lock)
+        if package["name"] == "vonk-forge-public-contracts"
+    ]
+    source = (
+        'source = { git = "https://github.com/CarstVaartjes/'
+        f'vonk-forge-recipes.git?subdirectory=contracts&branch=main#{revision}" }}'
+    )
+    if (
+        len(packages) != 1
+        or packages[0]["version"] != "0.1.0"
+        or source not in packages[0]["record"].splitlines()
+    ):
+        raise ValueError("control lock does not resolve the reviewed public contract")
 
 
 def protocol_wheel(root: Path) -> bytes:
@@ -327,6 +402,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
     version = protocol_project["project"]["version"]
     if not isinstance(version, str) or protocol_version(control_lock) != version:
         raise ValueError("control must resolve the exact protocol version")
+    verify_public_contract_lock(root, control_lock)
     wheel = protocol_wheel(root)
     wheel_sha256 = digest(wheel)
     if protocol_wheel_hash(control_lock) != wheel_sha256:
@@ -430,7 +506,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
     )
     input_paths += workload_package_inputs(root)
     input_paths += rust_package_inputs(root)
-    input_paths += recipe_catalog_inputs(root)
+    input_paths += recipe_execution_supply_chain_inputs(root)
     manifest = {
         "schema_version": 2,
         "inputs": {path: digest((root / path).read_bytes()) for path in input_paths},
