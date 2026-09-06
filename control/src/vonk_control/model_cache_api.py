@@ -34,7 +34,13 @@ from .model_cache_contract import (
     ModelCacheRetryRequest,
     ModelCacheUpdatesResponse,
 )
-from .operation_api import bounded_error_responses
+from .operation_api import (
+    OperationApiServices,
+    OperationListPage,
+    OperationProjectionError,
+    OperationProvider,
+    bounded_error_responses,
+)
 from .operation_contract import AvailabilityOperationFailure
 
 MODEL_CACHE_OPERATION_IDS = {
@@ -551,7 +557,7 @@ def install_model_cache_routes(
         return operation_response(result)
 
 class ModelCacheOperationProvider:
-    """Duck-typed Activity provider for the Controller-owned cache family."""
+    """Current Activity provider for the Controller-owned cache family."""
 
     family = "model-cache"
 
@@ -574,18 +580,6 @@ class ModelCacheOperationProvider:
         next_cursor = self._next_cursor(
             page.get("_next_boundary"), state=state, node_id=node_id
         )
-        # The typed provider classes landed after the cache slice's base
-        # revision.  Keep this module importable on that revision while
-        # returning the exact dataclass expected once the shared seam is
-        # present.
-        try:
-            from .operation_api import OperationListPage
-        except ImportError:
-            return {
-                "items": items,
-                "next_cursor": next_cursor,
-                "total": page["total"],
-            }
         return OperationListPage(
             items=items,
             next_cursor=next_cursor,
@@ -612,9 +606,7 @@ class ModelCacheOperationProvider:
                 context=context,
                 boundary=[created_at, operation_id],
             )
-        # This fallback is only used by the pre-Activity base revision.  The
-        # production composition always supplies the shared signed codec.
-        return f"{created_at}|{operation_id}"[:1024]
+        raise OperationProjectionError("operation cursor projection unavailable")
 
     def get_operation(self, operation_id: str) -> dict[str, object]:
         try:
@@ -699,12 +691,8 @@ class ModelCacheOperationProvider:
 def model_cache_operation_provider(
     service: ModelCacheService,
     cursors: Any | None = None,
-) -> Any:
+) -> OperationProvider:
     provider = ModelCacheOperationProvider(service, cursors)
-    try:
-        from .operation_api import OperationProvider
-    except ImportError:
-        return provider
     return OperationProvider(
         family=provider.family,
         list_operations=provider.list_operations,
@@ -713,22 +701,16 @@ def model_cache_operation_provider(
 
 
 def register_model_cache_operation_provider(
-    services: Any, service: ModelCacheService | None
-) -> Any:
-    """Attach the cache family when the shared Activity seam is available.
-
-    The cache slice remains importable against the pre-Activity base commit;
-    integration branches expose ``operation_providers`` on the immutable
-    ``OperationApiServices`` value.  This adapter keeps registration at the
-    production composition boundary without importing or constructing the app.
-    """
-    if services is None or service is None or not hasattr(services, "operation_providers"):
+    services: OperationApiServices | None, service: ModelCacheService | None
+) -> OperationApiServices | None:
+    """Attach the cache family to the current shared Activity services."""
+    if services is None or service is None:
         return services
     provider = model_cache_operation_provider(
-        service, getattr(services, "cursor_codec", None)
+        service, services.cursor_codec
     )
-    existing = tuple(getattr(services, "operation_providers", ()))
-    if any(getattr(item, "family", None) == "model-cache" for item in existing):
+    existing = services.operation_providers
+    if any(item.family == "model-cache" for item in existing):
         return services
     from dataclasses import replace
 

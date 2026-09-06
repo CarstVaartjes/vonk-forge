@@ -371,13 +371,7 @@ def test_download_mutation_is_queued_until_the_controller_worker_runs(
 def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
     cache, tmp_path: Path
 ) -> None:
-    operation_contract = pytest.importorskip("vonk_control.operation_contract")
-    operation_api = pytest.importorskip("vonk_control.operation_api")
-    if not all(
-        hasattr(operation_api, name)
-        for name in ("OperationListPage", "OperationProvider", "OperationQuery")
-    ):
-        pytest.skip("shared Activity provider DTO is not available on this base revision")
+    from vonk_control import operation_api, operation_contract
     service, _sessions = cache
     cursor_codec = TokenCodec(b"c" * 32).cursor_codec()
     provider = model_cache_operation_provider(service, cursors=cursor_codec)
@@ -408,6 +402,8 @@ def test_activity_provider_filters_pages_and_projects_attempt_and_progress(
         operation_ids.append(operation.id)
 
     query = operation_api.OperationQuery(limit=1, after=None, state=None, node_id=None)
+    with pytest.raises(operation_api.OperationProjectionError, match="cursor projection unavailable"):
+        model_cache_operation_provider(service).list_operations(query)
     first_page = provider.list_operations(query)
     assert isinstance(first_page, operation_api.OperationListPage)
     assert first_page.total == 2
