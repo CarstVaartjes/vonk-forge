@@ -259,8 +259,8 @@ export class ApiClient implements ControlApi {
     return this.request("/api/v1/catalog/imports/global", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256})});
   }
 
-  listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList> {
-    return this.request("/api/v1/catalog/public-recipes", {signal});
+  async listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList> {
+    return resultData(await this.generated.GET("/api/v1/catalog/public-recipes", {signal}));
   }
 
   previewPublicRecipe(uri: string, signal?: AbortSignal): Promise<PublicRecipePreview> {

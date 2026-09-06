@@ -430,7 +430,7 @@ export function NodeDetail({
     </section>
 
     <section aria-labelledby={`${headingId}-recipes`}>
-      <div className="node-recipe-command"><div><h4 id={`${headingId}-recipes`}>Models and recipes</h4><p>Stop or remove what is here, or choose a model and exact recipe to download to the Controller.</p></div><a className="button" href={`/library?spark=${encodeURIComponent(node.id)}`}>Download to Library</a></div>
+      <div className="node-recipe-command"><div><h4 id={`${headingId}-recipes`}>Models and recipes</h4><p>Stop or remove what is here, or choose a model and exact recipe to download to the Controller.</p></div><a className="button" href={`/library?spark=${encodeURIComponent(node.id)}`}>Download to NAS</a></div>
       {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={refreshLifecycle} operation={operation}/>}
       <div className="detail-recipe-columns">
         <section aria-label={`Loaded recipes in ${name} details`}><h5>Loaded now</h5>{loaded.length === 0 ? <p>Nothing is loaded now</p> : <ul>{loaded.map(run => <li key={`${run.run_id}:${run.rank}`}><strong>{run.title}</strong><small>{run.alias} · {run.role} rank {run.rank}</small><small>Group {run.group_state} · Run {run.run_state} · Rank {run.rank_state} · Route {run.route_state}</small><span>{runGroupLabel(run)}</span>{stopButton(run)}</li>)}</ul>}</section>

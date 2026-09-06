@@ -69,8 +69,8 @@ export function LibraryBrowser({api, catalogCommit, catalogError, catalogLoading
   return <div className="library-browser-shell">
     {catalogLoading && <p className="library-catalog-state" role="status">Refreshing recipes from the repository…</p>}
     {catalogError && <div className="library-catalog-state is-error" role="alert"><span>Repository catalog unavailable: {catalogError}</span><button type="button" className="button secondary" onClick={onRetryCatalog}>Retry repository</button></div>}
-    {subview === "models" && <LibraryModelsView api={api} entries={records} fleet={fleet} filters={filters} onFiltersChange={updateFilters} onNavigate={onNavigate} onQueryChange={onQueryChange} query={query}/>}
-    {subview === "cache" && <LibraryCacheView api={api} entries={records} fleet={fleet} onBusyChange={onBusyChange} onNavigate={onNavigate}/>}
+    {subview === "models" && <LibraryModelsView api={api} entries={records} fleet={fleet} filters={filters} modelInventory={snapshot.models} onFiltersChange={updateFilters} onNavigate={onNavigate} onNavigatePath={onNavigatePath} onQueryChange={onQueryChange} path={path} query={query}/>}
+    {subview === "cache" && <LibraryCacheView api={api} entries={records} fleet={fleet} modelInventory={snapshot.models} onBusyChange={onBusyChange} onNavigate={onNavigate} path={path}/>}
     {subview === "profiles" && <LibraryProfilesView api={api} entries={records} fleet={fleet} initialCreate={new URL(path, location.origin).searchParams.get("profile") === "new"} initialProfileId={new URL(path, location.origin).searchParams.get("profile") ?? undefined} onBusyChange={onBusyChange} onNavigate={onNavigate}/>}
     {subview === "recipes" && <LibraryWorkcell
         api={api}

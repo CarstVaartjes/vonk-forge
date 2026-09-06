@@ -13,8 +13,8 @@ function catalogRecipe(overrides: Partial<PublicRecipe> = {}): PublicRecipe {
     uri: `vonk://catalog/vonk-forge/qwen-chat@sha256:${"b".repeat(64)}`, content_sha256: "b".repeat(64),
     model_publisher: "qwen", model_slug: "qwen", model_title: "Qwen 3.5", model_version_publisher: "qwen", model_version_slug: "qwen-3-5-bf16", model_version_title: "Qwen 3.5 BF16",
     source_owner: "QwenLM", source_repository: "https://github.com/QwenLM/Qwen3", alignment: "standard", capabilities: ["chat"], qualification: "cataloged", qualification_basis: "explicit-accepted-metadata", qualification_detail: "Accepted.",
-    precision: "BF16", quantizations: ["BF16"], execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "Executable.", execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64), artifact_count: 1,
-    topology_name: "single", topology_mode: "single", node_count: 1, topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true}], fabric: {connectivity: "none", minimum_bandwidth_mbps: 0},
+    precision: "BF16", quantizations: ["BF16"], execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "Executable.", execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64), artifact_count: 1, artifact_identities: [], temporary_build_bytes_per_node: 0,
+    topology_name: "single", topology_mode: "single", node_count: 1, topology_roles: [{name: "entrypoint", count: 1, endpoint_owner: true, disk: {image_bytes: 0, artifact_bytes: 0, staging_bytes: 0, cache_bytes: 0, rollback_bytes: 0, safety_margin_bytes: 0}}], fabric: {connectivity: "none", minimum_bandwidth_mbps: 0},
     expected_download_bytes: 20 * GIB, maximum_installed_bytes_per_node: 25 * GIB, maximum_runtime_memory_bytes_per_node: 48 * GIB, release_version: "1.0.0", release_released_at: "2026-08-30",
     local: {status: "current", recipe_id: "recipe-chat", revision_number: 1, content_sha256: "a".repeat(64), release_version: "1.0.0"},
     ...overrides,
@@ -74,6 +74,16 @@ test("includes repository-only recipes while automatic synchronization catches u
   expect(records[0]).toMatchObject({catalog: recipe, title: "Qwen Chat"});
   expect(records[0].recipe).toBeUndefined();
   expect(filterLibraryRecipeRecords(records, {...EMPTY_LIBRARY_WORKCELL_FILTERS, sparks: "1"}, "qwen")).toHaveLength(1);
+});
+
+test("surfaces unresolved model linkage for a repository recipe", () => {
+  const unresolvedSnapshot: LibrarySnapshot = {
+    ...librarySnapshot,
+    models: [{...librarySnapshot.models[0]!, model_version: {...librarySnapshot.models[0]!.model_version!, state: "unknown"}, recipes: [librarySnapshot.models[0]!.recipes[0]!]}],
+    unlinked_recipes: [],
+  };
+  const record = buildLibraryRecipeRecords(unresolvedSnapshot, [catalogRecipe()])[0]!;
+  expect(record.modelLinkageError).toMatch(/could not resolve this model version/i);
 });
 
 test("preserves live Spark state projection for operational placement", () => {

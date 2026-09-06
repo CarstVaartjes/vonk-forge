@@ -10,6 +10,7 @@ import type {
   LibraryOperation,
   LibraryStopPlan,
   LibraryUninstallPlan,
+  PublicRecipe,
 } from "../api/types";
 import {App} from "../app";
 import {fullLibraryDetail, librarySnapshot} from "../test-fixtures/library";
@@ -17,6 +18,22 @@ import {LibraryOperationProgress} from "./library-operation-progress";
 import {UninstallPreview} from "./library-action-preview";
 
 const GIB = 1024 ** 3;
+
+const repositoryRecipe = {
+  publisher: "vonk-forge", slug: "qwen-chat", title: "Qwen Chat", description: "Repository recipe", tags: [],
+  uri: `vonk://catalog/vonk-forge/qwen-chat@sha256:${"b".repeat(64)}`, content_sha256: "b".repeat(64),
+  model_publisher: "qwen", model_slug: "3", model_title: "Qwen 3", model_version_publisher: "qwen", model_version_slug: "3-bf16", model_version_title: "Qwen 3 BF16",
+  source_owner: null, source_repository: null, alignment: "standard", capabilities: ["chat"], qualification: "cataloged",
+  qualification_basis: "explicit-accepted-metadata", qualification_detail: "Accepted.", precision: "BF16", quantizations: ["BF16"],
+  execution_readiness: "executable", execution_readiness_basis: "explicit-executable-metadata", execution_readiness_detail: "Executable.", execution_harness: "vllm-openai", runtime_distribution: "vllm-0-27-1", source_bundle_sha256: "9".repeat(64), artifact_count: 1, artifact_identities: [], temporary_build_bytes_per_node: 0,
+  topology_name: "pair", topology_mode: "distributed", node_count: 2, topology_roles: [], fabric: {connectivity: "connected", minimum_bandwidth_mbps: 10_000},
+  expected_download_bytes: 120, maximum_installed_bytes_per_node: 80, maximum_runtime_memory_bytes_per_node: 100, release_version: "1.0.0", release_released_at: "2026-09-01",
+  local: {status: "current", recipe_id: "recipe-chat", revision_number: 3, content_sha256: "a".repeat(64), release_version: "1.0.0"},
+} as PublicRecipe;
+
+function repositoryApi<T extends object>(api: T): ControlApi {
+  return {...api, listPublicRecipes: async () => ({repository: "CarstVaartjes/vonk-forge-recipes", commit: "c".repeat(40), recipes: [repositoryRecipe]})} as unknown as ControlApi;
+}
 
 const buildPlan: LibraryBuildPlan = {
   build_id: "build-chat",
@@ -111,7 +128,7 @@ test("previews Load authority, applies its digest, and keeps partial grouped pro
     libraryJobProgress,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  render(<App api={api}/>);
+  render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = await within(placement).findByRole("button", {name: "Select complete group MIA Alpha and MIA Beta"});
@@ -165,7 +182,7 @@ test("previews and applies Build and image Distribution as explicit lifecycle st
     applyLibraryImageDistribution,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  render(<App api={api}/>);
+  render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
@@ -214,7 +231,7 @@ test("locks global navigation and browser departure for the full Library apply a
     applyLibraryLoad,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  render(<App api={api}/>);
+  render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
@@ -254,7 +271,7 @@ test("keeps a stale preview open and returns focus when a review sheet closes", 
     applyLibraryLoad,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  render(<App api={api}/>);
+  render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
@@ -309,7 +326,7 @@ test("applies Mapping and Install only from their distinct authoritative preview
     previewLibraryInstall: vi.fn(async () => lateInstallPlan), applyLibraryInstall,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  render(<App api={api}/>);
+  render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
@@ -358,7 +375,7 @@ test("reuses one apply request key for ambiguous retries of the reviewed preview
     applyLibraryLoad,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  render(<App api={api}/>);
+  render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
@@ -390,7 +407,7 @@ test("locks dismissal while an apply is in flight and warns before leaving", asy
     },
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  const rendered = render(<App api={api}/>);
+  const rendered = render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
@@ -458,7 +475,7 @@ test("aborts in-flight preview, apply, operation, and job requests on cleanup", 
     previewLibraryLoad,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  const previewRender = render(<App api={previewApi}/>);
+  const previewRender = render(<App api={repositoryApi(previewApi)}/>);
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
   await user.click(selector);
@@ -478,7 +495,7 @@ test("aborts in-flight preview, apply, operation, and job requests on cleanup", 
     previewLibraryLoad: async () => loadPlan(),
     applyLibraryLoad,
   } as unknown as ControlApi;
-  const applyRender = render(<App api={applyApi}/>);
+  const applyRender = render(<App api={repositoryApi(applyApi)}/>);
   const applyPlacement = await screen.findByRole("region", {name: "Complete placement groups"});
   const applySelector = within(applyPlacement).getByRole("button", {name: /Select complete group/});
   await user.click(applySelector);
@@ -548,7 +565,7 @@ test("aborts an apply-owned detail refresh on unmount and ignores its late autho
     libraryOperation: vi.fn(async () => operation("running")),
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  const rendered = render(<App api={api}/>);
+  const rendered = render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
@@ -606,7 +623,7 @@ test("retries a failed preview without closing its review", async () => {
     previewLibraryLoad,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  render(<App api={api}/>);
+  render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});
@@ -650,7 +667,7 @@ test("previews Stop and Remove consequences without implying released capacity o
     applyLibraryUninstall,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  render(<App api={api}/>);
+  render(<App api={repositoryApi(api)}/>);
 
   const stopTrigger = await screen.findByRole("button", {name: "Review stop of run 1"});
   expect(stopTrigger).not.toHaveAccessibleName(/run-chat/);
@@ -720,7 +737,7 @@ test("retries operation status errors and cancels pending polls on cleanup", asy
     libraryOperation,
   } as unknown as ControlApi;
   const user = userEvent.setup();
-  const rendered = render(<App api={api}/>);
+  const rendered = render(<App api={repositoryApi(api)}/>);
 
   const placement = await screen.findByRole("region", {name: "Complete placement groups"});
   const selector = within(placement).getByRole("button", {name: /Select complete group/});

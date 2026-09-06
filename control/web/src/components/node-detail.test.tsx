@@ -142,7 +142,7 @@ test("opens a Spark-scoped model management workspace", () => {
   const control = {nodeTelemetryHistory: async () => history()} as unknown as ControlApi;
   render(<NodeDetail api={control} node={node()} now={NOW} onClose={() => undefined}/>);
 
-  expect(screen.getByRole("link", {name: "Download to Library"})).toHaveAttribute(
+  expect(screen.getByRole("link", {name: "Download to NAS"})).toHaveAttribute(
     "href",
     `/library?spark=${encodeURIComponent(node().id)}`,
   );

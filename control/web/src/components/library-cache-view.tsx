@@ -13,6 +13,7 @@ import type {
   ModelCacheRepairInput,
   ModelCacheRepairPreviewResponse,
   ModelCacheState,
+  LibraryModel,
   VisualFleetNode,
   VisualFleetSnapshot,
 } from "../api/types";
@@ -120,8 +121,12 @@ function targetStates(recipeIds: string[], fleet?: VisualFleetSnapshot): Library
   });
 }
 
-function entryFromResponse(response: CacheEntryResponse, records: LibraryRecipeRecord[], fleet?: VisualFleetSnapshot): LibraryCacheEntry {
+function entryFromResponse(response: CacheEntryResponse, records: LibraryRecipeRecord[], modelInventory: readonly LibraryModel[], fleet?: VisualFleetSnapshot): LibraryCacheEntry {
   const matches = exactRecipeMatches(response, records);
+  const model = modelInventory.find(candidate => candidate.model.content_sha256 === response.model_version_sha256);
+  const modelFacts = model?.model_version;
+  const modelTitle = modelFacts?.family?.metadata.title?.trim() || modelFacts?.metadata?.title?.trim();
+  const modelVariantTitle = modelFacts?.format?.quantization?.trim() || modelFacts?.format?.precision?.trim();
   const recipeIds = matches.flatMap(record => record.recipe?.recipe_id ? [record.recipe.recipe_id] : []);
   const first = matches[0];
   return {
@@ -129,8 +134,8 @@ function entryFromResponse(response: CacheEntryResponse, records: LibraryRecipeR
     artifact_set_sha256: response.artifact_set_sha256,
     model_version_sha256: response.model_version_sha256,
     recipe_revision_sha256: response.recipe_revision_sha256,
-    model_title: first?.modelTitle ?? "Model identity not reported",
-    variant_title: first?.catalog?.model_version_title ?? first?.modelTitle ?? `Artifact set ${response.artifact_set_sha256.slice(0, 12)}…`,
+    model_title: modelTitle ?? first?.modelTitle ?? "Model identity not reported",
+    variant_title: modelVariantTitle ?? first?.catalog?.model_version_title ?? first?.modelTitle ?? `Artifact set ${response.artifact_set_sha256.slice(0, 12)}…`,
     recipe_ids: recipeIds,
     recipe_titles: matches.map(record => record.title),
     status: response.state,
@@ -148,6 +153,37 @@ function entryFromResponse(response: CacheEntryResponse, records: LibraryRecipeR
     last_error: response.last_error ?? null,
     target_states: targetStates(recipeIds, fleet),
     note: response.last_error ?? undefined,
+  };
+}
+
+function modelFromInventory(model: LibraryModel, fleet?: VisualFleetSnapshot): LibraryCacheEntry {
+  const facts = model.model_version;
+  const modelTitle = facts?.family?.metadata.title?.trim() || facts?.metadata?.title?.trim() || `${model.model.publisher}/${model.model.slug}`;
+  const variantTitle = facts?.format?.quantization?.trim() || facts?.format?.precision?.trim() || "Exact model version";
+  return {
+    rowKey: `model:${model.model.content_sha256}`,
+    artifact_set_sha256: null,
+    model_version_sha256: model.model.content_sha256,
+    recipe_revision_sha256: null,
+    model_title: modelTitle,
+    variant_title: variantTitle,
+    recipe_ids: [],
+    recipe_titles: [],
+    status: "unknown",
+    coverage: "unknown",
+    expected_bytes: facts?.sizes?.download_bytes ?? null,
+    verified_bytes: null,
+    unique_bytes: null,
+    artifact_count: null,
+    artifacts: [],
+    protected: false,
+    protected_reasons: [],
+    update_available: false,
+    recipe_update_available: false,
+    verified_at: null,
+    last_error: null,
+    target_states: targetStates([], fleet),
+    note: "The Controller has not reported an exact artifact set for this model version.",
   };
 }
 
@@ -180,21 +216,25 @@ function candidateFromRecord(record: LibraryRecipeRecord, fleet?: VisualFleetSna
   };
 }
 
-function mergeInventory(inventory: ModelCacheInventoryResponse | undefined, records: LibraryRecipeRecord[], fleet?: VisualFleetSnapshot): LibraryCacheEntry[] {
-  if (!inventory) return records.map(record => candidateFromRecord(record, fleet));
-  const exact = inventory.entries.map(entry => entryFromResponse(entry, records, fleet));
+function mergeInventory(inventory: ModelCacheInventoryResponse | undefined, records: LibraryRecipeRecord[], modelInventory: readonly LibraryModel[], fleet?: VisualFleetSnapshot): LibraryCacheEntry[] {
+  if (!inventory) return [...records.map(record => candidateFromRecord(record, fleet)), ...modelInventory.map(model => modelFromInventory(model, fleet))];
+  const exact = inventory.entries.map(entry => entryFromResponse(entry, records, modelInventory, fleet));
   const representedRevisionPins = new Set(exact.map(entry => entry.recipe_revision_sha256).filter((value): value is string => Boolean(value)));
+  const representedModelPins = new Set(exact.map(entry => entry.model_version_sha256).filter((value): value is string => Boolean(value)));
   const candidates = records
     .filter(record => {
       const pin = record.recipe?.selected_revision?.content_sha256 ?? record.catalog?.content_sha256;
       return !pin || !representedRevisionPins.has(pin);
     })
     .map(record => candidateFromRecord(record, fleet));
-  return [...exact, ...candidates].sort((left, right) => left.variant_title.localeCompare(right.variant_title));
+  const modelCandidates = modelInventory
+    .filter(model => !representedModelPins.has(model.model.content_sha256))
+    .map(model => modelFromInventory(model, fleet));
+  return [...exact, ...candidates, ...modelCandidates].sort((left, right) => left.variant_title.localeCompare(right.variant_title));
 }
 
 function actionFor(entry: LibraryCacheEntry): CacheMutationAction | undefined {
-  if (!entry.artifact_set_sha256 && !entry.recipe_revision_sha256) return undefined;
+  if (!entry.artifact_set_sha256 && !entry.recipe_revision_sha256 && !entry.model_version_sha256) return undefined;
   if (["incomplete", "needs-repair", "failed"].includes(entry.status)) return entry.artifact_set_sha256 ? "repair" : "download";
   if (entry.status === "cached" && (entry.update_available || entry.recipe_update_available)) return "download";
   if (entry.status === "cached") return "evict";
@@ -206,7 +246,7 @@ function actionLabel(entry: LibraryCacheEntry, action: CacheMutationAction | und
   if (!action) return "Controller action unavailable";
   if (action === "repair") return "Repair payload";
   if (action === "evict") return "Review eviction";
-  return entry.update_available || entry.recipe_update_available ? "Update in Library" : "Download to Library";
+  return entry.update_available || entry.recipe_update_available ? "Update in NAS" : "Download to NAS";
 }
 
 function operationLabel(operation: ModelCacheOperationResponse): string {
@@ -236,12 +276,14 @@ function reviewBlockers(review: CacheReview): string[] {
   return [];
 }
 
-export function LibraryCacheView({api, entries: recordEntries, fleet, onBusyChange, onNavigate}: {
+export function LibraryCacheView({api, entries: recordEntries, fleet, modelInventory = [], onBusyChange, onNavigate, path}: {
   api: ControlApi;
   entries: LibraryRecipeRecord[];
   fleet?: VisualFleetSnapshot;
+  modelInventory?: readonly LibraryModel[];
   onBusyChange?(busy: boolean): void;
   onNavigate: Navigate;
+  path?: string;
 }) {
   const cacheApi = api;
   const [inventory, setInventory] = useState<ModelCacheInventoryResponse>();
@@ -268,12 +310,20 @@ export function LibraryCacheView({api, entries: recordEntries, fleet, onBusyChan
     return () => controller.abort();
   }, [api, refreshAttempt]);
 
-  const entries = useMemo(() => mergeInventory(inventory, recordEntries, fleet), [fleet, inventory, recordEntries]);
+  const entries = useMemo(() => mergeInventory(inventory, recordEntries, modelInventory, fleet), [fleet, inventory, modelInventory, recordEntries]);
   const visibleEntries = useMemo(() => entries.filter(entry => entryMatches(entry, filter, query)), [entries, filter, query]);
   const cachedCount = entries.filter(entry => entry.status === "cached").length;
   const updateCount = entries.filter(entry => entry.update_available || entry.recipe_update_available).length;
   const referencedCount = entries.filter(entry => entry.target_states.some(target => target.state !== "unavailable") || entry.protected).length;
   const operationRunning = Boolean(operation && !TERMINAL_OPERATION_STATES.has(operation.state));
+
+  useEffect(() => {
+    const modelQuery = path ? new URL(path, location.origin).searchParams.get("model") : null;
+    const modelDigest = modelQuery?.slice(modelQuery.lastIndexOf("@") + 1) || null;
+    if (!modelDigest || selected) return;
+    const entry = entries.find(candidate => candidate.model_version_sha256 === modelDigest);
+    if (entry) setSelected(entry);
+  }, [entries, path, selected]);
 
   useEffect(() => {
     onBusyChange?.(operationRunning);
@@ -308,9 +358,9 @@ export function LibraryCacheView({api, entries: recordEntries, fleet, onBusyChan
   }
 
   async function previewAction(entry: LibraryCacheEntry, action = actionFor(entry)) {
-    if (!action || (!entry.artifact_set_sha256 && !entry.recipe_revision_sha256)) {
+    if (!action || (!entry.artifact_set_sha256 && !entry.recipe_revision_sha256 && !entry.model_version_sha256)) {
       setSelected(entry);
-      setOperationError("The Controller has not reported an exact recipe or artifact identity for this entry. No cache mutation was assumed.");
+      setOperationError("The Controller has not reported an exact model, recipe, or artifact identity for this entry. No cache mutation was assumed.");
       return;
     }
     setSelected(entry);
@@ -322,7 +372,7 @@ export function LibraryCacheView({api, entries: recordEntries, fleet, onBusyChan
     setOperationError("");
     try {
       if (action === "download") {
-        const plan = await cacheApi.previewModelCacheDownload({schema_version: 2, source_policy: "nas-first", ...(entry.artifact_set_sha256 ? {artifact_set_sha256: entry.artifact_set_sha256} : {recipe_revision_sha256: entry.recipe_revision_sha256!})});
+        const plan = await cacheApi.previewModelCacheDownload({schema_version: 2, source_policy: "nas-first", ...(entry.artifact_set_sha256 ? {artifact_set_sha256: entry.artifact_set_sha256} : entry.model_version_sha256 ? {model_version_sha256: entry.model_version_sha256} : {recipe_revision_sha256: entry.recipe_revision_sha256!})});
         const nextReview: CacheReview = {action, plan};
         if (plan.blockers.length > 0) setReview(nextReview);
         else await applyReview(nextReview, entry);
@@ -428,7 +478,7 @@ export function LibraryCacheView({api, entries: recordEntries, fleet, onBusyChan
             <dl><div><dt>Artifact set</dt><dd><code>{entry.artifact_set_sha256 ? `sha256:${entry.artifact_set_sha256}` : "Not reported by Controller"}</code></dd></div><div><dt>Model pin</dt><dd><code>{entry.model_version_sha256 ? `sha256:${entry.model_version_sha256}` : "Not reported"}</code></dd></div><div><dt>Recipe pin</dt><dd><code>{entry.recipe_revision_sha256 ? `sha256:${entry.recipe_revision_sha256}` : "Not reported"}</code></dd></div><div><dt>Last verification</dt><dd>{formatVerifiedAt(entry.verified_at)}</dd></div><div><dt>Errors</dt><dd>{entry.last_error ?? "None reported"}</dd></div></dl>
             <div className="library-cache-targets"><strong>Per-Spark outcome</strong>{entry.target_states.length > 0 ? <ul>{entry.target_states.map(target => <li key={target.node_id} className={`target-${target.state}`}><span>{target.label}</span><small>{target.state === "running" ? "Running" : target.state === "staged" ? "Staged / installed" : "Target artifact state unavailable"} · {target.detail}</small></li>)}</ul> : <p>Fleet target state is unavailable.</p>}</div>
             {entry.artifacts.length > 0 && <details className="library-cache-artifacts"><summary>Show {entry.artifacts.length} verified payload file{entry.artifacts.length === 1 ? "" : "s"}</summary><ul>{entry.artifacts.map(artifact => <li key={artifact.sha256}><span>{artifact.path}</span><small>{artifact.state} · {formatBytes(artifact.actual_bytes)} / {formatBytes(artifact.expected_bytes)} · <code>{artifact.sha256.slice(0, 12)}…</code></small></li>)}</ul></details>}
-            <div className="library-cache-detail-actions">{action ? <button type="button" className="button secondary" disabled={operationRunning} onClick={() => void previewAction(entry, action)}>{actionLabel(entry, action)}</button> : <span className="library-cache-action-unavailable">No mutation until the Controller reports an exact artifact set</span>}{entry.status === "cached" && <button type="button" className="button secondary" disabled={operationRunning} onClick={() => void previewAction(entry, "evict")}>Review eviction</button>}</div>
+            <div className="library-cache-detail-actions">{action ? <button type="button" className="button secondary" disabled={operationRunning} onClick={() => void previewAction(entry, action)}>{actionLabel(entry, action)}</button> : <span className="library-cache-action-unavailable">No mutation until the Controller reports an exact cache identity</span>}{entry.status === "cached" && <button type="button" className="button secondary" disabled={operationRunning} onClick={() => void previewAction(entry, "evict")}>Review eviction</button>}</div>
           </div>}
         </article>;
       })}

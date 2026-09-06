@@ -10,7 +10,6 @@ import {actionName} from "./library-action-types";
 import type {LibraryActionName, LibraryActionReview, LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
 import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
 import {LibraryProfileComposer} from "./library-profile-composer";
-import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
 import {LibraryRecipeVisual} from "./library-recipe-visual";
 import {ArtifactJobWorkspace} from "./artifact-job-workspace";
 import {LibraryRecipeFit} from "./library-recipe-fit";
@@ -107,24 +106,11 @@ export function LibraryRecipeAuthority({api, catalogRecipe, detail, modelVersion
   const [runGroup, setRunGroup] = useState<LibraryPlacementGroup>();
   const [operationName, setOperationName] = useState<LibraryActionName>("Load");
   const narrowViewport = useNarrowViewport("(max-width: 520px)");
-  const [mobileQualificationOpen, setMobileQualificationOpen] = useState(false);
-  const canonicalPreviewKey = [
-    detail.recipe.recipe_id,
-    detail.selected_revision?.id ?? "",
-    detail.selected_revision?.content_sha256 ?? "",
-    JSON.stringify(detail.visual_recipe),
-  ].join(":");
-  const [preview, setPreview] = useState({document: detail.visual_recipe, canonicalKey: canonicalPreviewKey, local: false});
+  const [mobileExecutionOpen, setMobileExecutionOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement | null>(null);
-  const visual = preview.canonicalKey === canonicalPreviewKey ? preview.document : detail.visual_recipe;
-  const localPreview = visual !== null && preview.canonicalKey === canonicalPreviewKey && preview.local;
+  const visual = detail.visual_recipe;
   const revision = detail.selected_revision;
   const alias = detail.visual_recipe?.interfaces.find(item => item.adapter === "openai")?.model_aliases?.[0] ?? detail.recipe.slug;
-  useEffect(() => {
-    setPreview(current => current.canonicalKey === canonicalPreviewKey
-      ? current
-      : {document: detail.visual_recipe, canonicalKey: canonicalPreviewKey, local: false});
-  }, [canonicalPreviewKey, detail.visual_recipe]);
   const closeReview = useCallback(() => {
     setReview(undefined);
     const returnTo = trigger.current;
@@ -235,7 +221,6 @@ export function LibraryRecipeAuthority({api, catalogRecipe, detail, modelVersion
         ]}/>
       </div>
       <div className="recipe-authority-statuses">
-        {localPreview && <StatusPill tone="warning">Local preview · not saved</StatusPill>}
         <StatusPill tone={revision?.lifecycle === "resolved" ? "healthy" : "warning"}>{revision ? `${revision.lifecycle === "resolved" ? "Immutable" : revision.lifecycle} revision ${revision.revision_number}` : "No valid revision"}</StatusPill>
       </div>
     </header>
@@ -243,7 +228,7 @@ export function LibraryRecipeAuthority({api, catalogRecipe, detail, modelVersion
     <section className={`recipe-next-action${activeRun ? " is-running" : placementRecommendation ? "" : " is-blocked"}`} aria-label="Recommended next action">
       <div>
         <p className="fleet-kicker">Recommended next step</p>
-        <h4>{activeRun ? "Model is running" : recommendationCopy?.title ?? "Resolve placement readiness"}</h4>
+        <h4>{activeRun ? "Model is running" : recommendationCopy?.title ?? "Resolve placement"}</h4>
         <p>{activeRun
           ? "No lifecycle change is required. Use Fleet for live node, route, and workload health."
           : recommendationCopy?.description ?? "No complete Spark group currently exposes an authorized lifecycle action. Review placement blockers and evidence below."}</p>
@@ -256,11 +241,11 @@ export function LibraryRecipeAuthority({api, catalogRecipe, detail, modelVersion
     </section>
     <ArtifactJobWorkspace api={api} detail={detail} onBusyChange={onBusyChange}/>
     <LibraryProfileComposer api={api} detail={detail} preferredNodeId={preferredNodeId}/>
-    <details className="recipe-qualification-disclosure" open={!narrowViewport || mobileQualificationOpen} onToggle={event => {
-      if (narrowViewport && event.currentTarget.open !== mobileQualificationOpen) setMobileQualificationOpen(event.currentTarget.open);
+    <details className="recipe-execution-disclosure" open={!narrowViewport || mobileExecutionOpen} onToggle={event => {
+      if (narrowViewport && event.currentTarget.open !== mobileExecutionOpen) setMobileExecutionOpen(event.currentTarget.open);
     }}>
-      <summary><span><strong>Technical qualification</strong><small>Lifecycle, placement, runtime and topology</small></span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round"/></svg></summary>
-      <div className="recipe-qualification-body">
+      <summary><span><strong>Execution and placement</strong><small>Lifecycle, placement, runtime and topology</small></span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round"/></svg></summary>
+      <div className="recipe-execution-body">
     <section className="library-section library-primary-control" aria-label="Lifecycle overview">
       <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Lifecycle overview</h4></div><span className="identity-note">Build · map · install · run</span></div>
       <ol className="lifecycle-track" aria-label="Recipe lifecycle stages">
@@ -306,11 +291,6 @@ export function LibraryRecipeAuthority({api, catalogRecipe, detail, modelVersion
       </section>
     </>}
     <LibraryReasons reasons={detail.reasons}/>
-    {detail.visual_recipe && <LibraryRecipeAdvanced
-      document={detail.visual_recipe}
-      onValidDocument={document => setPreview({document, canonicalKey: canonicalPreviewKey, local: true})}
-      resetToken={canonicalPreviewKey}
-    />}
       </div>
     </details>
     {review && <LibraryActionDialog alias={alias} api={api} evidence={review.evidence} onApplied={onApplied} onBusyChange={onBusyChange} onClose={closeReview} onRefresh={onRefresh} policy={policy} target={review.target}/>}
