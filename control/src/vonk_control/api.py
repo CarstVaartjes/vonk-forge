@@ -1507,7 +1507,8 @@ def production_app() -> FastAPI:
 
     settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url))
-    clock = lambda: datetime.now(UTC)
+    def clock() -> datetime:
+        return datetime.now(UTC)
     token_codec = TokenCodec(settings.token_signing_key)
     cursor_codec = token_codec.cursor_codec()
     job_service = JobService(sessions, clock=clock, cursors=cursor_codec)
@@ -1556,7 +1557,8 @@ def production_app() -> FastAPI:
         huggingface_token_path=settings.huggingface_token_path,
     )
     model_cache.resume_operations()
-    revision_eligible = lambda revision: revision == authority.head()
+    def revision_eligible(revision: str) -> bool:
+        return revision == authority.head()
     current_revision = authority.head
     agent_services = build_agent_services(
         settings,
@@ -1667,7 +1669,7 @@ def production_app() -> FastAPI:
             resolve_persisted_runtime_image_receipt(
                 session,
                 recipe_revision_id=revision.id,
-                original_content_digest=recipe_digest,
+                current_content_digest=recipe_digest,
                 effective_execution_key=execution_key,
                 receipt=receipt,
             )

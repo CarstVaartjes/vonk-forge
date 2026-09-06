@@ -22,6 +22,7 @@ from .test_runtime_image_preparation import (
     IMAGE_DIGEST,
     PLATFORM_IMAGE_DIGEST,
     TinyTransport,
+    _add_revision,
     _recipe,
     _runtime,
 )
@@ -51,6 +52,7 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(tmp_path: Path
         clock=lambda: datetime.now(UTC),
     )
     with Session(engine) as session:
+        _add_revision(session, revision_id, _recipe("recipe-image.json"))
         persist_runtime_image_receipt(
             session,
             recipe_revision_id=revision_id,

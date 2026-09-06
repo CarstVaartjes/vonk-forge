@@ -31,6 +31,7 @@ from .models import (
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
+    RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
 from .runtime_image_preparation import (
@@ -204,7 +205,13 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
         super().__init__(sessions, artifact_root, **kwargs)
         self._runtime_storage = FilesystemRuntimeImageStorage(artifact_root)
 
-    def _published_receipt_authorizes(self, image_digest: str, archive_sha256: str) -> bool:
+    def _published_receipt_authorizes(
+        self,
+        image_digest: str,
+        archive_sha256: str,
+        *,
+        recipe_revision_id: str | None = None,
+    ) -> bool:
         try:
             receipt = self._runtime_storage.read_receipt(archive_sha256)
             if receipt.source != "published" or receipt.image_digest != image_digest:
@@ -215,7 +222,6 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                 revision = session.scalar(
                     select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
                         CatalogDocumentRevision.content_digest
                         == receipt.distribution_content_sha256,
                         CatalogDocumentRevision.publisher
@@ -239,7 +245,6 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                     return False
                 durable = session.scalar(
                     select(RuntimeImageReceipt).where(
-                        RuntimeImageReceipt.recipe_revision_id == revision.id,
                         RuntimeImageReceipt.source == "published",
                         RuntimeImageReceipt.original_content_digest
                         == receipt.distribution_content_sha256,
@@ -258,6 +263,23 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                     )
                 )
                 if durable is None:
+                    return False
+                authorization_query = select(RuntimeImageAuthorization).where(
+                    RuntimeImageAuthorization.receipt_id == durable.id,
+                    RuntimeImageAuthorization.source == "published",
+                    RuntimeImageAuthorization.state == "authorized",
+                )
+                if recipe_revision_id is not None:
+                    authorization_query = authorization_query.where(
+                        RuntimeImageAuthorization.recipe_revision_id == recipe_revision_id
+                    )
+                elif revision.id is not None:
+                    authorization_query = authorization_query.join(
+                        CatalogDocumentRevision,
+                        CatalogDocumentRevision.id
+                        == RuntimeImageAuthorization.recipe_revision_id,
+                    ).where(CatalogDocumentRevision.state == "active")
+                if session.scalar(authorization_query.limit(1)) is None:
                     return False
             self._runtime_storage.verify_existing(archive_sha256, receipt.image_bytes)
             return True
@@ -352,6 +374,7 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                     return self._published_receipt_authorizes(
                         assignment.oci_image_digest,
                         assignment.oci_archive_sha256,
+                        recipe_revision_id=revision_id,
                     )
         return self.verify_runtime_image(
             assignment.oci_image_digest,

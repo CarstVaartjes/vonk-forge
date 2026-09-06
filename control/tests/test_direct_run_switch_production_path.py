@@ -323,6 +323,8 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
                     state="active",
                     document=recipe_document,
                     content_digest=recipe_digest,
+                    artifact_key="b" * 64,
+                    execution_key="a" * 64,
                     projected={},
                     created_by="test",
                     created_at=NOW,

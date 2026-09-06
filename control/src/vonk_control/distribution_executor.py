@@ -26,6 +26,7 @@ from .models import (
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
+    RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
 from .run_switch_contract import RunSwitchPhase, RunSwitchPlan
@@ -481,21 +482,92 @@ class DurableDistributionPhaseExecutor:
                     or build.image_bytes != image_bytes
                 ):
                     raise RuntimeError("OCI build authority changed")
-                if plan.recipe_revision_id is not None and build.recipe_revision_id != plan.recipe_revision_id:
-                    raise RuntimeError("OCI build recipe revision changed")
-            else:
-                receipt = session.scalar(
-                    select(RuntimeImageReceipt).where(
-                        RuntimeImageReceipt.recipe_revision_id == plan.recipe_revision_id,
-                        RuntimeImageReceipt.source == "published",
-                        RuntimeImageReceipt.original_content_digest == plan.recipe_content_sha256,
-                        RuntimeImageReceipt.effective_execution_key == effective_execution_key,
-                        RuntimeImageReceipt.state == "verified",
-                        RuntimeImageReceipt.platform_manifest_digest == image_digest,
-                        RuntimeImageReceipt.oci_archive_sha256 == layout_digest,
-                        RuntimeImageReceipt.image_bytes == image_bytes,
+                if plan.recipe_revision_id is not None:
+                    authorization = session.scalar(
+                        select(RuntimeImageAuthorization).where(
+                            RuntimeImageAuthorization.recipe_revision_id == plan.recipe_revision_id,
+                            RuntimeImageAuthorization.source == "controller-build",
+                            RuntimeImageAuthorization.build_id == build.id,
+                            RuntimeImageAuthorization.effective_execution_key
+                            == effective_execution_key,
+                            RuntimeImageAuthorization.platform_manifest_digest == image_digest,
+                            RuntimeImageAuthorization.oci_archive_sha256 == layout_digest,
+                            RuntimeImageAuthorization.image_bytes == image_bytes,
+                            RuntimeImageAuthorization.state == "authorized",
+                        )
                     )
-                )
+                    if authorization is None:
+                        raise RuntimeError("current recipe is not authorized for OCI build receipt")
+                    receipt = session.scalar(
+                        select(RuntimeImageReceipt).where(
+                            RuntimeImageReceipt.id == authorization.receipt_id,
+                            RuntimeImageReceipt.state == "verified",
+                            RuntimeImageReceipt.source == authorization.source,
+                            RuntimeImageReceipt.build_id == authorization.build_id,
+                            RuntimeImageReceipt.original_content_digest
+                            == authorization.original_content_digest,
+                            RuntimeImageReceipt.effective_execution_key
+                            == authorization.effective_execution_key,
+                            RuntimeImageReceipt.platform_manifest_digest
+                            == authorization.platform_manifest_digest,
+                            RuntimeImageReceipt.local_image_config_id
+                            == authorization.local_image_config_id,
+                            RuntimeImageReceipt.oci_archive_sha256
+                            == authorization.oci_archive_sha256,
+                            RuntimeImageReceipt.image_bytes == authorization.image_bytes,
+                        )
+                    )
+                    if receipt is None:
+                        raise RuntimeError("OCI build receipt authority changed")
+            else:
+                receipt = None
+                if plan.recipe_revision_id is not None:
+                    authorization = session.scalar(
+                        select(RuntimeImageAuthorization).where(
+                            RuntimeImageAuthorization.recipe_revision_id == plan.recipe_revision_id,
+                            RuntimeImageAuthorization.source == "published",
+                            RuntimeImageAuthorization.effective_execution_key
+                            == effective_execution_key,
+                            RuntimeImageAuthorization.platform_manifest_digest == image_digest,
+                            RuntimeImageAuthorization.oci_archive_sha256 == layout_digest,
+                            RuntimeImageAuthorization.image_bytes == image_bytes,
+                            RuntimeImageAuthorization.state == "authorized",
+                        )
+                    )
+                    if authorization is not None:
+                        receipt = session.scalar(
+                            select(RuntimeImageReceipt).where(
+                                RuntimeImageReceipt.id == authorization.receipt_id,
+                                RuntimeImageReceipt.state == "verified",
+                                RuntimeImageReceipt.source == authorization.source,
+                                RuntimeImageReceipt.build_id.is_(None),
+                                RuntimeImageReceipt.original_content_digest
+                                == authorization.original_content_digest,
+                                RuntimeImageReceipt.effective_execution_key
+                                == authorization.effective_execution_key,
+                                RuntimeImageReceipt.registry_manifest_digest
+                                == authorization.registry_manifest_digest,
+                                RuntimeImageReceipt.platform_manifest_digest
+                                == authorization.platform_manifest_digest,
+                                RuntimeImageReceipt.local_image_config_id
+                                == authorization.local_image_config_id,
+                                RuntimeImageReceipt.oci_archive_sha256
+                                == authorization.oci_archive_sha256,
+                                RuntimeImageReceipt.image_bytes == authorization.image_bytes,
+                            )
+                        )
+                else:
+                    receipt = session.scalar(
+                        select(RuntimeImageReceipt).where(
+                            RuntimeImageReceipt.source == "published",
+                            RuntimeImageReceipt.original_content_digest == plan.recipe_content_sha256,
+                            RuntimeImageReceipt.effective_execution_key == effective_execution_key,
+                            RuntimeImageReceipt.state == "verified",
+                            RuntimeImageReceipt.platform_manifest_digest == image_digest,
+                            RuntimeImageReceipt.oci_archive_sha256 == layout_digest,
+                            RuntimeImageReceipt.image_bytes == image_bytes,
+                        )
+                    )
                 if receipt is None:
                     raise RuntimeError("published runtime image receipt authority changed")
         return DistributionObject("image.oci.tar", layout_digest, image_bytes, "oci-archive")

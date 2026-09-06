@@ -80,6 +80,7 @@ from .models import (
     RecipeRun,
     RecipeSourceBundle,
     RunNode,
+    RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
 from .operation_api import bounded_error_responses
@@ -129,13 +130,12 @@ def _runtime_image_receipt_matches(
     revision_digest: str,
     installation_image_digest: str,
     installation_recipe_build_id: str | None,
+    authorization: object | None = None,
 ) -> bool:
     """Bind one persisted launch image to its verified Controller receipt."""
 
     if (
         getattr(receipt, "state", None) != "verified"
-        or getattr(receipt, "recipe_revision_id", None) != revision_id
-        or getattr(receipt, "original_content_digest", None) != revision_digest
         or identity.get("recipe_revision_sha256") != revision_digest
         or getattr(receipt, "effective_execution_key", None)
         != identity.get("execution_sha256")
@@ -158,6 +158,30 @@ def _runtime_image_receipt_matches(
         != getattr(receipt, "runtime_interface_label", None)
         or runtime_image.get("source") != getattr(receipt, "source", None)
         or runtime_image.get("build_id") != getattr(receipt, "build_id", None)
+    ):
+        return False
+    if authorization is None:
+        if (
+            getattr(receipt, "recipe_revision_id", None) != revision_id
+            or getattr(receipt, "original_content_digest", None) != revision_digest
+        ):
+            return False
+    elif (
+        getattr(authorization, "recipe_revision_id", None) != revision_id
+        or getattr(authorization, "receipt_id", None) != getattr(receipt, "id", None)
+        or getattr(authorization, "original_content_digest", None)
+        != getattr(receipt, "original_content_digest", None)
+        or getattr(authorization, "effective_execution_key", None)
+        != getattr(receipt, "effective_execution_key", None)
+        or getattr(authorization, "source", None) != getattr(receipt, "source", None)
+        or getattr(authorization, "platform_manifest_digest", None)
+        != getattr(receipt, "platform_manifest_digest", None)
+        or getattr(authorization, "local_image_config_id", None)
+        != getattr(receipt, "local_image_config_id", None)
+        or getattr(authorization, "oci_archive_sha256", None)
+        != getattr(receipt, "oci_archive_sha256", None)
+        or getattr(authorization, "image_bytes", None) != getattr(receipt, "image_bytes", None)
+        or getattr(authorization, "build_id", None) != getattr(receipt, "build_id", None)
     ):
         return False
     source = runtime_image.get("source")
@@ -1171,12 +1195,8 @@ def _read_tuf_file(root: Path, name: str, maximum: int) -> bytes:
         directory_descriptor = os.open(os.fspath(root), root_flags)
         try:
             opened_root = os.fstat(directory_descriptor)
-            root_identity = lambda item: (
-                item.st_dev,
-                item.st_ino,
-                item.st_mode,
-                item.st_uid,
-            )
+            def root_identity(item: os.stat_result) -> tuple[int, int, int, int]:
+                return (item.st_dev, item.st_ino, item.st_mode, item.st_uid)
             if root_identity(root_metadata) != root_identity(opened_root):
                 raise OSError("TUF root changed")
             for component in components[:-1]:
@@ -1234,16 +1254,17 @@ def _read_tuf_file(root: Path, name: str, maximum: int) -> bytes:
             first_digest.update(chunk)
             remaining -= len(chunk)
         after = os.fstat(descriptor)
-        identity = lambda item: (
-            item.st_dev,
-            item.st_ino,
-            item.st_mode,
-            item.st_uid,
-            item.st_nlink,
-            item.st_size,
-            item.st_mtime_ns,
-            item.st_ctime_ns,
-        )
+        def identity(item: os.stat_result) -> tuple[int, ...]:
+            return (
+                item.st_dev,
+                item.st_ino,
+                item.st_mode,
+                item.st_uid,
+                item.st_nlink,
+                item.st_size,
+                item.st_mtime_ns,
+                item.st_ctime_ns,
+            )
         if identity(before) != identity(after) or os.read(descriptor, 1):
             raise HTTPException(status_code=404, detail="TUF file changed")
         os.lseek(descriptor, 0, os.SEEK_SET)
@@ -2164,17 +2185,31 @@ def install_agent_routes(
                 if isinstance(candidate_identity, Mapping)
                 else None
             )
-            receipts = (
+            authorizations = (
                 session.scalars(
-                    select(RuntimeImageReceipt).where(
-                        RuntimeImageReceipt.recipe_revision_id
+                    select(RuntimeImageAuthorization).where(
+                        RuntimeImageAuthorization.recipe_revision_id
                         == installation.recipe_revision_id,
-                        RuntimeImageReceipt.effective_execution_key
+                        RuntimeImageAuthorization.effective_execution_key
                         == effective_execution_key,
-                        RuntimeImageReceipt.state == "verified",
+                        RuntimeImageAuthorization.state == "authorized",
                     )
                 ).all()
                 if isinstance(effective_execution_key, str)
+                else []
+            )
+            authorization_by_receipt = {
+                authorization.receipt_id: authorization
+                for authorization in authorizations
+            }
+            receipts = (
+                session.scalars(
+                    select(RuntimeImageReceipt).where(
+                        RuntimeImageReceipt.id.in_(authorization_by_receipt),
+                        RuntimeImageReceipt.state == "verified",
+                    )
+                ).all()
+                if authorization_by_receipt
                 else []
             )
             candidate_source = (
@@ -2251,6 +2286,7 @@ def install_agent_routes(
                 revision_digest=revision_content_digest,
                 installation_image_digest=installation_image_digest,
                 installation_recipe_build_id=installation_recipe_build_id,
+                authorization=authorization_by_receipt.get(receipt.id),
             )
         ]
         if len(matching_receipts) != 1:

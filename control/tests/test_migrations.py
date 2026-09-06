@@ -65,6 +65,7 @@ EXPECTED_BASELINE_TABLES = {
     "recipe_source_bundles",
     "source_bundle_archives",
     "runtime_image_receipts",
+    "runtime_image_authorizations",
     "reconciliation_cancellations",
     "reconciliation_completion_generation",
     "reconciliation_operations",
@@ -183,6 +184,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0018_canonical_catalog_documents.py",
         "0019_recipe_builds_canonical_revision.py",
         "0020_runtime_image_receipts.py",
+        "0021_runtime_image_authorizations.py",
     ]
 
 
@@ -250,6 +252,119 @@ def test_runtime_image_receipt_uses_production_identity_fields(
         "ck_runtime_image_receipts_source_build",
         "ck_runtime_image_receipts_runtime_identity",
     }
+
+
+def test_postgres_runtime_image_authorization_migration_and_checks(
+    postgres_engine,
+) -> None:
+    """Run the fresh chain on PostgreSQL and exercise the new authority check."""
+
+    config = _config(postgres_engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, "head")
+    inspector = inspect(postgres_engine)
+    assert "runtime_image_authorizations" in inspector.get_table_names()
+    checks = {
+        check["name"]
+        for check in inspector.get_check_constraints("runtime_image_authorizations")
+    }
+    assert checks >= {
+        "ck_runtime_image_authorizations_original_digest",
+        "ck_runtime_image_authorizations_execution_key",
+        "ck_runtime_image_authorizations_platform_digest",
+        "ck_runtime_image_authorizations_config_digest",
+        "ck_runtime_image_authorizations_archive_digest",
+        "ck_runtime_image_authorizations_registry_digest",
+        "ck_runtime_image_authorizations_image_bytes",
+        "ck_runtime_image_authorizations_source",
+        "ck_runtime_image_authorizations_state",
+    }
+
+    now = "2026-09-06 12:00:00+00"
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO catalog_documents
+                  (id, kind, publisher, slug, title, created_by, created_at, updated_at)
+                VALUES
+                  ('pg-doc', 'recipe', 'acme', 'pg-recipe', 'PG Recipe', 'test', :now, :now)
+                """
+            ),
+            {"now": now},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO catalog_document_revisions
+                  (id, document_id, kind, publisher, slug, revision_number,
+                   schema_version, state, document, content_digest, artifact_key,
+                   execution_key, projected, created_by, created_at)
+                VALUES
+                  ('pg-revision', 'pg-doc', 'recipe', 'acme', 'pg-recipe', 1,
+                   2, 'active', '{}', :content_digest, :artifact_key,
+                   :execution_key, '{}', 'test', :now)
+                """
+            ),
+            {
+                "content_digest": "a" * 64,
+                "artifact_key": "b" * 64,
+                "execution_key": "c" * 64,
+                "now": now,
+            },
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO runtime_image_receipts
+                  (id, recipe_revision_id, source, original_content_digest,
+                   effective_execution_key, registry_manifest_digest,
+                   platform_manifest_digest, local_image_config_id,
+                   oci_archive_sha256, image_bytes, architecture,
+                   runtime_interface, runtime_interface_label, verified_at, state)
+                VALUES
+                  ('pg-receipt', 'pg-revision', 'published', :digest, :execution,
+                   :registry, :platform, :config, :archive, 1, 'linux-arm64',
+                   'vonk.runtime.v1', 'v1', :now, 'verified')
+                """
+            ),
+            {
+                "digest": "a" * 64,
+                "execution": "c" * 64,
+                "registry": "sha256:" + "d" * 64,
+                "platform": "sha256:" + "e" * 64,
+                "config": "sha256:" + "f" * 64,
+                "archive": "1" * 64,
+                "now": now,
+            },
+        )
+
+    invalid_authorization = text(
+        """
+        INSERT INTO runtime_image_authorizations
+          (id, recipe_revision_id, receipt_id, source, original_content_digest,
+           effective_execution_key, registry_manifest_digest,
+           platform_manifest_digest, local_image_config_id, oci_archive_sha256,
+           image_bytes, authorized_at, state)
+        VALUES
+          ('pg-auth-invalid', 'pg-revision', 'pg-receipt', 'published',
+           :digest, :execution, :registry, :platform, :config, :archive,
+           1, :now, 'authorized')
+        """
+    )
+    with pytest.raises(IntegrityError):
+        with postgres_engine.begin() as connection:
+            connection.execute(
+                invalid_authorization,
+                {
+                    "digest": "G" * 64,
+                    "execution": "c" * 64,
+                    "registry": "sha256:" + "d" * 64,
+                    "platform": "sha256:" + "e" * 64,
+                    "config": "sha256:" + "f" * 64,
+                    "archive": "1" * 64,
+                    "now": now,
+                },
+            )
 
 
 def test_fresh_recipe_installation_allows_published_images_without_build(
@@ -471,7 +586,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-                == "0020_runtime_image_receipts"
+                    == "0021_runtime_authz"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -601,7 +716,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-                == "0020_runtime_image_receipts"
+                    == "0021_runtime_authz"
         )
 
 
@@ -683,7 +798,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-                == "0020_runtime_image_receipts"
+                    == "0021_runtime_authz"
         )
 
 
