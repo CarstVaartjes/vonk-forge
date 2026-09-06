@@ -634,15 +634,30 @@ class RecipeImageAvailabilityService:
         try:
             operation = self._model_cache.get_operation(child_id)
             if operation.state == "failed":
-                retry_key = str(
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"vonk:recipe-availability-model-retry:{child_id}:{parent_request_key}",
+                reused = None
+                list_operations = getattr(self._model_cache, "list_operations", None)
+                if callable(list_operations):
+                    for candidate in list_operations(limit=100):
+                        if (
+                            candidate.id != child_id
+                            and candidate.artifact_set_sha256 == operation.artifact_set_sha256
+                            and candidate.plan_digest == operation.plan_digest
+                            and candidate.state in {"queued", "running", "partial", "succeeded"}
+                        ):
+                            reused = candidate
+                            break
+                if reused is not None:
+                    operation = reused
+                else:
+                    retry_key = str(
+                        uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"vonk:recipe-availability-model-retry:{child_id}:{parent_request_key}",
+                        )
                     )
-                )
-                operation = self._model_cache.retry(
-                    child_id, actor=actor, request_key=retry_key
-                )
+                    operation = self._model_cache.retry(
+                        child_id, actor=actor, request_key=retry_key
+                    )
             return dict(child) | {
                 "id": operation.id,
                 "state": operation.state,
