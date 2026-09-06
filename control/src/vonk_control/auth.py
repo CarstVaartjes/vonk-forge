@@ -74,6 +74,10 @@ MUTATION_ROLES = {
         {"administrator"}
     ),
     ("POST", "/api/v1/model-cache/evict"): frozenset({"administrator"}),
+    (
+        "POST",
+        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
+    ): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/catalog/managed-recipes/sync"): frozenset({"administrator"}),
     ("PUT", "/api/v1/catalog/source-bundles/{sha256}"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/source-checks"): frozenset({"administrator"}),

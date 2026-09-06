@@ -73,6 +73,13 @@ class ModelCacheRetryRequest(StrictModel):
     request_key: str = Field(pattern=UUID_PATTERN)
 
 
+class ModelCacheAccessResumeRequest(StrictModel):
+    schema_version: Literal[2] = 2
+    request_key: str = Field(pattern=UUID_PATTERN)
+    artifact_set_sha256: Digest
+    plan_digest: Digest
+
+
 class ModelCacheEvictionPreviewRequest(StrictModel):
     schema_version: Literal[2] = 2
     target_bytes: int = Field(gt=0)
@@ -289,6 +296,7 @@ __all__ = [
     "ModelCacheRepairPreviewResponse",
     "ModelCacheRepairRequest",
     "ModelCacheRetryRequest",
+    "ModelCacheAccessResumeRequest",
     "ModelCacheUpdateResponse",
     "ModelCacheUpdatesResponse",
 ]

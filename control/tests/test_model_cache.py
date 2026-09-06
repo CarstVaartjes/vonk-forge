@@ -30,6 +30,7 @@ from vonk_control.model_cache_api import (
     model_cache_operation_provider,
 )
 from vonk_control.model_cache_contract import (
+    ModelCacheAccessResumeRequest,
     ModelCacheDownloadRequest,
     ModelCacheEvictionPreviewRequest,
     ModelCacheEvictRequest,
@@ -644,6 +645,12 @@ def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
     assert _retry_after_seconds(
         {"x-ratelimit-reset": str(int(now.timestamp()) + 11)}, now=now
     ) == 11
+    assert _retry_after_seconds(
+        {"RateLimit": '"resolvers";r=0;t=123'}, now=now
+    ) == 123
+    assert _retry_after_seconds(
+        {"Retry-After": "7", "RateLimit": '"resolvers";r=0;t=123'}, now=now
+    ) == 123
 
 
 def test_worker_prefers_nonblocking_cache_tick_when_available() -> None:
@@ -846,6 +853,11 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
     assert "protected" not in ModelCacheEvictionPreviewRequest.model_fields
     assert set(ModelCacheDownloadRequest.model_fields) >= {"request_key", "plan_digest"}
     assert set(ModelCacheEvictRequest.model_fields) >= {"request_key", "plan_digest"}
+    assert set(ModelCacheAccessResumeRequest.model_fields) >= {
+        "request_key",
+        "artifact_set_sha256",
+        "plan_digest",
+    }
     with pytest.raises(ValueError):
         ModelCacheDownloadRequest(
             request_key="00000000-0000-4000-8000-000000000011",
@@ -906,6 +918,7 @@ def test_contracts_and_routes_are_schema_two_and_do_not_accept_sources_or_force_
         "/api/v1/model-cache/operations",
         "/api/v1/model-cache/operations/{operation_id}",
         "/api/v1/model-cache/operations/{operation_id}/retry",
+        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
     }
 
 
