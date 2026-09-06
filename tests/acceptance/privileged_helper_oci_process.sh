@@ -45,6 +45,10 @@ install -d -o root -g root -m 0755 /var/lib/vonk-forge
 install -d -o root -g root -m 0700 /var/lib/vonk-forge/helper /var/lib/vonk-forge/helper/requests
 install -d -o root -g root -m 0755 /run/vonk-forge-agent /run/vonk-forge-package-helper
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent /var/lib/vonk-forge-agent/oci-archives /run/vonk-forge-agent/runtime-requests
+rm -rf \
+  /var/lib/vonk-forge-agent/installations/proof-install \
+  /var/lib/vonk-forge-agent/runs/$run_id \
+  /var/lib/vonk-forge-agent/run-metadata/$run_id
 runtime_probe=/run/vonk-forge-agent/privileged_oci_process_probe
 runtime_fixture=/run/vonk-forge-agent/compiled_workload_v2.json
 install -o root -g vonk-agent -m 0750 "$probe_binary" "$runtime_probe"
