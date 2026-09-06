@@ -543,9 +543,18 @@ fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
         program == std::path::Path::new("/usr/bin/docker")
             && arguments == &["load", "--input", archive.to_str().unwrap()]
     }));
+    assert!(calls.iter().any(|(program, arguments)| {
+        program == std::path::Path::new("/usr/bin/docker")
+            && arguments
+                == &[
+                    "tag",
+                    "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest",
+                    "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002",
+                ]
+    }));
 }
 
-fn assert_archive_import_accepts_load_output(load_output: Vec<u8>) {
+fn assert_archive_import_accepts_load_output(load_output: Vec<u8>, expected_source: Option<&str>) {
     let (_temp, roots, runner, release) = fixture();
     runner.set_docker_load_stdout(load_output);
     let image = "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002";
@@ -571,6 +580,7 @@ fn assert_archive_import_accepts_load_output(load_output: Vec<u8>) {
         ],
     );
     let request_digest = write_runtime_request(&roots, &request);
+    let calls = runner.calls.clone();
     let executor =
         OperationExecutor::new(roots.clone(), release.public_key().as_ref(), runner, None).unwrap();
 
@@ -597,6 +607,12 @@ fn assert_archive_import_accepts_load_output(load_output: Vec<u8>) {
         receipt["local_image_reference"],
         format!("{image}@sha256:{}", "c".repeat(64))
     );
+    if let Some(source) = expected_source {
+        assert!(calls.lock().unwrap().iter().any(|(program, arguments)| {
+            program == std::path::Path::new("/usr/bin/docker")
+                && arguments == &["tag", source, image].map(str::to_owned)
+        }));
+    }
 }
 
 #[test]
@@ -604,8 +620,13 @@ fn accepted_docker_archive_does_not_depend_on_load_output_format() {
     assert_archive_import_accepts_load_output(
         b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002\n"
             .to_vec(),
+        Some("localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002"),
     );
-    assert_archive_import_accepts_load_output(Vec::new());
+    assert_archive_import_accepts_load_output(
+        b"Loaded image ID: sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662\n"
+            .to_vec(),
+        Some("sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"),
+    );
 }
 
 #[test]

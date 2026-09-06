@@ -4,7 +4,7 @@ An execution harness is the stable lifecycle contract between a recipe and the
 Spark agent. It compiles declarative recipe inputs into the universal source,
 build, distribute, install, run, health, route, stop, and uninstall operations.
 Operators act through those operations and their preview digests; they do not
-start a parallel container and then write Library state by hand.
+start a parallel container or maintain a separate local recipe authority.
 
 See [Model and recipe identities](model-catalog.md) for model identity and revision concepts.
 
@@ -16,6 +16,15 @@ serving checks. A separate **ModelDefinition** owns the exact model artifacts
 and license facts. The exact reviewed repository snapshot and package SHA-256
 close over those documents and all recipe-owned source, patches, wrappers, and
 serving fixtures.
+
+The production Controller follows the canonical global recipe repository's
+`main` branch through the Caddy proxy. It refreshes catalog metadata at startup
+and every 15 minutes as an automatic, read-only operation. When applying a
+changed revision, the Controller eagerly fetches its exact immutable recipe
+package and source bundle and stores them as read-only execution cache entries.
+The selected revision, package SHA-256, source-bundle digest, and operation plan
+remain immutable execution receipts, never local recipe authority. Model bytes
+and runtime images remain persistent local caches.
 
 The platform compiler turns that package into a shell-free
 `CompiledExecutionPlan`. Engine adapters enforce platform-owned invariants and
@@ -56,11 +65,13 @@ of container execution.
 
 Physical lifecycle work uses Controller Run/Switch, including the normal
 `vonkctl models run --input-file REQUEST.json --json` command. The Controller
-binds the selected recipe revision and Spark group to fresh certificate-bound
-inventory, capacity, fabric, model and image bytes, operation phases, per-rank
-receipts, and route state. After the route is active, execute the Recipe's
-declared HTTP serving checks with `scripts/qualify-recipe --serving-url URL
---evidence-ledger PATH` and retain that bounded result separately.
+binds the selected automatically refreshed recipe revision and Spark group to
+fresh certificate-bound inventory, capacity, fabric, model and image bytes,
+operation phases, per-rank receipts, and route state. Applying a changed
+revision first fills the read-only execution cache with the exact package and
+source bundle. After the route is active, execute the Recipe's declared HTTP
+serving checks with `scripts/qualify-recipe --serving-url URL --evidence-ledger
+PATH` and retain that bounded result separately.
 
 Keep structural, container, Controller operation, and physical Spark evidence
 as separate gates. State names without an image digest, artifact-set digest,

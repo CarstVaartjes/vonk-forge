@@ -37,7 +37,9 @@ are offline after installation.
 ## Qualification behavior
 
 Structural qualification is portable and resolves the model entities and
-build context from the separate standard recipe library:
+build context from an exact checkout of the canonical recipe repository. This
+checkout is a dev/CI qualification input only; the production Controller
+follows automatically refreshed global repository metadata:
 
 ```bash
 scripts/qualify-recipe \

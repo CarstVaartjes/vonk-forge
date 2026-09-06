@@ -124,9 +124,8 @@ def _validate_target_recipe_coverage(
     root: Path,
     recipe_slugs: set[str],
 ) -> None:
-    # The standalone public library owns the complete target ledger.  The
-    # platform checkout may contain a deliberately smaller imported snapshot;
-    # its config/model-targets files are not the publication authority.
+    # The standalone public library owns the complete target ledger. The
+    # platform checkout does not mirror that ledger and is never its authority.
     target_root = root / "model-targets"
     if not target_root.is_dir():
         return

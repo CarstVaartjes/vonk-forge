@@ -56,7 +56,6 @@ flowchart LR
 - [Model and recipe identities](operators/model-catalog.md)
 - [Standard recipe library](operators/recipe-library.md)
 - [Execution harnesses](operators/execution-harnesses.md)
-- [Model target qualification](operators/model-targets.md)
 
 ## Release and platform guides
 

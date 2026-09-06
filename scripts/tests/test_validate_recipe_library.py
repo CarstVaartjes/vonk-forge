@@ -15,11 +15,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "validate-recipe-library"
-CANDIDATE = Path(
-    os.environ.get(
-        "VONK_FORGE_RECIPE_LIBRARY",
-        "/private/tmp/vonk-forge-recipes-contract-conversion-final",
-    )
+_configured_library = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
+_sibling_library = ROOT.parent / "vonk-forge-recipes"
+CANDIDATE = (
+    Path(_configured_library)
+    if _configured_library
+    else _sibling_library if _sibling_library.is_dir() else None
 )
 
 
@@ -41,7 +42,7 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _candidate_library_or_skip() -> Path:
-    if not CANDIDATE.is_dir():
+    if CANDIDATE is None or not CANDIDATE.is_dir():
         pytest.skip("central contract recipe-library fixture is unavailable")
     return CANDIDATE
 
@@ -144,9 +145,18 @@ def test_contract_recipe_library_rejects_an_archive_without_recipe_entrypoint(
     for source in (candidate / "packages").glob("*.tar.gz"):
         shutil.copy2(source, package_dir / source.name)
 
-    recipe_path = next((candidate / "recipes").glob("*.json"))
+    recipe_path = None
+    recipe_document = None
+    for path in sorted((candidate / "recipes").glob("*.json")):
+        document = json.loads(path.read_text())
+        package_path = candidate / "packages" / f"{path.stem}.tar.gz"
+        if document.get("execution", {}).get("mode") == "build" and package_path.is_file():
+            recipe_path = path
+            recipe_document = document
+            break
+    if recipe_path is None or recipe_document is None:
+        pytest.fail("current recipe library has no packaged build recipe fixture")
     recipe_slug = recipe_path.stem
-    recipe_document = json.loads(recipe_path.read_text())
     context_path = recipe_document["execution"]["build"]["context"]["path"]
     shutil.copytree(candidate / context_path, library / context_path)
     package_name = f"{recipe_slug}.tar.gz"

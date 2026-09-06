@@ -5,7 +5,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
 import pytest
-from vonk_control.serving_execution import (
+
+from cluster_profiles.serving_execution import (
     MAX_HTTP_RESPONSE_BYTES,
     HttpObservation,
     ServingExecutionError,
