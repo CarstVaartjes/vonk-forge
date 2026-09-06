@@ -1235,9 +1235,12 @@ wheels = [
 [[package]]
 name = "vonk-agent-protocol"
 version = "2.2.0"
-source = { directory = "../agent_protocol" }
+source = { path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" }
 dependencies = [
     { name = "jsonschema" },
+]
+wheels = [
+    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:24894efe048755576cc365a9fb3233bd4af3be3028cb38394b2fba533acb628f" },
 ]
 
 [package.metadata]
@@ -1322,7 +1325,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = "==2.0.42" },
     { name = "tomli-w", specifier = "==1.2.0" },
     { name = "uvicorn", specifier = "==0.35.0" },
-    { name = "vonk-agent-protocol", directory = "../agent_protocol" },
+    { name = "vonk-agent-protocol", path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" },
     { name = "vonk-cluster-profiles", directory = "../" },
     { name = "vonk-forge-public-contracts", path = "../inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl" },
 ]

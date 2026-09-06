@@ -34,10 +34,6 @@ config/*
 !inventory/wheels/
 !inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl
 !inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl
-!agent_protocol/
-!agent_protocol/pyproject.toml
-!agent_protocol/src/
-!agent_protocol/src/**
 **/__pycache__/**
 **/*.py[cod]
 **/.dev
