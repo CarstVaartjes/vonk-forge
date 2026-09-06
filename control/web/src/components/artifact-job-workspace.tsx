@@ -8,6 +8,7 @@ import type {
   ArtifactJobInterface,
   LibraryApi,
   LibraryRecipeDetail,
+  RecipeDefinition,
 } from "../api/types";
 import {formatBytes} from "../lib/fleet";
 import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
@@ -19,26 +20,13 @@ const CONTROLLER_FILE_LIMIT = 512 * 1024 * 1024;
 const CONTROLLER_TOTAL_LIMIT = 1024 * 1024 * 1024;
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
-type VisualRecipeDocument = NonNullable<LibraryRecipeDetail["visual_recipe"]>;
-type RecipeParameter = VisualRecipeDocument["parameters"][number];
-type Scalar = RecipeParameter["default"];
-type RecipeInputSlot = {
-  id: string;
-  label: string;
-  description: string;
-  media_types: string[];
-  extensions: string[];
-  min_files: number;
-  max_files: number;
-  max_file_bytes: number;
-  max_total_bytes: number;
-};
-type RecipeInput = {path: "/inputs"; required: boolean; media_types: string[]; max_bytes: number; min_files: number; max_files: number; slots?: RecipeInputSlot[]};
-type RecipeOutputSlot = RecipeInputSlot;
-type RecipeOutput = {path: "/outputs"; allowed_media_types: string[]; max_total_bytes: number | null; slots?: RecipeOutputSlot[]};
-type JobRecipeDocument = VisualRecipeDocument & {
-  interfaces: Array<VisualRecipeDocument["interfaces"][number] & {input?: RecipeInput | null; output?: RecipeOutput | null}>;
-};
+type JobRecipeDocument = RecipeDefinition;
+type JobRecipeInterface = Extract<JobRecipeDocument["interfaces"][number], {adapter: ArtifactJobInterface}>;
+type RecipeInput = NonNullable<JobRecipeInterface["input"]>;
+type RecipeInputSlot = NonNullable<RecipeInput["slots"]>[number];
+type RecipeOutputSlot = JobRecipeInterface["output"]["slots"][number];
+type Scalar = NonNullable<Extract<JobRecipeDocument["settings"], {kind: "job"}>["knobs"]>[string]["value"];
+type RecipeParameter = {name: string; description: string; type: "boolean" | "integer" | "string"; default: Scalar};
 type InputPayload = {declaration: ArtifactJobInputFile; blob: Blob};
 
 const outputMedia: Record<ArtifactJobInterface, string[]> = {
@@ -103,15 +91,18 @@ function parameterError(parameter: RecipeParameter, value: Scalar): string | und
   if (value === null) return undefined;
   if (parameter.type === "integer") {
     if (!Number.isInteger(value)) return "Enter a whole number.";
-    if (parameter.minimum != null && Number(value) < parameter.minimum) return `Use ${parameter.minimum} or more.`;
-    if (parameter.maximum != null && Number(value) > parameter.maximum) return `Use ${parameter.maximum} or less.`;
-  }
-  if (parameter.type === "enum" && !(parameter.allowed_values ?? []).includes(value)) return "Choose an allowed value.";
-  if (parameter.type === "string" && parameter.pattern) {
-    try { if (!new RegExp(parameter.pattern).test(String(value))) return "This value does not match the recipe constraint."; }
-    catch { return "The recipe declares an invalid text constraint."; }
   }
   return undefined;
+}
+
+function recipeParameters(document: JobRecipeDocument): RecipeParameter[] {
+  if (document.settings.kind !== "job") return [];
+  return Object.entries(document.settings.knobs ?? {}).map(([name, setting]) => ({
+    name,
+    description: "Declared runtime setting.",
+    type: typeof setting.value === "boolean" ? "boolean" : typeof setting.value === "number" && Number.isInteger(setting.value) ? "integer" : "string",
+    default: setting.value,
+  }));
 }
 
 function OutputPreview({api, file, job}: {api: LibraryApi; file: ArtifactJobFile; job: ArtifactJob}) {
@@ -163,12 +154,12 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
 }
 
 export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryApi; detail: LibraryRecipeDetail; onBusyChange?(busy: boolean): void}) {
-  const document = detail.visual_recipe as JobRecipeDocument | null;
-  const jobInterfaces = useMemo(() => (document?.interfaces.filter(item => item.adapter !== "openai") ?? []) as Array<JobRecipeDocument["interfaces"][number] & {adapter: ArtifactJobInterface}>, [document]);
+  const document = detail.definition;
+  const jobInterfaces = useMemo(() => document.interfaces.filter((item): item is JobRecipeInterface => item.adapter !== "openai"), [document]);
   const [interfaceIndex, setInterfaceIndex] = useState(0);
   const jobInterface = jobInterfaces[interfaceIndex];
   const activeRun = detail.operational_state.runs.find(run => run.state === "running");
-  const parameters = useMemo(() => document?.parameters ?? [], [document]);
+  const parameters = useMemo(() => recipeParameters(document), [document]);
   const input = jobInterface?.input ?? null;
   const inputSlots = useMemo<RecipeInputSlot[]>(() => {
     if (!input) return [];
@@ -179,16 +170,15 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
       description: "Inputs accepted by this recipe revision.",
       media_types: input.media_types,
       extensions: [],
-      min_files: input.min_files,
-      max_files: input.max_files,
+      min_files: input.required ? 1 : 0,
+      max_files: 32,
       max_file_bytes: Math.min(input.max_bytes, CONTROLLER_FILE_LIMIT),
-      max_total_bytes: Math.min(input.max_bytes * input.max_files, CONTROLLER_TOTAL_LIMIT),
+      max_total_bytes: Math.min(input.max_bytes * 32, CONTROLLER_TOTAL_LIMIT),
     }];
   }, [input]);
   const textSlot = inputSlots.find(slot => slot.media_types.includes("text/plain"));
-  const promptParameter = parameters.find(parameter => parameter.name === "prompt" && parameter.type === "string");
   const [values, setValues] = useState<Record<string, Scalar>>(() => parameterDefaults(parameters));
-  const [prompt, setPrompt] = useState(() => promptParameter?.default == null ? "" : String(promptParameter.default));
+  const [prompt, setPrompt] = useState("");
   const [filesBySlot, setFilesBySlot] = useState<Record<string, File[]>>({});
   const [timeoutSeconds, setTimeoutSeconds] = useState(3600);
   const [jobs, setJobs] = useState<ArtifactJob[]>([]);
@@ -213,11 +203,11 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   }, [interfaceIndex, jobInterfaces.length]);
   useEffect(() => {
     setValues(parameterDefaults(parameters));
-    setPrompt(promptParameter?.default == null ? "" : String(promptParameter.default));
+    setPrompt("");
     setFilesBySlot({});
     setSubmitError("");
     setRetryNotice("");
-  }, [jobInterface, parameters, promptParameter]);
+  }, [jobInterface, parameters]);
   const loadCapabilities = useCallback(async (signal?: AbortSignal) => {
     setCapabilitiesLoading(true);
     try {
@@ -313,9 +303,7 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
   if (!outputContractReady) inputErrors.push("This recipe revision has no complete artifact output contract.");
   const preflightErrors = [...parameterErrors.map(item => `${item.name}: ${item.error}`), ...inputErrors];
   const canSubmit = Boolean(activeRun && capabilities) && !phase && preflightErrors.length === 0;
-  const exactOutputMedia = output?.allowed_media_types?.length
-    ? output.allowed_media_types
-    : [...new Set(outputSlots.flatMap(slot => slot.media_types))];
+  const exactOutputMedia = [...new Set(outputSlots.flatMap(slot => slot.media_types))];
   const outputLimits = {
     max_files: Math.min(outputSlots.reduce((total, slot) => total + slot.max_files, 0) || 1, capabilities?.transport.max_output_files ?? 32),
     max_file_bytes: Math.min(Math.max(...outputSlots.map(slot => slot.max_file_bytes), 1), capabilities?.transport.max_output_file_bytes ?? 1024 ** 3),
@@ -352,11 +340,9 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
       const prepared = await payloads(controller.signal);
       const createParameters: ArtifactJobCreateInput["parameters"] = {};
       for (const parameter of parameters) {
-        if (parameter.name === promptParameter?.name) continue;
         const value = values[parameter.name] ?? parameter.default;
-        if (value !== null) createParameters[parameter.name] = value;
+        createParameters[parameter.name] = value;
       }
-      if (promptParameter) createParameters[promptParameter.name] = prompt.trim();
       const body: ArtifactJobCreateInput = {
         interface: adapter,
         parameters: createParameters,
@@ -425,17 +411,14 @@ export function ArtifactJobWorkspace({api, detail, onBusyChange}: {api: LibraryA
     <div className="artifact-job-layout">
       <form className="artifact-job-form" onSubmit={event => { event.preventDefault(); void submit(); }} noValidate>
         {jobInterfaces.length > 1 && <label htmlFor="artifact-job-interface"><span>Job interface</span><select id="artifact-job-interface" aria-label="Job interface" value={interfaceIndex} onChange={event => setInterfaceIndex(Number(event.target.value))}>{jobInterfaces.map((item, index) => <option value={index} key={`${item.adapter}:${item.path ?? ""}:${index}`}>{humanizeIdentifier(item.adapter)} · {item.input?.slots?.length ?? 0} bounded slot{item.input?.slots?.length === 1 ? "" : "s"}</option>)}</select><small>Each declared interface keeps its own exact input and output boundary. Changing interface clears local, unsubmitted inputs.</small></label>}
-        {(textSlot || promptParameter) && <label htmlFor="artifact-job-prompt"><span>{textSlot?.label ?? humanizeIdentifier(promptParameter!.name)}{textSlot && textSlot.min_files > 0 ? "" : " (optional)"}</span><textarea id="artifact-job-prompt" rows={5} value={prompt} onChange={event => setPrompt(event.target.value)} aria-label={textSlot?.label ?? humanizeIdentifier(promptParameter!.name)} aria-required={textSlot?.min_files ? "true" : undefined} aria-invalid={inputErrors.some(error => error.startsWith(`${textSlot?.label}:`)) || undefined} aria-describedby="artifact-job-prompt-help" placeholder="Describe the artifact to produce"/><small id="artifact-job-prompt-help">{textSlot ? <>{textSlot.description} Saved as UTF-8 <code>prompt.txt</code> · {formatBytes(promptBytes)} of {formatBytes(promptLimit)}</> : <>{promptParameter!.description} Sent as the declared <code>{promptParameter!.name}</code> job parameter · {formatBytes(promptBytes)}</>}</small></label>}
-        {!textSlot && !promptParameter && <div className="artifact-job-contract-notice"><strong>No prompt control declared</strong><p>This recipe revision does not authorize a prompt file or parameter. Add its required source files below, or update the recipe contract before expecting text-guided output.</p></div>}
-        {parameters.some(parameter => parameter.name !== promptParameter?.name) && <fieldset className="artifact-job-parameters"><legend>Recipe parameters</legend>{parameters.filter(parameter => parameter.name !== promptParameter?.name).map(parameter => {
+        {textSlot && <label htmlFor="artifact-job-prompt"><span>{textSlot.label}{textSlot.min_files > 0 ? "" : " (optional)"}</span><textarea id="artifact-job-prompt" rows={5} value={prompt} onChange={event => setPrompt(event.target.value)} aria-label={textSlot.label} aria-required={textSlot.min_files ? "true" : undefined} aria-invalid={inputErrors.some(error => error.startsWith(`${textSlot.label}:`)) || undefined} aria-describedby="artifact-job-prompt-help" placeholder="Describe the artifact to produce"/><small id="artifact-job-prompt-help">{textSlot.description} Saved as UTF-8 <code>prompt.txt</code> · {formatBytes(promptBytes)} of {formatBytes(promptLimit)}</small></label>}
+        {!textSlot && <div className="artifact-job-contract-notice"><strong>No prompt control declared</strong><p>This recipe revision does not authorize a prompt file. Add its required source files below, or update the recipe contract before expecting text-guided output.</p></div>}
+        {parameters.length > 0 && <fieldset className="artifact-job-parameters"><legend>Recipe settings</legend>{parameters.map(parameter => {
           const value = values[parameter.name] ?? parameter.default;
-          const allowedValues = parameter.allowed_values ?? [];
           const error = parameterErrors.find(item => item.name === parameter.name)?.error;
           const describedBy = `${parameter.name}-help${error ? ` ${parameter.name}-error` : ""}`;
           if (parameter.type === "boolean") return <label className="artifact-job-check" key={parameter.name}><input type="checkbox" checked={Boolean(value)} onChange={event => setValues(current => ({...current, [parameter.name]: event.target.checked}))}/><span><strong>{humanizeIdentifier(parameter.name)}</strong><small id={`${parameter.name}-help`}>{parameter.description}</small></span></label>;
-          return <label key={parameter.name} htmlFor={`artifact-job-${parameter.name}`}><span>{humanizeIdentifier(parameter.name)}</span>{parameter.type === "enum"
-            ? <select id={`artifact-job-${parameter.name}`} value={value === null ? "" : String(value)} aria-label={humanizeIdentifier(parameter.name)} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={event => setValues(current => ({...current, [parameter.name]: event.target.value === "" ? null : allowedValues.find(item => item !== null && String(item) === event.target.value) ?? event.target.value}))}>{allowedValues.includes(null) && <option value="">Use recipe default</option>}{allowedValues.filter(item => item !== null).map(item => <option value={String(item)} key={`${typeof item}:${String(item)}`}>{String(item)}</option>)}</select>
-            : <input id={`artifact-job-${parameter.name}`} type={parameter.type === "integer" ? "number" : "text"} value={value === null ? "" : String(value)} min={parameter.minimum ?? undefined} max={parameter.maximum ?? undefined} pattern={parameter.pattern ?? undefined} aria-label={humanizeIdentifier(parameter.name)} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={event => setValues(current => ({...current, [parameter.name]: parameter.type === "integer" ? Number(event.target.value) : event.target.value}))}/>}<small id={`${parameter.name}-help`}>{parameter.description}</small>{error && <small className="artifact-job-field-error" id={`${parameter.name}-error`}>{error}</small>}</label>;
+          return <label key={parameter.name} htmlFor={`artifact-job-${parameter.name}`}><span>{humanizeIdentifier(parameter.name)}</span><input id={`artifact-job-${parameter.name}`} type={parameter.type === "integer" ? "number" : "text"} value={String(value)} aria-label={humanizeIdentifier(parameter.name)} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={event => setValues(current => ({...current, [parameter.name]: parameter.type === "integer" ? Number(event.target.value) : event.target.value}))}/><small id={`${parameter.name}-help`}>{parameter.description}</small>{error && <small className="artifact-job-field-error" id={`${parameter.name}-error`}>{error}</small>}</label>;
         })}</fieldset>}
         {inputSlots.map(slot => {
           const fileMedia = slot.media_types.filter(mediaType => mediaType !== "text/plain");

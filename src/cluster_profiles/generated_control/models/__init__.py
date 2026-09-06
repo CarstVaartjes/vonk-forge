@@ -59,6 +59,12 @@ from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
 from .create_artifact_job_response_createartifactjob import CreateArtifactJobResponseCreateartifactjob
+from .effective_parallelism import EffectiveParallelism
+from .effective_settings_selection import EffectiveSettingsSelection
+from .effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
+from .effective_settings_selection_change_effects_additional_property import EffectiveSettingsSelectionChangeEffectsAdditionalProperty
+from .effective_settings_selection_kind import EffectiveSettingsSelectionKind
+from .effective_settings_selection_knobs import EffectiveSettingsSelectionKnobs
 from .endpoint_response import EndpointResponse
 from .enrollment_grant_response import EnrollmentGrantResponse
 from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInstallerUrl
@@ -395,6 +401,8 @@ from .rejected_node import RejectedNode
 from .request_key import RequestKey
 from .resolve_import_request import ResolveImportRequest
 from .resolve_import_request_overlays import ResolveImportRequestOverlays
+from .resource_demand_evidence import ResourceDemandEvidence
+from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
 from .rollout_preparation import RolloutPreparation
 from .run_node_plan_response import RunNodePlanResponse
 from .run_plan_response import RunPlanResponse
@@ -567,6 +575,12 @@ __all__ = (
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
     "CreateArtifactJobResponseCreateartifactjob",
+    "EffectiveParallelism",
+    "EffectiveSettingsSelection",
+    "EffectiveSettingsSelectionChangeEffects",
+    "EffectiveSettingsSelectionChangeEffectsAdditionalProperty",
+    "EffectiveSettingsSelectionKind",
+    "EffectiveSettingsSelectionKnobs",
     "EndpointResponse",
     "EnrollmentGrantResponse",
     "EnrollmentGrantResponseInstallerUrl",
@@ -903,6 +917,8 @@ __all__ = (
     "RequestKey",
     "ResolveImportRequest",
     "ResolveImportRequestOverlays",
+    "ResourceDemandEvidence",
+    "ResourceDemandEvidenceEvidenceState",
     "RolloutPreparation",
     "RunNodePlanResponse",
     "RunPlanResponse",

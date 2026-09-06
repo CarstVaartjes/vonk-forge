@@ -2283,6 +2283,50 @@ export interface components {
             /** Verified Sha256 */
             verified_sha256?: string | null;
         };
+        /**
+         * EffectiveParallelism
+         * @description Derived from topology; never an editable settings field.
+         */
+        EffectiveParallelism: {
+            /** Backend */
+            backend: string;
+            /** Data */
+            data: number;
+            /** Pipeline */
+            pipeline: number;
+            /** Tensor */
+            tensor: number;
+            /** World Size */
+            world_size: number;
+        };
+        /**
+         * EffectiveSettingsSelection
+         * @description Canonical effective settings bound into the Run/Switch plan digest.
+         */
+        EffectiveSettingsSelection: {
+            /** Change Effects */
+            change_effects: {
+                [key: string]: "none" | "restart" | "reprepare" | "rebuild" | "reinstall";
+            };
+            /** Concurrency */
+            concurrency?: number | null;
+            /** Context Tokens */
+            context_tokens?: number | null;
+            /** Identity Sha256 */
+            identity_sha256: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "generation" | "embedding" | "job";
+            /** Knobs */
+            knobs?: {
+                [key: string]: unknown;
+            };
+            /** Max Batch Tokens */
+            max_batch_tokens?: number | null;
+            parallelism: components["schemas"]["EffectiveParallelism"];
+        };
         /** EndpointResponse */
         EndpointResponse: {
             /** Alias */
@@ -5887,6 +5931,31 @@ export interface components {
             };
         };
         /**
+         * ResourceDemandEvidence
+         * @description The evidence terms used for one selected rank's memory fit.
+         */
+        ResourceDemandEvidence: {
+            /** Batch Bytes */
+            batch_bytes?: number | null;
+            /** Concurrency Bytes */
+            concurrency_bytes?: number | null;
+            /** Context Bytes */
+            context_bytes?: number | null;
+            /** Evidence Digest */
+            evidence_digest?: string | null;
+            /**
+             * Evidence State
+             * @enum {string}
+             */
+            evidence_state: "declared" | "measured" | "fresh" | "stale" | "unknown";
+            /** Runtime Overhead Bytes */
+            runtime_overhead_bytes?: number | null;
+            /** Total Bytes */
+            total_bytes?: number | null;
+            /** Weights Bytes */
+            weights_bytes?: number | null;
+        };
+        /**
          * RolloutPreparation
          * @description Normalized preparation identity shared by profiles, Run, web and CLI.
          */
@@ -6223,6 +6292,7 @@ export interface components {
             build: components["schemas"]["RecipeBuildEvidence"];
             /** Conflicts */
             conflicts: components["schemas"]["RunSwitchReason"][];
+            effective_settings?: components["schemas"]["EffectiveSettingsSelection"] | null;
             fit: components["schemas"]["SparkFit"];
             fit_after_stop: components["schemas"]["SparkFit"] | null;
             fit_current: components["schemas"]["SparkFit"];
@@ -6548,6 +6618,7 @@ export interface components {
             node_id: string;
             /** Rank */
             rank: number;
+            resource_demand?: components["schemas"]["ResourceDemandEvidence"] | null;
             /** Role */
             role: string;
             /** Warnings */

@@ -1,3 +1,8 @@
+.library-recipe-detail {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
 .recipe-authority {
   container-type: inline-size;
   min-width: 0;
@@ -104,6 +109,17 @@
   }
 }
 
+@media (max-width: 760px) {
+  .recipe-fit-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recipe-fit-strip > div + div {
+    border-block-start: 1px solid var(--border);
+    border-inline-start: 0;
+  }
+}
+
 .identity-note {
   color: var(--text-subtle);
   font-size: 0.72rem;
@@ -170,6 +186,19 @@
   border-top: 1px solid var(--border);
   margin-top: 1rem;
   padding-top: 1rem;
+}
+
+.library-model-detail-list,
+.library-model-detail-list ul,
+.library-model-detail-list li,
+.library-model-detail-list li > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.library-model-detail-list li {
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .section-heading h4,
