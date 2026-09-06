@@ -11,6 +11,7 @@ from threading import Event
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.models import (
     AgentCertificate,
@@ -284,6 +285,43 @@ def test_rust_node_cannot_be_assigned_an_unadvertised_operation(service) -> None
         {"schema_version": 1, "recipe": {}},
     )
     assert stored.kind == "recipe.install"
+
+
+def test_artifact_distribution_is_negotiated_and_serialized_as_a_mutation(
+    service,
+) -> None:
+    jobs, sessions, clock = service
+    parent_job = parent(sessions, clock)
+    operation = ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value
+    first = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, {})
+    second = jobs.enqueue(parent_job.id, NODE_A, operation, COMMIT, {})
+    capabilities = ["agent.runtime.rust.v1", operation]
+
+    claim = claim_agent(
+        jobs,
+        NODE_A,
+        "serial-a",
+        30,
+        protocol_version=3,
+        capabilities=capabilities,
+    )
+
+    assert claim is not None
+    assert claim.operation_id == first.id
+    assert (
+        claim_agent(
+            jobs,
+            NODE_A,
+            "serial-a",
+            30,
+            protocol_version=3,
+            capabilities=capabilities,
+        )
+        is None
+    )
+    with sessions() as session:
+        stored = session.get(AgentOperation, second.id)
+        assert stored is not None and stored.state == "queued"
 
 
 def test_rust_claim_updates_current_contact(service) -> None:

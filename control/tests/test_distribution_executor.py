@@ -38,7 +38,7 @@ from vonk_control.operation_api import merge_operation_providers
 from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system
+from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
 
 
 def _target(node: str, *, image: bool = False) -> SimpleNamespace:
@@ -76,7 +76,7 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
     assert result.result == {"skipped": True, "verified": False, "verified_digests": ["c" * 64], "verified_image_digest": "sha256:" + "d" * 64, "verified_oci_layout_sha256": "e" * 64, "cached_nodes": list(nodes), "cached_target_totals": {node: 0 for node in nodes}}
 
 
-def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> None:
+def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> None:  # noqa: F811
     _client, services, _tokens, clock = agent_system
     model = DistributionObject("weights/model.bin", "a" * 64, 10, "model")
     config = DistributionObject("config/tokenizer.json", "b" * 64, 5, "model")
@@ -151,7 +151,7 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     assert verify.result["verified"] is True
 
 
-def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> None:
+def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> None:  # noqa: F811
     _client, services, _tokens, clock = agent_system
     source = MemoryVerifiedObjectSource()
     distribution = DistributionService(source, clock=clock, sessions=services.sessions)
@@ -355,7 +355,7 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
 
 
 def test_production_composite_uncached_cache_then_two_target_distribution(
-    agent_system,
+    agent_system,  # noqa: F811
     tmp_path: Path,
 ) -> None:
     """Exercise the production source pair and durable child handoff.
