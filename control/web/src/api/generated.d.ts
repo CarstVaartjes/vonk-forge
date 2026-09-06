@@ -310,40 +310,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/catalog/imports/workload_run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Apply */
-        post: operations["applyWorkloadRunImport"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/imports/workload_run/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Preview */
-        post: operations["previewWorkloadRunImport"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/catalog/managed-recipes/sync": {
         parameters: {
             query?: never;
@@ -372,23 +338,6 @@ export interface paths {
         get: operations["getManagedRecipeCatalogSyncStatus"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/recipes/{recipe_id}/resolve-import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resolve Imported */
-        post: operations["resolveWorkloadRunImport"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1823,15 +1772,6 @@ export interface components {
         AgentsResponse: {
             /** Agents */
             agents: components["schemas"]["AgentSummary"][];
-        };
-        /** ApplyRequest */
-        ApplyRequest: {
-            /** Report Digest */
-            report_digest: string;
-            /** Source Sha256 */
-            source_sha256: string;
-            /** Source Yaml */
-            source_yaml: string;
         };
         /** ArtifactFileDeclaration */
         ArtifactFileDeclaration: {
@@ -5266,11 +5206,6 @@ export interface components {
              */
             severity: "blocker" | "warning" | "info";
         };
-        /** PreviewRequest */
-        PreviewRequest: {
-            /** Source Yaml */
-            source_yaml: string;
-        };
         /** ProposalChangeRequest */
         ProposalChangeRequest: {
             /** Document */
@@ -5920,15 +5855,6 @@ export interface components {
         RequestKey: {
             /** Request Key */
             request_key: string;
-        };
-        /** ResolveImportRequest */
-        ResolveImportRequest: {
-            /** Expected Revision */
-            expected_revision: number;
-            /** Overlays */
-            overlays: {
-                [key: string]: unknown;
-            };
         };
         /**
          * ResourceDemandEvidence
@@ -8087,72 +8013,6 @@ export interface operations {
             };
         };
     };
-    applyWorkloadRunImport: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ApplyRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    previewWorkloadRunImport: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PreviewRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     syncManagedRecipeCatalog: {
         parameters: {
             query?: never;
@@ -8274,41 +8134,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    resolveWorkloadRunImport: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipe_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResolveImportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
