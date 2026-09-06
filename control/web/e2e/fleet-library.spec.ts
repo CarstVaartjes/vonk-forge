@@ -476,10 +476,14 @@ async function installLocalFleetFixture(page: Page) {
   });
   const cacheStorage = {schema_version: 2, total_bytes: 1_000, free_bytes: 700, reserve_bytes: 100, available_bytes: 600, unique_used_bytes: 300, in_flight_bytes: 0, protected_bytes: 100, reclaimable_bytes: 200};
   const emptyCacheInventory = {schema_version: 2, source_policy: "nas-first", entries: [], storage: cacheStorage, total: 0, next_cursor: null};
+  const emptyRecipeAvailability: components["schemas"]["RecipeImageAvailabilityListResponse"] = {schema_version: 2, total: 0, operations: [], next_cursor: null};
   await page.route("**/api/v1/model-cache", route => route.fulfill({json: emptyCacheInventory}));
   await page.route("**/api/v1/model-cache?*", route => route.fulfill({json: emptyCacheInventory}));
-  await page.route("**/api/v1/model-cache/updates", route => route.fulfill({json: {schema_version: 2, source_policy: "nas-first", total: 0, updates: [], next_cursor: null}}));
-  await page.route("**/api/v1/library/recipe-image-availability?*", route => route.fulfill({json: {schema_version: 2, total: 0, operations: [], next_cursor: null}}));
+  const emptyModelUpdates = {schema_version: 2, source_policy: "nas-first", total: 0, updates: [], next_cursor: null};
+  await page.route("**/api/v1/model-cache/updates", route => route.fulfill({json: emptyModelUpdates}));
+  await page.route("**/api/v1/model-cache/updates?*", route => route.fulfill({json: emptyModelUpdates}));
+  await page.route("**/api/v1/library/recipe-image-availability", route => route.fulfill({json: emptyRecipeAvailability}));
+  await page.route("**/api/v1/library/recipe-image-availability?*", route => route.fulfill({json: emptyRecipeAvailability}));
   const librarySnapshotRoute = (route: Route) => {
     if (libraryState.snapshotFailuresRemaining > 0) {
       libraryState.snapshotFailuresRemaining -= 1;
@@ -1169,7 +1173,7 @@ test("Library pairs exact model selection with matching recipes and downloads an
   const orphanRow = modelInventory.locator(".library-model-row").filter({hasText: unlinked.model_document.identity.model.title}).first();
   await expect(orphanRow).toContainText("No Recipe");
   const previewRequest = page.waitForRequest(request => request.url().endsWith("/api/v1/model-cache/download-preview"));
-  await orphanRow.getByRole("button", {name: "Download to NAS"}).click();
+  await orphanRow.getByRole("button", {name: "Make available"}).click();
   expect((await previewRequest).postDataJSON()).toMatchObject({schema_version: 2, model_version_sha256: unlinked.model.content_sha256});
   await expect(page.getByText(/Downloading to NAS/)).toBeVisible();
 });
@@ -1181,9 +1185,9 @@ test("Library retries a transient Model cache operation without restarting its t
   const replacementId = "model-download-retry";
   const failed = {
     schema_version: 2, id: failedId, attempt: 1, request_key: "00000000-0000-4000-8000-000000000811", kind: "download", state: "failed", artifact_set_sha256: "f".repeat(64), plan_digest: "model-download-plan",
-    progress: {schema_version: 2, phase: "failed", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 100, expected_bytes: 200, current_artifact_key: "weights"}, result: {retryable: true}, last_error: "temporary transfer failure", created_at: "2026-09-06T00:00:00Z", updated_at: "2026-09-06T00:00:01Z", completed_at: "2026-09-06T00:00:01Z",
+    progress: {schema_version: 2, phase: "failed", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 100, expected_bytes: 200, current_artifact_key: "weights"}, failure: {code: "transfer_failed", detail: "temporary transfer failure", retryable: true, recovery_actions: ["retry"]}, result: null, last_error: "temporary transfer failure", created_at: "2026-09-06T00:00:00Z", updated_at: "2026-09-06T00:00:01Z", completed_at: "2026-09-06T00:00:01Z",
   };
-  const replacement = {...failed, id: replacementId, state: "succeeded", request_key: "00000000-0000-4000-8000-000000000812", result: {retryable: false}, last_error: null, progress: {...failed.progress, phase: "completed", completed_artifacts: 2, downloaded_bytes: 200}, updated_at: "2026-09-06T00:00:02Z", completed_at: "2026-09-06T00:00:02Z"};
+  const replacement = {...failed, id: replacementId, state: "succeeded", request_key: "00000000-0000-4000-8000-000000000812", failure: null, result: null, last_error: null, progress: {...failed.progress, phase: "completed", completed_artifacts: 2, downloaded_bytes: 200}, updated_at: "2026-09-06T00:00:02Z", completed_at: "2026-09-06T00:00:02Z"};
   let downloadCalls = 0;
   let retryBody: Record<string, unknown> | undefined;
   await page.unroute("**/api/v1/model-cache/download");
@@ -1197,10 +1201,10 @@ test("Library retries a transient Model cache operation without restarting its t
   await page.goto(`/library?view=models&model=${encodeURIComponent(modelKey)}`);
 
   const row = page.getByLabel("Exact model inventory").locator(".library-model-row").first();
-  await row.getByRole("button", {name: "Download to NAS"}).click();
-  await expect(row.getByRole("button", {name: "Retry download"})).toBeVisible();
-  await row.getByRole("button", {name: "Retry download"}).click();
+  await row.getByRole("button", {name: "Make available"}).click();
+  await expect(row.getByRole("button", {name: "Retry download"}).first()).toBeVisible();
+  await row.getByRole("button", {name: "Retry download"}).first().click();
   await expect.poll(() => retryBody).toMatchObject({schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(downloadCalls).toBe(1);
-  await expect(row.getByRole("button", {name: "Downloaded to NAS"})).toBeVisible();
+  await expect(row.getByRole("button", {name: "Available on NAS"})).toBeVisible();
 });
