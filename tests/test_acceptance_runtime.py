@@ -208,6 +208,30 @@ def test_bundle_contract_is_exact_and_contains_no_secret_values_in_compose(
         assert_bundle_contract(bundle)
 
 
+def test_bundle_contract_allows_empty_optional_hugging_face_token(
+    tmp_path: Path,
+) -> None:
+    bundle = tmp_path / "vonk-forge"
+    secrets = bundle / "secrets"
+    secrets.mkdir(parents=True)
+    (bundle / "docker-compose.yaml").write_text(
+        "services: {}\nsecrets:\n  hf-token:\n    file: ./secrets/hf-token\n"
+    )
+    (bundle / ".env").write_text("COMPOSE_PROJECT_NAME=vonk-forge-control\n")
+    (secrets / "hf-token").write_text("\n")
+    (bundle / "docker-compose.yaml").chmod(0o644)
+    (bundle / ".env").chmod(0o600)
+    secrets.chmod(0o700)
+    (secrets / "hf-token").chmod(0o600)
+
+    assert_bundle_contract(bundle)
+
+    (secrets / "token").write_text("")
+    (secrets / "token").chmod(0o600)
+    with pytest.raises(AcceptanceError, match="bundle file token is empty"):
+        assert_bundle_contract(bundle)
+
+
 def test_compose_health_parser_rejects_exited_or_unhealthy_services() -> None:
     healthy = json.dumps(
         [
