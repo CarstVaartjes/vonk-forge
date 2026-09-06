@@ -427,10 +427,6 @@ class RecipeImageAvailabilityService:
                     force_download = True
                 else:
                     force_rebuild = True
-            if recipe.execution.mode == "build" and build_input_sha256 is None:
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_input_missing", "source-build availability requires an exact build input digest"
-                )
             runtime_build_input = runtime.get("build_input_sha256")
             if recipe.execution.mode == "build":
                 if not isinstance(runtime_build_input, str):
@@ -439,7 +435,9 @@ class RecipeImageAvailabilityService:
                         "authoritative runtime projection lacks the exact build input digest",
                     )
                 runtime_build_input = _digest(runtime_build_input, field="build_input_sha256")
-                if build_input_sha256 != runtime_build_input:
+                if build_input_sha256 is None:
+                    build_input_sha256 = runtime_build_input
+                elif build_input_sha256 != runtime_build_input:
                     raise RecipeImageAvailabilityError(
                         "recipe_image.identity_conflict",
                         "submitted build input does not match authoritative runtime metadata",

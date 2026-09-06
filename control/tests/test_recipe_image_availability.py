@@ -153,8 +153,8 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(tmp_path: 
     )
     queued = service.start(
         "revision-source", actor="operator", request_id="1" * 36,
-        build_input_sha256="f" * 64,
     )
+    assert queued.build_input_sha256 == "f" * 64
     assert queued.state == "queued"
     assert service.run_pending() == 1
     failed = service.get(queued.id)
