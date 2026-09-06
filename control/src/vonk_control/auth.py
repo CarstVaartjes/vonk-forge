@@ -58,6 +58,12 @@ MUTATION_ROLES = {
     ),
     ("POST", "/api/v1/library/placements/preview"): frozenset({"administrator"}),
     ("POST", "/api/v1/library/placements"): frozenset({"administrator"}),
+    ("POST", "/api/v1/library/recipe-image-availability"): frozenset(
+        {"operator", "administrator"}
+    ),
+    (
+        "POST", "/api/v1/library/recipe-image-availability/{operation_id}/retry"
+    ): frozenset({"operator", "administrator"}),
     ("POST", "/api/v1/model-cache/download-preview"): frozenset(
         {"operator", "administrator"}
     ),

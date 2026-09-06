@@ -627,7 +627,7 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(controller, tmp_path
     assert failed.retryable is True
     assert failed.last_error and "before the immutable artifact size" in failed.last_error
     assert failed.result is None
-    assert failed.progress == {
+    expected_progress = {
         "schema_version": 2,
         "phase": "downloading",
         "completed_artifacts": 0,
@@ -636,6 +636,12 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(controller, tmp_path
         "expected_bytes": len(expected),
         "current_artifact_key": "artifact-cccccccccccc-metadata",
     }
+    assert {key: failed.progress[key] for key in expected_progress} == expected_progress
+    assert failed.progress["total_bytes_known"] is True
+    members = failed.progress["members"]
+    assert len(members) == 1
+    assert members[0]["completed_bytes"] == 0
+    assert members[0]["total_bytes"] == len(expected)
     entry = cache.get_entry(str(operation.artifact_set_sha256))
     assert entry["state"] == "needs-repair"
     assert entry["coverage"] == "incomplete"
