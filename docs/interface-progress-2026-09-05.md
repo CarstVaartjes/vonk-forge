@@ -12,6 +12,9 @@ separate results.
 - At `bef6a88c`, [CI34065413598](https://github.com/CarstVaartjes/vonk-forge/actions/runs/34065413598)
   passed all 18 active jobs, including complete repository/Controller shards,
   native Rust tests/lint, generated clients and web behavior.
+- The same checkpoint passed the privileged-helper OCI and agent-recovery
+  workflows. The subsequent Rust schema-2 install/start integration passed
+  247 native tests; explicit-null placement-key presence is now integrated too.
 - All 85 Recipes and 92 Model records pass catalog validation against the
   integration. The recipe contract source is unchanged by v1.0.4.
 - Artifact verification now has one typed producer/consumer result with the
@@ -23,6 +26,20 @@ separate results.
   It then exposed an install/start wire mismatch. That correction and its
   connected Python/Rust test are in progress; full lifecycle acceptance is
   still pending.
+- Current catalog compilation exposes two distinct remaining issues: 24
+  placements exceed the previous 64 KiB launch-message ceiling, and two LTX
+  recipes mount the same selected file at two valid targets. The latter must
+  preserve both `/models/license-token-preflight` and `/models/target` while
+  materializing the file once. The production NAS cache already deduplicates
+  receipts; the failure is the compiled plan's repeated-file restriction.
+  Passing catalog validation does not establish these runtime projections.
+- Three narrowly scoped corrections await exact user approval after automatic
+  approval review rejected them: allow unbound rendezvous addresses at Install
+  while requiring them at distributed Start; allow the Controller routing alias
+  to differ from the engine model name; recognize only the helper's exact
+  read-only UID10001 model ACL on subsequent Starts. Their unmerged worker
+  branches remain preserved. The ACL correction retains content verification
+  whenever file metadata changes.
 - The NAS Controller is unchanged. Rollback backups and a fresh database are
   prepared; device identities have not been copied. No selected Model download
   has started. Deployment follows successful publication and acceptance.
