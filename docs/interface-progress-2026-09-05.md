@@ -155,11 +155,23 @@ in the affected modules then passed. The focused repository suite passed 120
 tests; its two skipped validator cases were made portable and independently
 passed as part of seven validator tests against all 85 Recipes and 92 Models.
 
-Native ARM64 CI at `ad24d720` proved signed image import through the real helper.
-Start correctly rejected the probe's undeclared executable; `47a02738` repairs
-the test image and uses the declared runtime path without changing validation.
-Its next native run is pending. Both repair and upgrade acceptance passed at
-`abc1c240`. These are not live Controller-to-Spark distribution observations.
+CI at `6cafc480` passed all repository shards, Rust, generated clients, Admin
+web, Compose, and repair/upgrade acceptance. Two Controller image tests failed
+because modifying the pinned Skopeo ELF caused an AMD64 startup fault. The
+integrated fix `55cceafe` preserves the original binary and invokes its private
+loader. Actual ARM64 and AMD64 images passed non-root version, TLS inspect,
+archive copy/inspect, and security checks in OrbStack; root independently
+rechecked both images as UID10001. Updated supply-chain verification passed.
+
+Native ARM64 CI proved signed image import through the real helper, but Start
+remains incomplete. Review found mismatched probe identity/installation paths
+and a production filename check that incorrectly reused lowercase, 64-character
+identity rules. A lexical comparison of all 85 compiled Recipe projections
+found 717 selected paths across 57 Recipes that fail that rule, including
+legitimate DeepSeek filenames. This comparison used a synthetic image receipt
+solely to inspect paths; it does not establish builds or execution. The helper
+owner is correcting these issues and running a composed OrbStack proof before
+integration. No live Controller-to-Spark distribution is claimed.
 
 ## Remaining runtime and deployment checks
 
