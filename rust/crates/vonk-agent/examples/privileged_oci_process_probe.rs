@@ -48,7 +48,6 @@ fn main() {
     let archive_bytes: u64 = env_required("VONK_HELPER_ARCHIVE_BYTES").parse().unwrap();
     let registry_digest = env_required("VONK_HELPER_REGISTRY_DIGEST");
     let platform_digest = env_required("VONK_HELPER_PLATFORM_DIGEST");
-    let config_id = env_required("VONK_HELPER_CONFIG_ID");
     let image_ref = env_required("VONK_HELPER_IMAGE_REF");
     let action = match mode.as_str() {
         "import" => HostRuntimeAction::ImageImport,
@@ -217,7 +216,7 @@ fn production_start_arguments() -> Vec<String> {
     value["runtime"]["executable"] = json!("/bin/sh");
     value["runtime"]["argv"] = json!([
         "-c",
-        "set -eu; printf 'uid=%s\\n' \"$(id -u)\"; touch \"$HOME/helper-entrypoint-ok\" \"$TMPDIR/helper-tmp-ok\" \"$XDG_CACHE_HOME/helper-cache-ok\"; printf 'helper-argv-once\\n'; sleep 5"
+        "set -eu; printf 'uid=%s\\n' \"$(id -u)\"; touch \"$HOME/helper-entrypoint-ok\" \"$TMPDIR/helper-tmp-ok\"; if [ -e \"$XDG_CACHE_HOME/helper-cache-ok\" ]; then printf 'cache-reused\\n'; else printf 'cache-created\\n' >\"$XDG_CACHE_HOME/helper-cache-ok\"; printf 'cache-created\\n'; fi; if [ -e /tmp/helper-ephemeral-marker ]; then printf 'tmp-reused\\n'; exit 9; fi; touch /tmp/helper-ephemeral-marker; printf 'tmp-fresh\\n'; printf 'helper-argv-once\\n'; sleep 5"
     ]);
     let archive_sha = env_required("VONK_HELPER_ARCHIVE_SHA");
     let archive_bytes: u64 = env_required("VONK_HELPER_ARCHIVE_BYTES").parse().unwrap();

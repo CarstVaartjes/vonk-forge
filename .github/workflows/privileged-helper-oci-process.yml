@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
-            acl adduser ca-certificates docker.io systemd-container
+            acl adduser ca-certificates curl systemd-container
           docker info
       - name: Build production helper and compiled-plan probe
         shell: bash

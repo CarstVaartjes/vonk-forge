@@ -14,7 +14,9 @@ mkdir -p "$report_root"
 chmod 0700 "$report_root"
 
 registry_name=vonk-helper-proof-registry
-image_name=localhost:5001/vonk/helper-tiny:v1
+image_base=localhost:5001/vonk/helper-tiny
+image_name="$image_base:v1"
+image_platform="$image_base:arm64"
 image_ref=''
 helper_pid=''
 fixture_dir=$(mktemp -d)
@@ -54,17 +56,33 @@ ENTRYPOINT ["/bin/sh", "-c"]
 CMD ["true"]
 DOCKERFILE
 
-docker build --platform linux/arm64 -t "$image_name" "$fixture_dir" >"$report_root/image-build.log"
+docker build --platform linux/arm64 -t "$image_platform" "$fixture_dir" >"$report_root/image-build.log"
 docker run --detach --rm --name "$registry_name" -p 5001:5000 registry:2 >"$report_root/registry-id"
 for _ in {1..30}; do
-  docker push "$image_name" >"$report_root/image-push.log" 2>&1 && break
+  docker push "$image_platform" >"$report_root/image-push.log" 2>&1 && break
   sleep 1
 done
-repo_digest=$(docker image inspect "$image_name" --format '{{index .RepoDigests 0}}')
-image_ref=${repo_digest}
-platform_digest=${repo_digest##*@}
-config_id=$(docker image inspect "$image_name" --format '{{.Id}}')
-docker save --output "$fixture_dir/image.oci.tar" "$image_name"
+for _ in {1..30}; do
+  docker manifest create --insecure "$image_name" "$image_platform" >"$report_root/manifest-create.log" 2>&1 && break
+  sleep 1
+done
+docker manifest annotate "$image_name" "$image_platform" --os linux --arch arm64 >"$report_root/manifest-annotate.log"
+for _ in {1..30}; do
+  docker manifest push --insecure "$image_name" >"$report_root/manifest-push.log" 2>&1 && break
+  sleep 1
+done
+platform_ref=$(docker image inspect "$image_platform" --format '{{index .RepoDigests 0}}')
+platform_digest=${platform_ref##*@}
+registry_digest=$(curl --fail --silent --show-error --head \
+  -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+  "http://localhost:5001/v2/vonk/helper-tiny/manifests/v1" \
+  | awk -F': ' 'tolower($1) == "docker-content-digest" {gsub("\r", "", $2); print $2; exit}')
+test -n "$registry_digest"
+test "$registry_digest" != "$platform_digest"
+image_ref="$image_platform@$platform_digest"
+config_id=$(docker image inspect "$image_platform" --format '{{.Id}}')
+docker image inspect "$image_ref" >"$report_root/source-image-ref-inspect.json"
+docker save --output "$fixture_dir/image.oci.tar" "$image_ref"
 archive_sha=$(sha256sum "$fixture_dir/image.oci.tar" | awk '{print $1}')
 archive_bytes=$(stat -c '%s' "$fixture_dir/image.oci.tar")
 cp "$fixture_dir/image.oci.tar" "/var/lib/vonk-forge/oci-archives/$archive_sha"
@@ -92,7 +110,7 @@ chmod 0600 /var/lib/vonk-forge-agent/run-metadata/proof-run/runtime.json
 
 export VONK_HELPER_ARCHIVE_SHA="$archive_sha"
 export VONK_HELPER_ARCHIVE_BYTES="$archive_bytes"
-export VONK_HELPER_REGISTRY_DIGEST='sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+export VONK_HELPER_REGISTRY_DIGEST="$registry_digest"
 export VONK_HELPER_PLATFORM_DIGEST="$platform_digest"
 export VONK_HELPER_CONFIG_ID="$config_id"
 export VONK_HELPER_IMAGE_REF="$image_ref"
@@ -103,6 +121,13 @@ export VONK_HELPER_REQUEST_ROOT=/run/vonk-forge-agent/runtime-requests
 "$probe_binary" setup >"$report_root/setup.log"
 chown root:vonk-agent /etc/vonk-forge-agent/observation-receipt.pub
 chmod 0640 /etc/vonk-forge-agent/observation-receipt.pub
+for ref in "$image_ref" "$image_platform" "$image_name"; do
+  docker image rm "$ref" >>"$report_root/source-image-removal.log" 2>&1 || true
+done
+if docker image inspect "$image_ref" >/dev/null 2>&1; then
+  echo 'source image remained installed before helper import' >&2
+  exit 1
+fi
 rm -f /run/vonk-forge-package-helper/package-helper.sock
 systemd-socket-activate \
   --listen=/run/vonk-forge-package-helper/package-helper.sock \
@@ -143,7 +168,10 @@ sudo -u vonk-agent -g vonk-agent env \
 
 sleep 6
 docker logs vonk-proof-run >"$report_root/container-first.log" 2>&1
-test -f /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/helper-cache-ok
+grep -q 'uid=10001' "$report_root/container-first.log"
+grep -q 'cache-created' "$report_root/container-first.log"
+grep -q 'tmp-fresh' "$report_root/container-first.log"
+test "$(cat /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/helper-cache-ok)" = cache-created
 docker rm vonk-proof-run >"$report_root/container-first-remove.log"
 sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_SHA="$archive_sha" \
@@ -174,8 +202,10 @@ if grep -q '"--device"' "$report_root/start.log"; then
 fi
 grep -q 'uid=10001' "$report_root/container.log"
 grep -q 'helper-argv-once' "$report_root/container.log"
+grep -q 'cache-reused' "$report_root/container.log"
+grep -q 'tmp-fresh' "$report_root/container.log"
 test -f /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/home/helper-entrypoint-ok
-test -f /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/helper-cache-ok
+test "$(cat /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/helper-cache-ok)" = cache-created
 test -f /var/lib/vonk-forge-agent/runs/proof-run/outputs/tmp/proof-run/helper-tmp-ok
 printf 'helper-process-proof=passed\narchive_sha256=%s\narchive_bytes=%s\nimage_ref=%s\nplatform_digest=%s\nconfig_id=%s\n' \
   "$archive_sha" "$archive_bytes" "$image_ref" "$platform_digest" "$config_id" | tee "$report_root/summary.txt"
