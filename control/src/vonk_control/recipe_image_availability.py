@@ -403,12 +403,7 @@ class RecipeImageAvailabilityService:
                 "recipe_image.metadata_refresh_unavailable", "latest recipe metadata could not be refreshed"
             )
         try:
-            try:
-                raw_recipe, runtime = self._authority(recipe_revision_id, force=force)
-            except TypeError:
-                # Preserve compatibility with test and plugin resolvers that
-                # predate the force-aware production seam.
-                raw_recipe, runtime = self._authority(recipe_revision_id)
+            raw_recipe, runtime = self._authority(recipe_revision_id, force=force)
         except RecipeImageAvailabilityError:
             raise
         except Exception as error:
@@ -1087,6 +1082,10 @@ class RecipeImageAvailabilityService:
                                 completed_bytes=receipt.image_bytes,
                             )
                             operation.updated_at = self._clock()
+            with self._sessions() as session:
+                latest = session.get(Job, operation_id)
+                if latest is not None and isinstance(latest.payload, Mapping):
+                    payload = dict(latest.payload)
             if model_pending:
                 with self._sessions.begin() as session:
                     operation = session.get(Job, operation_id)
@@ -1229,10 +1228,9 @@ class RecipeImageAvailabilityService:
                     "recipe_image.build_unavailable", "no canonical recipe build executor is configured"
                 )
             build_input_sha256 = payload.get("build_input_sha256")
-            if not isinstance(build_input_sha256, str):
-                raise RecipeImageAvailabilityError(
-                    "recipe_image.build_input_missing", "exact build input digest is missing"
-                )
+            dispatch_identity_missing = not isinstance(build_input_sha256, str)
+            if dispatch_identity_missing:
+                build_input_sha256 = ""
             if self._builder_admission is not None:
                 self._builder_admission(recipe, runtime)
             self._update_progress(operation_id, "build", total_bytes=None)
@@ -1250,6 +1248,22 @@ class RecipeImageAvailabilityService:
                 )
             if not isinstance(build_receipt, Mapping):
                 raise RecipeImageAvailabilityError("recipe_image.build_invalid", "builder returned no receipt")
+            if dispatch_identity_missing:
+                resolved_input = build_receipt.get("build_input_sha256")
+                if not isinstance(resolved_input, str):
+                    raise RecipeImageAvailabilityError(
+                        "recipe_image.build_input_missing",
+                        "dispatch did not bind an exact build input identity",
+                        retryable=True,
+                        recovery_actions=("retry",),
+                    )
+                with self._sessions.begin() as session:
+                    operation = session.get(Job, operation_id)
+                    if operation is not None:
+                        operation.payload = dict(operation.payload) | {
+                            "build_input_sha256": resolved_input,
+                            "identity_key": resolved_input,
+                        }
             self._update_progress(operation_id, "verify")
             return prepare_runtime_image(
                 recipe,

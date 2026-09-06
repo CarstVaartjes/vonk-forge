@@ -210,14 +210,9 @@ def build_recipe_image_availability(
                     )
                     for candidate in candidates:
                         try:
-                            try:
-                                candidate_plan = recipe_builds.plan(
-                                    revision_id, candidate.id, now=clock(), resolution=resolution
-                                )
-                            except TypeError:
-                                candidate_plan = recipe_builds.plan(
-                                    revision_id, candidate.id, now=clock()
-                                )
+                            candidate_plan = recipe_builds.plan(
+                                revision_id, candidate.id, now=clock(), resolution=resolution
+                            )
                         except Exception:
                             continue
                         active_work = sum(
@@ -234,13 +229,9 @@ def build_recipe_image_availability(
                             )
                         )
                         plans.append((active_work, candidate.id, candidate_plan))
-                    if not plans:
-                        raise RecipeImageAvailabilityError(
-                            "recipe_image.build_unavailable",
-                            "no active compatible Recipe builder is available",
-                        )
-                    _, builder_node_id, plan = min(plans, key=lambda item: (item[0], item[1]))
-                    package_handle = {"build_input_sha256": plan.build_input_sha256}
+                    if plans:
+                        _, builder_node_id, plan = min(plans, key=lambda item: (item[0], item[1]))
+                        package_handle = {"build_input_sha256": plan.build_input_sha256}
             try:
                 runtime = _compile_consistent_runtime(
                     recipe,
@@ -275,13 +266,46 @@ def build_recipe_image_availability(
         del recipe
         revision_id = runtime.get("recipe_revision_id")
         builder_node_id = runtime.get("builder_node_id")
-        if not isinstance(revision_id, str) or not isinstance(builder_node_id, str):
+        if not isinstance(revision_id, str):
             raise RecipeImageAvailabilityError(
                 "recipe_image.build_input_missing",
                 "canonical build plan is unavailable after restart",
             )
+        resolution = recipe_builds.resolve(revision_id)
+        if not isinstance(builder_node_id, str):
+            with sessions() as session:
+                candidates = tuple(
+                    candidate
+                    for candidate in session.scalars(
+                        select(AgentNode)
+                        .where(AgentNode.state == "active")
+                        .order_by(AgentNode.id)
+                    )
+                    if candidate.architecture == "linux-arm64"
+                    and "recipe.build.v1" in (candidate.capabilities or ())
+                )
+            plans: list[tuple[int, str, Any]] = []
+            for candidate in candidates:
+                try:
+                    candidate_plan = recipe_builds.plan(
+                        revision_id, candidate.id, now=clock(), resolution=resolution
+                    )
+                except Exception:
+                    continue
+                plans.append((0, candidate.id, candidate_plan))
+            if not plans:
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.build_unavailable",
+                    "no compatible Recipe builder is currently available",
+                    retryable=True,
+                    recovery_actions=("resume", "retry"),
+                )
+            _, builder_node_id, selected_plan = min(plans, key=lambda item: (item[0], item[1]))
+            build_input_sha256 = selected_plan.build_input_sha256
         try:
-            plan = recipe_builds.plan(revision_id, builder_node_id, now=clock())
+            plan = recipe_builds.plan(
+                revision_id, builder_node_id, now=clock(), resolution=resolution
+            )
         except Exception as error:
             raise RecipeImageAvailabilityError(
                 str(getattr(error, "code", "recipe_image.build_unavailable")),
