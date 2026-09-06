@@ -88,6 +88,13 @@ export function availabilityFailure(value: unknown, fallbackDetail = "The availa
   return {code, detail, recovery, retryAt, retryAfterSeconds, operationId, preserved, logExcerpt, requiredBytes: bytes("required_bytes"), freeBytes: bytes("free_bytes"), shortfallBytes: bytes("shortfall_bytes")};
 }
 
+/** Return the shared retry decision without exposing the API DTO in UI code. */
+export function availabilityRetryable(value: unknown): boolean {
+  const root = objectValue(value);
+  const nested = objectValue(root?.failure) ?? objectValue(root?.error) ?? root;
+  return nested?.retryable === true || Boolean(nested?.retryable === undefined && root?.state === "failed" && root?.result && typeof root.result === "object" && (root.result as Record<string, unknown>).retryable === true);
+}
+
 function retryLabel(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
