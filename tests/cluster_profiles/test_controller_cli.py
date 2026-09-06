@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from cluster_profiles import cli
+from cluster_profiles.control_client import ControlForbidden
 
 
 class _Client:
@@ -86,6 +87,38 @@ class _Client:
             "sha256": expected_sha256,
             "size_bytes": expected_size,
         }
+
+
+def test_availability_error_json_uses_shared_failure_fields() -> None:
+    error = ControlForbidden(
+        403,
+        "Hugging Face access is required",
+        code="access_required",
+        recovery=("open_model_access", "configure_hf_token", "check_access_and_resume"),
+        retryable=True,
+        retry_time="2026-09-06T13:45:00+00:00",
+        retry_after_seconds=30,
+        preserved="12 MiB of verified bytes retained",
+        required_bytes=100,
+        free_bytes=40,
+        shortfall_bytes=60,
+        log_excerpt="safe provider detail",
+    )
+
+    payload = cli._control_error(error)
+
+    assert payload["code"] == "access_required"
+    assert payload["detail"] == "Hugging Face access is required"
+    assert payload["recovery_actions"] == [
+        "open_model_access",
+        "configure_hf_token",
+        "check_access_and_resume",
+    ]
+    assert payload["retryable"] is True
+    assert payload["retry_time"] == "2026-09-06T13:45:00+00:00"
+    assert payload["retry_after_seconds"] == 30
+    assert payload["preserved"] == "12 MiB of verified bytes retained"
+    assert payload["shortfall_bytes"] == 60
 
 
 class _StrictTaskClient(_Client):
@@ -1474,6 +1507,132 @@ def test_model_download_reports_canonical_cache_progress_and_terminal_error() ->
     assert result == 0
     assert "phase: downloading | bytes: 12/34 | artifact: weights.safetensors" in stderr.getvalue()
     assert '"last_error":"source unavailable"' in stdout.getvalue()
+
+
+def test_forced_model_download_uses_repair_without_changing_exact_identity() -> None:
+    artifact_set = "b" * 64
+    client = _Client(
+        {
+            ("POST", "/api/v1/model-cache/download-preview"): {
+                "plan_digest": "d" * 64,
+                "artifact_set_sha256": artifact_set,
+            },
+            ("POST", "/api/v1/model-cache/repair-preview"): {
+                "plan_digest": "e" * 64,
+            },
+            ("POST", "/api/v1/model-cache/repair"): {"operation_id": "op-1"},
+            ("GET", "/api/v1/operations/op-1"): {"state": "succeeded"},
+        }
+    )
+    result, payload = _invoke(
+        client,
+        "--json",
+        "models",
+        "download",
+        "--model-version-sha256",
+        "a" * 64,
+        "--force",
+        "--request-key",
+        "11111111-1111-4111-8111-111111111111",
+    )
+    assert result == 0
+    assert payload["force"] is True
+    assert client.calls[1][2] == {"artifact_set_sha256": artifact_set}
+    assert client.calls[2][2] == {"artifact_set_sha256": artifact_set, "plan_digest": "e" * 64, "request_key": "11111111-1111-4111-8111-111111111111"}
+
+
+def test_recipe_availability_start_and_status_use_the_durable_exact_route() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/library/recipe-image-availability"): {
+                "schema_version": 2,
+                "id": "op-1",
+                "state": "queued",
+            },
+            ("GET", "/api/v1/library/recipe-image-availability/op-1"): {
+                "schema_version": 2,
+                "id": "op-1",
+                "state": "succeeded",
+                "progress": {"phase": "available", "completed_bytes": 9, "total_bytes": 9},
+                "result": {"image_digest": "sha256:" + "a" * 64},
+            },
+        }
+    )
+    result, payload = _invoke(
+        client,
+        "--json",
+        "recipes",
+        "available",
+        "start",
+        "recipe-revision-1",
+        "--force",
+    )
+    assert result == 0
+    assert payload["state"] == "succeeded"
+    assert client.calls == [
+        (
+            "POST",
+            "/api/v1/library/recipe-image-availability",
+            {"request_key": "request-1", "recipe_revision_id": "recipe-revision-1", "force": True},
+            None,
+        ),
+        ("GET", "/api/v1/library/recipe-image-availability/op-1", None, None),
+    ]
+
+
+def test_recipe_availability_retry_requires_apply_and_returns_json_plan() -> None:
+    client = _Client()
+    result, payload = _invoke(
+        client,
+        "--json",
+        "recipes",
+        "availability",
+        "retry",
+        "op-1",
+    )
+    assert result == 0
+    assert payload == {
+        "apply": False,
+        "body": {"request_key": "request-1"},
+        "method": "POST",
+        "mode": "plan",
+        "path": "/api/v1/library/recipe-image-availability/op-1/retry",
+    }
+
+
+def test_model_cache_check_access_and_resume_uses_exact_identity_and_json_plan() -> None:
+    client = _Client({
+        ("POST", "/api/v1/model-cache/operations/op-1/check-access-and-resume"): {
+            "schema_version": 2,
+            "id": "op-1",
+            "state": "queued",
+        }
+    })
+    artifact_set = "a" * 64
+    plan_digest = "b" * 64
+    result, payload = _invoke(
+        client,
+        "--json",
+        "library",
+        "operation",
+        "check-access",
+        "op-1",
+        "--artifact-set-sha256",
+        artifact_set,
+        "--plan-digest",
+        plan_digest,
+        "--request-key",
+        "request-1",
+        "--apply",
+    )
+    assert result == 0
+    assert payload["state"] == "queued"
+    assert client.calls == [(
+        "POST",
+        "/api/v1/model-cache/operations/op-1/check-access-and-resume",
+        {"request_key": "request-1", "artifact_set_sha256": artifact_set, "plan_digest": plan_digest},
+        None,
+    )]
 
 
 def test_operation_progress_projects_run_switch_subphase_and_node_identity() -> None:

@@ -42,6 +42,12 @@ import type {
   ModelCacheRepairPreviewResponse,
   ModelCacheUpdatesResponse,
   ModelCacheRetryInput,
+  ModelCacheAccessResumeInput,
+  ModelCacheAccessResumeResponse,
+  RecipeImageAvailabilityInput,
+  RecipeImageAvailabilityList,
+  RecipeImageAvailabilityOperation,
+  RecipeImageAvailabilityRetryInput,
   RunSwitchRetryInput,
   JobDetail,
   JobResumeResponse,
@@ -366,6 +372,40 @@ export class ApiClient implements ControlApi {
 
   async retryModelCacheOperation(operationId: string, input: ModelCacheRetryInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
     return resultData(await this.generated.POST("/api/v1/model-cache/operations/{operation_id}/retry", {
+      params: {path: {operation_id: operationId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async checkModelCacheAccessAndResume(operationId: string, input: ModelCacheAccessResumeInput, signal?: AbortSignal): Promise<ModelCacheAccessResumeResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/operations/{operation_id}/check-access-and-resume", {
+      params: {path: {operation_id: operationId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async recipeAvailabilityStart(input: RecipeImageAvailabilityInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
+    return resultData(await this.generated.POST("/api/v1/library/recipe-image-availability", {body: input, signal}));
+  }
+
+  async recipeAvailabilityList(recipeRevisionId?: string, state?: RecipeImageAvailabilityOperation["state"], cursor?: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityList> {
+    return resultData(await this.generated.GET("/api/v1/library/recipe-image-availability", {
+      params: {query: {recipe_revision_id: recipeRevisionId, state, cursor, limit: 100}},
+      signal,
+    }));
+  }
+
+  async recipeAvailabilityOperation(operationId: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
+    return resultData(await this.generated.GET("/api/v1/library/recipe-image-availability/{operation_id}", {
+      params: {path: {operation_id: operationId}},
+      signal,
+    }));
+  }
+
+  async retryRecipeAvailability(operationId: string, input: RecipeImageAvailabilityRetryInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
+    return resultData(await this.generated.POST("/api/v1/library/recipe-image-availability/{operation_id}/retry", {
       params: {path: {operation_id: operationId}},
       body: input,
       signal,

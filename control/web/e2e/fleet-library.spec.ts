@@ -478,6 +478,8 @@ async function installLocalFleetFixture(page: Page) {
   const emptyCacheInventory = {schema_version: 2, source_policy: "nas-first", entries: [], storage: cacheStorage, total: 0, next_cursor: null};
   await page.route("**/api/v1/model-cache", route => route.fulfill({json: emptyCacheInventory}));
   await page.route("**/api/v1/model-cache?*", route => route.fulfill({json: emptyCacheInventory}));
+  await page.route("**/api/v1/model-cache/updates", route => route.fulfill({json: {schema_version: 2, source_policy: "nas-first", total: 0, updates: [], next_cursor: null}}));
+  await page.route("**/api/v1/library/recipe-image-availability?*", route => route.fulfill({json: {schema_version: 2, total: 0, operations: [], next_cursor: null}}));
   const librarySnapshotRoute = (route: Route) => {
     if (libraryState.snapshotFailuresRemaining > 0) {
       libraryState.snapshotFailuresRemaining -= 1;
@@ -1064,6 +1066,60 @@ test("Library route changes restore heading focus and browser back state", async
   await page.locator(".library-subnav").getByRole("link", {name: "Models", exact: true}).click();
   await expect(page).toHaveURL(new RegExp(`/library\\?(?:model=${encodeURIComponent(pairedModelKey)}&view=models|view=models&model=${encodeURIComponent(pairedModelKey)})`));
   await expect(page.getByRole("heading", {name: "Library", exact: true})).toBeFocused();
+});
+
+test("Recipe Make available uses durable aggregate progress, access resume, and image-only force", async ({page}) => {
+  const revisionId = fullLibraryDetail.recipe.recipe_revision_id;
+  const modelDigest = "b".repeat(64);
+  const imageDigest = "c".repeat(64);
+  let stage: "empty" | "running" | "failed" | "resumed" | "forced" = "empty";
+  const starts: Record<string, unknown>[] = [];
+  const progress = (phase: string, completedBytes: number, totalBytes: number, step?: string) => ({phase, completed_bytes: completedBytes, total_bytes: totalBytes, total_bytes_known: true, bytes_per_second: 10, eta_seconds: Math.max(0, Math.ceil((totalBytes - completedBytes) / 10)), checkpoint: null, ...(step ? {step} : {})});
+  const operation = (current: typeof stage) => ({
+    schema_version: 2, id: "recipe-availability-operation", request_id: "request-availability", kind: "recipe.image.availability.v2", state: current === "failed" ? "failed" : "running", attempt: current === "forced" ? 2 : 1,
+    recipe_revision_id: revisionId, recipe_content_sha256: "a".repeat(64), progress: progress(current === "forced" ? "build" : "prepare", 40, 100, current === "forced" ? "Rebuilding runtime image" : undefined),
+    children: [
+      {kind: "model-cache", id: "model-child-1", state: current === "failed" ? "failed" : current === "forced" ? "succeeded" : "running", artifact_set_sha256: modelDigest, plan_digest: "d".repeat(64), progress: progress("download", 40, 100), failure: current === "failed" ? {code: "access_required", detail: "Hugging Face access is required for the exact Model files.", recovery_actions: ["open_model_access", "configure_hf_token", "check_access_and_resume"], retryable: false, retry_time: null, retry_after_seconds: null, log_excerpt: null, required_bytes: null, free_bytes: null, shortfall_bytes: null} : null},
+      {kind: "runtime-image", id: "image-child-1", state: "running", progress: progress("build", 20, 100, "Building runtime image"), failure: null},
+    ],
+    failure: null, result: null, actions: [], created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:00:00Z",
+  });
+  await page.route("**/api/v1/library/recipe-image-availability?*", async route => route.fulfill({json: {schema_version: 2, total: stage === "empty" ? 0 : 1, operations: stage === "empty" ? [] : [operation(stage)], next_cursor: null}}));
+  await page.route("**/api/v1/library/recipe-image-availability", async route => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const body = await route.request().postDataJSON() as Record<string, unknown>;
+    starts.push(body);
+    stage = body.force === true ? "forced" : "running";
+    return route.fulfill({status: 202, json: operation(stage)});
+  });
+  await page.route("**/api/v1/library/recipe-image-availability/recipe-availability-operation", route => route.fulfill({json: operation(stage)}));
+  await page.route("**/api/v1/model-cache/operations/model-child-1/check-access-and-resume", async route => {
+    stage = "resumed";
+    return route.fulfill({status: 202, json: {schema_version: 2, id: "model-child-1", kind: "download", state: "queued", attempt: 2, request_key: "request-resume", artifact_set_sha256: modelDigest, plan_digest: "d".repeat(64), progress: {schema_version: 2, phase: "queued", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 40, expected_bytes: 100, total_bytes_known: true, current_artifact_key: "weights", bytes_per_second: null, eta_seconds: null, members: []}, failure: null, result: null, created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:02:00Z", completed_at: null}});
+  });
+
+  await page.goto(`/library/recipes/${pairedRecipeId}`);
+  const availability = page.getByRole("region", {name: "Make Recipe available"});
+  await expect(availability.getByRole("button", {name: "Make available"})).toBeVisible();
+  await availability.getByRole("button", {name: "Make available"}).click();
+  await expect(availability.getByRole("list", {name: "Availability members"})).toContainText("Model files");
+  await expect(availability.getByRole("list", {name: "Availability members"})).toContainText("Runtime image");
+  await expect(availability.getByText("40 B / 100 B").first()).toBeVisible();
+  expect(starts).toEqual([{request_key: expect.any(String), recipe_revision_id: revisionId, force: false}]);
+
+  await page.reload();
+  await expect(availability.getByText("Preparing exact Recipe on NAS")).toBeVisible();
+  stage = "failed";
+  await page.reload();
+  await expect(availability.getByRole("button", {name: "Check access and resume"})).toBeVisible();
+  await availability.getByRole("button", {name: "Check access and resume"}).click();
+  await expect(availability.getByText("Preparing exact Recipe on NAS")).toBeVisible();
+  await availability.locator("summary").filter({hasText: "More actions"}).click();
+  await availability.getByRole("button", {name: "Rebuild image"}).click();
+  await expect.poll(() => starts.at(-1)?.force).toBe(true);
+  expect(starts).toHaveLength(2);
+  await expect(availability.locator('[data-member-kind="model-cache"]')).toContainText("Succeeded");
+  await expect(availability.locator('[data-member-kind="runtime-image"]')).toContainText("Runtime image");
 });
 
 test("Library pairs exact model selection with matching recipes and downloads an unlinked Model", async ({page}, testInfo) => {

@@ -33,10 +33,10 @@ function cacheOperation(overrides: Partial<ModelCacheOperationResponse> = {}): M
     request_key: "00000000-0000-4000-8000-000000000401",
     artifact_set_sha256: "a".repeat(64),
     plan_digest: "b".repeat(64),
-    progress: {schema_version: 2, phase: "failed", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 10, expected_bytes: 20, current_artifact_key: "second"},
+    progress: {schema_version: 2, phase: "failed", completed_artifacts: 1, total_artifacts: 2, downloaded_bytes: 10, expected_bytes: 20, total_bytes_known: true, current_artifact_key: "second"},
     created_at: "2026-09-06T12:00:00Z",
     completed_at: "2026-09-06T12:01:00Z",
-    last_error: "temporary transfer failure",
+    failure: {code: "temporary_transfer_failure", detail: "temporary transfer failure", retryable: true, recovery_actions: ["retry"]},
     result: null,
     updated_at: "2026-09-06T12:01:00Z",
     ...overrides,
@@ -52,9 +52,9 @@ test("retries a transient cache operation in place with retained progress", asyn
   const retryModelCacheOperation = vi.fn(async () => replacement);
   render(<LibraryModelDownloadAction api={{previewModelCacheDownload, downloadModelCache, retryModelCacheOperation} as never} model={model}/>);
 
-  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Download to NAS"})); });
-  expect(await screen.findByRole("button", {name: "Retry download"})).toBeVisible();
-  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Retry download"})); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Make available"})); });
+  expect((await screen.findAllByRole("button", {name: "Retry download"}))[0]).toBeVisible();
+  await act(async () => { fireEvent.click(screen.getAllByRole("button", {name: "Retry download"})[0]!); });
   expect(retryModelCacheOperation).toHaveBeenCalledWith(failed.id, {schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   expect(previewModelCacheDownload).toHaveBeenCalledTimes(1);
   expect(downloadModelCache).toHaveBeenCalledTimes(1);
@@ -63,9 +63,25 @@ test("retries a transient cache operation in place with retained progress", asyn
 
 test("does not offer cache retry for terminal integrity failures", async () => {
   const model = librarySnapshot.models[0]!;
-  const failed = cacheOperation({last_error: "artifact digest mismatch", result: {retryable: false}});
+  const failed = cacheOperation({failure: {code: "integrity_mismatch", detail: "artifact digest mismatch", retryable: false, recovery_actions: ["download_again"]}});
   render(<LibraryModelDownloadAction api={{previewModelCacheDownload: vi.fn(async () => ({schema_version: 2 as const, artifact_set_sha256: "a".repeat(64), plan_digest: "b".repeat(64), source_policy: "nas-first" as const, artifact_count: 2, expected_bytes: 20, already_cached_bytes: 10, new_bytes: 10, blockers: [], warnings: []})), downloadModelCache: vi.fn(async () => failed)} as never} model={model}/>);
 
-  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Download to NAS"})); });
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Make available"})); });
   expect(screen.queryByRole("button", {name: "Retry download"})).not.toBeInTheDocument();
+});
+
+test("checks Model access and resumes the retained exact operation", async () => {
+  const model = librarySnapshot.models[0]!;
+  const failed = cacheOperation({failure: {code: "access_required", detail: "Model access is required", retryable: false, recovery_actions: ["open_model_access", "configure_hf_token", "check_access_and_resume"], retry_time: null, retry_after_seconds: null, log_excerpt: null, required_bytes: null, free_bytes: null, shortfall_bytes: null}});
+  const resumed = cacheOperation({state: "queued", failure: null, updated_at: "2026-09-06T12:02:00Z"});
+  const downloadModelCache = vi.fn(async () => failed);
+  const checkModelCacheAccessAndResume = vi.fn(async () => resumed);
+  render(<LibraryModelDownloadAction api={{previewModelCacheDownload: vi.fn(async () => ({schema_version: 2 as const, artifact_set_sha256: failed.artifact_set_sha256!, plan_digest: failed.plan_digest!, source_policy: "nas-first" as const, artifact_count: 2, expected_bytes: 20, already_cached_bytes: 10, new_bytes: 10, blockers: [], warnings: []})), downloadModelCache, checkModelCacheAccessAndResume} as never} model={model} modelAccessUrl="https://huggingface.co/example/model"/>);
+
+  await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Make available"})); });
+  expect(await screen.findByRole("button", {name: "Check access and resume"})).toBeVisible();
+  expect(screen.queryByRole("button", {name: "Retry download"})).not.toBeInTheDocument();
+  await act(async () => { fireEvent.click(await screen.findByRole("button", {name: "Check access and resume"})); });
+  expect(checkModelCacheAccessAndResume).toHaveBeenCalledWith(failed.id, {schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/), artifact_set_sha256: failed.artifact_set_sha256, plan_digest: failed.plan_digest});
+  expect(screen.getByText("Downloading to NAS…")).toBeVisible();
 });
