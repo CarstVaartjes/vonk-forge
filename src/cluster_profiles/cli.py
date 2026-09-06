@@ -53,8 +53,6 @@ class _RoutineControlClient(Protocol):
 def _runs_without_controller(args: argparse.Namespace) -> bool:
     if args.command == "admin" and args.admin_command == "deploy":
         return not args.apply
-    if args.command == "library" and args.library_command == "template":
-        return True
     if (
         args.command == "library"
         and args.library_command == "job"
@@ -380,12 +378,6 @@ def _emit(
     if args.global_json or getattr(args, "json", False):
         print(json.dumps(safe, sort_keys=True, separators=(",", ":")))
         return
-    if (
-        getattr(args, "command", None) == "library"
-        and getattr(args, "library_command", None) == "template"
-    ):
-        print(json.dumps(safe, sort_keys=True, indent=2))
-        return
     if _emit_agent_upgrade_detail(safe):
         return
     if _emit_list_table(safe):
@@ -425,12 +417,26 @@ def _admin_payload(result: object) -> dict[str, object]:
     return _model_payload(result)  # type: ignore[arg-type]
 
 
-def _control_error(error: BaseException) -> dict[str, object]:
+def _control_error(
+    error: BaseException, args: argparse.Namespace | None = None
+) -> dict[str, object]:
     if isinstance(error, (ControlUnavailable, ControlTransportError, OSError)):
         message = "control API unavailable"
     else:
         message = _sanitize_text(error)
-    return {"error": message, "error_type": "control_api"}
+    result: dict[str, object] = {"error": message, "error_type": "control_api"}
+    request_key = getattr(args, "request_key", None) if args is not None else None
+    operation_id = getattr(args, "operation_id", None) if args is not None else None
+    if isinstance(request_key, str) and request_key:
+        result["request_key"] = request_key
+        result["reconcile"] = {
+            "operation": "inspect the durable operation with the same request key",
+            "request_key": request_key,
+        }
+        if isinstance(operation_id, str) and operation_id:
+            result["operation_id"] = operation_id
+            result["reconcile"]["operation_id"] = operation_id
+    return result
 
 
 def _admin(
@@ -513,7 +519,16 @@ def main(
                 client,
                 request_id_factory or (lambda: str(uuid.uuid4())),
             )
-        elif args.command in {"fleet", "library", "activity"}:
+        elif args.command in {
+            "fleet",
+            "library",
+            "activity",
+            "models",
+            "recipes",
+            "cache",
+            "profiles",
+            "operations",
+        }:
             result = run_controller(
                 args,
                 client,  # type: ignore[arg-type]
@@ -529,7 +544,7 @@ def main(
             result,
             args,
             exact_structure=args.command
-            not in {"admin", "fleet", "library", "activity"},
+            not in {"admin", "fleet", "library", "activity", "recipes"},
         )
         return 0
     except (
@@ -539,5 +554,8 @@ def main(
         ValueError,
         json.JSONDecodeError,
     ) as error:
-        _emit(_control_error(error), args)
+        _emit(_control_error(error, args), args)
         return 2
+    except KeyboardInterrupt:
+        _emit(_control_error(ControlClientError("operation interrupted"), args), args)
+        return 130

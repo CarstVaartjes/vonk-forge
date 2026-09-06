@@ -197,7 +197,6 @@ def _campaign_plan(
         "recipes": intent_recipes,
         "operator_policy": {},
         "options": {
-            "jurisdiction": options.jurisdiction,
             "cleanup": options.cleanup,
             "selected_recipes": sorted(options.selected_recipes),
             **(
@@ -730,7 +729,7 @@ def test_apply_rejects_actionable_plan_tampering_and_option_drift(
         QualificationRunner(
             _Client({}),
             EvidenceLedger(tmp_path / "options.jsonl"),
-            RunnerOptions(jurisdiction="US"),
+            RunnerOptions(cleanup="none"),
         ).apply(plan, str(plan["plan_digest"]))
 
     selected = frozenset({"vonk/tiny"})
@@ -1941,7 +1940,7 @@ def test_plan_classifies_definite_memory_blocker_without_importing() -> None:
     assert all("imports/public" not in call[1] for call in client.calls)
 
 
-def test_restricted_license_fails_closed_and_understands_eu_membership() -> None:
+def test_restricted_license_metadata_does_not_create_territorial_blockers() -> None:
     recipe = {
         "model_license": {
             "territorial_restrictions": {
@@ -1951,8 +1950,8 @@ def test_restricted_license_fails_closed_and_understands_eu_membership() -> None
         }
     }
 
-    assert legal_blockers(recipe, None)[0].code == "license.jurisdiction_required"
-    assert legal_blockers(recipe, "NL")[0].code == "license.territory_denied"
+    assert legal_blockers(recipe, None) == []
+    assert legal_blockers(recipe, "NL") == []
     assert legal_blockers(recipe, "US") == []
 
 
@@ -1978,6 +1977,9 @@ def test_plan_reads_current_library_detail_for_revision_and_license() -> None:
                 "GET",
                 "/api/v1/library/recipes/00000000-0000-4000-8000-000000000001",
             ): {
+                "topology_roles": recipe["topology_roles"],
+                "artifact_identities": [],
+                "temporary_build_bytes_per_node": 0,
                 "selected_revision": {
                     "id": "00000000-0000-4000-8000-000000000002",
                     "content_sha256": "c" * 64,
@@ -1998,7 +2000,7 @@ def test_plan_reads_current_library_detail_for_revision_and_license() -> None:
     item = plan["recipes"][0]
 
     assert item["local_revision_id"] == "00000000-0000-4000-8000-000000000002"
-    assert item["blockers"][0]["code"] == "license.territory_denied"
+    assert item["blockers"] == []
     assert all(
         call[:2] != ("POST", "/api/v1/catalog/imports/public") for call in client.calls
     )
@@ -2218,7 +2220,7 @@ def test_apply_records_static_blockers_without_mutation(tmp_path: Path) -> None:
     assert ledger.completed_recipes(str(plan["plan_digest"])) == set()
 
 
-def test_apply_blocks_after_import_when_resolved_model_license_denies_jurisdiction(
+def test_apply_does_not_block_after_import_for_territorial_license_metadata(
     tmp_path: Path,
 ) -> None:
     options = RunnerOptions(jurisdiction="NL")
@@ -2272,12 +2274,17 @@ def test_apply_blocks_after_import_when_resolved_model_license_denies_jurisdicti
     )
     ledger = EvidenceLedger(tmp_path / "evidence.jsonl")
 
-    result = QualificationRunner(client, ledger, options).apply(plan, digest)
+    runner = QualificationRunner(client, ledger, options)
+    invoked: list[str] = []
+    runner._prepare_capacity_campaign = lambda *_args: None
+    runner._residency_inventory = lambda *_args: {}
+    runner._apply_recipe = lambda _digest, item: invoked.append(str(item["key"]))
 
-    assert result["blocked"] == 1
-    assert result["succeeded"] == 0
-    blocked = [row for row in ledger.records if row["event"] == "recipe.blocked"]
-    assert blocked[0]["payload"]["blockers"][0]["code"] == "license.territory_denied"
+    result = runner.apply(plan, digest)
+
+    assert result["blocked"] == 0
+    assert result["succeeded"] == 1
+    assert invoked == ["vonk/restricted"]
 
 
 def test_resume_never_uninstalls_a_preexisting_installation(tmp_path: Path) -> None:

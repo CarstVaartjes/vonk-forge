@@ -1,8 +1,8 @@
 from typing import Literal, cast
 
-TelemetryRollupPointResolution = Literal['fifteen-minute', 'minute']
+TelemetryRollupPointResolution = Literal['daily', 'fifteen-minute', 'minute']
 
-TELEMETRY_ROLLUP_POINT_RESOLUTION_VALUES: set[TelemetryRollupPointResolution] = { 'fifteen-minute', 'minute',  }
+TELEMETRY_ROLLUP_POINT_RESOLUTION_VALUES: set[TelemetryRollupPointResolution] = { 'daily', 'fifteen-minute', 'minute',  }
 
 def check_telemetry_rollup_point_resolution(value: str) -> TelemetryRollupPointResolution:
     if value in TELEMETRY_ROLLUP_POINT_RESOLUTION_VALUES:

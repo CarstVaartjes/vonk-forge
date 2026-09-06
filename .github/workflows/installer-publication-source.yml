@@ -60,6 +60,7 @@ on:
       - scripts/verify-release-tag-authority
       - src/cluster_profiles/**
       - tests/acceptance/test_fresh_nas_install.py
+      - tests/acceptance/recipe-library-revision.txt
       - tests/acceptance/test_spark_lifecycle.py
 
 permissions:

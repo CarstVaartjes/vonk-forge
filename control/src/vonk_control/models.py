@@ -34,7 +34,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql.functions import FunctionElement
 
 
@@ -66,6 +66,15 @@ def _lower_hex(column: str, length: int) -> str:
     return (
         f"length({column}) = {length} AND {column} = lower({column}) AND "
         f"length({remainder}) = 0"
+    )
+
+
+def _prefixed_digest(column: str) -> str:
+    """Require a lowercase sha256 digest with its explicit algorithm prefix."""
+
+    return (
+        f"length({column}) = 71 AND substr({column}, 1, 7) = 'sha256:' "
+        f"AND ({_lower_hex(f'substr({column}, 8)', 64)})"
     )
 
 
@@ -626,6 +635,11 @@ class FleetProfile(Base):
     assignments: Mapped[list[dict[str, object]]] = mapped_column(
         JSON, nullable=False, default=list
     )
+    # Explicit fleet membership, independent of desired assignments.  Nodes in
+    # this set without an assignment are intentionally reconciled to idle.
+    scope: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     labels: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
     favorite: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
@@ -925,6 +939,33 @@ class AgentOperation(Base):
     )
 
 
+class ArtifactDistributionAssignment(Base):
+    """Durable node-scoped authorization for Controller-served artifacts."""
+
+    __tablename__ = "artifact_distribution_assignments"
+    __table_args__ = (
+        UniqueConstraint("plan_digest", "node_id", name="uq_distribution_plan_node"),
+        CheckConstraint(_lower_hex("plan_digest", 64), name="ck_distribution_plan_digest"),
+        CheckConstraint(_lower_hex("model_artifact_set_sha256", 64), name="ck_distribution_model_set_digest"),
+        CheckConstraint(_lower_hex("oci_archive_sha256", 64), name="ck_distribution_archive_digest"),
+        CheckConstraint("generation >= 1", name="ck_distribution_generation"),
+        CheckConstraint("state IN ('active','revoked','expired')", name="ck_distribution_state"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(ForeignKey("agent_nodes.node_id", ondelete="CASCADE"), nullable=False, index=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    model_artifact_set_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    objects: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False)
+    oci_image_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    oci_archive_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class AgentOperationAttempt(Base):
     __tablename__ = "agent_operation_attempts"
     __table_args__ = (UniqueConstraint("operation_id", "attempt"),)
@@ -983,210 +1024,360 @@ class SourceBundleArchive(Base):
     archive: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
 
-class CatalogEntity(Base):
-    __tablename__ = "catalog_entities"
+class CatalogDocument(Base):
+    """Stable lookup identity for one canonical Model or Recipe document."""
+
+    __tablename__ = "catalog_documents"
     __table_args__ = (
+        UniqueConstraint("kind", "publisher", "slug", name="uq_catalog_document_identity"),
         UniqueConstraint(
-            "kind", "publisher", "slug", name="uq_catalog_entities_identity"
+            "id", "kind", "publisher", "slug", name="uq_catalog_document_root_target"
         ),
-        CheckConstraint(
-            "kind IN ('model-group','model','model-version','execution-harness',"
-            "'runtime-distribution','patch-bundle')",
-            name="ck_catalog_entities_kind",
-        ),
-        CheckConstraint(
-            "publisher = lower(publisher) AND length(publisher) BETWEEN 2 AND 63",
-            name="ck_catalog_entities_publisher",
-        ),
-        CheckConstraint(
-            "slug = lower(slug) AND length(slug) BETWEEN 2 AND 63",
-            name="ck_catalog_entities_slug",
-        ),
-        CheckConstraint(
-            "length(title) BETWEEN 1 AND 120", name="ck_catalog_entities_title"
-        ),
+        CheckConstraint("kind IN ('model','recipe')", name="ck_catalog_document_kind"),
+        CheckConstraint("publisher = lower(publisher) AND length(publisher) BETWEEN 2 AND 63", name="ck_catalog_document_publisher"),
+        CheckConstraint("slug = lower(slug) AND length(slug) BETWEEN 2 AND 63", name="ck_catalog_document_slug"),
+        CheckConstraint("length(title) BETWEEN 1 AND 120", name="ck_catalog_document_title"),
     )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     publisher: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
     slug: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(120), nullable=False)
     created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class CatalogDocumentRevision(Base):
+    """Validated canonical document and derived query projections."""
+
+    __tablename__ = "catalog_document_revisions"
+    __table_args__ = (
+        UniqueConstraint("document_id", "revision_number", name="uq_catalog_document_revision_number"),
+        UniqueConstraint("kind", "publisher", "slug", "content_digest", name="uq_catalog_document_revision_identity_digest"),
+        UniqueConstraint(
+            "id",
+            "kind",
+            "publisher",
+            "slug",
+            "content_digest",
+            name="uq_catalog_document_revision_fk_target",
+        ),
+        UniqueConstraint("id", "kind", name="uq_catalog_document_revision_kind"),
+        ForeignKeyConstraint(
+            ["document_id", "kind", "publisher", "slug"],
+            ["catalog_documents.id", "catalog_documents.kind", "catalog_documents.publisher", "catalog_documents.slug"],
+            name="fk_catalog_document_revision_identity",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("revision_number >= 1", name="ck_catalog_document_revision_number"),
+        CheckConstraint("schema_version = 2", name="ck_catalog_document_revision_schema"),
+        CheckConstraint("state IN ('candidate','active','failed')", name="ck_catalog_document_revision_state"),
+        CheckConstraint("kind IN ('model','recipe')", name="ck_catalog_document_revision_kind"),
+        CheckConstraint(_lower_hex("content_digest", 64), name="ck_catalog_document_revision_digest"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    document_id: Mapped[str] = mapped_column(ForeignKey("catalog_documents.id", ondelete="RESTRICT"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    publisher: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
+    slug: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="candidate")
+    document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    artifact_key: Mapped[str | None] = mapped_column(String(64), index=True)
+    execution_key: Mapped[str | None] = mapped_column(String(64), index=True)
+    download_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    installed_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    projected: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    @property
+    def entity_id(self) -> str:
+        return self.document_id
+
+
+class CatalogDocumentHead(Base):
+    """Atomic active/candidate pointer; a failed candidate cannot replace active."""
+
+    __tablename__ = "catalog_document_heads"
+    __table_args__ = (
+        UniqueConstraint("kind", "publisher", "slug", name="uq_catalog_document_head_identity"),
+        ForeignKeyConstraint(
+            ["kind", "publisher", "slug"],
+            ["catalog_documents.kind", "catalog_documents.publisher", "catalog_documents.slug"],
+            name="fk_catalog_document_head_identity",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("kind IN ('model','recipe')", name="ck_catalog_document_head_kind"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    publisher: Mapped[str] = mapped_column(String(63), nullable=False)
+    slug: Mapped[str] = mapped_column(String(63), nullable=False)
+    active_revision_id: Mapped[str | None] = mapped_column(ForeignKey("catalog_document_revisions.id", ondelete="RESTRICT"), index=True)
+    candidate_revision_id: Mapped[str | None] = mapped_column(ForeignKey("catalog_document_revisions.id", ondelete="RESTRICT"), index=True)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class CatalogRecipeModelReference(Base):
+    """Exact recipe-to-model revision binding enforced by composite foreign keys."""
+
+    __tablename__ = "catalog_recipe_model_references"
+    __table_args__ = (
+        UniqueConstraint("recipe_revision_id", "selection_id", name="uq_catalog_recipe_model_selection"),
+        ForeignKeyConstraint(
+            ["recipe_revision_id", "recipe_kind"],
+            ["catalog_document_revisions.id", "catalog_document_revisions.kind"],
+            name="fk_catalog_recipe_revision_kind",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["model_revision_id", "model_kind", "model_publisher", "model_slug", "model_content_digest"],
+            ["catalog_document_revisions.id", "catalog_document_revisions.kind", "catalog_document_revisions.publisher", "catalog_document_revisions.slug", "catalog_document_revisions.content_digest"],
+            name="fk_catalog_recipe_model_exact_revision",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("recipe_kind = 'recipe'", name="ck_catalog_recipe_revision_kind"),
+        CheckConstraint("model_kind = 'model'", name="ck_catalog_recipe_model_kind"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    recipe_revision_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    recipe_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="recipe")
+    selection_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_revision_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    model_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    model_publisher: Mapped[str] = mapped_column(String(63), nullable=False)
+    model_slug: Mapped[str] = mapped_column(String(63), nullable=False)
+    model_content_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+@event.listens_for(CatalogDocumentRevision, "before_update")
+def _catalog_document_revision_is_immutable(
+    _mapper, _connection, target: CatalogDocumentRevision
+) -> None:
+    state = inspect(target)
+    changed = {
+        attribute.key
+        for attribute in state.attrs
+        if attribute.history.has_changes()
+    }
+    previous_state = state.attrs.state.history.deleted
+    if previous_state and previous_state[0] == "active":
+        raise ValueError("active catalog document revisions are immutable")
+    if target.state == "active" and (
+        not previous_state
+        or changed - {"state", "artifact_key", "execution_key", "projected"}
+    ):
+        raise ValueError("active catalog document revisions are immutable")
+
+
+@event.listens_for(CatalogDocumentRevision, "before_delete")
+def _active_catalog_document_revision_cannot_be_deleted(_mapper, _connection, target: CatalogDocumentRevision) -> None:
+    if target.state == "active":
+        raise ValueError("active catalog document revisions are immutable")
+
+
+@event.listens_for(Session, "before_commit")
+def _active_catalog_document_json_is_immutable(session: Session) -> None:
+    for value in session.identity_map.values():
+        if isinstance(value, CatalogDocumentRevision) and value.state == "active":
+            payload = json.dumps(value.document, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            if hashlib.sha256(payload).hexdigest() != value.content_digest:
+                raise ValueError("active catalog document revisions are immutable")
+
+
+class ModelCacheSet(Base):
+    """Immutable model artifact-set identity and its current NAS projection."""
+
+    __tablename__ = "model_cache_sets"
+    __table_args__ = (
+        CheckConstraint(
+            "schema_version = 2", name="ck_model_cache_sets_schema_version"
+        ),
+        CheckConstraint(
+            _lower_hex("artifact_set_sha256", 64),
+            name="ck_model_cache_sets_artifact_set_digest",
+        ),
+        CheckConstraint(
+            "model_version_sha256 IS NULL OR "
+            f"({_lower_hex('model_version_sha256', 64)})",
+            name="ck_model_cache_sets_model_version_digest",
+        ),
+        CheckConstraint(
+            "recipe_revision_sha256 IS NULL OR "
+            f"({_lower_hex('recipe_revision_sha256', 64)})",
+            name="ck_model_cache_sets_recipe_revision_digest",
+        ),
+        CheckConstraint(
+            "state IN ('incomplete','downloading','verifying','cached',"
+            "'needs-repair','failed')",
+            name="ck_model_cache_sets_state",
+        ),
+        CheckConstraint(
+            "expected_bytes >= 0 AND verified_bytes >= 0 AND verified_bytes <= expected_bytes",
+            name="ck_model_cache_sets_sizes",
+        ),
+        CheckConstraint(
+            "length(CAST(manifest AS TEXT)) BETWEEN 2 AND 1048576",
+            name="ck_model_cache_sets_manifest_size",
+        ),
+    )
+    artifact_set_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    model_version_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    recipe_revision_sha256: Mapped[str | None] = mapped_column(
+        String(64), index=True
+    )
+    manifest: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    expected_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    verified_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    protected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    protected_reasons: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_accessed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    last_error: Mapped[str | None] = mapped_column(String(512))
 
 
-class CatalogEntityRevision(Base):
-    __tablename__ = "catalog_entity_revisions"
+class ModelCacheArtifact(Base):
+    """One deduplicated immutable artifact object tracked by its content digest."""
+
+    __tablename__ = "model_cache_artifacts"
+    __table_args__ = (
+        CheckConstraint(
+            _lower_hex("sha256", 64), name="ck_model_cache_artifacts_digest"
+        ),
+        CheckConstraint(
+            "expected_bytes >= 0 AND actual_bytes >= 0 AND actual_bytes <= expected_bytes AND (expected_bytes > 0 OR (sha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' AND actual_bytes = 0))",
+            name="ck_model_cache_artifacts_sizes",
+        ),
+        CheckConstraint(
+            "state IN ('partial','verified','missing','corrupt')",
+            name="ck_model_cache_artifacts_state",
+        ),
+        CheckConstraint(
+            "length(CAST(identity AS TEXT)) BETWEEN 2 AND 65536",
+            name="ck_model_cache_artifacts_identity_size",
+        ),
+    )
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    identity: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    expected_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    actual_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
+class ModelCacheSetArtifact(Base):
+    """Stable membership projection; one artifact object may serve many sets."""
+
+    __tablename__ = "model_cache_set_artifacts"
     __table_args__ = (
         UniqueConstraint(
-            "entity_id", "revision_number", name="uq_catalog_entity_revision_number"
+            "artifact_set_sha256",
+            "artifact_key",
+            name="uq_model_cache_set_artifact_key",
         ),
         CheckConstraint(
-            "revision_number >= 1", name="ck_catalog_entity_revisions_number"
+            "length(artifact_key) BETWEEN 1 AND 256",
+            name="ck_model_cache_set_artifacts_key",
         ),
         CheckConstraint(
-            "schema_version = 1", name="ck_catalog_entity_revisions_schema"
-        ),
-        CheckConstraint(
-            "lifecycle IN ('draft','blocked','resolved','deprecated')",
-            name="ck_catalog_entity_revisions_lifecycle",
-        ),
-        CheckConstraint(
-            "lifecycle != 'resolved' OR content_sha256 IS NOT NULL",
-            name="ck_catalog_entity_revisions_resolved_digest",
-        ),
-        CheckConstraint(
-            _nullable_lower_hex("content_sha256", 64),
-            name="ck_catalog_entity_revisions_content_digest",
+            "length(path) BETWEEN 1 AND 512",
+            name="ck_model_cache_set_artifacts_path",
         ),
     )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    artifact_set_sha256: Mapped[str] = mapped_column(
+        ForeignKey("model_cache_sets.artifact_set_sha256", ondelete="CASCADE"),
+        primary_key=True,
     )
-    entity_id: Mapped[str] = mapped_column(
-        ForeignKey("catalog_entities.id", ondelete="RESTRICT"),
+    artifact_key: Mapped[str] = mapped_column(String(256), primary_key=True)
+    artifact_sha256: Mapped[str] = mapped_column(
+        ForeignKey("model_cache_artifacts.sha256", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
-    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    lifecycle: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    content_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    entity: Mapped[CatalogEntity] = relationship(lazy="joined")
+    path: Mapped[str] = mapped_column(String(512), nullable=False)
+    roles: Mapped[list[str]] = mapped_column(JSON, nullable=False)
 
 
-@event.listens_for(CatalogEntity, "before_delete")
-def _catalog_entity_with_revisions_cannot_be_deleted(
-    _mapper, connection, target: CatalogEntity
-) -> None:
-    revision_id = connection.scalar(
-        select(CatalogEntityRevision.id)
-        .where(CatalogEntityRevision.entity_id == target.id)
-        .limit(1)
-    )
-    if revision_id is not None:
-        raise ValueError("catalog entities with revisions cannot be deleted")
+class ModelCacheOperation(Base):
+    """Restart-safe NAS operation with per-artifact byte checkpoints."""
 
-
-@event.listens_for(CatalogEntityRevision, "before_update")
-@event.listens_for(CatalogEntityRevision, "before_delete")
-def _resolved_catalog_entity_revision_is_immutable(
-    _mapper, _connection, target: CatalogEntityRevision
-) -> None:
-    lifecycle_history = inspect(target).attrs.lifecycle.history
-    previous = lifecycle_history.deleted[0] if lifecycle_history.deleted else None
-    if target.lifecycle == "resolved" or previous == "resolved":
-        raise ValueError("resolved catalog entity revisions are immutable")
-
-
-@event.listens_for(Session, "before_commit")
-def _resolved_catalog_entity_document_is_immutable(session: Session) -> None:
-    for value in session.identity_map.values():
-        if not isinstance(value, CatalogEntityRevision):
-            continue
-        if value.lifecycle != "resolved" or value.content_sha256 is None:
-            continue
-        encoded = json.dumps(
-            value.document,
-            ensure_ascii=False,
-            allow_nan=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        if hashlib.sha256(encoded).hexdigest() != value.content_sha256:
-            raise ValueError("resolved catalog entity revisions are immutable")
-
-
-class LocalRecipe(Base):
-    __tablename__ = "local_recipes"
+    __tablename__ = "model_cache_operations"
     __table_args__ = (
         CheckConstraint(
-            "source_kind IN ('local','workload_run','global','recipe_library')",
-            name="ck_local_recipes_source_kind",
+            "schema_version = 2", name="ck_model_cache_operations_schema_version"
         ),
         CheckConstraint(
-            "slug = lower(slug) AND length(slug) BETWEEN 2 AND 128",
-            name="ck_local_recipes_slug",
+            "kind IN ('download','repair','evict')",
+            name="ck_model_cache_operations_kind",
+        ),
+        CheckConstraint(
+            "state IN ('queued','running','partial','succeeded','failed','cancelled')",
+            name="ck_model_cache_operations_state",
+        ),
+        CheckConstraint(
+            "attempt >= 1", name="ck_model_cache_operations_attempt"
+        ),
+        CheckConstraint(
+            "plan_digest IS NULL OR "
+            f"({_lower_hex('plan_digest', 64)})",
+            name="ck_model_cache_operations_plan_digest",
+        ),
+        CheckConstraint(
+            "length(CAST(progress AS TEXT)) BETWEEN 2 AND 65536",
+            name="ck_model_cache_operations_progress_size",
+        ),
+        CheckConstraint(
+            "length(CAST(payload AS TEXT)) BETWEEN 2 AND 262144",
+            name="ck_model_cache_operations_payload_size",
         ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    source_kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    request_key: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    attempt: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    artifact_set_sha256: Mapped[str | None] = mapped_column(
+        ForeignKey("model_cache_sets.artifact_set_sha256", ondelete="SET NULL"),
+        index=True,
+    )
+    plan_digest: Mapped[str | None] = mapped_column(String(64), index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    progress: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    actor: Mapped[str] = mapped_column(String(200), nullable=False)
+    current_artifact_key: Mapped[str | None] = mapped_column(String(256))
+    last_error: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class LocalRecipeRevision(Base):
-    __tablename__ = "local_recipe_revisions"
-    __table_args__ = (
-        UniqueConstraint(
-            "recipe_id", "revision_number", name="uq_local_recipe_revision_number"
-        ),
-        UniqueConstraint(
-            "recipe_id", "content_sha256", name="uq_local_recipe_revision_content"
-        ),
-        CheckConstraint(
-            "revision_number >= 1", name="ck_local_recipe_revisions_number"
-        ),
-        CheckConstraint("schema_version >= 1", name="ck_local_recipe_revisions_schema"),
-        CheckConstraint(
-            "lifecycle IN ('draft','blocked','resolved','deprecated')",
-            name="ck_local_recipe_revisions_lifecycle",
-        ),
-        CheckConstraint(
-            "lifecycle != 'resolved' OR content_sha256 IS NOT NULL",
-            name="ck_local_recipe_revisions_resolved_digest",
-        ),
-        CheckConstraint(
-            _nullable_lower_hex("content_sha256", 64),
-            name="ck_local_recipe_revisions_content_digest",
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    recipe_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipes.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    lifecycle: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    content_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-@event.listens_for(LocalRecipeRevision, "before_update")
-@event.listens_for(LocalRecipeRevision, "before_delete")
-def _resolved_recipe_revision_is_immutable(
-    _mapper, _connection, target: LocalRecipeRevision
-) -> None:
-    if target.lifecycle == "resolved":
-        raise ValueError("resolved recipe revisions are immutable")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RecipeLibrarySyncRun(Base):
@@ -1258,175 +1449,6 @@ class RecipeLibrarySyncRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class ManagedRecipeLibraryLink(Base):
-    """Stable remote identity bound to the latest imported immutable revision."""
-
-    __tablename__ = "managed_recipe_library_links"
-    __table_args__ = (
-        UniqueConstraint(
-            "repository",
-            "publisher",
-            "slug",
-            name="uq_managed_recipe_library_identity",
-        ),
-        CheckConstraint(
-            "availability IN ('present','missing')",
-            name="ck_managed_recipe_library_links_availability",
-        ),
-        CheckConstraint(
-            "sync_state IN ('current','update-available','error')",
-            name="ck_managed_recipe_library_links_sync_state",
-        ),
-        CheckConstraint(
-            _lower_hex("remote_content_sha256", 64),
-            name="ck_managed_recipe_library_links_digest",
-        ),
-        CheckConstraint(
-            _lower_hex("remote_commit", 40),
-            name="ck_managed_recipe_library_links_commit",
-        ),
-    )
-    recipe_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipes.id", ondelete="CASCADE"), primary_key=True
-    )
-    repository: Mapped[str] = mapped_column(String(200), nullable=False)
-    publisher: Mapped[str] = mapped_column(String(63), nullable=False)
-    slug: Mapped[str] = mapped_column(String(63), nullable=False)
-    source_path: Mapped[str] = mapped_column(String(256), nullable=False)
-    remote_commit: Mapped[str] = mapped_column(String(40), nullable=False)
-    remote_content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    local_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipe_revisions.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    availability: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    sync_state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
-    last_error: Mapped[str | None] = mapped_column(String(256))
-    last_seen_run_id: Mapped[str] = mapped_column(
-        ForeignKey("recipe_library_sync_runs.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    first_synced_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-
-
-class RecipeImport(Base):
-    __tablename__ = "recipe_imports"
-    __table_args__ = (
-        UniqueConstraint(
-            "source_kind", "source_sha256", name="uq_recipe_import_source"
-        ),
-        CheckConstraint(
-            "source_kind IN ('local','workload_run','global','recipe_library')",
-            name="ck_recipe_imports_source_kind",
-        ),
-        CheckConstraint(
-            _lower_hex("source_sha256", 64), name="ck_recipe_imports_source_digest"
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    recipe_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipes.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    source_kind: Mapped[str] = mapped_column(String(16), nullable=False)
-    source_reference: Mapped[str] = mapped_column(Text, nullable=False)
-    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    redacted_source: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class RecipeImportItem(Base):
-    __tablename__ = "recipe_import_items"
-    __table_args__ = (
-        CheckConstraint(
-            "disposition IN ('imported','incorporated','resolved','transformed','resolution_required',"
-            "'overlay_required','unsupported_blocking','dropped_redundant')",
-            name="ck_recipe_import_items_disposition",
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    import_id: Mapped[str] = mapped_column(
-        ForeignKey("recipe_imports.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    source_path: Mapped[str] = mapped_column(Text, nullable=False)
-    disposition: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    destination_path: Mapped[str | None] = mapped_column(Text)
-    reason_code: Mapped[str] = mapped_column(String(128), nullable=False)
-    detail: Mapped[str] = mapped_column(Text, nullable=False)
-    blocking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-
-
-class RecipeGlobalLink(Base):
-    __tablename__ = "recipe_global_links"
-    __table_args__ = (
-        UniqueConstraint(
-            "global_publisher", "global_slug", name="uq_recipe_global_link_identity"
-        ),
-        CheckConstraint("global_revision >= 1", name="ck_recipe_global_links_revision"),
-        CheckConstraint(
-            _lower_hex("global_content_sha256", 64),
-            name="ck_recipe_global_links_digest",
-        ),
-        CheckConstraint(
-            "sync_state IN ('current','local-ahead','remote-ahead','unavailable')",
-            name="ck_recipe_global_links_state",
-        ),
-    )
-    recipe_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipes.id", ondelete="CASCADE"), primary_key=True
-    )
-    global_recipe_id: Mapped[str] = mapped_column(
-        String(36), nullable=False, index=True
-    )
-    global_publisher: Mapped[str] = mapped_column(String(63), nullable=False)
-    global_slug: Mapped[str] = mapped_column(String(63), nullable=False)
-    global_revision: Mapped[int] = mapped_column(Integer, nullable=False)
-    global_content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    sync_state: Mapped[str] = mapped_column(String(24), nullable=False)
-    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class RecipeTestReport(Base):
-    """Publisher-submitted local test evidence bound to one immutable revision."""
-
-    __tablename__ = "recipe_test_reports"
-    __table_args__ = (
-        UniqueConstraint(
-            "recipe_revision_id", "report_sha256", name="uq_recipe_test_report_digest"
-        ),
-        CheckConstraint(
-            _lower_hex("report_sha256", 64), name="ck_recipe_test_reports_digest"
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    recipe_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipe_revisions.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    report_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    report: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
 class RecipeBuild(Base):
     __tablename__ = "recipe_builds"
     __table_args__ = (
@@ -1466,7 +1488,11 @@ class RecipeBuild(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     recipe_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipe_revisions.id", ondelete="RESTRICT"),
+        ForeignKey(
+            "catalog_document_revisions.id",
+            name="fk_recipe_builds_canonical_recipe_revision",
+            ondelete="RESTRICT",
+        ),
         nullable=False,
         index=True,
     )
@@ -1492,6 +1518,208 @@ class RecipeBuild(Base):
     )
 
 
+class RuntimeImageReceipt(Base):
+    """Controller verified image identity used by install and run admission.
+
+    This row is the immutable artifact receipt.  Its recipe revision is the
+    revision whose executable image/build was actually verified.  A current
+    recipe revision that reuses these bytes is represented by
+    :class:`RuntimeImageAuthorization`, never by rewriting this row.
+    """
+
+    __tablename__ = "runtime_image_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "recipe_revision_id",
+            "source",
+            "original_content_digest",
+            "effective_execution_key",
+            "platform_manifest_digest",
+            "local_image_config_id",
+            name="uq_runtime_image_receipt_identity",
+        ),
+        Index(
+            "ix_runtime_image_receipt_effective_identity",
+            "effective_execution_key",
+            "platform_manifest_digest",
+            "local_image_config_id",
+            "oci_archive_sha256",
+        ),
+        CheckConstraint(
+            "source IN ('published','controller-build')",
+            name="ck_runtime_image_receipts_source",
+        ),
+        CheckConstraint(
+            _lower_hex("original_content_digest", 64),
+            name="ck_runtime_image_receipts_original_digest",
+        ),
+        CheckConstraint(
+            _lower_hex("effective_execution_key", 64),
+            name="ck_runtime_image_receipts_execution_key",
+        ),
+        CheckConstraint(
+            _prefixed_digest("platform_manifest_digest"),
+            name="ck_runtime_image_receipts_platform_digest",
+        ),
+        CheckConstraint(
+            "registry_manifest_digest IS NULL OR "
+            f"({_prefixed_digest('registry_manifest_digest')})",
+            name="ck_runtime_image_receipts_registry_digest",
+        ),
+        CheckConstraint(
+            _prefixed_digest("local_image_config_id"),
+            name="ck_runtime_image_receipts_config_digest",
+        ),
+        CheckConstraint(
+            _nullable_lower_hex("oci_archive_sha256", 64),
+            name="ck_runtime_image_receipts_archive_digest",
+        ),
+        CheckConstraint(
+            "image_bytes IS NULL OR image_bytes > 0",
+            name="ck_runtime_image_receipts_image_bytes",
+        ),
+        CheckConstraint(
+            "oci_archive_sha256 IS NOT NULL AND image_bytes IS NOT NULL",
+            name="ck_runtime_image_receipts_archive_pair",
+        ),
+        CheckConstraint(
+            "(source = 'published' AND registry_manifest_digest IS NOT NULL AND build_id IS NULL) OR "
+            "(source = 'controller-build' AND registry_manifest_digest IS NULL AND build_id IS NOT NULL)",
+            name="ck_runtime_image_receipts_source_build",
+        ),
+        CheckConstraint(
+            "architecture = 'linux-arm64' AND runtime_interface = 'vonk.runtime.v1' AND runtime_interface_label = 'v1'",
+            name="ck_runtime_image_receipts_runtime_identity",
+        ),
+        CheckConstraint(
+            "state IN ('verified','revoked')",
+            name="ck_runtime_image_receipts_state",
+        ),
+        ForeignKeyConstraint(
+            ["recipe_revision_id"],
+            ["catalog_document_revisions.id"],
+            name="fk_runtime_image_receipts_recipe_revision",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["build_id"],
+            ["recipe_builds.id"],
+            name="fk_runtime_image_receipts_build",
+            ondelete="RESTRICT",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    recipe_revision_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    original_content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    effective_execution_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    registry_manifest_digest: Mapped[str | None] = mapped_column(String(71), index=True)
+    platform_manifest_digest: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
+    local_image_config_id: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
+    oci_archive_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    image_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    architecture: Mapped[str] = mapped_column(String(32), nullable=False)
+    runtime_interface: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_interface_label: Mapped[str] = mapped_column(String(128), nullable=False)
+    build_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="verified", index=True)
+
+
+class RuntimeImageAuthorization(Base):
+    """Authorize one current recipe revision to consume one verified receipt.
+
+    The receipt and this binding intentionally duplicate the effective image
+    identity.  Comparing both copies at every boundary prevents a changed
+    current recipe, a stale receipt, or a coincidentally matching build from
+    becoming an implicit fallback.
+    """
+
+    __tablename__ = "runtime_image_authorizations"
+    __table_args__ = (
+        UniqueConstraint(
+            "recipe_revision_id",
+            "receipt_id",
+            name="uq_runtime_image_authorization_revision_receipt",
+        ),
+        CheckConstraint(
+            _lower_hex("original_content_digest", 64),
+            name="ck_runtime_image_authorizations_original_digest",
+        ),
+        CheckConstraint(
+            _lower_hex("effective_execution_key", 64),
+            name="ck_runtime_image_authorizations_execution_key",
+        ),
+        CheckConstraint(
+            _prefixed_digest("platform_manifest_digest"),
+            name="ck_runtime_image_authorizations_platform_digest",
+        ),
+        CheckConstraint(
+            _prefixed_digest("local_image_config_id"),
+            name="ck_runtime_image_authorizations_config_digest",
+        ),
+        CheckConstraint(
+            _lower_hex("oci_archive_sha256", 64),
+            name="ck_runtime_image_authorizations_archive_digest",
+        ),
+        CheckConstraint(
+            "image_bytes > 0",
+            name="ck_runtime_image_authorizations_image_bytes",
+        ),
+        CheckConstraint(
+            "source IN ('published','controller-build')",
+            name="ck_runtime_image_authorizations_source",
+        ),
+        CheckConstraint(
+            "state IN ('authorized','revoked')",
+            name="ck_runtime_image_authorizations_state",
+        ),
+        ForeignKeyConstraint(
+            ["recipe_revision_id"],
+            ["catalog_document_revisions.id"],
+            name="fk_runtime_image_authorizations_recipe_revision",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["receipt_id"],
+            ["runtime_image_receipts.id"],
+            name="fk_runtime_image_authorizations_receipt",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["build_id"],
+            ["recipe_builds.id"],
+            name="fk_runtime_image_authorizations_build",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_runtime_image_authorizations_effective_identity",
+            "effective_execution_key",
+            "platform_manifest_digest",
+            "local_image_config_id",
+            "oci_archive_sha256",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    recipe_revision_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    receipt_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    original_content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    effective_execution_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    registry_manifest_digest: Mapped[str | None] = mapped_column(String(71), index=True)
+    platform_manifest_digest: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
+    local_image_config_id: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
+    oci_archive_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    image_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    build_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    authorized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="authorized", index=True)
+
+
 class ClusterMapping(Base):
     __tablename__ = "cluster_mappings"
     __table_args__ = (
@@ -1509,7 +1737,7 @@ class ClusterMapping(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     recipe_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipe_revisions.id", ondelete="RESTRICT"),
+        ForeignKey("catalog_document_revisions.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -1730,6 +1958,13 @@ class NodeTelemetrySample(Base):
     network_transmit_bytes_per_second: Mapped[float | None] = mapped_column(Float)
     gap_samples: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     details: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    # Rich schema-2 observations live separately from the historical scalar
+    # columns.  Keeping the old columns makes rollups and old evidence stable;
+    # this bounded JSON document carries per-device, per-interface and
+    # per-run series plus capability/provenance metadata.
+    metrics: Mapped[dict[str, object]] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
 
 
 class NodeTelemetryLatest(Base):
@@ -1808,6 +2043,39 @@ class NodeTelemetryRollupMetric(Base):
             name="ck_telemetry_rollup_metrics_name",
         ),
         CheckConstraint(
+            "key IS NULL OR length(key) BETWEEN 1 AND 96",
+            name="ck_telemetry_rollup_metrics_key",
+        ),
+        CheckConstraint(
+            "scope IS NULL OR length(scope) BETWEEN 1 AND 16",
+            name="ck_telemetry_rollup_metrics_scope",
+        ),
+        CheckConstraint(
+            "device_id IS NULL OR length(device_id) BETWEEN 1 AND 128",
+            name="ck_telemetry_rollup_metrics_device",
+        ),
+        CheckConstraint(
+            "process_id IS NULL OR process_id BETWEEN 1 AND 2147483647",
+            name="ck_telemetry_rollup_metrics_process",
+        ),
+        CheckConstraint(
+            "process_name IS NULL OR length(process_name) BETWEEN 1 AND 128",
+            name="ck_telemetry_rollup_metrics_process_name",
+        ),
+        CheckConstraint(
+            "interface_name IS NULL OR length(interface_name) BETWEEN 1 AND 64",
+            name="ck_telemetry_rollup_metrics_interface",
+        ),
+        CheckConstraint(
+            "run_id IS NULL OR length(run_id) BETWEEN 1 AND 128",
+            name="ck_telemetry_rollup_metrics_run",
+        ),
+        CheckConstraint(
+            "length(unit) BETWEEN 1 AND 32 AND length(source) BETWEEN 1 AND 128 AND "
+            "length(measurement_kind) BETWEEN 1 AND 16 AND length(aggregation) BETWEEN 1 AND 32",
+            name="ck_telemetry_rollup_metrics_metadata",
+        ),
+        CheckConstraint(
             "sample_count BETWEEN 0 AND 9223372036854775807",
             name="ck_telemetry_rollup_metrics_count",
         ),
@@ -1825,6 +2093,28 @@ class NodeTelemetryRollupMetric(Base):
         DateTime(timezone=True), primary_key=True
     )
     metric_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # Rich identity and provenance are retained with each rollup row.  The
+    # bounded metric_name is only the stable storage key; consumers must use
+    # these columns to distinguish devices, processes, interfaces and runs.
+    key: Mapped[str | None] = mapped_column(String(96))
+    scope: Mapped[str | None] = mapped_column(String(16))
+    device_id: Mapped[str | None] = mapped_column(String(128))
+    process_id: Mapped[int | None] = mapped_column(BigInteger)
+    process_name: Mapped[str | None] = mapped_column(String(128))
+    interface_name: Mapped[str | None] = mapped_column(String(64))
+    run_id: Mapped[str | None] = mapped_column(String(128))
+    unit: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="unknown", server_default="unknown"
+    )
+    source: Mapped[str] = mapped_column(
+        String(128), nullable=False, default="legacy", server_default="legacy"
+    )
+    measurement_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="measured", server_default="measured"
+    )
+    aggregation: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="mean", server_default="mean"
+    )
     sample_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     minimum: Mapped[float] = mapped_column(Float, nullable=False)
     mean: Mapped[float] = mapped_column(Float, nullable=False)
@@ -1992,7 +2282,7 @@ class RecipeInstallation(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     recipe_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("local_recipe_revisions.id", ondelete="RESTRICT"),
+        ForeignKey("catalog_document_revisions.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -2008,8 +2298,8 @@ class RecipeInstallation(Base):
         index=True,
     )
     mapping_generation: Mapped[int] = mapped_column(Integer, nullable=False)
-    recipe_build_id: Mapped[str] = mapped_column(
-        ForeignKey("recipe_builds.id", ondelete="RESTRICT"), nullable=False, index=True
+    recipe_build_id: Mapped[str | None] = mapped_column(
+        ForeignKey("recipe_builds.id", ondelete="RESTRICT"), nullable=True, index=True
     )
     image_digest: Mapped[str] = mapped_column(String(71), nullable=False)
     # A digest identifies the approved plan contents, not one installation row.
@@ -2355,52 +2645,3 @@ class ResourceReservation(Base):
         DateTime(timezone=True), nullable=False
     )
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class Recipe(Base):
-    """Greenfield Library recipe identity owned by PostgreSQL."""
-
-    __tablename__ = "recipes"
-    recipe_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    slug: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    source: Mapped[str] = mapped_column(Text, nullable=False)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class RecipeRevision(Base):
-    """Content-addressed immutable revision in the greenfield Library."""
-
-    __tablename__ = "recipe_revisions"
-    __table_args__ = (
-        UniqueConstraint(
-            "recipe_id", "revision_number", name="uq_recipe_revision_number"
-        ),
-        UniqueConstraint(
-            "recipe_id", "content_digest", name="uq_recipe_revision_digest"
-        ),
-        CheckConstraint("revision_number >= 1", name="ck_recipe_revision_number"),
-    )
-    revision_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    recipe_id: Mapped[str] = mapped_column(
-        ForeignKey("recipes.recipe_id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    content: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-@event.listens_for(RecipeRevision, "before_update")
-@event.listens_for(RecipeRevision, "before_delete")
-def _recipe_revision_is_immutable(_mapper, _connection, target: RecipeRevision) -> None:
-    raise ValueError("recipe revisions are immutable")

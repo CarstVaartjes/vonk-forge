@@ -40,7 +40,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("recipe_installations") as batch:
+    # Fresh baseline foreign keys point at canonical revisions; asking SQLite
+    # to resolve the historical local revision target during a batch rebuild
+    # would fail because that table is intentionally absent.
+    with op.batch_alter_table(
+        "recipe_installations", reflect_kwargs={"resolve_fks": False}
+    ) as batch:
         batch.create_unique_constraint(
             "uq_recipe_installations_plan_digest", ["plan_digest"]
         )

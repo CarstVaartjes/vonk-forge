@@ -1,0 +1,8 @@
+source = "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
+# Resolved from recipes main after the canonical synthetic canary update (PR #74).
+branch = "main"
+revision = "807957c9bae653f618d98fb27620f69bf736fe37"
+subdirectory = "contracts"
+package = "vonk-forge-public-contracts==0.1.0"
+wheel = "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl"
+sha256 = "694a60b6bfc2bd15ccd10aa77910d850cdfcd536374cae28792958266382e326"

@@ -526,6 +526,7 @@ def test_results_are_bounded_and_reject_secret_bearing_keys() -> None:
 def test_operation_enum_contains_only_supported_operations() -> None:
     assert {member.value for member in AgentOperation} == {
         "agent.upgrade.v1",
+        "artifact.distribution.v1",
         "node.probe",
         "release.install",
         "workload.prepare",

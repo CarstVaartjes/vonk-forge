@@ -15,10 +15,49 @@ from vonk_control.catalog_contract import catalog_content_sha256
 from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessCompileError
 from vonk_control.harnesses.common import (
     SyntheticHarnessCompiler,
+    compile_arguments,
     custom_adapter_command,
     structured_command,
     validate_projection,
 )
+
+
+def test_compile_arguments_preserves_opaque_post_executable_values() -> None:
+    rendered, parsed = compile_arguments(
+        {
+            "parameters": [],
+            "runtime": {
+                "arguments": [
+                    {"name": "device", "value": "--device=/dev/nvidia0"},
+                    {"name": "network", "value": "host"},
+                    {"name": "user", "value": "10001:10001"},
+                    {"name": "mount", "value": ""},
+                    {"name": "volume", "value": '{"target":"/data"}'},
+                    {"name": "option", "value": "-c"},
+                    {"name": "device", "value": "second"},
+                ]
+            },
+        },
+        {},
+        {},
+    )
+    assert rendered == (
+        "--device",
+        "--device=/dev/nvidia0",
+        "--network",
+        "host",
+        "--user",
+        "10001:10001",
+        "--mount",
+        "",
+        "--volume",
+        '{"target":"/data"}',
+        "--option",
+        "-c",
+        "--device",
+        "second",
+    )
+    assert parsed["--device"] == "second"
 from vonk_control.harnesses.registry import (
     HarnessRegistry,
     TrustedBuiltinComposition,

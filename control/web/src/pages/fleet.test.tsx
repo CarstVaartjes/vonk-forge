@@ -61,7 +61,12 @@ function control(
   history: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, resolution, maximumPoints) => ({schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points: []}),
   updateNodeProfile: ControlApi["updateNodeProfile"] = async (nodeId, input) => ({id: nodeId, display_name: input.display_name, hostname: `${nodeId}.internal`, ip_address: null}),
 ): ControlApi {
-  return {visualFleet, nodeTelemetryHistory: history, updateNodeProfile} as ControlApi;
+  return {
+    visualFleet,
+    nodeTelemetryHistory: history,
+    updateNodeProfile,
+    fleetProfiles: async () => ({profiles: []}),
+  } as unknown as ControlApi;
 }
 
 async function flush(): Promise<void> {
@@ -108,8 +113,8 @@ test("shows truthful cluster counts and live connection state", async () => {
     expect(within(within(summary).getByText(label).parentElement!).getByText("1")).toBeVisible();
   }
   expect(within(summary).getByText("70.0 GiB")).toBeVisible();
-  expect(within(summary).getByText("1 installed recipe")).toBeInTheDocument();
-  expect(within(summary).getByText("1 loaded recipe")).toBeInTheDocument();
+  expect(within(summary).queryByText("1 installed recipe")).not.toBeInTheDocument();
+  expect(within(summary).queryByText("1 loaded recipe")).not.toBeInTheDocument();
   expect(within(summary).getByRole("button", {name: "3 active warnings"})).toBeVisible();
   expect(screen.getAllByRole("article")).toHaveLength(4);
 
@@ -319,7 +324,7 @@ test("keeps selected detail and focus while a keyed node card updates", async ()
 
   act(() => stream.emit("node-telemetry", {schema_version: 1, node_id: "node-a", sample: sample("node-a", "2026-08-15T11:59:59Z", 73)}, "6"));
 
-  expect(screen.getByRole("img", {name: "GPU 24h trend"})).toHaveAccessibleDescription(/Latest 73%/);
+  expect(screen.getByRole("img", {name: "GPU 24h trend has only one reported sample"})).toHaveTextContent("Current sample only");
   expect(screen.getByRole("complementary", {name: "Alpha details"})).toBeVisible();
   expect(close).toHaveFocus();
 });
@@ -566,6 +571,7 @@ test("offers unbound re-enrollment after the controller has lost its node rows",
   render(<FleetPage api={api}/>);
   await flush();
 
+  openFleetControls();
   fireEvent.click(screen.getByRole("button", {name: "Re-enroll Spark"}));
   expect(screen.getByText(/Spark's locally held node identity/i)).toBeVisible();
   fireEvent.click(screen.getByRole("button", {name: "Create one-time enrollment command"}));

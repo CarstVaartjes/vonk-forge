@@ -2274,6 +2274,7 @@ dependencies = [
  "url",
  "uuid",
  "vonk-agent-protocol",
+ "vonk-agent-helper",
  "x509-parser",
 ]
 

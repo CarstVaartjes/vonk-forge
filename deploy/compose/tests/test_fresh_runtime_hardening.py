@@ -120,11 +120,12 @@ def test_caddy_serves_the_site_controller_certificate() -> None:
 
 
 def test_control_images_do_not_install_git_or_ssh() -> None:
-    dockerfile = CONTROL_DOCKERFILE.read_text(encoding="utf-8").lower()
-
-    assert "apt-get install" not in dockerfile
-    assert "openssh" not in dockerfile
-    assert " git" not in dockerfile
+    worker = _final_stage("worker")
+    api = _final_stage("api")
+    for stage in (worker, api):
+        assert "apt-get install" not in stage
+        assert "openssh" not in stage
+        assert " git" not in stage
 
 
 def test_api_image_bounds_root_to_preexec_and_seals_source_secret_directory() -> None:

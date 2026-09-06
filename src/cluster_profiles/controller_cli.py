@@ -3,46 +3,21 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import hashlib
 import json
 import os
 import re
 import stat
+import sys
+import time
 import urllib.parse
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
-from importlib import resources
 from pathlib import Path
 from typing import Protocol
 
 from .control_client import ControlClientError
 
-PUBLIC_CAPABILITIES = (
-    "chat",
-    "reasoning",
-    "vision",
-    "image-generation",
-    "image-editing",
-    "video",
-    "audio",
-    "3d",
-)
-PUBLIC_READINESS = (
-    "executable",
-    "integration-required",
-    "not-executable",
-    "not-declared",
-)
-PUBLIC_QUALIFICATIONS = ("cataloged", "candidate")
-PUBLIC_LOCAL_STATES = (
-    "not-imported",
-    "update-available",
-    "current",
-    "needs-review",
-)
-PUBLIC_MODEL_TYPES = ("language", "vision", "image", "video", "audio", "3d")
-PUBLIC_SORTS = ("catalog", "model", "sparks", "download")
 ARTIFACT_JOB_INTERFACES = (
     "audio-job",
     "video-job",
@@ -65,7 +40,6 @@ ACTIVITY_STATUSES = (
     "unknown",
 )
 ACTIVITY_SORTS = ("recent", "attention")
-RECIPE_PRESETS = ("custom", "vllm", "diffusers")
 _MAX_PAGES = 100
 _MAX_ARTIFACT_JOB_INPUT_FILES = 32
 _MAX_ARTIFACT_JOB_INPUT_FILE_BYTES = 512 * 1024**2
@@ -199,8 +173,12 @@ def _add_json(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Emit stable JSON output")
 
 
-def _subcommands(parser: argparse.ArgumentParser, name: str):
-    return parser.add_subparsers(dest=name, required=True, parser_class=type(parser))
+def _subcommands(
+    parser: argparse.ArgumentParser, name: str, *, required: bool = True
+):
+    return parser.add_subparsers(
+        dest=name, required=required, parser_class=type(parser)
+    )
 
 
 def _apply(parser: argparse.ArgumentParser) -> None:
@@ -211,31 +189,17 @@ def _apply(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _paging(parser: argparse.ArgumentParser, *, default: int) -> None:
+def _paging(
+    parser: argparse.ArgumentParser, *, default: int, maximum: int = 100
+) -> None:
     parser.add_argument("--cursor")
-    parser.add_argument("--limit", type=int, choices=range(1, 101), default=default)
+    parser.add_argument(
+        "--limit", type=int, choices=range(1, maximum + 1), default=default
+    )
     parser.add_argument(
         "--all",
         action="store_true",
         help="Follow bounded continuation cursors until all available pages are loaded",
-    )
-
-
-def _public_filters(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--search", default="")
-    parser.add_argument("--model-type", choices=PUBLIC_MODEL_TYPES)
-    parser.add_argument("--model")
-    parser.add_argument("--source-owner")
-    parser.add_argument("--repository")
-    parser.add_argument("--sparks", choices=("1", "2", "3", "4+"))
-    parser.add_argument("--runtime")
-    parser.add_argument("--precision")
-    parser.add_argument("--topology")
-    parser.add_argument("--qualification", choices=PUBLIC_QUALIFICATIONS)
-    parser.add_argument("--readiness", choices=PUBLIC_READINESS)
-    parser.add_argument("--local", choices=PUBLIC_LOCAL_STATES)
-    parser.add_argument(
-        "--capability", action="append", choices=PUBLIC_CAPABILITIES, default=[]
     )
 
 
@@ -244,6 +208,32 @@ def _request_key(parser: argparse.ArgumentParser) -> None:
         "--request-key",
         help="Idempotency UUID (generated automatically when omitted)",
     )
+
+
+def _structured_input(
+    parser: argparse.ArgumentParser,
+    *,
+    required: bool = True,
+    prefix: str | None = None,
+) -> None:
+    """Add the bounded structured-input contract used by agent callers.
+
+    ``--input -`` is accepted as an explicit stdin form as well as the more
+    discoverable ``--stdin`` flag.  Keeping this on the parser means every
+    complex command advertises the same machine-facing contract.
+    """
+    group = parser.add_mutually_exclusive_group(required=required)
+    suffix = f"{prefix}_" if prefix else ""
+    group.add_argument("--input", dest=f"{suffix}input", metavar="JSON", help="Inline JSON object")
+    group.add_argument("--input-file", dest=f"{suffix}input_file", type=Path, help="Bounded JSON object file")
+    group.add_argument("--stdin", dest=f"{suffix}stdin", action="store_true", help="Read a JSON object from stdin")
+
+
+def _plan_flags(parser: argparse.ArgumentParser, *, require_digest: bool = False) -> None:
+    parser.add_argument("--plan-digest", required=require_digest)
+    _request_key(parser)
+    _apply(parser)
+    _add_json(parser)
 
 
 def _action_pair(
@@ -288,24 +278,87 @@ def add_controller_commands(
     _add_json(fleet_node)
 
     telemetry = fleet_commands.add_parser(
-        "telemetry", help="Show node telemetry history"
+        "telemetry", help="Inspect node telemetry and metric support"
     )
-    telemetry.add_argument("node_id")
-    telemetry_time = telemetry.add_mutually_exclusive_group()
-    telemetry_time.add_argument(
+    telemetry_commands = telemetry.add_subparsers(dest="telemetry_command")
+    telemetry_current = telemetry_commands.add_parser("current")
+    telemetry_current.add_argument("node_id")
+    _add_json(telemetry_current)
+    telemetry_capabilities = telemetry_commands.add_parser("capabilities")
+    telemetry_capabilities.add_argument("node_id")
+    _add_json(telemetry_capabilities)
+    telemetry_workloads = telemetry_commands.add_parser("workloads")
+    telemetry_workloads.add_argument("node_id")
+    telemetry_workloads.add_argument("--run-id")
+    telemetry_workloads.add_argument("--state")
+    _add_json(telemetry_workloads)
+    telemetry_history = telemetry_commands.add_parser("history")
+    telemetry_history.add_argument("node_id")
+    telemetry_history_time = telemetry_history.add_mutually_exclusive_group()
+    telemetry_history_time.add_argument(
         "--range", choices=tuple(TELEMETRY_RANGES), default="1h"
     )
-    telemetry_time.add_argument("--start")
-    telemetry.add_argument("--end")
-    telemetry.add_argument("--resolution", choices=("raw", "minute", "fifteen-minute"))
-    telemetry.add_argument("--maximum-points", type=int, choices=range(1, 3001))
-    _add_json(telemetry)
+    telemetry_history_time.add_argument("--start")
+    telemetry_history.add_argument("--end")
+    telemetry_history.add_argument(
+        "--resolution", choices=("raw", "minute", "fifteen-minute")
+    )
+    telemetry_history.add_argument(
+        "--maximum-points", type=int, choices=range(1, 3001)
+    )
+    _add_json(telemetry_history)
 
-    profile = fleet_commands.add_parser("profile", help="Rename a Fleet node")
+    metrics = fleet_commands.add_parser(
+        "metrics", help="Inspect server-provided Spark metrics and history"
+    )
+    metric_commands = _subcommands(metrics, "metrics_command")
+    metrics_current = metric_commands.add_parser("current")
+    metrics_current.add_argument("node_id")
+    _add_json(metrics_current)
+    for metric_command in ("history", "export"):
+        metric_parser = metric_commands.add_parser(metric_command)
+        metric_parser.add_argument("node_id")
+        metric_time = metric_parser.add_mutually_exclusive_group()
+        metric_time.add_argument(
+            "--range", choices=tuple(TELEMETRY_RANGES), default="1h"
+        )
+        metric_time.add_argument("--start")
+        metric_parser.add_argument("--end")
+        metric_parser.add_argument(
+            "--resolution", choices=("raw", "minute", "fifteen-minute")
+        )
+        metric_parser.add_argument(
+            "--maximum-points", type=int, choices=range(1, 3001)
+        )
+        if metric_command == "export":
+            metric_parser.add_argument("--file", type=Path)
+        _add_json(metric_parser)
+    metrics_capabilities = metric_commands.add_parser("capabilities")
+    metrics_capabilities.add_argument("node_id")
+    _add_json(metrics_capabilities)
+    metrics_workloads = metric_commands.add_parser("workloads")
+    metrics_workloads.add_argument("node_id")
+    metrics_workloads.add_argument("--run-id")
+    metrics_workloads.add_argument("--state")
+    _add_json(metrics_workloads)
+
+    profile = fleet_commands.add_parser(
+        "node-profile", aliases=["profile"], help="Rename a Fleet node"
+    )
     profile.add_argument("node_id")
     profile.add_argument("--display-name", required=True)
     _apply(profile)
     _add_json(profile)
+    current = fleet_commands.add_parser(
+        "current", help="Show current workloads and placements"
+    )
+    current.add_argument("--search", default="")
+    current.add_argument("--all", action="store_true")
+    _add_json(current)
+    state = fleet_commands.add_parser("state", help="Show current Spark state and capacity")
+    state.add_argument("--search", default="")
+    state.add_argument("--all", action="store_true")
+    _add_json(state)
 
     agents = fleet_commands.add_parser("agents", help="List registered agents")
     _add_json(agents)
@@ -376,143 +429,6 @@ def add_controller_commands(
     library_compare.add_argument("recipe_id", nargs="+", metavar="RECIPE_ID")
     _add_json(library_compare)
 
-    public = library_commands.add_parser(
-        "public", help="Browse and import the public catalog"
-    )
-    public_commands = _subcommands(public, "public_command")
-    public_list = public_commands.add_parser("list", help="List public recipes")
-    _public_filters(public_list)
-    public_list.add_argument("--sort", choices=PUBLIC_SORTS, default="catalog")
-    _add_json(public_list)
-    public_facets = public_commands.add_parser(
-        "facets", help="List the currently available web catalog filter options"
-    )
-    _public_filters(public_facets)
-    _add_json(public_facets)
-    public_compare = public_commands.add_parser(
-        "compare", help="Compare two or three public recipes"
-    )
-    public_compare.add_argument("uri", nargs="+", metavar="URI")
-    _add_json(public_compare)
-    public_preview = public_commands.add_parser(
-        "preview", help="Review an immutable public recipe"
-    )
-    public_preview.add_argument("uri")
-    _add_json(public_preview)
-    public_import = public_commands.add_parser(
-        "import", help="Import an immutable public recipe"
-    )
-    public_import.add_argument("uri")
-    public_import.add_argument("--expected-content-sha256", required=True)
-    _apply(public_import)
-    _add_json(public_import)
-
-    template = library_commands.add_parser(
-        "template", help="Print the canonical document for a web builder preset"
-    )
-    template.add_argument("--preset", choices=RECIPE_PRESETS, default="custom")
-    _add_json(template)
-
-    create = library_commands.add_parser("create", help="Create a custom recipe draft")
-    create.add_argument("--slug", required=True)
-    create.add_argument("--document", type=Path, required=True)
-    _apply(create)
-    _add_json(create)
-    update = library_commands.add_parser("update", help="Update a custom recipe draft")
-    update.add_argument("recipe_id")
-    update.add_argument("--expected-revision", type=int, required=True)
-    update.add_argument("--document", type=Path, required=True)
-    _apply(update)
-    _add_json(update)
-    resolve = library_commands.add_parser("resolve", help="Resolve a recipe draft")
-    resolve.add_argument("recipe_id")
-    resolve.add_argument("--expected-revision", type=int, required=True)
-    _apply(resolve)
-    _add_json(resolve)
-    fork = library_commands.add_parser("fork", help="Fork an immutable recipe revision")
-    fork.add_argument("recipe_id")
-    fork.add_argument("--revision", type=int, required=True)
-    fork.add_argument("--slug", required=True)
-    _apply(fork)
-    _add_json(fork)
-
-    def mapping_shared(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--recipe-revision-id", required=True)
-        parser.add_argument("--node-id", action="append", required=True)
-        parser.add_argument("--parameters", type=Path)
-
-    _action_pair(
-        library_commands,
-        "map",
-        mapping_shared,
-        lambda parser: parser.add_argument("--placement-digest", required=True),
-    )
-
-    def build_shared(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--recipe-revision-id", required=True)
-        parser.add_argument("--builder-node-id", required=True)
-
-    _action_pair(
-        library_commands,
-        "build",
-        build_shared,
-        lambda parser: parser.add_argument("--build-input-sha256", required=True),
-    )
-
-    def distribute_shared(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--recipe-build-id", required=True)
-        parser.add_argument("--mapping-id", required=True)
-        parser.add_argument("--mapping-generation", type=int, required=True)
-
-    _action_pair(
-        library_commands,
-        "distribute",
-        distribute_shared,
-        lambda parser: parser.add_argument("--plan-digest", required=True),
-    )
-
-    def install_shared(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--mapping-id", required=True)
-        parser.add_argument("--recipe-build-id", required=True)
-
-    _action_pair(
-        library_commands,
-        "install",
-        install_shared,
-        lambda parser: parser.add_argument("--plan-digest", required=True),
-    )
-
-    def load_shared(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("--installation-id", required=True)
-        parser.add_argument("--alias", required=True)
-
-    _action_pair(
-        library_commands,
-        "load",
-        load_shared,
-        lambda parser: parser.add_argument("--plan-digest", required=True),
-    )
-
-    def stop_shared(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("run_id")
-
-    _action_pair(
-        library_commands,
-        "stop",
-        stop_shared,
-        lambda parser: parser.add_argument("--plan-digest", required=True),
-    )
-
-    def uninstall_shared(parser: argparse.ArgumentParser) -> None:
-        parser.add_argument("installation_id")
-
-    _action_pair(
-        library_commands,
-        "uninstall",
-        uninstall_shared,
-        lambda parser: parser.add_argument("--plan-digest", required=True),
-    )
-
     operation = library_commands.add_parser(
         "operation", help="Inspect or retry a recipe operation"
     )
@@ -522,6 +438,12 @@ def add_controller_commands(
     _add_json(operation_show)
     operation_retry = operation_commands.add_parser("retry")
     operation_retry.add_argument("operation_id")
+    operation_retry.add_argument(
+        "--family",
+        choices=("recipe", "model-cache", "run-switch"),
+        default="recipe",
+        help="operation family owning the durable retry",
+    )
     _request_key(operation_retry)
     _apply(operation_retry)
     _add_json(operation_retry)
@@ -685,6 +607,211 @@ def add_controller_commands(
     _apply(resume)
     _add_json(resume)
 
+    # Stable, task-oriented aliases for the browser's primary workflows.  The
+    # lower-level ``library`` tree remains available for expert lifecycle work.
+    models = commands.add_parser("models", help="Discover and compare model versions")
+    model_commands = _subcommands(models, "models_command")
+    model_list = model_commands.add_parser("list", aliases=["discover"])
+    _paging(model_list, default=100, maximum=512)
+    model_list.add_argument("--search", default="")
+    model_list.add_argument("--capability", action="append", default=[])
+    model_list.add_argument(
+        "--recipe-capability",
+        action="append",
+        default=[],
+        help="Filter by capabilities exposed by at least one recipe",
+    )
+    _add_json(model_list)
+    model_show = model_commands.add_parser("show")
+    model_show.add_argument("model_id")
+    _add_json(model_show)
+    model_compare = model_commands.add_parser("compare")
+    model_compare.add_argument("model_id", nargs="+", metavar="MODEL_ID")
+    _add_json(model_compare)
+    model_download = model_commands.add_parser(
+        "download", help="Download an exact model to the Library"
+    )
+    model_download.add_argument("--model-version-sha256", required=True)
+    model_download.add_argument("--recipe-revision-id")
+    model_download.add_argument("--recipe-revision-sha256")
+    model_download.add_argument("--request-key")
+    model_download.add_argument("--dry-run", action="store_true")
+    model_download.add_argument("--detach", action="store_true")
+    model_download.add_argument("--timeout-seconds", type=int, default=30)
+    model_download.add_argument("--interval-seconds", type=float, default=1.0)
+    _add_json(model_download)
+
+    recipes = commands.add_parser("recipes", help="Discover canonical Recipes")
+    recipe_commands = _subcommands(recipes, "recipes_command")
+    recipe_list = recipe_commands.add_parser("list")
+    _paging(recipe_list, default=100, maximum=512)
+    recipe_list.add_argument("--search", default="")
+    _add_json(recipe_list)
+    recipe_show = recipe_commands.add_parser("show")
+    recipe_show.add_argument("recipe_id")
+    _add_json(recipe_show)
+
+    model_run = model_commands.add_parser("run", help="Preview or start a model run")
+    _structured_input(model_run, required=False, prefix="run")
+    model_run.add_argument("--request-key", dest="run_request_key")
+    model_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the automatic run without starting it",
+    )
+    model_run.add_argument("--detach", action="store_true", help="Return after submission")
+    model_run.add_argument("--timeout-seconds", type=int, default=30)
+    model_run.add_argument("--interval-seconds", type=float, default=1.0)
+    model_run_commands = _subcommands(
+        model_run, "model_run_command", required=False
+    )
+    model_run_preview = model_run_commands.add_parser("preview")
+    _structured_input(model_run_preview)
+    _add_json(model_run_preview)
+    model_run_apply = model_run_commands.add_parser("apply")
+    _structured_input(model_run_apply)
+    model_run_apply.add_argument("--plan-digest", required=True)
+    model_run_apply.add_argument("--request-key", required=True)
+    _apply(model_run_apply)
+    _add_json(model_run_apply)
+    model_run_stop = model_run_commands.add_parser("stop")
+    stop_variants = _subcommands(model_run_stop, "model_run_stop_command")
+    stop_preview = stop_variants.add_parser("preview")
+    stop_preview.add_argument("run_id")
+    _add_json(stop_preview)
+    stop_apply = stop_variants.add_parser("apply")
+    stop_apply.add_argument("run_id")
+    stop_apply.add_argument("--plan-digest", required=True)
+    stop_apply.add_argument("--request-key", required=True)
+    _apply(stop_apply)
+    _add_json(stop_apply)
+
+    cache = commands.add_parser("cache", help="Manage verified NAS model artifacts")
+    cache_commands = _subcommands(cache, "cache_command")
+    cache_list = cache_commands.add_parser("list")
+    _paging(cache_list, default=100)
+    cache_list.add_argument("--search", default="")
+    cache_list.add_argument("--state")
+    _add_json(cache_list)
+    cache_show = cache_commands.add_parser("show")
+    cache_show.add_argument("artifact_id", metavar="ARTIFACT_SET_SHA256")
+    _add_json(cache_show)
+    cache_download = cache_commands.add_parser("download")
+    cache_download.add_argument("download_mode", nargs="?", choices=("preview", "apply"))
+    _structured_input(cache_download, required=False)
+    cache_download.add_argument("--model-version-sha256")
+    cache_download.add_argument("--recipe-revision-sha256")
+    cache_download.add_argument("--recipe-revision-id")
+    cache_download.add_argument("--dry-run", action="store_true", help="Preview without downloading")
+    cache_download.add_argument("--detach", action="store_true", help="Return after submission")
+    cache_download.add_argument("--timeout-seconds", type=int, default=30)
+    cache_download.add_argument("--interval-seconds", type=float, default=1.0)
+    _plan_flags(cache_download)
+    cache_repair = cache_commands.add_parser("repair")
+    cache_repair.add_argument("artifact_id", metavar="ARTIFACT_SET_SHA256")
+    cache_repair.add_argument("repair_mode", nargs="?", choices=("preview", "apply"))
+    _plan_flags(cache_repair)
+    cache_update = cache_commands.add_parser("update")
+    cache_update.add_argument("artifact_id", nargs="?", metavar="ARTIFACT_SET_SHA256")
+    _add_json(cache_update)
+    cache_operations = cache_commands.add_parser("operations")
+    cache_operations_commands = _subcommands(cache_operations, "cache_operations_command")
+    cache_operations_list = cache_operations_commands.add_parser("list")
+    _paging(cache_operations_list, default=20)
+    _add_json(cache_operations_list)
+    cache_operations_show = cache_operations_commands.add_parser("show")
+    cache_operations_show.add_argument("operation_id")
+    _add_json(cache_operations_show)
+    eviction = cache_commands.add_parser("eviction", help="Review or apply cache eviction")
+    eviction_commands = _subcommands(eviction, "eviction_command")
+    eviction_preview = eviction_commands.add_parser("preview")
+    _structured_input(eviction_preview, required=False)
+    eviction_preview.add_argument("--target-bytes", type=int)
+    _add_json(eviction_preview)
+    eviction_apply = eviction_commands.add_parser("apply")
+    _structured_input(eviction_apply, required=False)
+    eviction_apply.add_argument("--target-bytes", type=int)
+    _plan_flags(eviction_apply, require_digest=True)
+
+    profiles = commands.add_parser("profiles", help="Saved whole-fleet running profiles")
+    profile_commands = _subcommands(profiles, "profiles_command")
+    profile_list = profile_commands.add_parser("list")
+    profile_list.add_argument("--search", default="")
+    _add_json(profile_list)
+    profile_show = profile_commands.add_parser("show")
+    profile_show.add_argument("profile_id")
+    _add_json(profile_show)
+    profile_create = profile_commands.add_parser("create")
+    _structured_input(profile_create)
+    _add_json(profile_create)
+    profile_update = profile_commands.add_parser("update")
+    profile_update.add_argument("profile_id")
+    _structured_input(profile_update)
+    _add_json(profile_update)
+    profile_duplicate = profile_commands.add_parser("duplicate")
+    profile_duplicate.add_argument("profile_id")
+    profile_duplicate.add_argument("--name", required=True)
+    profile_duplicate.add_argument("--description")
+    profile_duplicate.add_argument("--apply", action="store_true")
+    profile_duplicate.add_argument("--request-key")
+    _structured_input(profile_duplicate, required=False)
+    _add_json(profile_duplicate)
+    profile_capture = profile_commands.add_parser("capture-current")
+    profile_capture.add_argument("--name", required=True)
+    profile_capture.add_argument("--description", default="")
+    profile_capture.add_argument("--installation-policy", choices=("keep-cached", "exact"), default="keep-cached")
+    profile_capture.add_argument("--request-key")
+    _structured_input(profile_capture, required=False)
+    _apply(profile_capture)
+    _add_json(profile_capture)
+    profile_delete = profile_commands.add_parser("delete")
+    profile_delete.add_argument("profile_id")
+    _apply(profile_delete)
+    _add_json(profile_delete)
+    profile_preview = profile_commands.add_parser("preview")
+    profile_preview.add_argument("profile_id")
+    _add_json(profile_preview)
+    profile_status = profile_commands.add_parser("status")
+    profile_status.add_argument("profile_id")
+    _add_json(profile_status)
+    profile_switch = profile_commands.add_parser("switch")
+    profile_switch.add_argument("profile_id")
+    profile_switch.add_argument("--plan-digest")
+    profile_switch.add_argument("--request-key")
+    profile_switch.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview the automatic switch without applying it",
+    )
+    profile_switch.add_argument("--detach", action="store_true", help="Return after submission")
+    profile_switch.add_argument("--timeout-seconds", type=int, default=30)
+    profile_switch.add_argument("--interval-seconds", type=float, default=1.0)
+    _apply(profile_switch)
+    _add_json(profile_switch)
+    profile_application = profile_commands.add_parser("application")
+    profile_application.add_argument("application_id")
+    _add_json(profile_application)
+
+    operations = commands.add_parser("operations", help="Inspect durable operations and evidence")
+    operation_commands = _subcommands(operations, "operations_command")
+    operation_list = operation_commands.add_parser("list")
+    _paging(operation_list, default=20)
+    operation_list.add_argument("--status")
+    _add_json(operation_list)
+    operation_show = operation_commands.add_parser("show")
+    operation_show.add_argument("operation_id")
+    _add_json(operation_show)
+    for operation_action in ("watch", "wait"):
+        watch_parser = operation_commands.add_parser(operation_action)
+        watch_parser.add_argument("operation_id")
+        watch_parser.add_argument("--timeout-seconds", type=int, default=30)
+        watch_parser.add_argument("--interval-seconds", type=float, default=1.0)
+        _add_json(watch_parser)
+    evidence = operation_commands.add_parser("evidence")
+    evidence.add_argument("operation_id")
+    evidence.add_argument("--file", type=Path)
+    _add_json(evidence)
+
 
 def _quoted(value: str) -> str:
     return urllib.parse.quote(value, safe="")
@@ -706,6 +833,113 @@ def _read_object(path: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("input JSON must be an object")
     return value
+
+
+def _read_structured(
+    args: argparse.Namespace,
+    *,
+    required: bool = True,
+    prefix: str | None = None,
+) -> dict[str, object]:
+    """Read one bounded JSON object from inline text, a file, or stdin."""
+    suffix = f"{prefix}_" if prefix else ""
+    source = getattr(args, f"{suffix}input", None)
+    input_file = getattr(args, f"{suffix}input_file", None)
+    use_stdin = bool(getattr(args, f"{suffix}stdin", False))
+    if source is None and input_file is None and not use_stdin:
+        if required:
+            raise ValueError("one of --input, --input-file, or --stdin is required")
+        return {}
+    if source is not None:
+        raw = source.encode()
+        if len(raw) > 1_048_576:
+            raise ValueError("inline JSON input exceeds the 1 MiB limit")
+        return _decode_structured(raw)
+    if input_file is not None:
+        return _read_object(input_file)
+    stream = getattr(sys.stdin, "buffer", sys.stdin)
+    raw = stream.read(1_048_577)
+    if isinstance(raw, str):
+        raw = raw.encode()
+    if len(raw) > 1_048_576:
+        raise ValueError("stdin JSON input exceeds the 1 MiB limit")
+    return _decode_structured(raw)
+
+
+def _decode_structured(raw: bytes) -> dict[str, object]:
+    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        value: dict[str, object] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"input JSON contains duplicate key: {key}")
+            value[key] = item
+        return value
+
+    value = json.loads(raw, object_pairs_hook=reject_duplicates)
+    if not isinstance(value, dict):
+        raise TypeError("input JSON must be an object")
+    return value
+
+
+def _validated_request_key(args: argparse.Namespace, factory: Callable[[], str]) -> str:
+    value = args.request_key or factory()
+    if re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        value,
+    ) is None:
+        raise ValueError("--request-key must be a lowercase UUID")
+    return value
+
+
+def _explicit_request_key(value: str | None) -> str:
+    if value is None or re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        value,
+    ) is None:
+        raise ValueError("an explicit lowercase UUID --request-key is required")
+    return value
+
+
+def _load_pages(
+    client: ControllerClient,
+    path: str,
+    args: argparse.Namespace,
+    *,
+    query: Mapping[str, object] | None = None,
+    collection: str | None = None,
+) -> dict[str, object]:
+    """Follow server cursors with a hard bound and preserve stable JSON."""
+    cursor = getattr(args, "cursor", None)
+    pages: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for _ in range(_MAX_PAGES):
+        values = dict(query or {})
+        values.update(cursor=cursor, limit=getattr(args, "limit", 20))
+        page = client.request("GET", path, query=_query(**values))
+        pages.append(page)
+        next_cursor = page.get("next_cursor")
+        if not getattr(args, "all", False) or not isinstance(next_cursor, str) or not next_cursor:
+            break
+        if next_cursor in seen:
+            raise ValueError("continuation cursor repeated")
+        seen.add(next_cursor)
+        cursor = next_cursor
+    else:
+        raise ValueError("pagination exceeded the safety limit")
+    if not pages:
+        return {}
+    result = dict(pages[0])
+    if collection is None:
+        return result
+    merged: list[object] = []
+    for page in pages:
+        values = page.get(collection)
+        if isinstance(values, list):
+            merged.extend(values)
+    result[collection] = merged
+    result["loaded_pages"] = len(pages)
+    result["next_cursor"] = pages[-1].get("next_cursor")
+    return result
 
 
 def _inspect_artifact_input(
@@ -830,51 +1064,6 @@ def _artifact_job_create_payload(
         },
         "timeout_seconds": args.timeout_seconds,
     }
-
-
-def _merge_patch(base: object, patch: object) -> object:
-    if not isinstance(base, Mapping) or not isinstance(patch, Mapping):
-        return copy.deepcopy(patch)
-    result = copy.deepcopy(dict(base))
-    for key, value in patch.items():
-        result[str(key)] = (
-            _merge_patch(result[key], value) if key in result else copy.deepcopy(value)
-        )
-    return result
-
-
-def _preset_data() -> dict[str, object]:
-    packaged = resources.files("cluster_profiles").joinpath(
-        "resources/custom-recipe-presets.json"
-    )
-    try:
-        value = json.loads(packaged.read_bytes())
-    except FileNotFoundError:
-        repository_copy = (
-            Path(__file__).resolve().parents[2]
-            / "control/web/src/pages/custom-recipe-presets.json"
-        )
-        value = json.loads(repository_copy.read_bytes())
-    if not isinstance(value, dict):
-        raise TypeError("custom recipe preset data must be a JSON object")
-    return value
-
-
-def _recipe_template(preset: str) -> dict[str, object]:
-    data = _preset_data()
-    base = data.get("base")
-    presets = data.get("presets")
-    if not isinstance(base, Mapping) or not isinstance(presets, Mapping):
-        raise TypeError("custom recipe preset data is invalid")
-    if preset not in presets:
-        raise ValueError(f"unknown custom recipe preset: {preset}")
-    patch = presets.get(preset)
-    if not isinstance(patch, Mapping):
-        raise TypeError(f"custom recipe preset is not an object: {preset}")
-    merged = _merge_patch(base, patch)
-    if not isinstance(merged, dict):
-        raise TypeError("custom recipe preset did not produce a document")
-    return merged
 
 
 def _plan_or_request(
@@ -1191,318 +1380,6 @@ def _filter_library(payload: dict[str, object], query: str) -> dict[str, object]
     }
 
 
-def _public_match(
-    recipe: Mapping[str, object], args: argparse.Namespace, omitted: str | None = None
-) -> bool:
-    query = args.search.strip().casefold()
-    fields = (
-        "title",
-        "slug",
-        "description",
-        "model_title",
-        "model_slug",
-        "source_owner",
-        "source_repository",
-        "runtime_distribution",
-        "precision",
-        "capabilities",
-        "tags",
-    )
-    if query and not any(_contains(recipe.get(field), query) for field in fields):
-        return False
-    capabilities = recipe.get("capabilities")
-    capability_set = set(capabilities) if isinstance(capabilities, list) else set()
-    if omitted != "modelType":
-        model_type = args.model_type
-        if model_type == "language" and not capability_set.intersection(
-            {"chat", "reasoning"}
-        ):
-            return False
-        if model_type == "vision" and "vision" not in capability_set:
-            return False
-        if model_type == "image" and not capability_set.intersection(
-            {"image-generation", "image-editing"}
-        ):
-            return False
-        if model_type in {"video", "audio", "3d"} and model_type not in capability_set:
-            return False
-    exact = {
-        "model": ("model", args.model),
-        "source_owner": ("sourceOwner", args.source_owner),
-        "source_repository": ("repository", args.repository),
-        "runtime_distribution": ("runtime", args.runtime),
-        "precision": ("precision", args.precision),
-        "topology_mode": ("topology", args.topology),
-        "qualification": ("qualification", args.qualification),
-        "execution_readiness": ("readiness", args.readiness),
-    }
-    for field, (facet, expected) in exact.items():
-        if omitted == facet or expected is None:
-            continue
-        actual = (
-            f"{recipe.get('model_publisher')}/{recipe.get('model_slug')}"
-            if field == "model"
-            else recipe.get(field)
-        )
-        if actual != expected:
-            return False
-    node_count = recipe.get("node_count")
-    if (
-        omitted != "sparks"
-        and args.sparks == "4+"
-        and (not isinstance(node_count, int) or node_count < 4)
-    ):
-        return False
-    if (
-        omitted != "sparks"
-        and args.sparks in {"1", "2", "3"}
-        and node_count != int(args.sparks)
-    ):
-        return False
-    local = recipe.get("local")
-    local_state = local.get("status") if isinstance(local, Mapping) else None
-    if (
-        omitted != "local"
-        and args.local == "needs-review"
-        and local_state
-        not in {
-            "different-revision",
-            "local-ahead",
-            "conflict",
-        }
-    ):
-        return False
-    if (
-        omitted != "local"
-        and args.local
-        and args.local != "needs-review"
-        and local_state != args.local
-    ):
-        return False
-    return omitted == "capability" or all(
-        capability in capability_set for capability in args.capability
-    )
-
-
-def _filter_public(
-    payload: dict[str, object], args: argparse.Namespace
-) -> dict[str, object]:
-    recipes = payload.get("recipes")
-    if not isinstance(recipes, list):
-        return payload
-    filtered = [
-        recipe
-        for recipe in recipes
-        if isinstance(recipe, dict) and _public_match(recipe, args)
-    ]
-    if args.sort == "model":
-        filtered.sort(
-            key=lambda recipe: (
-                str(recipe.get("model_title", "")).casefold(),
-                str(recipe.get("title", "")).casefold(),
-            )
-        )
-    elif args.sort == "sparks":
-        filtered.sort(
-            key=lambda recipe: (
-                int(recipe.get("node_count", 0)),
-                str(recipe.get("title", "")).casefold(),
-            )
-        )
-    elif args.sort == "download":
-        filtered.sort(
-            key=lambda recipe: (
-                int(recipe.get("expected_download_bytes", 0)),
-                str(recipe.get("title", "")).casefold(),
-            )
-        )
-    return {**payload, "recipes": filtered, "filtered_count": len(filtered)}
-
-
-def _model_type_matches(recipe: Mapping[str, object], model_type: str) -> bool:
-    capabilities = recipe.get("capabilities")
-    values = set(capabilities) if isinstance(capabilities, list) else set()
-    if model_type == "language":
-        return bool(values.intersection({"chat", "reasoning"}))
-    if model_type == "image":
-        return bool(values.intersection({"image-generation", "image-editing"}))
-    return model_type in values
-
-
-def _facet_values(
-    recipes: list[Mapping[str, object]],
-    args: argparse.Namespace,
-    facet: str,
-    values: list[str],
-    predicate: Callable[[Mapping[str, object], str], bool],
-) -> list[dict[str, object]]:
-    return [
-        {
-            "value": value,
-            "count": sum(
-                _public_match(recipe, args, facet) and predicate(recipe, value)
-                for recipe in recipes
-            ),
-        }
-        for value in values
-    ]
-
-
-def _public_facets(
-    payload: dict[str, object], args: argparse.Namespace
-) -> dict[str, object]:
-    raw = payload.get("recipes")
-    recipes = (
-        [recipe for recipe in raw if isinstance(recipe, Mapping)]
-        if isinstance(raw, list)
-        else []
-    )
-
-    def unique(field: str) -> list[str]:
-        return sorted(
-            {
-                value
-                for recipe in recipes
-                if isinstance((value := recipe.get(field)), str) and value
-            },
-            key=str.casefold,
-        )
-
-    models = sorted(
-        {
-            f"{recipe.get('model_publisher')}/{recipe.get('model_slug')}"
-            for recipe in recipes
-            if recipe.get("model_publisher")
-            and recipe.get("model_slug")
-            and (
-                args.model_type is None or _model_type_matches(recipe, args.model_type)
-            )
-        },
-        key=str.casefold,
-    )
-    capabilities = []
-    for capability in PUBLIC_CAPABILITIES:
-        selected_others = [value for value in args.capability if value != capability]
-        capabilities.append(
-            {
-                "value": capability,
-                "count": sum(
-                    _public_match(recipe, args, "capability")
-                    and all(
-                        selected in set(recipe.get("capabilities", []))
-                        for selected in selected_others
-                    )
-                    and capability in set(recipe.get("capabilities", []))
-                    for recipe in recipes
-                ),
-            }
-        )
-    model_type_args = argparse.Namespace(**{**vars(args), "model": None})
-    facets = {
-        "model_type": _facet_values(
-            recipes,
-            model_type_args,
-            "modelType",
-            list(PUBLIC_MODEL_TYPES),
-            _model_type_matches,
-        ),
-        "model": _facet_values(
-            recipes,
-            args,
-            "model",
-            models,
-            lambda recipe, value: (
-                f"{recipe.get('model_publisher')}/{recipe.get('model_slug')}" == value
-            ),
-        ),
-        "source_owner": _facet_values(
-            recipes,
-            args,
-            "sourceOwner",
-            unique("source_owner"),
-            lambda recipe, value: recipe.get("source_owner") == value,
-        ),
-        "repository": _facet_values(
-            recipes,
-            args,
-            "repository",
-            unique("source_repository"),
-            lambda recipe, value: recipe.get("source_repository") == value,
-        ),
-        "sparks": _facet_values(
-            recipes,
-            args,
-            "sparks",
-            ["1", "2", "3", "4+"],
-            lambda recipe, value: (
-                isinstance(recipe.get("node_count"), int)
-                and (
-                    recipe["node_count"] >= 4
-                    if value == "4+"
-                    else recipe["node_count"] == int(value)
-                )
-            ),
-        ),
-        "runtime": _facet_values(
-            recipes,
-            args,
-            "runtime",
-            unique("runtime_distribution"),
-            lambda recipe, value: recipe.get("runtime_distribution") == value,
-        ),
-        "precision": _facet_values(
-            recipes,
-            args,
-            "precision",
-            unique("precision"),
-            lambda recipe, value: recipe.get("precision") == value,
-        ),
-        "topology": _facet_values(
-            recipes,
-            args,
-            "topology",
-            unique("topology_mode"),
-            lambda recipe, value: recipe.get("topology_mode") == value,
-        ),
-        "qualification": _facet_values(
-            recipes,
-            args,
-            "qualification",
-            list(PUBLIC_QUALIFICATIONS),
-            lambda recipe, value: recipe.get("qualification") == value,
-        ),
-        "readiness": _facet_values(
-            recipes,
-            args,
-            "readiness",
-            list(PUBLIC_READINESS),
-            lambda recipe, value: recipe.get("execution_readiness") == value,
-        ),
-        "local": _facet_values(
-            recipes,
-            args,
-            "local",
-            list(PUBLIC_LOCAL_STATES),
-            lambda recipe, value: (
-                isinstance(recipe.get("local"), Mapping)
-                and (
-                    recipe["local"].get("status")
-                    in {"different-revision", "local-ahead", "conflict"}
-                    if value == "needs-review"
-                    else recipe["local"].get("status") == value
-                )
-            ),
-        ),
-        "capability": capabilities,
-    }
-    return {
-        "repository": payload.get("repository"),
-        "commit": payload.get("commit"),
-        "matching_count": sum(_public_match(recipe, args) for recipe in recipes),
-        "facets": facets,
-    }
-
-
 def _telemetry_query(args: argparse.Namespace) -> dict[str, object]:
     end = datetime.fromisoformat(args.end) if args.end else datetime.now(UTC)
     if end.tzinfo is None:
@@ -1553,18 +1430,18 @@ def _model_identity_key(model: Mapping[str, object]) -> tuple[object, object, ob
 def _load_library_snapshot(
     client: ControllerClient, args: argparse.Namespace
 ) -> dict[str, object]:
-    cursor = args.cursor
+    cursor = getattr(args, "cursor", None)
     seen: set[str] = set()
     pages: list[dict[str, object]] = []
     for _page_number in range(_MAX_PAGES):
         page = client.request(
             "GET",
             "/api/v1/library",
-            query=_query(cursor=cursor, limit=args.limit),
+            query=_query(cursor=cursor, limit=getattr(args, "limit", 100)),
         )
         pages.append(page)
         next_cursor = page.get("next_cursor")
-        if not args.all or not isinstance(next_cursor, str) or not next_cursor:
+        if not getattr(args, "all", False) or not isinstance(next_cursor, str) or not next_cursor:
             break
         if next_cursor in seen:
             raise ValueError("Library continuation cursor repeated")
@@ -1610,8 +1487,55 @@ def _load_library_snapshot(
     return result
 
 
+def _load_recipe_list(
+    client: ControllerClient, args: argparse.Namespace
+) -> dict[str, object]:
+    """Load the independent canonical Recipe projection with bounded paging."""
+    cursor = getattr(args, "cursor", None)
+    seen: set[str] = set()
+    pages: list[dict[str, object]] = []
+    for _page_number in range(_MAX_PAGES):
+        page = client.request(
+            "GET",
+            "/api/v1/library/recipes",
+            query=_query(cursor=cursor, limit=getattr(args, "limit", 100)),
+        )
+        pages.append(page)
+        next_cursor = page.get("next_cursor")
+        if not getattr(args, "all", False) or not isinstance(next_cursor, str) or not next_cursor:
+            break
+        if next_cursor in seen:
+            raise ValueError("Recipe continuation cursor repeated")
+        seen.add(next_cursor)
+        cursor = next_cursor
+    else:
+        raise ValueError("Recipe pagination exceeded the safety limit")
+
+    result = dict(pages[0])
+    recipes: dict[object, Mapping[str, object]] = {}
+    for page in pages:
+        values = page.get("recipes")
+        if not isinstance(values, list):
+            continue
+        for recipe in values:
+            if isinstance(recipe, Mapping):
+                recipes.setdefault(recipe.get("recipe_id"), recipe)
+    result["recipes"] = list(recipes.values())
+    result["next_cursor"] = pages[-1].get("next_cursor")
+    result["loaded_pages"] = len(pages)
+    return result
+
+
 def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     command = args.fleet_command
+    if command == "current":
+        return client.request(
+            "GET", "/api/v1/fleet/workloads", query=_query(search=args.search or None, all=True if args.all else None)
+        )
+    if command == "state":
+        return client.request(
+            "GET", "/api/v1/fleet/state", query=_query(search=args.search or None, all=True if args.all else None)
+        )
     if command in {"list", "show"}:
         payload = client.request("GET", "/api/v1/fleet")
         if command == "list":
@@ -1623,12 +1547,12 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
                     return node
         raise ValueError(f"Fleet node not found: {args.node_id}")
     if command == "telemetry":
-        return client.request(
-            "GET",
-            f"/api/v1/nodes/{_quoted(args.node_id)}/telemetry",
-            query=_telemetry_query(args),
+        return _run_metric_command(
+            args, client, getattr(args, "telemetry_command", None) or "history"
         )
-    if command == "profile":
+    if command == "metrics":
+        return _run_metric_command(args, client, args.metrics_command)
+    if command in {"profile", "node-profile"}:
         display_name = args.display_name.strip()
         if (
             not display_name
@@ -1694,6 +1618,30 @@ def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, 
     return _plan_or_request(
         args, client, "POST", f"/api/v1/agents/nodes/{_quoted(args.node_id)}/revoke"
     )
+
+
+def _run_metric_command(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    metric_command: str,
+) -> dict[str, object]:
+    """Forward the Controller's schema-2 telemetry projection unchanged."""
+    node_path = f"/api/v1/nodes/{_quoted(args.node_id)}/telemetry"
+    if metric_command == "current":
+        return client.request("GET", f"{node_path}/current")
+    if metric_command == "capabilities":
+        return client.request("GET", f"{node_path}/capabilities")
+    if metric_command == "workloads":
+        return client.request(
+            "GET",
+            f"{node_path}/workloads",
+            query=_query(run_id=args.run_id, state=args.state) or None,
+        )
+    result = client.request("GET", node_path, query=_telemetry_query(args))
+    if metric_command == "export" and args.file is not None:
+        args.file.write_text(json.dumps(result, sort_keys=True) + "\n")
+        return {"node_id": args.node_id, "file": str(args.file)}
+    return result
 
 
 def _artifact_job_id(value: object) -> str:
@@ -2024,196 +1972,14 @@ def _run_library(
             ],
             "compared_count": len(recipe_ids),
         }
-    if command == "public":
-        if args.public_command in {"list", "facets", "compare"}:
-            catalog = client.request("GET", "/api/v1/catalog/public-recipes")
-            if args.public_command == "list":
-                return _filter_public(catalog, args)
-            if args.public_command == "facets":
-                return _public_facets(catalog, args)
-            uris = _compare_values(args.uri, "recipe URI")
-            recipes = catalog.get("recipes")
-            indexed = (
-                {
-                    recipe.get("uri"): recipe
-                    for recipe in recipes
-                    if isinstance(recipe, Mapping)
-                    and isinstance(recipe.get("uri"), str)
-                }
-                if isinstance(recipes, list)
-                else {}
-            )
-            missing = [uri for uri in uris if uri not in indexed]
-            if missing:
-                raise ValueError(f"public recipe not found: {missing[0]}")
-            return {
-                "repository": catalog.get("repository"),
-                "commit": catalog.get("commit"),
-                "recipes": [indexed[uri] for uri in uris],
-                "compared_count": len(uris),
-            }
-        payload = {"uri": args.uri}
-        if args.public_command == "preview":
-            return client.request(
-                "POST", "/api/v1/catalog/imports/public/preview", payload
-            )
-        payload["expected_content_sha256"] = args.expected_content_sha256
-        return _plan_or_request(
-            args, client, "POST", "/api/v1/catalog/imports/public", payload
-        )
-    if command == "template":
-        return _recipe_template(args.preset)
-    if command == "create":
-        return _plan_or_request(
-            args,
-            client,
-            "POST",
-            "/api/v1/catalog/recipes",
-            {"slug": args.slug, "document": _read_object(args.document)},
-        )
-    if command == "update":
-        return _plan_or_request(
-            args,
-            client,
-            "PUT",
-            f"/api/v1/catalog/recipes/{_quoted(args.recipe_id)}/draft",
-            {
-                "expected_revision": args.expected_revision,
-                "document": _read_object(args.document),
-            },
-        )
-    if command == "resolve":
-        return _plan_or_request(
-            args,
-            client,
-            "POST",
-            f"/api/v1/catalog/recipes/{_quoted(args.recipe_id)}/resolve",
-            {"expected_revision": args.expected_revision},
-        )
-    if command == "fork":
-        return _plan_or_request(
-            args,
-            client,
-            "POST",
-            f"/api/v1/catalog/recipes/{_quoted(args.recipe_id)}/fork",
-            {"revision": args.revision, "slug": args.slug},
-        )
-    if command in {
-        "map",
-        "build",
-        "distribute",
-        "install",
-        "load",
-        "stop",
-        "uninstall",
-    }:
-        variant = getattr(args, f"{command}_command")
-        apply = variant == "apply"
-        if command == "map":
-            payload: dict[str, object] = {
-                "recipe_revision_id": args.recipe_revision_id,
-                "node_ids": args.node_id,
-                "parameters": _read_object(args.parameters) if args.parameters else {},
-            }
-            path = (
-                "/api/v1/recipes/mappings"
-                if apply
-                else "/api/v1/recipes/mapping-plans/preview"
-            )
-            if apply:
-                payload.update(
-                    placement_digest=args.placement_digest,
-                    request_key=_request_key_value(args, request_id_factory),
-                )
-        elif command == "build":
-            payload = {
-                "recipe_revision_id": args.recipe_revision_id,
-                "builder_node_id": args.builder_node_id,
-            }
-            path = (
-                "/api/v1/recipes/builds"
-                if apply
-                else "/api/v1/recipes/build-plans/preview"
-            )
-            if apply:
-                payload.update(
-                    build_input_sha256=args.build_input_sha256,
-                    request_key=_request_key_value(args, request_id_factory),
-                )
-        elif command == "distribute":
-            payload = {
-                "recipe_build_id": args.recipe_build_id,
-                "mapping_id": args.mapping_id,
-                "mapping_generation": args.mapping_generation,
-            }
-            path = (
-                "/api/v1/recipes/image-distributions"
-                if apply
-                else "/api/v1/recipes/image-distribution-plans/preview"
-            )
-            if apply:
-                payload.update(
-                    plan_digest=args.plan_digest,
-                    request_key=_request_key_value(args, request_id_factory),
-                )
-        elif command == "install":
-            payload = {
-                "mapping_id": args.mapping_id,
-                "recipe_build_id": args.recipe_build_id,
-            }
-            path = (
-                "/api/v1/recipes/installations"
-                if apply
-                else "/api/v1/recipes/install-plans/preview"
-            )
-            if apply:
-                payload.update(
-                    plan_digest=args.plan_digest,
-                    request_key=_request_key_value(args, request_id_factory),
-                )
-        elif command == "load":
-            payload = {"installation_id": args.installation_id, "alias": args.alias}
-            path = (
-                "/api/v1/recipes/runs" if apply else "/api/v1/recipes/run-plans/preview"
-            )
-            if apply:
-                payload.update(
-                    plan_digest=args.plan_digest,
-                    request_key=_request_key_value(args, request_id_factory),
-                )
-        elif command == "stop":
-            payload = (
-                {"run_id": args.run_id}
-                if not apply
-                else {
-                    "plan_digest": args.plan_digest,
-                    "request_key": _request_key_value(args, request_id_factory),
-                }
-            )
-            path = (
-                "/api/v1/recipes/stop-plans/preview"
-                if not apply
-                else f"/api/v1/recipes/runs/{_quoted(args.run_id)}/stop"
-            )
-        else:
-            payload = (
-                {"installation_id": args.installation_id}
-                if not apply
-                else {
-                    "plan_digest": args.plan_digest,
-                    "request_key": _request_key_value(args, request_id_factory),
-                }
-            )
-            path = (
-                "/api/v1/recipes/uninstall-plans/preview"
-                if not apply
-                else f"/api/v1/recipes/installations/{_quoted(args.installation_id)}/uninstall"
-            )
-        if apply:
-            return _plan_or_request(args, client, "POST", path, payload)
-        return client.request("POST", path, payload)
     if command == "operation":
-        path = f"/api/v1/recipes/operations/{_quoted(args.operation_id)}"
+        family = getattr(args, "family", "recipe")
+        if family == "model-cache":
+            path = f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}"
+        elif family == "run-switch":
+            path = f"/api/v1/recipes/run-switches/{_quoted(args.operation_id)}"
+        else:
+            path = f"/api/v1/recipes/operations/{_quoted(args.operation_id)}"
         if args.operation_command == "show":
             return client.request("GET", path)
         return _plan_or_request(
@@ -2572,6 +2338,549 @@ def _run_activity(
     return _plan_or_request(args, client, "POST", f"{path}/resume")
 
 
+def _model_supports_capabilities(
+    model: Mapping[str, object], requested: list[str]
+) -> bool:
+    """Match only declared facts from the Controller model inventory."""
+    inventory = model.get("model_capabilities")
+    if not isinstance(inventory, Mapping) or inventory.get("state") != "declared":
+        return False
+    facts = inventory.get("facts")
+    if not isinstance(facts, list):
+        return False
+    supported = {
+        str(item.get("capability"))
+        for item in facts
+        if isinstance(item, Mapping)
+        and item.get("support") == "supported"
+        and isinstance(item.get("capability"), str)
+    }
+    return all(capability in supported for capability in requested)
+
+
+def _run_models(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.models_command
+    if command in {"list", "discover"}:
+        result = _load_library_snapshot(client, args)
+        result = _filter_library(result, args.search)
+        if args.capability:
+            models = result.get("models")
+            if isinstance(models, list):
+                result["models"] = [
+                    model
+                    for model in models
+                    if isinstance(model, Mapping)
+                    and _model_supports_capabilities(model, args.capability)
+                ]
+        if args.recipe_capability:
+            models = result.get("models")
+            if isinstance(models, list):
+                result["models"] = [
+                    model
+                    for model in models
+                    if isinstance(model, Mapping)
+                    and any(
+                        all(
+                            capability in recipe.get("capabilities", [])
+                            for capability in args.recipe_capability
+                        )
+                        for recipe in model.get("recipes", [])
+                        if isinstance(recipe, Mapping)
+                    )
+                ]
+        return result
+    if command == "download":
+        if _LOWER_SHA256.fullmatch(args.model_version_sha256) is None:
+            raise ValueError("model version identity must be a lowercase SHA-256 digest")
+        model_version_sha256 = args.model_version_sha256
+        payload: dict[str, object] = {
+            "model_version_sha256": model_version_sha256,
+        }
+        if args.recipe_revision_id is not None:
+            payload["recipe_revision_id"] = args.recipe_revision_id
+        if args.recipe_revision_sha256 is not None:
+            if _LOWER_SHA256.fullmatch(args.recipe_revision_sha256) is None:
+                raise ValueError("recipe revision identity must be a lowercase SHA-256 digest")
+            payload["recipe_revision_sha256"] = args.recipe_revision_sha256
+        return _run_cache_download_flow(args, client, request_id_factory, payload)
+    if command == "show":
+        snapshot = _load_library_snapshot(client, args)
+        return _find_model(snapshot, args.model_id)
+    values = _compare_values(args.model_id, "model")
+    return {
+        "models": [_find_model(_load_library_snapshot(client, args), value) for value in values],
+        "compared_count": len(values),
+    }
+
+
+def _run_recipes(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
+    """Read canonical Recipes independently from the Model projection."""
+    if args.recipes_command == "list":
+        result = _load_recipe_list(client, args)
+        return {
+            **result,
+            "recipes": [
+                recipe
+                for recipe in result.get("recipes", [])
+                if isinstance(recipe, Mapping)
+                and (
+                    not args.search.strip()
+                    or args.search.strip().casefold() in _searchable_recipe(recipe)
+                )
+            ],
+        }
+    if args.recipes_command == "show":
+        return client.request(
+            "GET", f"/api/v1/library/recipes/{_quoted(args.recipe_id)}"
+        )
+    raise ValueError("unsupported recipe command")
+
+
+def _run_model_run(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.model_run_command
+    if command is None:
+        payload = _read_structured(args, prefix="run")
+        preview = client.request(
+            "POST", "/api/v1/recipes/run-switch-plans/preview", payload
+        )
+        if args.dry_run:
+            return preview
+        plan_digest = preview.get("plan_digest")
+        if not isinstance(plan_digest, str) or not plan_digest:
+            raise ValueError("automatic model run preview did not return plan_digest")
+        request_key = args.run_request_key or request_id_factory()
+        args.request_key = _explicit_request_key(request_key)
+        apply_payload = dict(payload)
+        apply_payload.update(plan_digest=plan_digest, request_key=args.request_key)
+        result = client.request(
+            "POST", "/api/v1/recipes/run-switches", apply_payload
+        )
+        result = _follow_submitted_operation(args, client, result)
+        return {
+            "plan": preview,
+            "result": result,
+            "plan_digest": plan_digest,
+            "request_key": args.request_key,
+        }
+    if command in {"preview", "apply"}:
+        payload = _read_structured(args)
+        if command == "preview":
+            return client.request("POST", "/api/v1/recipes/run-switch-plans/preview", payload)
+        payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
+        if not args.apply:
+            return {
+                "mode": "plan",
+                "apply": False,
+                "method": "POST",
+                "path": "/api/v1/recipes/run-switches",
+                "body": payload,
+            }
+        return client.request("POST", "/api/v1/recipes/run-switches", payload)
+    variant = args.model_run_stop_command
+    payload: dict[str, object] = {"run_id": args.run_id}
+    if variant == "preview":
+        return client.request("POST", "/api/v1/recipes/run-switch-stops/preview", payload)
+    payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
+    if not args.apply:
+        return {
+            "mode": "plan",
+            "apply": False,
+            "method": "POST",
+            "path": "/api/v1/recipes/run-switch-stops",
+            "body": payload,
+        }
+    return client.request("POST", "/api/v1/recipes/run-switch-stops", payload)
+
+
+_TERMINAL_OPERATION_STATES = frozenset(
+    {"succeeded", "completed", "failed", "cancelled", "canceled", "blocked", "partial"}
+)
+
+
+def _operation_progress_line(observed: Mapping[str, object]) -> str | None:
+    progress = observed.get("progress")
+    if not isinstance(progress, Mapping):
+        return None
+    phase = progress.get("phase")
+    pieces: list[str] = []
+    if isinstance(phase, str) and phase:
+        pieces.append(f"phase: {phase}")
+    subphase = progress.get("subphase")
+    if isinstance(subphase, str) and subphase:
+        pieces.append(f"subphase: {subphase}")
+    completed = progress.get("completed_bytes", progress.get("downloaded_bytes"))
+    total = progress.get("total_bytes", progress.get("expected_bytes"))
+    if isinstance(completed, int) and not isinstance(completed, bool):
+        if isinstance(total, int) and not isinstance(total, bool):
+            pieces.append(f"bytes: {completed}/{total}")
+        else:
+            pieces.append(f"bytes: {completed}")
+    artifact = progress.get("current_artifact_key")
+    if isinstance(artifact, str) and artifact:
+        pieces.append(f"artifact: {artifact}")
+    members = progress.get("members")
+    if isinstance(members, list):
+        labels = []
+        for member in members:
+            if isinstance(member, Mapping):
+                label = (
+                    member.get("display_name")
+                    or member.get("node_name")
+                    or member.get("node_id")
+                    or member.get("member_id")
+                    or member.get("id")
+                )
+                if isinstance(label, str) and label:
+                    detail = member.get("phase") or member.get("state")
+                    labels.append(
+                        f"{label} ({detail})"
+                        if isinstance(detail, str) and detail
+                        else label
+                    )
+        if labels:
+            pieces.append("sparks: " + ", ".join(labels[:32]))
+    return " | ".join(pieces) if pieces else None
+
+
+def _follow_submitted_operation(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    submission: dict[str, object],
+) -> dict[str, object]:
+    operation_id = submission.get("operation_id")
+    if not isinstance(operation_id, str) or not operation_id or args.detach:
+        return submission
+    args.operation_id = operation_id
+    timeout = max(0, min(args.timeout_seconds, 300))
+    interval = max(0.1, min(args.interval_seconds, 30.0))
+    deadline = time.monotonic() + timeout
+    last_progress: str | None = None
+    human_output = not (args.global_json or getattr(args, "json", False))
+    while True:
+        observed = client.request("GET", f"/api/v1/operations/{_quoted(operation_id)}")
+        if human_output:
+            progress = _operation_progress_line(observed)
+            if progress is not None and progress != last_progress:
+                print(progress, file=sys.stderr)
+                last_progress = progress
+        state = str(observed.get("state", observed.get("status", ""))).casefold()
+        if state in _TERMINAL_OPERATION_STATES:
+            return observed
+        if time.monotonic() >= deadline:
+            return {**observed, "timed_out": True, "operation_id": operation_id}
+        time.sleep(interval)
+
+
+def _find_model(snapshot: Mapping[str, object], requested: str) -> dict[str, object]:
+    models = snapshot.get("models")
+    if not isinstance(models, list):
+        raise TypeError("Library response contains no model identities")
+    query = requested.casefold()
+    matches: list[dict[str, object]] = []
+    for model in models:
+        if not isinstance(model, Mapping) or not isinstance(model.get("model"), Mapping):
+            continue
+        identity = model["model"]
+        publisher = str(identity.get("publisher", ""))
+        slug = str(identity.get("slug", ""))
+        digest = str(identity.get("content_sha256", ""))
+        aliases = {publisher, slug, f"{publisher}/{slug}", digest, f"{publisher}/{slug}@sha256:{digest}"}
+        if query in {alias.casefold() for alias in aliases}:
+            matches.append(dict(model))
+    if len(matches) > 1:
+        raise ValueError(json.dumps({"error": "ambiguous model", "candidates": matches}, sort_keys=True))
+    if not matches:
+        raise ValueError(f"model not found: {requested}")
+    return matches[0]
+
+
+def _cache_payload(args: argparse.Namespace) -> dict[str, object]:
+    payload = _read_structured(args, required=False)
+    for key in ("plan_digest",):
+        value = getattr(args, key, None)
+        if value is not None:
+            payload.setdefault(key, value)
+    for key in ("model_version_sha256", "recipe_revision_sha256", "recipe_revision_id"):
+        value = getattr(args, key, None)
+        if value is not None:
+            payload.setdefault(key, value)
+    return payload
+
+
+def _artifact_set_sha256(value: str) -> str:
+    if _LOWER_SHA256.fullmatch(value) is None:
+        raise ValueError("artifact set identity must be a lowercase SHA-256 digest")
+    return value
+
+
+def _run_cache_download_flow(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+    payload: dict[str, object],
+) -> dict[str, object]:
+    preview = client.request(
+        "POST", "/api/v1/model-cache/download-preview", dict(payload)
+    )
+    if args.dry_run:
+        return preview
+    plan_digest = preview.get("plan_digest")
+    if not isinstance(plan_digest, str) or not plan_digest:
+        raise ValueError("automatic cache download preview did not return plan_digest")
+    request_key = _explicit_request_key(args.request_key or request_id_factory())
+    args.request_key = request_key
+    apply_payload = dict(payload)
+    apply_payload.update(plan_digest=plan_digest, request_key=request_key)
+    result = _follow_submitted_operation(
+        args,
+        client,
+        client.request("POST", "/api/v1/model-cache/download", apply_payload),
+    )
+    return {
+        "plan": preview,
+        "result": result,
+        "plan_digest": plan_digest,
+        "request_key": request_key,
+    }
+
+
+def _run_cache(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.cache_command
+    if command == "list":
+        return _load_pages(
+            client,
+            "/api/v1/model-cache",
+            args,
+            query=_query(search=args.search, state=args.state),
+            collection="entries",
+        )
+    if command == "show":
+        artifact_set_sha256 = _artifact_set_sha256(args.artifact_id)
+        return client.request(
+            "GET", f"/api/v1/model-cache/entries/{_quoted(artifact_set_sha256)}"
+        )
+    if command == "update":
+        artifact_set_sha256 = (
+            _artifact_set_sha256(args.artifact_id) if args.artifact_id else None
+        )
+        return client.request(
+            "GET",
+            "/api/v1/model-cache/updates",
+            query=_query(artifact_set_sha256=artifact_set_sha256),
+        )
+    if command == "operations":
+        if args.cache_operations_command == "list":
+            return _load_pages(client, "/api/v1/model-cache/operations", args, collection="operations")
+        return client.request(
+            "GET", f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}"
+        )
+    if command == "eviction":
+        variant = args.eviction_command
+        path = "/api/v1/model-cache/eviction-preview" if variant == "preview" else "/api/v1/model-cache/evict"
+        payload = _cache_payload(args)
+        if args.target_bytes is not None:
+            if args.target_bytes < 0:
+                raise ValueError("--target-bytes must be non-negative")
+            payload.setdefault("target_bytes", args.target_bytes)
+        if not any(key != "plan_digest" for key in payload):
+            raise ValueError("cache eviction requires --target-bytes or structured input")
+        if variant == "apply":
+            if not args.request_key:
+                raise ValueError("cache eviction apply requires --request-key")
+            payload.update(
+                plan_digest=args.plan_digest,
+                request_key=_explicit_request_key(args.request_key),
+            )
+            return _plan_or_request(args, client, "POST", path, payload)
+        return client.request("POST", path, payload)
+    if command == "download":
+        payload = _cache_payload(args)
+        if not payload:
+            raise ValueError("cache download requires an exact artifact input")
+        if args.download_mode is None:
+            return _run_cache_download_flow(args, client, request_id_factory, payload)
+        variant = args.download_mode
+        if variant == "preview":
+            if args.apply:
+                raise ValueError("cache download preview cannot be combined with --apply")
+            return client.request("POST", "/api/v1/model-cache/download-preview", payload)
+        if not args.apply or not args.plan_digest or not args.request_key:
+            raise ValueError("cache download apply requires --apply, --plan-digest, and --request-key")
+        payload.update(plan_digest=args.plan_digest, request_key=_explicit_request_key(args.request_key))
+        return client.request("POST", "/api/v1/model-cache/download", payload)
+    payload = _cache_payload(args)
+    payload.setdefault("artifact_set_sha256", _artifact_set_sha256(args.artifact_id))
+    variant = args.repair_mode or ("apply" if args.apply else "preview")
+    if variant == "preview":
+        if args.apply:
+            raise ValueError("cache repair preview cannot be combined with --apply")
+        return client.request("POST", "/api/v1/model-cache/repair-preview", payload)
+    if not args.apply or not args.plan_digest or not args.request_key:
+        raise ValueError("cache repair apply requires --apply, --plan-digest, and --request-key")
+    payload.update(
+        plan_digest=args.plan_digest,
+        request_key=_explicit_request_key(args.request_key),
+    )
+    return client.request("POST", "/api/v1/model-cache/repair", payload)
+
+
+def _profile_body(args: argparse.Namespace) -> dict[str, object]:
+    body = _read_structured(args)
+    if "scope" not in body:
+        raise ValueError("profile input requires an explicit scope")
+    return body
+
+
+def _run_profiles(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.profiles_command
+    base = "/api/v1/fleet-profiles"
+    if command == "list":
+        result = client.request("GET", base)
+        search = args.search.strip().casefold()
+        if search and isinstance(result.get("profiles"), list):
+            result["profiles"] = [
+                profile
+                for profile in result["profiles"]
+                if isinstance(profile, Mapping)
+                and search in str(profile.get("name", "")).casefold()
+            ]
+        return result
+    if command == "show":
+        return client.request("GET", f"{base}/{_quoted(args.profile_id)}")
+    if command in {"create", "update"}:
+        path = base if command == "create" else f"{base}/{_quoted(args.profile_id)}"
+        return client.request("POST" if command == "create" else "PUT", path, _profile_body(args))
+    if command == "duplicate":
+        body = _read_structured(args, required=False)
+        if body and "scope" not in body:
+            raise ValueError("profile duplicate input requires an explicit scope")
+        body["name"] = args.name
+        if args.description is not None:
+            body["description"] = args.description
+        if args.apply:
+            if not args.request_key:
+                raise ValueError("profile duplicate apply requires --request-key")
+            body["request_key"] = _explicit_request_key(args.request_key)
+        return _plan_or_request(
+            args,
+            client,
+            "POST",
+            f"{base}/{_quoted(args.profile_id)}/duplicate",
+            body,
+        )
+    if command == "capture-current":
+        payload = _read_structured(args, required=False)
+        payload.setdefault("name", args.name)
+        payload.setdefault("description", args.description)
+        payload.setdefault("installation_policy", args.installation_policy)
+        if args.apply:
+            if not args.request_key:
+                raise ValueError("profile capture-current apply requires --request-key")
+            payload["request_key"] = _explicit_request_key(args.request_key)
+        return _plan_or_request(args, client, "POST", f"{base}/capture-current", payload)
+    if command == "delete":
+        return _plan_or_request(args, client, "DELETE", f"{base}/{_quoted(args.profile_id)}")
+    if command == "preview":
+        return client.request("POST", f"{base}/{_quoted(args.profile_id)}/preview", {})
+    if command == "status":
+        return client.request("GET", f"{base}/{_quoted(args.profile_id)}/status")
+    if command == "application":
+        return client.request("GET", f"{base}/applications/{_quoted(args.application_id)}")
+    profile_id = _quoted(args.profile_id)
+    if command == "switch":
+        switch_path = f"{base}/{profile_id}/switch"
+        if args.plan_digest is None:
+            preview = client.request("POST", f"{base}/{profile_id}/preview", {})
+            if args.dry_run:
+                return preview
+            plan_digest = preview.get("plan_digest")
+            if not isinstance(plan_digest, str) or not plan_digest:
+                raise ValueError("automatic profile switch preview did not return plan_digest")
+        else:
+            preview = None
+            plan_digest = args.plan_digest
+        request_key = args.request_key or request_id_factory()
+        request_key = _explicit_request_key(request_key)
+        args.request_key = request_key
+        payload = {
+            "plan_digest": plan_digest,
+            "request_key": request_key,
+        }
+        if not args.apply and preview is None:
+            return {
+                "mode": "plan",
+                "apply": False,
+                "method": "POST",
+                "path": switch_path,
+                "body": payload,
+            }
+        result = _follow_submitted_operation(
+            args, client, client.request("POST", switch_path, payload)
+        )
+        if preview is None:
+            return result
+        return {
+            "plan": preview,
+            "result": result,
+            "plan_digest": plan_digest,
+            "request_key": request_key,
+        }
+    raise ValueError(f"unsupported profile command: {command}")
+
+
+def _run_operations(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.operations_command
+    base = "/api/v1/operations"
+    if command == "list":
+        return _load_pages(client, base, args, query=_query(state=args.status), collection="operations")
+    operation_id = _quoted(args.operation_id)
+    if command == "show":
+        return client.request("GET", f"{base}/{operation_id}")
+    if command == "evidence":
+        result = client.request("GET", f"{base}/{operation_id}")
+        if args.file is not None:
+            args.file.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
+            return {"operation_id": args.operation_id, "file": str(args.file)}
+        return result
+    if command in {"watch", "wait"}:
+        timeout = max(0, min(args.timeout_seconds, 300))
+        interval = max(0.1, min(args.interval_seconds, 30.0))
+        deadline = time.monotonic() + timeout
+        result: dict[str, object] = {}
+        while True:
+            result = client.request(
+                "GET",
+                f"{base}/{operation_id}",
+            )
+            state = str(result.get("state", result.get("status", ""))).casefold()
+            if state in {"succeeded", "completed", "failed", "cancelled", "canceled", "blocked", "partial"} or command == "watch" or time.monotonic() >= deadline:
+                if time.monotonic() >= deadline and state not in {"succeeded", "completed", "failed", "cancelled", "canceled"}:
+                    result = {**result, "timed_out": True, "operation_id": args.operation_id}
+                return result
+            time.sleep(interval)
+    raise ValueError(f"unsupported operation command: {command}")
+
+
 def run_controller(
     args: argparse.Namespace,
     client: ControllerClient,
@@ -2583,4 +2892,16 @@ def run_controller(
         return _run_library(args, client, request_id_factory)
     if args.command == "activity":
         return _run_activity(args, client)
+    if args.command == "models":
+        if args.models_command == "run":
+            return _run_model_run(args, client, request_id_factory)
+        return _run_models(args, client, request_id_factory)
+    if args.command == "recipes":
+        return _run_recipes(args, client)
+    if args.command == "cache":
+        return _run_cache(args, client, request_id_factory)
+    if args.command == "profiles":
+        return _run_profiles(args, client, request_id_factory)
+    if args.command == "operations":
+        return _run_operations(args, client, request_id_factory)
     raise ValueError("unsupported controller command")

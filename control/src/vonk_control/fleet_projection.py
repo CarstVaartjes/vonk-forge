@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+)
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .models import (
@@ -16,11 +23,13 @@ from .models import (
     AgentNode,
     AgentNodeProfile,
     AgentPresence,
+    ArtifactJob,
+    CatalogDocument,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
-    LocalRecipe,
-    LocalRecipeRevision,
+    Job,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -33,6 +42,13 @@ from .telemetry import (
     TelemetryResolution,
     TelemetryRollupPointView,
     TelemetrySampleView,
+)
+from .telemetry_contract import (
+    TelemetryCapability,
+    TelemetryMetrics,
+    TelemetryRuntime,
+    TelemetryWorkload,
+    empty_telemetry_metrics,
 )
 
 _REVISION_PATTERN = r"^[0-9a-f]{64}$"
@@ -51,6 +67,39 @@ _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
 _MAX_SIGNED_INTEGER = 2_147_483_647
 _MAX_TELEMETRY_BYTES = 16 * 1024**4
 _MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
+_MAX_TELEMETRY_RUNS = 32
+_MAX_TELEMETRY_WORKLOADS = 128
+
+
+def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | None:
+    if (
+        revision.kind != "recipe"
+        or revision.schema_version != 2
+        or revision.state != "active"
+    ):
+        return None
+    try:
+        recipe = RecipeDefinition.model_validate(revision.document)
+    except (TypeError, ValueError):
+        return None
+    return recipe if content_sha256(recipe) == revision.content_digest else None
+_RUNTIME_CAPABILITY_LEDGER = (
+    ("runtime.decode_tokens_per_second", "tokens/s", "derived"),
+    ("runtime.prefill_tokens_per_second", "tokens/s", "derived"),
+    ("runtime.prefill_cached_tokens_per_second", "tokens/s", "derived"),
+    ("runtime.prefill_uncached_tokens_per_second", "tokens/s", "derived"),
+    ("runtime.output_tokens_total", "tokens", "measured"),
+    ("runtime.slots_active", "requests", "measured"),
+    ("runtime.requests_running", "requests", "measured"),
+    ("runtime.requests_waiting", "requests", "measured"),
+    ("runtime.kv_cache_usage_percent", "%", "measured"),
+    ("runtime.preemptions_total", "count", "measured"),
+    ("runtime.prefix_cache_hit_percent", "%", "derived"),
+    ("runtime.mtp_acceptance_percent", "%", "derived"),
+    ("runtime.ttft_p95_ms", "ms", "derived"),
+    ("runtime.e2e_p95_ms", "ms", "derived"),
+    ("runtime.itl_p95_ms", "ms", "derived"),
+)
 
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
 UuidId = Annotated[str, StringConstraints(pattern=_UUID_PATTERN)]
@@ -197,6 +246,16 @@ class TelemetryPoint(_StrictModel):
     )
     gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     details: TelemetryDetails
+    # Scalar-only rows predate the rich contract.  Keep their schema-1 fleet
+    # and stream representation byte-compatible; new samples carry the
+    # explicit nested schema-2 document here.
+    metrics: TelemetryMetrics | None = Field(
+        default=None,
+        # Scalar-only points are the schema-1 wire exception.  Keep the
+        # optional rich document out of those responses while retaining its
+        # concrete type in the generated schema.
+        exclude_if=lambda value: value is None,
+    )
 
 
 class TelemetryMetricSummary(_StrictModel):
@@ -204,16 +263,45 @@ class TelemetryMetricSummary(_StrictModel):
     minimum: float
     mean: float
     maximum: float
+    # The storage key is bounded for indexes, so retain the complete series
+    # identity and provenance with the aggregate in every history response.
+    key: Text128 | None = None
+    scope: Text32 | None = None
+    device_id: Text128 | None = None
+    process_id: int | None = Field(default=None, ge=1, le=_MAX_SIGNED_INTEGER)
+    process_name: Text128 | None = None
+    interface_name: Annotated[str, StringConstraints(min_length=1, max_length=64)] | None = None
+    run_id: Text128 | None = None
+    unit: Text32 = "unknown"
+    source: Text128 = "legacy"
+    measurement_kind: Text32 = "measured"
+    aggregation: Text32 = "mean"
 
 
 class TelemetryRollupPoint(_StrictModel):
     node_id: NodeId
-    resolution: Literal["minute", "fifteen-minute"]
+    resolution: Literal["minute", "fifteen-minute", "daily"]
     bucket_start: datetime
     bucket_end: datetime
     source_sample_count: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    metrics: dict[str, TelemetryMetricSummary] = Field(max_length=64)
+    metrics: dict[str, TelemetryMetricSummary] = Field(max_length=512)
+
+
+class TelemetryHistoryMetadata(_StrictModel):
+    """Coverage and downsampling facts for a history/export response."""
+
+    requested_start: datetime
+    requested_end: datetime
+    actual_start: datetime | None = None
+    actual_end: datetime | None = None
+    requested_resolution: TelemetryResolution
+    actual_resolution: TelemetryResolution
+    timezone: Literal["UTC"] = "UTC"
+    point_count: int = Field(ge=0, le=3_000)
+    coverage_seconds: float = Field(ge=0, le=float(_MAX_SIGNED_BIGINT))
+    gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
+    downsampled: bool
 
 
 class TelemetryState(_StrictModel):
@@ -308,9 +396,56 @@ class TelemetryHistoryResponse(_StrictModel):
     resolution: TelemetryResolution
     maximum_points: int = Field(ge=1, le=3_000)
     points: list[TelemetryPoint | TelemetryRollupPoint] = Field(max_length=3_000)
+    metadata: TelemetryHistoryMetadata | None = Field(
+        default=None,
+        # Preserve the legacy history envelope when no rich-series metadata
+        # was available, without weakening the OpenAPI response type.
+        exclude_if=lambda value: value is None,
+    )
+
+
+class TelemetryCurrentResponse(_StrictModel):
+    """Versioned current telemetry response with an explicit rich payload."""
+
+    schema_version: Literal[2] = 2
+    node_id: NodeId
+    observed_at: datetime
+    received_at: datetime
+    freshness: Literal["live", "delayed", "stale"]
+    sample: TelemetryPoint
+
+
+class TelemetryCapabilitiesResponse(_StrictModel):
+    schema_version: Literal[2] = 2
+    node_id: NodeId
+    observed_at: datetime
+    received_at: datetime
+    freshness: Literal["live", "delayed", "stale"]
+    capabilities: list[TelemetryCapability] = Field(max_length=128)
+
+
+class TelemetryWorkloadsResponse(_StrictModel):
+    schema_version: Literal[2] = 2
+    node_id: NodeId
+    observed_at: datetime
+    received_at: datetime
+    freshness: Literal["live", "delayed", "stale"]
+    run_id: str | None = None
+    state: str | None = None
+    runtimes: list[TelemetryRuntime] = Field(max_length=32)
+    workloads: list[TelemetryWorkload] = Field(max_length=128)
 
 
 def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
+    metrics = value.metrics.model_copy(deep=True)
+    # The mTLS identity is authoritative for node ownership.  The receive
+    # timestamp is assigned by the Controller, so neither can be spoofed by a
+    # producer embedded in the report.
+    for series in metrics.series:
+        series.node_id = value.node_id
+        series.received_at = value.received_at
+    for capability in metrics.capabilities:
+        capability.node_id = value.node_id
     return TelemetryPoint(
         id=value.id,
         node_id=value.node_id,
@@ -333,6 +468,7 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         network_transmit_bytes_per_second=value.network_transmit_bytes_per_second,
         gap_samples=value.gap_samples,
         details=_telemetry_details(value.details),
+        metrics=(metrics if any((metrics.series, metrics.capabilities, metrics.runtimes, metrics.workloads)) else None),
     )
 
 
@@ -350,6 +486,17 @@ def telemetry_rollup_point(value: TelemetryRollupPointView) -> TelemetryRollupPo
                 minimum=metric.minimum,
                 mean=metric.mean,
                 maximum=metric.maximum,
+                key=metric.key,
+                scope=metric.scope,
+                device_id=metric.device_id,
+                process_id=metric.process_id,
+                process_name=metric.process_name,
+                interface_name=metric.interface_name,
+                run_id=metric.run_id,
+                unit=metric.unit,
+                source=metric.source,
+                measurement_kind=metric.measurement_kind,
+                aggregation=metric.aggregation,
             )
             for name, metric in value.metrics.items()
         },
@@ -367,6 +514,104 @@ def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _run_readiness(run: RecipeRun, nodes: Sequence[RunNode]) -> str:
+    if run.state == "planned":
+        return "queued"
+    if run.state == "starting":
+        return "starting"
+    if run.state == "running":
+        if nodes and all(node.observation_endpoint_ready is True for node in nodes):
+            return "ready"
+        return "running"
+    if run.state in {"stopping", "stopped"}:
+        return "stopped"
+    if run.state == "failed":
+        return "failed"
+    return "unknown"
+
+
+def _artifact_workload_state(value: str) -> str:
+    if value in {"draft", "ready", "queued", "waiting-for-operator"}:
+        return "queued"
+    if value in {"running", "cancelling"}:
+        return "running"
+    if value == "succeeded":
+        return "completed"
+    if value == "failed":
+        return "failed"
+    if value == "cancelled":
+        return "cancelled"
+    return "unknown"
+
+
+def _metric_matches(
+    key: str | None,
+    device_id: str | None,
+    interface_name: str | None,
+    run_id: str | None,
+    *,
+    requested_key: str | None,
+    requested_device_id: str | None,
+    requested_interface_name: str | None,
+    requested_run_id: str | None,
+) -> bool:
+    return (
+        (requested_key is None or key == requested_key)
+        and (requested_device_id is None or device_id == requested_device_id)
+        and (requested_interface_name is None or interface_name == requested_interface_name)
+        and (requested_run_id is None or run_id == requested_run_id)
+    )
+
+
+def _filter_metrics(
+    value: TelemetryMetrics,
+    *,
+    key: str | None,
+    device_id: str | None,
+    interface_name: str | None,
+    run_id: str | None,
+) -> TelemetryMetrics:
+    if all(item is None for item in (key, device_id, interface_name, run_id)):
+        return value
+    return TelemetryMetrics(
+        series=[
+            item
+            for item in value.series
+            if _metric_matches(
+                item.key,
+                item.device_id,
+                item.interface_name,
+                item.run_id,
+                requested_key=key,
+                requested_device_id=device_id,
+                requested_interface_name=interface_name,
+                requested_run_id=run_id,
+            )
+        ],
+        capabilities=[
+            item
+            for item in value.capabilities
+            if _metric_matches(
+                item.key,
+                item.device_id,
+                item.interface_name,
+                item.run_id,
+                requested_key=key,
+                requested_device_id=device_id,
+                requested_interface_name=interface_name,
+                requested_run_id=run_id,
+            )
+        ],
+        runtimes=[
+            item for item in value.runtimes if run_id is None or item.run_id == run_id
+        ],
+        workloads=[
+            item for item in value.workloads if run_id is None or item.run_id == run_id
+        ],
+        provenance=value.provenance,
+    )
 
 
 class FleetProjection:
@@ -463,6 +708,10 @@ class FleetProjection:
             certificates = self._current_certificates(session, node_ids, current)
             inventories = self._latest_inventory(session, node_ids)
             telemetry = self._telemetry.latest_in_session(session, node_ids)
+            telemetry = {
+                node_id: self._telemetry_with_controller(session, node_id, value)
+                for node_id, value in telemetry.items()
+            }
             installation_rows = self._installation_rows(session, node_ids)
             run_rows = self._run_rows(session, node_ids)
             mapping_ids = {row[2].id for row in (*installation_rows, *run_rows)}
@@ -511,6 +760,10 @@ class FleetProjection:
         end: datetime,
         maximum_points: int,
         resolution: TelemetryResolution,
+        key: str | None = None,
+        device_id: str | None = None,
+        interface_name: str | None = None,
+        run_id: str | None = None,
     ) -> TelemetryHistoryResponse:
         if type(maximum_points) is not int or not 1 <= maximum_points <= 3_000:
             raise ValueError("telemetry history maximum points is invalid")
@@ -534,6 +787,76 @@ class FleetProjection:
             maximum_points,
             resolution=resolution,
         )
+        points = tuple(
+            replace(
+                point,
+                metrics=_filter_metrics(
+                    point.metrics,
+                    key=key,
+                    device_id=device_id,
+                    interface_name=interface_name,
+                    run_id=run_id,
+                ),
+            )
+            if isinstance(point, TelemetrySampleView)
+            else replace(
+                point,
+                metrics={
+                    name: metric
+                    for name, metric in point.metrics.items()
+                    if _metric_matches(
+                        metric.key or name,
+                        metric.device_id,
+                        metric.interface_name,
+                        metric.run_id,
+                        requested_key=key,
+                        requested_device_id=device_id,
+                        requested_interface_name=interface_name,
+                        requested_run_id=run_id,
+                    )
+                },
+            )
+            for point in points
+        )
+        actual_start: datetime | None = None
+        actual_end: datetime | None = None
+        gap_samples = 0
+        if points:
+            first = points[0]
+            last = points[-1]
+            if isinstance(first, TelemetrySampleView):
+                actual_start = first.observed_at
+                actual_end = last.observed_at  # type: ignore[union-attr]
+                gap_samples = sum(
+                    point.gap_samples
+                    for point in points
+                    if isinstance(point, TelemetrySampleView)
+                )
+            else:
+                actual_start = first.bucket_start
+                actual_end = last.bucket_end  # type: ignore[union-attr]
+                gap_samples = sum(
+                    point.gap_samples
+                    for point in points
+                    if isinstance(point, TelemetryRollupPointView)
+                )
+        coverage_seconds = (
+            max(0.0, (actual_end - actual_start).total_seconds())
+            if actual_start is not None and actual_end is not None
+            else 0.0
+        )
+        has_rich_metrics = any(
+            isinstance(value, TelemetrySampleView)
+            and any(
+                (
+                    value.metrics.series,
+                    value.metrics.capabilities,
+                    value.metrics.runtimes,
+                    value.metrics.workloads,
+                )
+            )
+            for value in points
+        )
         return TelemetryHistoryResponse(
             node_id=node_id,
             start=start_utc,
@@ -546,6 +869,326 @@ class FleetProjection:
                 else telemetry_rollup_point(value)
                 for value in points
             ],
+            metadata=(
+                TelemetryHistoryMetadata(
+                    requested_start=start_utc,
+                    requested_end=end_utc,
+                    actual_start=actual_start,
+                    actual_end=actual_end,
+                    requested_resolution=resolution,
+                    actual_resolution=resolution,
+                    point_count=len(points),
+                    coverage_seconds=coverage_seconds,
+                    gap_samples=gap_samples,
+                    downsampled=resolution != "raw",
+                )
+                if has_rich_metrics or resolution != "raw"
+                else None
+            ),
+        )
+
+    def telemetry_current(
+        self,
+        node_id: str,
+        *,
+        key: str | None = None,
+        device_id: str | None = None,
+        interface_name: str | None = None,
+        run_id: str | None = None,
+    ) -> TelemetryCurrentResponse:
+        """Return the latest authenticated sample for one registered node."""
+
+        if node_id not in self._registered_node_ids(node_id):
+            raise KeyError(node_id)
+        with self._sessions.begin() as session:
+            value = self._telemetry.latest_in_session(session, (node_id,)).get(node_id)
+            if value is not None:
+                value = self._telemetry_with_controller(session, node_id, value)
+        if value is None:
+            raise KeyError(node_id)
+        point = telemetry_point(value)
+        if point.metrics is not None:
+            point.metrics = _filter_metrics(
+                point.metrics,
+                key=key,
+                device_id=device_id,
+                interface_name=interface_name,
+                run_id=run_id,
+            )
+        return TelemetryCurrentResponse(
+            node_id=node_id,
+            observed_at=point.observed_at,
+            received_at=point.received_at,
+            freshness=self._telemetry_freshness(point.observed_at),
+            sample=point,
+        )
+
+    def telemetry_capabilities(
+        self,
+        node_id: str,
+        *,
+        key: str | None = None,
+        device_id: str | None = None,
+        interface_name: str | None = None,
+        run_id: str | None = None,
+    ) -> TelemetryCapabilitiesResponse:
+        response = self.telemetry_current(
+            node_id,
+            key=key,
+            device_id=device_id,
+            interface_name=interface_name,
+            run_id=run_id,
+        )
+        point = response.sample
+        metrics = point.metrics or empty_telemetry_metrics()
+        return TelemetryCapabilitiesResponse(
+            node_id=node_id,
+            observed_at=point.observed_at,
+            received_at=point.received_at,
+            freshness=self._telemetry_freshness(point.observed_at),
+            capabilities=[item.model_dump(mode="json") for item in metrics.capabilities],
+        )
+
+    def telemetry_workloads(
+        self,
+        node_id: str,
+        *,
+        run_id: str | None = None,
+        state: str | None = None,
+    ) -> TelemetryWorkloadsResponse:
+        response = self.telemetry_current(node_id)
+        point = response.sample
+        metrics = point.metrics or empty_telemetry_metrics()
+        runtimes = [
+            item
+            for item in metrics.runtimes
+            if run_id is None or item.run_id == run_id
+        ]
+        workloads = [
+            item
+            for item in metrics.workloads
+            if (run_id is None or item.run_id == run_id)
+            and (state is None or item.state == state)
+        ]
+        return TelemetryWorkloadsResponse(
+            node_id=node_id,
+            observed_at=point.observed_at,
+            received_at=point.received_at,
+            freshness=self._telemetry_freshness(point.observed_at),
+            run_id=run_id,
+            state=state,
+            runtimes=[item.model_dump(mode="json") for item in runtimes],
+            workloads=[item.model_dump(mode="json") for item in workloads],
+        )
+
+    @staticmethod
+    def _telemetry_run_rows(
+        session: Session, node_id: str
+    ) -> tuple[tuple[RunNode, RecipeRun], ...]:
+        selected = (
+            select(RecipeRun.id)
+            .join(RunNode, RunNode.run_id == RecipeRun.id)
+            .where(RunNode.node_id == node_id)
+            .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())
+            .limit(_MAX_TELEMETRY_RUNS)
+        )
+        return tuple(
+            session.execute(
+                select(RunNode, RecipeRun)
+                .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+                .where(RunNode.run_id.in_(selected))
+                .order_by(RunNode.run_id, RunNode.rank)
+                .limit(_MAX_GROUP_MEMBER_ROWS)
+            )
+        )
+
+    def _telemetry_metrics_in_session(
+        self,
+        session: Session,
+        node_id: str,
+        metrics: TelemetryMetrics,
+    ) -> TelemetryMetrics:
+        """Join authenticated run/job placement without reading workload secrets."""
+
+        rows = self._telemetry_run_rows(session, node_id)
+        nodes_by_run: dict[str, list[RunNode]] = {}
+        runs_by_id: dict[str, RecipeRun] = {}
+        for run_node, run in rows:
+            nodes_by_run.setdefault(run.id, []).append(run_node)
+            runs_by_id[run.id] = run
+        incoming_by_run: dict[str, list[TelemetryRuntime]] = {}
+        for runtime in metrics.runtimes:
+            incoming_by_run.setdefault(runtime.run_id, []).append(runtime)
+
+        runtimes: list[TelemetryRuntime] = []
+        for run_id in sorted(runs_by_id):
+            run = runs_by_id[run_id]
+            run_nodes = sorted(nodes_by_run.get(run_id, ()), key=lambda value: value.rank)
+            reports = incoming_by_run.get(run_id, ())
+            report = reports[0] if reports else None
+            adapter = report.adapter if report is not None else "controller-managed"
+            supported = any(item.adapter_supported for item in reports)
+            reason = None if supported else "managed runtime metrics were not reported"
+            runtimes.append(
+                TelemetryRuntime(
+                    run_id=run_id,
+                    engine_id=run_id,
+                    backend=report.backend if report is not None else adapter,
+                    version=report.version if report is not None else None,
+                    endpoint=None,
+                    model=None,
+                    model_version=None,
+                    recipe_revision=None,
+                    context_limit_tokens=None,
+                    serving_node_ids=list(dict.fromkeys(value.node_id for value in run_nodes)),
+                    ranks=list(dict.fromkeys(value.rank for value in run_nodes)),
+                    readiness=_run_readiness(run, run_nodes),
+                    error=(
+                        "recipe run failed"
+                        if run.state == "failed"
+                        else "recipe run observation was lost"
+                        if run.state == "lost"
+                        else None
+                    ),
+                    adapter=adapter,
+                    adapter_version=report.adapter_version if report is not None else None,
+                    adapter_supported=supported,
+                    adapter_reason=reason,
+                )
+            )
+        known_run_ids = set(runs_by_id)
+        for run_id, reports in incoming_by_run.items():
+            if run_id in known_run_ids:
+                continue
+            if reports:
+                runtimes.append(reports[0])
+        runtimes = runtimes[:32]
+
+        capabilities = list(metrics.capabilities)
+        capability_ids = {
+            (item.key, item.scope, item.device_id, item.process_id, item.interface_name, item.run_id)
+            for item in capabilities
+        }
+        for runtime in runtimes[:8]:
+            for key, unit, kind in _RUNTIME_CAPABILITY_LEDGER:
+                identity = (key, "runtime", None, None, None, runtime.run_id)
+                if identity in capability_ids:
+                    continue
+                capabilities.append(
+                    TelemetryCapability(
+                        key=key,
+                        scope="runtime",
+                        run_id=runtime.run_id,
+                        unit=unit,
+                        source="controller-runtime",
+                        measurement_kind=kind,
+                        supported=False,
+                        freshness_threshold_seconds=self._telemetry_live_seconds,
+                        reason="metric was not reported by the managed runtime",
+                    )
+                )
+                capability_ids.add(identity)
+                if len(capabilities) >= 128:
+                    break
+            if len(capabilities) >= 128:
+                break
+
+        run_ids = tuple(runs_by_id)
+        workloads = list(metrics.workloads)
+        if run_ids:
+            artifact_jobs = session.scalars(
+                select(ArtifactJob)
+                .where(ArtifactJob.run_id.in_(run_ids))
+                .order_by(ArtifactJob.updated_at.desc(), ArtifactJob.id.desc())
+                .limit(_MAX_TELEMETRY_WORKLOADS)
+            ).all()
+            operation_ids = tuple(
+                item.operation_id for item in artifact_jobs if item.operation_id is not None
+            )
+            operations = {
+                item.id: item
+                for item in session.scalars(
+                    select(Job).where(Job.id.in_(operation_ids))
+                )
+            }
+            workload_ids = {item.job_id for item in workloads if item.job_id is not None}
+            now = _utc(self._clock())
+            for artifact_job in artifact_jobs:
+                if artifact_job.id in workload_ids:
+                    continue
+                state = _artifact_workload_state(artifact_job.state)
+                operation = (
+                    operations.get(artifact_job.operation_id)
+                    if artifact_job.operation_id is not None
+                    else None
+                )
+                run_nodes = nodes_by_run.get(artifact_job.run_id, ())
+                started_at = (
+                    _utc(artifact_job.submitted_at)
+                    if artifact_job.submitted_at is not None
+                    else None
+                )
+                ended_at = (
+                    _utc(artifact_job.completed_at)
+                    if artifact_job.completed_at is not None
+                    else None
+                )
+                end_for_elapsed = ended_at or (now if state == "running" else None)
+                elapsed = (
+                    max(0.0, (end_for_elapsed - _utc(artifact_job.created_at)).total_seconds())
+                    if end_for_elapsed is not None
+                    else None
+                )
+                workloads.append(
+                    TelemetryWorkload(
+                        request_id=(
+                            operation.request_id
+                            if operation is not None
+                            else artifact_job.request_id
+                        ),
+                        job_id=operation.id if operation is not None else artifact_job.id,
+                        run_id=artifact_job.run_id,
+                        model=None,
+                        recipe_revision=None,
+                        engine_id=artifact_job.run_id,
+                        state=state,
+                        origin_node_id=None,
+                        executor_node_ids=list(
+                            dict.fromkeys(value.node_id for value in run_nodes)
+                        ),
+                        created_at=_utc(
+                            operation.created_at
+                            if operation is not None
+                            else artifact_job.created_at
+                        ),
+                        started_at=started_at,
+                        ended_at=ended_at,
+                        elapsed_seconds=min(elapsed, 86_400 * 365) if elapsed is not None else None,
+                        failure=(
+                            "artifact job failed"
+                            if state == "failed"
+                            else None
+                        ),
+                        title="artifact job",
+                    )
+                )
+                workload_ids.add(artifact_job.id)
+                if len(workloads) >= _MAX_TELEMETRY_WORKLOADS:
+                    break
+        return TelemetryMetrics(
+            series=list(metrics.series),
+            capabilities=capabilities[:128],
+            runtimes=runtimes,
+            workloads=workloads[:_MAX_TELEMETRY_WORKLOADS],
+            provenance=metrics.provenance,
+        )
+
+    def _telemetry_with_controller(
+        self, session: Session, node_id: str, value: TelemetrySampleView
+    ) -> TelemetrySampleView:
+        return replace(
+            value,
+            metrics=self._telemetry_metrics_in_session(session, node_id, value.metrics),
         )
 
     def _registered_node_ids(self, node_id: str | None = None) -> tuple[str, ...]:
@@ -694,8 +1337,8 @@ class FleetProjection:
                     InstallationNode,
                     RecipeInstallation,
                     ClusterMapping,
-                    LocalRecipeRevision,
-                    LocalRecipe,
+                    CatalogDocumentRevision,
+                    CatalogDocument,
                 )
                 .join(
                     RecipeInstallation,
@@ -705,10 +1348,18 @@ class FleetProjection:
                     ClusterMapping, ClusterMapping.id == RecipeInstallation.mapping_id
                 )
                 .join(
-                    LocalRecipeRevision,
-                    LocalRecipeRevision.id == RecipeInstallation.recipe_revision_id,
+                    CatalogDocumentRevision,
+                    CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id,
                 )
-                .join(LocalRecipe, LocalRecipe.id == LocalRecipeRevision.recipe_id)
+                .join(
+                    CatalogDocument,
+                    CatalogDocument.id == CatalogDocumentRevision.document_id,
+                )
+                .where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.schema_version == 2,
+                    CatalogDocumentRevision.state == "active",
+                )
                 .where(InstallationNode.installation_id.in_(selected))
                 .order_by(InstallationNode.installation_id, InstallationNode.rank)
                 .limit(_MAX_GROUP_MEMBER_ROWS)
@@ -776,6 +1427,8 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][3]
             recipe = group[0][4]
+            if _canonical_recipe(revision) is None:
+                continue
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
             reason = self._exact_group_reason(
                 expected_count=mapping.node_count,
@@ -841,6 +1494,8 @@ class FleetProjection:
             mapping = group[0][2]
             revision = group[0][4]
             recipe = group[0][5]
+            if _canonical_recipe(revision) is None:
+                continue
             visible_nodes = [node for node in nodes if node.node_id in fleet_node_ids]
             reason = self._exact_group_reason(
                 expected_count=mapping.node_count,
@@ -918,8 +1573,8 @@ class FleetProjection:
                     RecipeRun,
                     ClusterMapping,
                     RecipeInstallation,
-                    LocalRecipeRevision,
-                    LocalRecipe,
+                    CatalogDocumentRevision,
+                    CatalogDocument,
                 )
                 .join(RecipeRun, RecipeRun.id == RunNode.run_id)
                 .join(ClusterMapping, ClusterMapping.id == RecipeRun.mapping_id)
@@ -928,10 +1583,18 @@ class FleetProjection:
                     RecipeInstallation.id == RecipeRun.installation_id,
                 )
                 .join(
-                    LocalRecipeRevision,
-                    LocalRecipeRevision.id == RecipeInstallation.recipe_revision_id,
+                    CatalogDocumentRevision,
+                    CatalogDocumentRevision.id == RecipeInstallation.recipe_revision_id,
                 )
-                .join(LocalRecipe, LocalRecipe.id == LocalRecipeRevision.recipe_id)
+                .join(
+                    CatalogDocument,
+                    CatalogDocument.id == CatalogDocumentRevision.document_id,
+                )
+                .where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.schema_version == 2,
+                    CatalogDocumentRevision.state == "active",
+                )
                 .where(RunNode.run_id.in_(selected))
                 .order_by(RunNode.run_id, RunNode.rank)
                 .limit(_MAX_GROUP_MEMBER_ROWS)
@@ -1178,3 +1841,13 @@ class FleetProjection:
             freshness=freshness,
             sample=telemetry_point(value),
         )
+
+    def _telemetry_freshness(
+        self, observed_at: datetime
+    ) -> Literal["live", "delayed", "stale"]:
+        age = max(0.0, (_utc(self._clock()) - _utc(observed_at)).total_seconds())
+        if age <= self._telemetry_live_seconds:
+            return "live"
+        if age <= self._telemetry_delayed_seconds:
+            return "delayed"
+        return "stale"

@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 EXPECTED_BASELINE_TABLES = {
+    "artifact_distribution_assignments",
     "artifact_job_blobs",
     "artifact_job_files",
     "artifact_jobs",
@@ -28,8 +29,10 @@ EXPECTED_BASELINE_TABLES = {
     "agent_operations",
     "agent_presence",
     "audit_events",
-    "catalog_entities",
-    "catalog_entity_revisions",
+    "catalog_documents",
+    "catalog_document_heads",
+    "catalog_document_revisions",
+    "catalog_recipe_model_references",
     "cluster_mapping_nodes",
     "cluster_mappings",
     "control_process_heartbeats",
@@ -41,9 +44,10 @@ EXPECTED_BASELINE_TABLES = {
     "job_attempts",
     "job_log_entries",
     "jobs",
-    "local_recipe_revisions",
-    "local_recipes",
-    "managed_recipe_library_links",
+    "model_cache_artifacts",
+    "model_cache_operations",
+    "model_cache_set_artifacts",
+    "model_cache_sets",
     "node_artifacts",
     "node_inventory_snapshots",
     "node_mutation_leases",
@@ -54,18 +58,14 @@ EXPECTED_BASELINE_TABLES = {
     "node_telemetry_samples",
     "observations",
     "recipe_builds",
-    "recipe_global_links",
-    "recipe_import_items",
-    "recipe_imports",
     "recipe_installations",
     "recipe_library_sync_runs",
     "recipe_run_observation_grants",
     "recipe_runs",
     "recipe_source_bundles",
     "source_bundle_archives",
-    "recipe_revisions",
-    "recipes",
-    "recipe_test_reports",
+    "runtime_image_receipts",
+    "runtime_image_authorizations",
     "reconciliation_cancellations",
     "reconciliation_completion_generation",
     "reconciliation_operations",
@@ -129,6 +129,13 @@ def test_fresh_baseline_creates_retained_metadata_with_inert_legacy_storage(
     assert set(Base.metadata.tables) == EXPECTED_BASELINE_TABLES
     assert "agent_node_profiles" in tables
     assert not any(table.startswith("package_") for table in tables)
+    assert not {
+        "managed_recipe_library_links",
+        "recipe_imports",
+        "recipe_import_items",
+        "recipe_global_links",
+        "recipe_test_reports",
+    } & tables
     with engine.connect() as connection:
         assert _metadata_differences_without_retained_legacy(connection) == []
         assert connection.execute(
@@ -156,6 +163,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
     versions = Path(__file__).resolve().parents[1] / "migrations/versions"
 
     assert sorted(path.name for path in versions.glob("*.py")) == [
+        "0000_canonical_catalog_baseline.py",
         "0001_fleet_library_baseline.py",
         "0002_fleet_node_profile_events.py",
         "0003_agent_reenrollment_grants.py",
@@ -169,7 +177,278 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0011_recipe_model_identity.py",
         "0012_recipe_run_generation.py",
         "0013_repeatable_install_plans.py",
+        "0014_fleet_profile_scope.py",
+        "0015_model_cache.py",
+        "0016_rich_telemetry_metrics.py",
+        "0017_artifact_distribution_assignments.py",
+        "0018_canonical_catalog_documents.py",
+        "0019_recipe_builds_canonical_revision.py",
+        "0020_runtime_image_receipts.py",
+        "0021_runtime_image_authorizations.py",
     ]
+
+
+def test_fresh_baseline_binds_recipe_builds_to_canonical_recipe_revision(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'recipe-build-fk.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+
+    foreign_keys = inspect(engine).get_foreign_keys("recipe_builds")
+    recipe_revision_keys = [
+        foreign_key
+        for foreign_key in foreign_keys
+        if foreign_key["constrained_columns"] == ["recipe_revision_id"]
+    ]
+
+    assert len(recipe_revision_keys) == 1
+    assert recipe_revision_keys[0]["referred_table"] == "catalog_document_revisions"
+    assert recipe_revision_keys[0]["referred_columns"] == ["id"]
+    assert all(
+        foreign_key["referred_table"] != "local_recipe_revisions"
+        for foreign_key in recipe_revision_keys
+    )
+
+
+def test_runtime_image_receipt_uses_production_identity_fields(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'runtime-image-receipts.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    inspector = inspect(engine)
+
+    assert [column["name"] for column in inspector.get_columns("runtime_image_receipts")] == [
+        "id",
+        "recipe_revision_id",
+        "source",
+        "original_content_digest",
+        "effective_execution_key",
+        "registry_manifest_digest",
+        "platform_manifest_digest",
+        "local_image_config_id",
+        "oci_archive_sha256",
+        "image_bytes",
+        "architecture",
+        "runtime_interface",
+        "runtime_interface_label",
+        "build_id",
+        "verified_at",
+        "state",
+    ]
+    checks = {
+        check["name"] for check in inspector.get_check_constraints("runtime_image_receipts")
+    }
+    assert checks >= {
+        "ck_runtime_image_receipts_source",
+        "ck_runtime_image_receipts_registry_digest",
+        "ck_runtime_image_receipts_platform_digest",
+        "ck_runtime_image_receipts_config_digest",
+        "ck_runtime_image_receipts_archive_digest",
+        "ck_runtime_image_receipts_archive_pair",
+        "ck_runtime_image_receipts_source_build",
+        "ck_runtime_image_receipts_runtime_identity",
+    }
+
+
+def test_postgres_runtime_image_authorization_migration_and_checks(
+    postgres_engine,
+) -> None:
+    """Run the fresh chain on PostgreSQL and exercise the new authority check."""
+
+    config = _config(postgres_engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, "head")
+    inspector = inspect(postgres_engine)
+    assert "runtime_image_authorizations" in inspector.get_table_names()
+    checks = {
+        check["name"]
+        for check in inspector.get_check_constraints("runtime_image_authorizations")
+    }
+    assert checks >= {
+        "ck_runtime_image_authorizations_original_digest",
+        "ck_runtime_image_authorizations_execution_key",
+        "ck_runtime_image_authorizations_platform_digest",
+        "ck_runtime_image_authorizations_config_digest",
+        "ck_runtime_image_authorizations_archive_digest",
+        "ck_runtime_image_authorizations_registry_digest",
+        "ck_runtime_image_authorizations_image_bytes",
+        "ck_runtime_image_authorizations_source",
+        "ck_runtime_image_authorizations_state",
+    }
+
+    now = "2026-09-06 12:00:00+00"
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO catalog_documents
+                  (id, kind, publisher, slug, title, created_by, created_at, updated_at)
+                VALUES
+                  ('pg-doc', 'recipe', 'acme', 'pg-recipe', 'PG Recipe', 'test', :now, :now)
+                """
+            ),
+            {"now": now},
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO catalog_document_revisions
+                  (id, document_id, kind, publisher, slug, revision_number,
+                   schema_version, state, document, content_digest, artifact_key,
+                   execution_key, projected, created_by, created_at)
+                VALUES
+                  ('pg-revision', 'pg-doc', 'recipe', 'acme', 'pg-recipe', 1,
+                   2, 'active', '{}', :content_digest, :artifact_key,
+                   :execution_key, '{}', 'test', :now)
+                """
+            ),
+            {
+                "content_digest": "a" * 64,
+                "artifact_key": "b" * 64,
+                "execution_key": "c" * 64,
+                "now": now,
+            },
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO runtime_image_receipts
+                  (id, recipe_revision_id, source, original_content_digest,
+                   effective_execution_key, registry_manifest_digest,
+                   platform_manifest_digest, local_image_config_id,
+                   oci_archive_sha256, image_bytes, architecture,
+                   runtime_interface, runtime_interface_label, verified_at, state)
+                VALUES
+                  ('pg-receipt', 'pg-revision', 'published', :digest, :execution,
+                   :registry, :platform, :config, :archive, 1, 'linux-arm64',
+                   'vonk.runtime.v1', 'v1', :now, 'verified')
+                """
+            ),
+            {
+                "digest": "a" * 64,
+                "execution": "c" * 64,
+                "registry": "sha256:" + "d" * 64,
+                "platform": "sha256:" + "e" * 64,
+                "config": "sha256:" + "f" * 64,
+                "archive": "1" * 64,
+                "now": now,
+            },
+        )
+
+    invalid_authorization = text(
+        """
+        INSERT INTO runtime_image_authorizations
+          (id, recipe_revision_id, receipt_id, source, original_content_digest,
+           effective_execution_key, registry_manifest_digest,
+           platform_manifest_digest, local_image_config_id, oci_archive_sha256,
+           image_bytes, authorized_at, state)
+        VALUES
+          ('pg-auth-invalid', 'pg-revision', 'pg-receipt', 'published',
+           :digest, :execution, :registry, :platform, :config, :archive,
+           1, :now, 'authorized')
+        """
+    )
+    with pytest.raises(IntegrityError), postgres_engine.begin() as connection:
+        connection.execute(
+            invalid_authorization,
+            {
+                "digest": "G" * 64,
+                "execution": "c" * 64,
+                "registry": "sha256:" + "d" * 64,
+                "platform": "sha256:" + "e" * 64,
+                "config": "sha256:" + "f" * 64,
+                "archive": "1" * 64,
+                "now": now,
+            },
+        )
+
+
+def test_fresh_recipe_installation_allows_published_images_without_build(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'recipe-installation-build-null.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    recipe_build = next(
+        column
+        for column in inspect(engine).get_columns("recipe_installations")
+        if column["name"] == "recipe_build_id"
+    )
+
+    assert recipe_build["nullable"] is True
+    build_foreign_keys = [
+        foreign_key
+        for foreign_key in inspect(engine).get_foreign_keys("recipe_installations")
+        if foreign_key["constrained_columns"] == ["recipe_build_id"]
+    ]
+    assert len(build_foreign_keys) == 1
+    assert build_foreign_keys[0]["referred_table"] == "recipe_builds"
+
+
+def test_runtime_image_receipt_rejects_inconsistent_provenance_and_digests(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'runtime-image-receipts-checks.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    insert = text(
+        """
+        INSERT INTO runtime_image_receipts
+          (id, recipe_revision_id, source, original_content_digest,
+           effective_execution_key, registry_manifest_digest,
+           platform_manifest_digest, local_image_config_id, oci_archive_sha256,
+           image_bytes, architecture, runtime_interface, runtime_interface_label,
+           build_id, verified_at, state)
+        VALUES
+          (:id, :recipe_revision_id, :source, :original_content_digest,
+           :effective_execution_key, :registry_manifest_digest,
+           :platform_manifest_digest, :local_image_config_id, :oci_archive_sha256,
+           :image_bytes, :architecture, :runtime_interface, :runtime_interface_label,
+           :build_id, :verified_at, :state)
+        """
+    )
+    base = {
+        "id": "receipt",
+        "recipe_revision_id": "revision",
+        "source": "published",
+        "original_content_digest": "a" * 64,
+        "effective_execution_key": "b" * 64,
+        "registry_manifest_digest": "sha256:" + "c" * 64,
+        "platform_manifest_digest": "sha256:" + "d" * 64,
+        "local_image_config_id": "sha256:" + "e" * 64,
+        "oci_archive_sha256": "f" * 64,
+        "image_bytes": 1,
+        "architecture": "linux-arm64",
+        "runtime_interface": "vonk.runtime.v1",
+        "runtime_interface_label": "v1",
+        "build_id": None,
+        "verified_at": "2026-09-06 12:00:00",
+        "state": "verified",
+    }
+    invalid = (
+        {"registry_manifest_digest": None},
+        {"build_id": "build"},
+        {"source": "controller-build", "build_id": "build"},
+        {"source": "controller-build", "registry_manifest_digest": None},
+        {"oci_archive_sha256": None},
+        {"image_bytes": None},
+        {"original_content_digest": "g" * 64},
+        {"effective_execution_key": "G" * 64},
+        {"oci_archive_sha256": "z" * 64},
+        {"platform_manifest_digest": "sha256:" + "z" * 64},
+        {"architecture": "linux-amd64"},
+        {"runtime_interface": "other.runtime.v1"},
+        {"runtime_interface_label": "v2"},
+    )
+    for number, overrides in enumerate(invalid, start=1):
+        values = {**base, **overrides, "id": f"receipt-{number}"}
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            connection.execute(insert, values)
 
 
 def test_existing_compatibility_recovery_revision_upgrades_without_operational_model(
@@ -305,7 +584,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            == "0013_repeatable_install_plans"
+                    == "0021_runtime_authz"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -435,7 +714,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0013_repeatable_install_plans"
+                    == "0021_runtime_authz"
         )
 
 
@@ -517,7 +796,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0013_repeatable_install_plans"
+                    == "0021_runtime_authz"
         )
 
 
@@ -552,11 +831,13 @@ def test_existing_database_is_upgraded_to_accept_reenrollment_grants(
         )
 
 
-def test_fresh_baseline_is_reversible(tmp_path: Path) -> None:
+def test_fresh_baseline_is_forward_only_and_canonical(tmp_path: Path) -> None:
     url = f"sqlite:///{tmp_path / 'control.sqlite'}"
     config = _config(url)
     command.upgrade(config, "head")
-    command.downgrade(config, "base")
 
     tables = set(inspect(create_engine(url)).get_table_names())
-    assert tables <= {"alembic_version"}
+    assert "local_recipes" not in tables
+    assert "local_recipe_revisions" not in tables
+    assert "catalog_documents" in tables
+    assert "runtime_image_receipts" in tables

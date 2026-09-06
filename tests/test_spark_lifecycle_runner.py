@@ -22,61 +22,6 @@ def _module():
     return module
 
 
-@pytest.mark.parametrize(
-    ("platform", "architecture", "image_digest"),
-    (
-        (
-            "linux-arm64",
-            "arm64",
-            "9bb659dc6d5218917236f3711e866a5634bb4c2f208de9d4533aa4863f57c1d3",
-        ),
-    ),
-)
-def test_synthetic_canary_uses_the_target_architecture_fixture(
-    tmp_path: Path, platform: str, architecture: str, image_digest: str
-) -> None:
-    lifecycle = _module()
-    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
-    run.arguments = SimpleNamespace(platform=platform)
-    run.temporary_root = tmp_path
-    development = lifecycle._load_development_runner()
-
-    recipe_path, catalog, source_context = run._synthetic_canary_inputs(development)
-
-    recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
-    runtime = json.loads(
-        (catalog / "05-runtime-distribution.json").read_text(encoding="utf-8")
-    )
-    assert recipe["build"]["platform"] == f"linux/{architecture}"
-    assert runtime["platform"] == f"linux/{architecture}"
-    image = f"docker.io/library/python:3.12.11-slim-bookworm@sha256:{image_digest}"
-    assert runtime["image"] == image
-    assert image in (source_context / "Dockerfile").read_text(encoding="utf-8")
-    archive, context_sha256, _ = development._source_bundle(source_context)
-    assert recipe["build"]["context"] == {
-        "sha256": context_sha256,
-        "expected_bytes": len(archive),
-        "media_type": "application/vnd.vonk-forge.source-bundle.v1+tar",
-    }
-    assert recipe["runtime"]["distribution"] == {
-        "kind": "runtime-distribution",
-        "publisher": "vonk",
-        "slug": f"development-vllm-shim-{architecture}",
-        "content_sha256": development._recipe_content_digest(runtime),
-    }
-    assert (
-        len(
-            development._catalog_documents(
-                catalog,
-                recipe,
-                library_root=lifecycle.REPOSITORY_ROOT,
-            )
-        )
-        == 5
-    )
-    assert source_context == tmp_path / "synthetic-canary-inputs/context"
-
-
 def test_literal_spark_bootstrap_keeps_pairing_token_only_in_tty_answers(
     tmp_path: Path,
 ) -> None:
@@ -262,14 +207,6 @@ def test_synthetic_device_is_resolved_by_the_native_docker_daemon(
         "-c",
         'test "${VONK_SYNTHETIC_CDI:-}" = 1',
     ] in observed
-
-
-def test_embedded_development_runner_reuses_the_shared_client_exception() -> None:
-    lifecycle = _module()
-
-    runner = lifecycle._load_development_runner()
-
-    assert runner.SliceError is lifecycle.SliceError
 
 
 def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:

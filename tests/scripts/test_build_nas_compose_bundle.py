@@ -103,7 +103,6 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "NAS_LAN_IP",
         "VONK_MANAGEMENT_CIDRS",
         "VONK_DIRECT_FABRIC_CIDRS",
-        "VONK_OPERATOR_JURISDICTION",
         "VONK_CONTROL_HOSTNAME",
         "VONK_AGENT_ENROLL_HOSTNAME",
         "VONK_AGENT_HOSTNAME",
@@ -116,7 +115,6 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "NAS_LAN_IP": "ipv4",
         "VONK_MANAGEMENT_CIDRS": "cidr_list",
         "VONK_DIRECT_FABRIC_CIDRS": "optional_cidr_list",
-        "VONK_OPERATOR_JURISDICTION": "jurisdiction",
         "VONK_CONTROL_HOSTNAME": "hostname",
         "VONK_AGENT_ENROLL_HOSTNAME": "hostname",
         "VONK_AGENT_HOSTNAME": "hostname",
@@ -139,9 +137,16 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",
         "litellm-upstream-key",
+        "hf-token",
     }
     secret_prompts = {item["file"]: item for item in payload["secrets"]}
     assert secret_prompts["admin-password"]["generate_bytes"] == 24
+    assert secret_prompts["hf-token"] == {
+        "file": "hf-token",
+        "prompt": "Hugging Face access token (optional; leave blank for public models)",
+        "generate_bytes": None,
+        "optional": True,
+    }
     for external in (
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",

@@ -5,14 +5,16 @@ import json
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from importlib import resources
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from sqlalchemy import create_engine, event, select, text, update
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     RecipeRunObservationReceiptClaims,
@@ -22,10 +24,11 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.host_helper import HostHelperSignature
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
-from vonk_control.auth import TokenCodec
-from vonk_control.catalog_service import CatalogService, RecipeDraftInput
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+from vonk_control.execution_plan_service import (
+    ControllerExecutionPlanService,
+)
 from vonk_control.host_helper_authority import (
     HostHelperAuthorityError,
     HostHelperGrantIssuer,
@@ -43,10 +46,10 @@ from vonk_control.models import (
     AgentOperation,
     AgentPresence,
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     InstallationNode,
     Job,
-    LocalRecipe,
-    LocalRecipeRevision,
     NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
@@ -79,8 +82,12 @@ from vonk_control.route_runtime import (
     verify_active_route_bundle,
 )
 from vonk_control.run_admission import RunAdmissionService
-
-from .test_catalog_service import _seed_recipe_dependencies
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    PulledImageEvidence,
+    prepare_runtime_image,
+)
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
 class RecordingQueue:
@@ -156,6 +163,45 @@ NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 RECEIPT_SIGNER = ed25519.Ed25519PrivateKey.from_private_bytes(b"r" * 32)
 
 
+def _synthetic_model_content_sha256() -> str:
+    document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    return content_sha256(ModelDefinition.model_validate(document))
+
+
+class _CanonicalModelCache:
+    """Small exact cache authority used by the canonical operation fixture."""
+
+    artifact_set_sha256 = "f" * 64
+    file_sha256 = "c" * 64
+
+    def resolve_artifact_set(self, **_kwargs):
+        return type("Manifest", (), {"digest": self.artifact_set_sha256})()
+
+    def verified_model_objects_for_set(self, artifact_set_sha256):
+        if artifact_set_sha256 != self.artifact_set_sha256:
+            raise ValueError("unknown artifact set")
+        return (
+            {
+                "model_content_sha256": _synthetic_model_content_sha256(),
+                "file_id": "weights",
+                "path": "model.safetensors",
+                "sha256": self.file_sha256,
+                "bytes": 1024,
+                "roles": ["weights"],
+                "distribution_object": {
+                    "name": "model.safetensors",
+                    "sha256": self.file_sha256,
+                    "bytes": 1024,
+                    "kind": "model",
+                },
+            },
+        )
+
+
 def signed_observation_receipt(
     grant,
     observation_identity_sha256: str,
@@ -189,6 +235,9 @@ def signed_observation_receipt(
 
 
 def start_evidence(payload: dict[str, object]) -> dict[str, object]:
+    model_identity = (
+        "vonk-forge/synthetic-tiny-fp16/" + _synthetic_model_content_sha256()
+    )
     if payload.get("phase") == "rank-launch":
         identity = {
             "phase": "rank-launch",
@@ -197,7 +246,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
             "recipe_content_sha256": payload["recipe_content_sha256"],
             "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
             "artifact_set_digest": "b" * 64,
-            "model_identity": "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567",
+            "model_identity": model_identity,
             "rank": payload["rank"],
             "role": payload["role"],
             "world_size": payload["world_size"],
@@ -225,7 +274,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
         "recipe_content_sha256": payload["recipe_content_sha256"],
         "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
         "artifact_set_digest": "b" * 64,
-        "model_identity": "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567",
+        "model_identity": model_identity,
         "rank": payload["rank"],
         "world_size": payload["world_size"],
         "endpoint": f"http://{payload['endpoint_address']}:{payload['port']}",
@@ -263,6 +312,8 @@ def setup_services(
     endpoint_owner_rank_one: bool = False,
     distributed_lifecycle: bool = False,
     start_order: tuple[str, ...] | None = None,
+    recipe_transform: Callable[[dict[str, object]], None] | None = None,
+    model_transform: Callable[[dict[str, object]], None] | None = None,
     engine=None,
     route_withdrawer=None,
 ):
@@ -348,14 +399,21 @@ def setup_services(
             )
         )
     document = json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text()
+    )
+    model_document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
     )
     document["identity"]["slug"] = "qwen3-vllm"
     role = document["topology"]["roles"][0]
     role["resources"] = {
         "disk": {
             "image_bytes": 30,
-            "artifact_bytes": 70,
+            "artifact_bytes": 1024,
             "staging_bytes": 20,
             "cache_bytes": 0,
             "rollback_bytes": 0,
@@ -392,44 +450,130 @@ def setup_services(
             "start_order": list(start_order or ("worker", "entrypoint")),
             "stop_order": ["entrypoint", "worker"],
         }
-        document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
+        document["models"][0]["files"][0]["roles"] = ["entrypoint", "worker"]
         if distributed_lifecycle:
             document["topology"]["mode"] = "distributed"
             document["topology"]["parallelism"]["backend"] = "mp"
             document["runtime"]["lifecycle"] = {
-                "pre_start": [],
-                "post_stop": [],
-                "stop_timeout_seconds": 30,
-                "readiness": {
-                    "strategy": "endpoint-owner-after-all-ranks",
-                    "path": "/v1/models",
-                    "timeout_seconds": 60,
-                },
                 "failure": {
                     "rank_loss": "withdraw-endpoint",
                     "recovery": "restart-worker-then-entrypoint",
                 },
+                "pre_start": [],
+                "post_stop": [],
+                "stop_timeout_seconds": 30,
             }
-    catalog = CatalogService(
-        sessions, clock=lambda: NOW, cursors=TokenCodec(b"c" * 32).cursor_codec()
-    )
-    _seed_recipe_dependencies(catalog, document)
-    draft = catalog.create_recipe("admin", RecipeDraftInput("qwen3-vllm", document))
-    revision = catalog.resolve(draft.recipe_id, 1, "admin")
+    if recipe_transform is not None:
+        recipe_transform(document)
+    if model_transform is not None:
+        model_transform(model_document)
+    recipe_definition = RecipeDefinition.model_validate(document)
+    model_definition = ModelDefinition.model_validate(model_document)
+    recipe_digest = content_sha256(recipe_definition)
+    model_digest = content_sha256(model_definition)
+    canonical_recipe_document = recipe_definition.model_dump(mode="json")
+    canonical_model_document = model_definition.model_dump(mode="json")
+    recipe_revision_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        recipe_catalog = CatalogDocument(
+            kind="recipe",
+            publisher=document["identity"]["publisher"],
+            slug=document["identity"]["slug"],
+            title=document["metadata"]["title"],
+            created_by="admin",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(recipe_catalog)
+        session.flush()
+        revision = CatalogDocumentRevision(
+            id=recipe_revision_id,
+            document_id=recipe_catalog.id,
+            kind="recipe",
+            publisher=recipe_catalog.publisher,
+            slug=recipe_catalog.slug,
+            revision_number=1,
+            schema_version=2,
+            state="active",
+            document=canonical_recipe_document,
+            content_digest=recipe_digest,
+            projected={},
+            created_by="admin",
+            created_at=NOW,
+        )
+        session.add(revision)
+        model_catalog = CatalogDocument(
+            kind="model",
+            publisher=model_document["identity"]["publisher"],
+            slug=model_document["identity"]["slug"],
+            title=model_document["identity"]["model"]["title"],
+            created_by="admin",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        session.add(model_catalog)
+        session.flush()
+        session.add(
+            CatalogDocumentRevision(
+                document_id=model_catalog.id,
+                kind="model",
+                publisher=model_catalog.publisher,
+                slug=model_catalog.slug,
+                revision_number=1,
+                schema_version=2,
+                state="active",
+                document=canonical_model_document,
+                content_digest=model_digest,
+                projected={},
+                created_by="admin",
+                created_at=NOW,
+            )
+        )
+        session.flush()
     mappings = ClusterMappingService(sessions)
     mapping_plan = mappings.preview(revision.id, node_ids, {}, "admin")
     mapping_id = mappings.materialize(mapping_plan, actor="admin", now=NOW)
+    image_archive = b"canonical-runtime-image-archive"[:30]
+    image_archive_sha256 = hashlib.sha256(image_archive).hexdigest()
+
+    class _CanonicalImageTransport:
+        def inspect_archive(
+            self,
+            archive: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            del archive
+            return PulledImageEvidence(
+                manifest_digest="sha256:" + "1" * 64,
+                requested_manifest_digest=None,
+                config_id="sha256:" + "4" * 64,
+                local_reference="localhost/vonk/fixture@sha256:" + "4" * 64,
+                architecture=expected_architecture,
+                runtime_interface="v1",
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
+            )
+
+    runtime_image_storage = FilesystemRuntimeImageStorage(
+        tmp_path / "runtime-images"
+    )
+    runtime_image_archive = runtime_image_storage.root / image_archive_sha256
+    runtime_image_archive.write_bytes(image_archive)
     with sessions.begin() as session:
         build = RecipeBuild(
             recipe_revision_id=revision.id,
             builder_node_id=node_ids[0],
-            source_bundle_sha256=document["build"]["context"]["sha256"],
+            source_bundle_sha256="d" * 64,
             build_input_sha256="e" * 64,
             state="succeeded",
             policy_report={"passed": True},
             plan={},
             image_digest="sha256:" + "1" * 64,
-            oci_layout_sha256="3" * 64,
+            oci_layout_sha256=image_archive_sha256,
             image_bytes=30,
             created_at=NOW,
             updated_at=NOW,
@@ -442,7 +586,7 @@ def setup_services(
                 node_id=node_id,
                 kind="image",
                 digest="1" * 64,
-                source="docker-archive:" + "3" * 64,
+                source="docker-archive:" + image_archive_sha256,
                 size_bytes=30,
                 state="verified",
                 ref_count=0,
@@ -460,8 +604,37 @@ def setup_services(
             ),
         )
     )
+    canonical_cache = _CanonicalModelCache()
+
+    def prepare_canonical_runtime_image(document, runtime_spec, build):
+        runtime = runtime_spec.get("runtime")
+        if not isinstance(runtime, dict):
+            raise TypeError("canonical runtime projection is unavailable")
+        return prepare_runtime_image(
+            document,
+            runtime=runtime,
+            storage=runtime_image_storage,
+            transport=_CanonicalImageTransport(),
+            build_receipt={
+                "state": build.state,
+                "build_id": build.id,
+                "image_digest": build.image_digest,
+                "oci_layout_sha256": build.oci_layout_sha256,
+                "image_bytes": build.image_bytes,
+            },
+            now=NOW,
+        )
+
+    execution_plans = ControllerExecutionPlanService(
+        canonical_cache,
+        runtime_image_preparer=prepare_canonical_runtime_image,
+    )
     install = InstallAdmissionService(
-        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+        sessions,
+        sizes=sizes,
+        inventory_max_age=300,
+        disk_floor_bytes=10,
+        compiled_plan_provider=execution_plans.compile_installation,
     )
     run = RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=50)
     queue = RecordingQueue()
@@ -527,6 +700,35 @@ def installed_recipe(
             evidence={"installed_bytes": 120},
         )
     return operation
+
+
+def test_canonical_recipe_revision_drives_install_and_schema2_payload(
+    tmp_path: Path,
+) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+
+    plan = service.preview_install(mapping_id, build_id)
+    with sessions() as session:
+        revision = session.get(CatalogDocumentRevision, plan.recipe_revision_id)
+        assert revision is not None
+        assert revision.kind == "recipe"
+        assert revision.state == "active"
+        assert plan.recipe_content_sha256 == revision.content_digest
+
+    operation = service.install(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="canonical-schema2-install",
+    )
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, operation.owner_id)
+        assert installation is not None
+        compiled = installation.plan.get("compiled_execution_plans")
+        assert isinstance(compiled, dict)
+        payload = compiled[nodes[0]]
+        assert payload["schema_version"] == 2
+        assert payload["identity"]["recipe_revision_sha256"] == revision.content_digest
 
 
 def started_recipe(
@@ -2044,6 +2246,11 @@ def test_terminal_image_distribution_retry_requeues_exact_persisted_group(
     sessions, service, queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
+    with sessions() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        archive_sha256 = build.oci_layout_sha256
+        assert archive_sha256 is not None
     plan_digest = "4" * 64
     payloads = tuple(
         (
@@ -2056,7 +2263,7 @@ def test_terminal_image_distribution_retry_requeues_exact_persisted_group(
                 "mapping_generation": 1,
                 "source_node_id": nodes[0],
                 "image_digest": "sha256:" + "1" * 64,
-                "oci_layout_sha256": "3" * 64,
+                "oci_layout_sha256": archive_sha256,
                 "image_bytes": 30,
             },
         )
@@ -2080,7 +2287,7 @@ def test_terminal_image_distribution_retry_requeues_exact_persisted_group(
             "build_id": build_id,
             "image_bytes": 30,
             "image_digest": "sha256:" + "1" * 64,
-            "oci_layout_sha256": "3" * 64,
+            "oci_layout_sha256": archive_sha256,
         },
     )
     service.record_node_result(
@@ -2347,9 +2554,12 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         installation = session.get(RecipeInstallation, install.owner_id)
         assert installation is not None
         assert installation.state == "uninstalled"
-        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        revision = session.get(
+            CatalogDocumentRevision, installation.recipe_revision_id
+        )
         assert revision is not None
-        assert session.get(LocalRecipe, revision.recipe_id) is not None
+        assert revision.kind == "recipe"
+        assert revision.state == "active"
 
 
 def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
@@ -2388,20 +2598,10 @@ def test_uninstall_preview_has_exact_bytes_content_and_fixed_consequences(
     with sessions() as session:
         stored = session.get(RecipeInstallation, installation.owner_id)
         assert stored is not None
-        revision = session.get(LocalRecipeRevision, stored.recipe_revision_id)
+        revision = session.get(CatalogDocumentRevision, stored.recipe_revision_id)
         assert revision is not None
-        assert first.installation_authority_digest == revision.content_sha256
+        assert first.installation_authority_digest == revision.content_digest
         assert first.recipe_content == revision.document
-
-    with sessions.begin() as session:
-        session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == first.recipe_revision_id)
-            .values(document={**first.recipe_content, "description": "changed"})
-        )
-    assert service.preview_uninstall(installation.owner_id).plan_digest != (
-        first.plan_digest
-    )
 
 
 def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
@@ -2759,13 +2959,13 @@ def test_uninstall_rejects_stale_bytes_before_transactional_full_group_queue(
             )
         )
         revision = session.get(
-            LocalRecipeRevision,
+            CatalogDocumentRevision,
             session.get(RecipeInstallation, installation.owner_id).recipe_revision_id,
         )
         assert len(children) == 2
         assert revision is not None
         assert {child.authority_revision for child in children} == {
-            revision.content_sha256
+            revision.content_digest
         }
         assert {child.payload["plan_digest"] for child in children} == {
             installation.plan_digest

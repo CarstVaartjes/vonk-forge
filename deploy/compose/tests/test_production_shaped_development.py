@@ -33,8 +33,6 @@ def test_development_has_no_alternate_runtime_service_graph() -> None:
 def test_development_workflow_renders_only_the_canonical_graph() -> None:
     workflow = DEVELOPMENT_WORKFLOW.read_text(encoding="utf-8")
     assert workflow.count("--template deploy/compose/compose.yaml") == 2
-    assert workflow.count('--hermes-image "$hermes_image"') == 2
-    assert workflow.count('--litellm-image "$litellm_image"') == 2
 
 
 def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
