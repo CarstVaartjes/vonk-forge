@@ -179,8 +179,6 @@ class ManagedRecipeCatalogSyncService:
                     hydrated = self._reader.fetch(item.uri)
                     if hydrated.library_commit != snapshot.commit or hydrated.content_sha256 != item.content_sha256:
                         raise CatalogSyncError("catalog.sync_revision_changed", "recipe changed while the exact library snapshot was applied")
-                    if not _explicitly_executable(hydrated.document):
-                        raise CatalogSyncError("catalog.sync_recipe_not_executable", "managed recipe does not explicitly declare an executable contract")
                     self._store_source_bundle(hydrated, actor)
                     self._catalog.import_recipe_library(
                         actor,
@@ -286,14 +284,6 @@ class ManagedRecipeCatalogSyncService:
             raise CatalogSyncError("catalog.sync_actor_invalid", "sync actor is invalid")
         if expected_commit is not None and (len(expected_commit) != 40 or any(char not in "0123456789abcdef" for char in expected_commit)):
             raise CatalogSyncError("catalog.sync_commit_invalid", "expected commit must be lowercase Git SHA-1")
-
-
-def _explicitly_executable(document: Mapping[str, object]) -> bool:
-    metadata = document.get("metadata")
-    tags = metadata.get("tags") if isinstance(metadata, Mapping) else None
-    normalized = {str(value).lower() for value in tags} if isinstance(tags, list) else set()
-    return "executable" in normalized and not normalized.intersection({"non-executable", "metadata-only", "integration-required"})
-
 
 def _empty_result() -> dict[str, object]:
     return {"schema_version": 1, "state": "current", "imported_count": 0, "updated_count": 0, "unchanged_count": 0, "skipped_count": 0, "withdrawn_count": 0, "withdrawn_recipes": [], "stale_recipes": [], "problems": []}
