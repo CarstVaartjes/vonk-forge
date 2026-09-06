@@ -3899,6 +3899,10 @@
   align-items: end;
   margin: 1rem 0;
 }
+.library-workcell {
+  display: block;
+  min-width: 0;
+}
 .library-workcell-toolbar label,
 .library-model-controls label,
 .library-cache-search { display: grid; gap: .35rem; color: var(--text-muted, #abb5a7); font-size: .72rem; font-weight: 700; }

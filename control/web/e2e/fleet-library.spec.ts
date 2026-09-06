@@ -1055,8 +1055,18 @@ test("Library pairs exact model selection with matching recipes and downloads an
   await expect(paired).toBeVisible();
   const recipes = page.getByLabel("Recipes matching selected model");
   await expect(recipes).toContainText(linked.recipes[0]!.title);
+  const workcellBox = await page.locator(".library-workcell").boundingBox();
+  const pairedBox = await paired.boundingBox();
+  const contentBox = await page.locator(".content-frame").boundingBox();
+  expect(workcellBox).not.toBeNull();
+  expect(pairedBox).not.toBeNull();
+  expect(contentBox).not.toBeNull();
+  expect(pairedBox!.width).toBeGreaterThan(900);
+  expect(Math.abs(pairedBox!.x - workcellBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(pairedBox!.x - contentBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(pairedBox!.width - workcellBox!.width)).toBeLessThanOrEqual(2);
   await expectNoSeriousAccessibilityViolations(page);
-  await page.screenshot({path: testInfo.outputPath("library-model-recipe-paired-desktop.png"), fullPage: true});
+  await page.screenshot({path: testInfo.outputPath("library-model-recipe-paired-desktop.png"), fullPage: false});
 
   await page.setViewportSize({width: 360, height: 800});
   await page.reload();
