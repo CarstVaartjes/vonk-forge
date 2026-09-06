@@ -50,6 +50,10 @@ configuration and relative secret paths.
 
 For gated or private Hugging Face model-cache downloads, see the
 [Hugging Face model-cache authentication guide](../../docs/model-cache-huggingface-auth.md).
+The background worker has a dedicated outbound `artifact-egress` network for
+model and OCI downloads. It publishes no ports. The API, PostgreSQL, and worker
+authority channel keep their internal networks.
+
 The default install leaves `HF_TOKEN_FILE` unset and all public downloads
 anonymous.
 
