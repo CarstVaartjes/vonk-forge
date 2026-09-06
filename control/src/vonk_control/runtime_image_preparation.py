@@ -34,6 +34,7 @@ from .models import RuntimeImageReceipt as RuntimeImageReceiptRow
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+OCI_ARCHIVE_DIRECTORY = "oci-archives"
 
 
 class RuntimeImagePreparationError(ValueError):
@@ -690,7 +691,7 @@ class FilesystemRuntimeImageStorage:
     """
 
     def __init__(self, root: Path, *, maximum_bytes: int = 16 * 1024**4) -> None:
-        self.root = root / "oci-archives"
+        self.root = root / OCI_ARCHIVE_DIRECTORY
         self.maximum_bytes = maximum_bytes
         self.root.mkdir(parents=True, exist_ok=True)
 

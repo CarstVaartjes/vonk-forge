@@ -35,6 +35,7 @@ from .models import (
     RuntimeImageReceipt,
 )
 from .runtime_image_preparation import (
+    OCI_ARCHIVE_DIRECTORY,
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
 )
@@ -161,7 +162,7 @@ class RecipeBuildVerifiedObjectSource(FilesystemVerifiedObjectSource):
     """Verified OCI source backed by succeeded Controller recipe builds."""
 
     def __init__(self, sessions: sessionmaker[Session], artifact_root: Path, **kwargs: object) -> None:
-        super().__init__(artifact_root, **kwargs)
+        super().__init__(artifact_root / OCI_ARCHIVE_DIRECTORY, **kwargs)
         self.sessions = sessions
 
     def verify_artifact_set(

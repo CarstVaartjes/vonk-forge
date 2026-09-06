@@ -873,7 +873,10 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     )
 
     assert response.status_code == 204
-    assert (services.artifact_root / layout_digest).read_bytes() == payload
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    assert storage.verify_existing(layout_digest, len(payload)).read_bytes() == payload
+    assert not (services.artifact_root / layout_digest).exists()
     with services.sessions() as session:
         build = session.get(RecipeBuild, build_id)
         assert build.image_digest == image_digest
@@ -3433,7 +3436,9 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
     client, services, _, clock = agent_system
     payload = b"accepted recipe image archive"
     digest = hashlib.sha256(payload).hexdigest()
-    (services.artifact_root / digest).write_bytes(payload)
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    (storage.root / digest).write_bytes(payload)
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,

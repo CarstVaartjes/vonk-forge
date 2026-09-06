@@ -567,7 +567,9 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                 updated_at=now,
             )
         )
-    (services.artifact_root / archive_digest).write_bytes(archive_payload)
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    (storage.root / archive_digest).write_bytes(archive_payload)
     distribution = build_distribution_service_from_components(
         cache,
         services.sessions,

@@ -90,6 +90,7 @@ from .recipe_operations import (
     prepare_exact_recipe_run_observation_nodes,
     record_recipe_run_observations,
 )
+from .runtime_image_preparation import OCI_ARCHIVE_DIRECTORY
 from .source_bundles import SourceBundleError, SourceBundleStore
 from .telemetry import (
     TelemetryDetailsInput,
@@ -1147,7 +1148,14 @@ def _open_owned_artifact(
     try:
         root_fd = os.open(os.fspath(services.artifact_root), root_flags)
         try:
-            descriptor = os.open(digest, file_flags, dir_fd=root_fd)
+            if recipe_image:
+                image_fd = os.open(OCI_ARCHIVE_DIRECTORY, root_flags, dir_fd=root_fd)
+                try:
+                    descriptor = os.open(digest, file_flags, dir_fd=image_fd)
+                finally:
+                    os.close(image_fd)
+            else:
+                descriptor = os.open(digest, file_flags, dir_fd=root_fd)
         finally:
             os.close(root_fd)
     except OSError:
@@ -2563,7 +2571,7 @@ def install_agent_routes(
                 )
         descriptor, temporary = await asyncio.to_thread(
             _prepare_recipe_image_upload,
-            required.artifact_root,
+            required.artifact_root / OCI_ARCHIVE_DIRECTORY,
             layout_sha256,
         )
         digest = hashlib.sha256()
@@ -2586,7 +2594,7 @@ def install_agent_routes(
                 await asyncio.to_thread(_flush_and_sync, stream)
             finally:
                 await asyncio.to_thread(stream.close)
-            destination = required.artifact_root / layout_sha256
+            destination = required.artifact_root / OCI_ARCHIVE_DIRECTORY / layout_sha256
             await asyncio.to_thread(
                 _commit_recipe_image_upload,
                 temporary,
