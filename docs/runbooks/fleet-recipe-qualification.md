@@ -22,7 +22,6 @@ uv tool install .
 chmod 600 .dev/admin-token
 export VONK_CONTROL_URL=https://forge.example.test
 export VONK_CONTROL_TOKEN_FILE="$PWD/.dev/admin-token"
-export VONK_OPERATOR_JURISDICTION=NL
 
 vonk-fleet-qualify \
   --fixture-manifest /path/to/vonk-forge-recipes/qualification/qualification-index.json \
@@ -36,9 +35,9 @@ to the append-only ledger. It does not import, place, install, or run anything.
 
 The plan classifies recipes requiring more than two Sparks without trying them.
 It also classifies insufficient online nodes, non-executable runtime contracts,
-operator policy blocks, and machine-readable license territory restrictions.
-A territorially restricted recipe fails closed when the operator jurisdiction is
-unknown. `EU` restrictions match every EU member jurisdiction, including `NL`.
+and explicit operator policy blocks. Upstream license and territorial information
+remain visible in the catalog for the user to assess; the qualification runner
+does not determine the user's jurisdiction.
 
 Use `--recipe PUBLISHER/SLUG` repeatedly for a bounded canary. The full catalog
 is selected when the option is omitted.

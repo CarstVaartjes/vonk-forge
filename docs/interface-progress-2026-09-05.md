@@ -2,7 +2,7 @@
 
 Updated 2026-09-06. This replaces the earlier status snapshot. Platform
 integration is `codex/interface-integration` at
-`ee73608b8cc4f4df4e7c01c0fd49a29f61a48aad`. Local checks, publication,
+`cc0ab30c` (latest remote main `0ab88b4f` is included). Local checks, publication,
 Controller deployment and physical Spark execution remain separate results.
 No local result below claims a deployed Controller or NVIDIA workload.
 
@@ -39,16 +39,15 @@ This is a fresh launch with one current contract and no legacy catalog path.
 | P2 independent validator | Published validator reads the canonical contract. v1.0.2 validation passed against platform `0ab88b4f`. | Recheck final combined consumer revision. |
 | P3 catalog / database | Canonical persistence, typed lists/details, all-page pagination and ordered multi-Model details integrated. | Fresh OrbStack PostgreSQL imported 92 Models / 85 Recipes and retained 13 unlinked Models; [exact evidence](evidence/fresh-launch-catalog-postgres-acceptance-2026-09-06.md). Recheck final database additions. |
 | P4 downloads / secrets | Optional Controller/worker HF token, anonymous public downloads and [documentation](model-cache-huggingface-auth.md) integrated. | Deployed gated-download observation. |
-| P5 cache / Run / profiles | NAS caches, explicit profile scope/Idle, durable preparation/distribution phases and artifact receipts integrated locally. | Final Rust/helper OCI path, current-Recipe receipt authorization, real image import/start, reuse and failure/retry. |
+| P5 cache / Run / profiles | NAS caches, explicit profile scope/Idle, durable preparation/distribution phases and artifact receipts integrated locally. | Runtime/helper OCI path, current-Recipe receipt authorization and bounded retry are integrated. Actual composed helper-process execution and combined acceptance remain pending; direct OrbStack Docker import/start is not that proof. |
 | P6 website | Canonical compact catalog and plain-language explanation deployed. | Recipe refresh propagation; website evidence does not establish Controller behavior. |
 | P7 Controller web / API / CLI | Paired lists, Model NAS download, Recipe placement, profiles, artifact jobs and rich Fleet surfaces integrated. Retired routes and generated clients removed. | Final UI branch: 195 Vitest tests, 22 Playwright journeys and one optional skip. Root layout repair passed its desktop/mobile journey. Route cleanup: 49 API/client tests and web build passed. CLI records 97 focused and 23 connected parity tests. New retries require matching API/CLI/web coverage. |
 | P8 upstream refresh | Reviewed first batch and reports published in v1.0.2. | GLM, LTX and adapter follow-ups are being composed for the next release; all-Recipe engine checks are active. |
-| P9 acceptance / cleanup | Fresh catalog/PostgreSQL checks and independent UI review recorded. | Residual retired configuration/modules, actual Controller image/helper checks, combined CI, compatible consumer publication/deployment, then physical Spark observations. |
+| P9 acceptance / cleanup | Fresh catalog/PostgreSQL checks and independent UI review recorded. | Retired authoring modules removed. Controller packaging and signed helper policy integrated. Combined suite fixes, actual composed helper execution, compatible consumer publication/deployment, then physical Spark observations remain. |
 
 Root UI repair: `f8ee3122`. Route cleanup: `d6e7e188`, integrated at
 `a251a7b5`; generated clients: `56e7d955`. Artifact settings and finite-number
-handling: `a33c3a56` plus `56caa0ae`, integrated at `e6e3268e`. Final precise
-credential and ordinary engine-argument follow-ups are still being checked.
+handling: `a33c3a56` plus `56caa0ae`, integrated at `e6e3268e`. Precise credential and ordinary engine-argument follow-ups are integrated at `ca326291`. The combined source lint is clean under Ruff 0.16.1.
 
 ## Fault tolerance
 
@@ -62,10 +61,7 @@ Only a same-commit result explicitly marked current is reused. A partial sync
 retries missing items without refetching successful immutable imports. Seven
 focused tests passed, including fail-once recovery; pinned Ruff 0.16.1 passed.
 
-Bounded model-cache and Run/Switch retries are under implementation. They must
-reuse the persisted plan/artifact digest, verified bytes and completed-node
-receipts. Authentication and integrity failures must not become retry loops
-or false success. Catalog withdrawal needs separate review: a partial remote
+Bounded model-cache and Run/Switch retries are integrated from `49fe4c67`, including API/CLI routes and generated clients. They reuse the persisted plan/artifact digest, verified bytes and completed-node receipts. Authentication, integrity, permissions and exhausted storage are terminal. UI recovery is being wired to the new persisted retry endpoints; preview/apply is not a replacement for retry. Catalog withdrawal needs separate review: a partial remote
 snapshot must never remove previously valid entries or immutable revisions.
 
 ## Every-Recipe engine verification
@@ -86,6 +82,26 @@ Intercepting a child process proves wrapper argument routing, not engine
 acceptance or inference. Missing parser/container/hardware evidence remains
 unverified. Proven defects feed the sole producer integration branch and are
 rechecked before publication.
+
+## Worktree and integration audit
+
+The 6 September audit inspected 256 discovered paths, including 200 readable Git checkouts. Older intermediate branches are compared by patches and current behavior, not ancestry alone. No checkout or uncommitted source was deleted or reset. The original `/opt/vonk-forge` working tree is preserved.
+
+Completed branches merged during the audit:
+
+- Immutable image receipt/current Recipe authorization: `115244ed`, merged at `ce368184`.
+- Spark compiled runtime and approved bridge/CDI projection: `fb2c081c`, merged at `61e07dcc`.
+- Controller Skopeo and exact-source protocol packaging: `386152fa`, merged at `e8179f51`.
+- Durable retries: `49fe4c67`, merged at `1950cc56`.
+- SGLang model-root wrapper fix: `b635712f`, merged at `b80ffd14`.
+- Retired local authoring cleanup: `af0b1a96`, merged at `9d4f45ce`.
+- Current generated retry clients and verified supply-chain manifest: `cc0ab30c`.
+
+Historical CI/publication/installer changes are present through current integration; old skip-based CI patches should not be restored. The dirty original UI is superseded by the canonical compact paired lists. One uncommitted current-contract UI test correction was found in an old review checkout and assigned to the current UI owner. The independently fetched public web `7eb783d` tree is identical to historical launch `47f856fe`; it is already published under different commits. Recipe GLM/LTX/SparkInfer/Qwen/DS4 changes are carried by the sole v1.0.3 candidate. An older connected package-to-Controller-to-Library/API/CLI acceptance test was also found absent and is being rebuilt against the current contract. The standalone historical serving-evidence module is under semantic review against the producer-owned qualification path; its filename alone does not prove missing behavior.
+
+Combined checks at this snapshot: 169 receipt/compiler/API/direct tests passed; 92 focused tests passed with 13 skips; 64 development-slice tests passed with their real loopback fixture; 3 CLI parity tests passed. The source/wheel supply-chain verifier passed. The broader Controller/protocol run reached 1,205 passes and two skips, then stopped at 12 failures. Packaging, schema-1 development fixtures, stale compiler/admission fixtures, migration/progress expectations and portable privilege-drop checks have explicit owners. The approved obsolete installer jurisdiction input and documentation cleanup passed the bundle checks; the short-path installer/Tailscale rerun passed 37 tests. The initial Caddy published-socket refusal cleared on an isolated run; its test now waits a bounded interval for that host socket while preserving immediate TLS/authentication failures. This is not a green release gate yet.
+
+Published v1.0.2 QA covers exactly 85 Recipes, with no missing or duplicate rows. All 85 pass public contract, Model/package closure and every-role compilation. Current wrapper evidence is 82 pass, one GLM failure, and two direct-engine rows unverified. Actual parser evidence is 15 pass, two DS4 failures, and 68 unverified. Container startup and physical Spark execution remain unverified for the corpus. The v1.0.3 candidate fixes the GLM mismatch, both DS4 options, three SparkInfer pass-through defects, and the LTX compiled-wire fixture; candidate wrapper and DS4 compiler-to-parser checks passed. Publication is pending final generation and validation.
 
 ## Remaining runtime and deployment checks
 
