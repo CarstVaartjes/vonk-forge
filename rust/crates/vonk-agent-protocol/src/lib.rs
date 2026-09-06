@@ -828,6 +828,14 @@ pub enum RecipeStartPhase {
     CollectiveReadiness,
 }
 
+fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecipeStartRequest {
@@ -836,8 +844,11 @@ pub struct RecipeStartRequest {
     pub endpoint_address: std::net::IpAddr,
     pub image_digest: String,
     pub installation_id: Uuid,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub local_address: Option<std::net::IpAddr>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_address: Option<std::net::IpAddr>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_port: Option<u16>,
     pub mapping_generation: u64,
     pub mapping_id: Uuid,
@@ -1107,6 +1118,15 @@ mod recipe_start_tests {
         assert!(legacy_wire.get("phase").is_none());
         assert!(legacy_wire.get("start_deadline").is_none());
 
+        for field in ["local_address", "master_address", "master_port"] {
+            let mut omitted = start_payload(1, 0, None, None, None);
+            omitted.as_object_mut().unwrap().remove(field);
+            assert!(
+                parsed_start(omitted).is_err(),
+                "omitted singleton field {field} must be rejected"
+            );
+        }
+
         let distributed = parsed_start(start_payload(
             2,
             1,
@@ -1143,6 +1163,21 @@ mod recipe_start_tests {
             collective.phase,
             Some(RecipeStartPhase::CollectiveReadiness)
         );
+
+        for field in ["local_address", "master_address", "master_port"] {
+            let mut omitted = start_payload(
+                2,
+                1,
+                Some("192.168.100.3"),
+                Some("192.168.100.2"),
+                Some("rank-launch"),
+            );
+            omitted.as_object_mut().unwrap().remove(field);
+            assert!(
+                parsed_start(omitted).is_err(),
+                "omitted distributed field {field} must be rejected"
+            );
+        }
     }
 
     #[test]
