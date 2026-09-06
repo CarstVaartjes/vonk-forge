@@ -86,17 +86,45 @@ def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> No
                 "maximum": 64.0,
             }
         )
-    with pytest.raises(ArtifactJobError, match="contract"):
-        _validate_parameter_definition(
-            {
-                "name": "api_token",
-                "type": "string",
-                "default": "secret",
-            }
+    for name in ("apiKey", "accessToken", "privateKey", "passwordHash", "hf_token"):
+        with pytest.raises(ArtifactJobError, match="contract"):
+            _validate_parameter_definition(
+                {"name": name, "type": "string", "default": "secret"}
+            )
+    for name in ("max_tokens", "token_budget", "tokenizer"):
+        definition = _validate_parameter_definition(
+            {"name": name, "type": "integer", "default": 1}
         )
+        assert definition["name"] == name
 
 
 def _configure_artifact_recipe(document: dict[str, object]) -> None:
+    document["settings"] = {
+        "kind": "job",
+        "concurrency": None,
+        "knobs": {},
+    }
+    document["validation"] = {
+        "benchmarks": [],
+        "serving": {
+            "interface": "image-job",
+            "checks": [
+                {
+                    "name": "image-job-output",
+                    "kind": "image-job.output",
+                    "assertions": ["inference.completed", "artifact.output"],
+                    "request": {
+                        "transport": "job",
+                        "fixture": "fixtures/input.png",
+                        "input_path": "/inputs",
+                        "input_slots": {},
+                        "output_path": "/outputs",
+                        "output_slot": "image",
+                    },
+                }
+            ],
+        },
+    }
     document["interfaces"] = [
         {
             "adapter": "image-job",
@@ -126,24 +154,10 @@ def _configure_artifact_recipe(document: dict[str, object]) -> None:
             },
         }
     ]
-    document["parameters"] = [
-        {
-            "name": "prompt",
-            "description": "Prompt",
-            "type": "string",
-            "default": "",
-            "change_effect": "restart",
-        },
-        {
-            "name": "seed",
-            "description": "Seed",
-            "type": "integer",
-            "default": 0,
-            "minimum": 0,
-            "maximum": 100,
-            "change_effect": "restart",
-        },
-    ]
+    document["settings"]["knobs"] = {
+        "prompt": {"value": "", "change_effect": "restart"},
+        "seed": {"value": 0, "change_effect": "restart"},
+    }
 
 
 def running_artifact_service(tmp_path, *, recipe_transform=None):
@@ -337,7 +351,7 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
         installation = session.get(RecipeInstallation, run.installation_id)
         revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         document = copy.deepcopy(revision.document)
-        document["parameters"][1]["maximum"] = 99
+        document["settings"]["knobs"]["seed"]["value"] = 99
         parsed = RecipeDefinition.model_validate(document)
         replacement = CatalogDocumentRevision(
             document_id=revision.document_id,
@@ -546,7 +560,7 @@ def test_artifact_job_rejects_unsafe_names_and_timeout(tmp_path) -> None:
     ("change", "message"),
     [
         (lambda value: value["parameters"].update(extra=True), "undeclared"),
-        (lambda value: value["parameters"].update(seed=101), "outside its range"),
+        (lambda value: value["parameters"].update(seed="101"), "wrong type"),
         (lambda value: value["inputs"][0].update(slot="other"), "undeclared"),
         (
             lambda value: value["inputs"][0].update(media_type="image/jpeg"),
@@ -715,6 +729,9 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
             }
         )
         output["slots"].append(detailed)
+        document["validation"]["serving"]["checks"][0]["request"][
+            "output_slot"
+        ] = "detailed"
 
     sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path, recipe_transform=transform
