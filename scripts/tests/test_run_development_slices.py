@@ -472,12 +472,13 @@ class SliceHandler(BaseHTTPRequestHandler):
                     },
                 },
             )
-        elif self.path == f"/api/v1/endpoints/{self.server.slug}":
+        elif self.path.startswith("/api/v1/endpoints/"):
+            endpoint_alias = self.path.rsplit("/", 1)[-1]
             if self.server.route_published:
                 self._json(
                     200,
                     {
-                        "alias": self.server.slug,
+                        "alias": endpoint_alias,
                         "state": "published",
                         "nodes": [NODE],
                     },
@@ -1416,6 +1417,7 @@ def test_runner_completes_exact_public_lifecycle_without_secret_leaks(
         in {
             "/api/v1/fleet",
             "/api/v1/endpoints/dev-http-smoke",
+            "/api/v1/library/recipes",
             "/v1/chat/completions",
         }
         for _method, path, _authorization in server.requests
