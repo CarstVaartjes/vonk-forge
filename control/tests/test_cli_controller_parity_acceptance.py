@@ -646,6 +646,8 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     # inventory, and lifecycle rows used by the Controller service tests.  It
     # is imported lazily because this acceptance is run on the integrated
     # branch, while the CLI branch intentionally has no backend dependency.
+    from importlib import resources
+
     from sqlalchemy import select
     from vonk_control.cluster_mappings import ClusterMappingService
     from vonk_control.fleet_profiles import (
@@ -660,6 +662,7 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
         PhaseExecution,
         RunSwitchOperationService,
     )
+    from vonk_forge_contracts import ModelDefinition, content_sha256
 
     from .test_recipe_operations import NOW as fixture_now
     from .test_recipe_operations import setup_services
@@ -669,8 +672,19 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
             "https://huggingface.co/vonk-forge/synthetic-tiny"
         )
 
+    model_document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    model_transform(model_document)
+    model_digest = content_sha256(ModelDefinition.model_validate(model_document))
+
+    def recipe_transform(document: dict[str, object]) -> None:
+        document["models"][0]["model"]["content_sha256"] = model_digest
+
     sessions, lifecycle, _queue, _mapping, _build, node_ids = setup_services(
-        tmp_path, model_transform=model_transform
+        tmp_path, recipe_transform=recipe_transform, model_transform=model_transform
     )
     now = fixture_now
 
