@@ -1,4 +1,9 @@
-use std::{fs, path::Path, time::Duration};
+use std::{
+    fs,
+    os::unix::fs::{MetadataExt, PermissionsExt},
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use reqwest::{Certificate, Client, Identity, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -683,8 +688,8 @@ impl AgentHttpClient {
     }
 
     /// Download one object from the Controller's assignment-bound delivery
-    /// API.  A partial destination is a resumable checkpoint; the assignment,
-    /// ETag, length and final SHA-256 are checked on every completed transfer.
+    /// API. A `.partial` destination is a resumable checkpoint; the assignment,
+    /// ETag, length, and range are checked on every response.
     pub async fn download_distribution_object(
         &self,
         plan_digest: &str,
@@ -695,33 +700,36 @@ impl AgentHttpClient {
         if !valid_sha256(plan_digest) {
             return Err(ClientError::Protocol);
         }
-        self.download_distribution_object_with_progress(
+        self.download_trusted_distribution_object_with_progress(
             plan_digest,
             sha256,
             expected_bytes,
             destination,
+            destination.parent().ok_or(ClientError::Protocol)?,
             |_| {},
         )
         .await
     }
 
-    async fn download_distribution_object_with_progress<F>(
+    async fn download_trusted_distribution_object_with_progress<F>(
         &self,
         plan_digest: &str,
         sha256: &str,
         expected_bytes: u64,
         destination: &Path,
+        managed_root: &Path,
         progress: F,
     ) -> Result<(), ClientError>
     where
         F: FnMut(u64),
     {
-        self.download_content_addressed_with_progress(
+        self.download_trusted_content_addressed_with_progress(
             "/agent/v1/distribution/objects",
-            Some(plan_digest),
+            plan_digest,
             sha256,
             expected_bytes,
             destination,
+            managed_root,
             progress,
         )
         .await
@@ -754,7 +762,7 @@ impl AgentHttpClient {
 
     /// Consume a complete assignment. Every model/configiliary object and the
     /// exact OCI archive is fetched through the assignment-bound endpoint;
-    /// existing complete files are re-hashed and reused, while partial files
+    /// complete files are reused by trusted metadata, while `.partial` files
     /// resume by identity and length after an agent process restart.
     pub async fn download_distribution(
         &self,
@@ -784,6 +792,10 @@ impl AgentHttpClient {
         let oci_root = destination_root.join("oci-archives");
         tokio::fs::create_dir_all(&model_root).await?;
         tokio::fs::create_dir_all(&oci_root).await?;
+        tokio::fs::set_permissions(&model_root, std::fs::Permissions::from_mode(0o700)).await?;
+        tokio::fs::set_permissions(&oci_root, std::fs::Permissions::from_mode(0o700)).await?;
+        ensure_private_parent(&model_root, destination_root).await?;
+        ensure_private_parent(&oci_root, destination_root).await?;
         let mut model_paths = Vec::new();
         let mut model_digests = Vec::new();
         let mut downloaded_bytes = 0_u64;
@@ -808,11 +820,12 @@ impl AgentHttpClient {
             let object_digest = object.sha256.clone();
             let kind = object.kind.clone();
             let base = downloaded_bytes;
-            self.download_distribution_object_with_progress(
+            self.download_trusted_distribution_object_with_progress(
                 plan_digest,
                 &object.sha256,
                 object.bytes,
                 &path,
+                destination_root,
                 |bytes| {
                     progress(DistributionProgress {
                         object_sha256: object_digest.clone(),
@@ -851,6 +864,114 @@ impl AgentHttpClient {
             oci_image_digest: assignment.oci_image_digest,
             downloaded_bytes,
         })
+    }
+
+    async fn download_trusted_content_addressed_with_progress<F>(
+        &self,
+        endpoint: &str,
+        plan_digest: &str,
+        sha256: &str,
+        expected_bytes: u64,
+        destination: &Path,
+        managed_root: &Path,
+        mut progress: F,
+    ) -> Result<(), ClientError>
+    where
+        F: FnMut(u64),
+    {
+        // The assignment-bound mTLS endpoint and its exact ranged response
+        // headers establish the object identity. The SHA-256 remains the
+        // stable path ID; trusted finalization deliberately avoids a second
+        // full-file scan here.
+        if !valid_sha256(plan_digest)
+            || !valid_sha256(sha256)
+            || !(1..=16 * 1024_u64.pow(4)).contains(&expected_bytes)
+            || !destination.is_absolute()
+        {
+            return Err(ClientError::Protocol);
+        }
+        let parent = destination.parent().ok_or(ClientError::Protocol)?;
+        if !destination.starts_with(managed_root) {
+            return Err(ClientError::Protocol);
+        }
+        ensure_private_parent(parent, managed_root).await?;
+
+        if let Some(file) = inspect_trusted_final(destination, expected_bytes).await? {
+            drop(file);
+            progress(expected_bytes);
+            return Ok(());
+        }
+
+        let partial = partial_path(destination);
+        let mut output = open_trusted_partial(&partial).await?;
+        let metadata = output.metadata().await?;
+        let mut offset = metadata.len();
+        if offset > expected_bytes {
+            return Err(ClientError::Protocol);
+        }
+        if offset == expected_bytes {
+            output.sync_all().await?;
+            drop(output);
+            tokio::fs::rename(&partial, destination).await?;
+            sync_parent(parent).await?;
+            validate_trusted_file(destination, expected_bytes).await?;
+            progress(expected_bytes);
+            return Ok(());
+        }
+
+        while offset < expected_bytes {
+            let end = expected_bytes
+                .saturating_sub(1)
+                .min(offset.saturating_add(8 * 1024 * 1024 - 1));
+            let mut url = self.endpoint(&format!("{endpoint}/{sha256}"))?;
+            url.query_pairs_mut()
+                .append_pair("plan_digest", plan_digest);
+            let response = self
+                .client
+                .get(url)
+                .header("range", format!("bytes={offset}-{end}"))
+                .header("if-range", format!("\"sha256:{sha256}\""))
+                .send()
+                .await?;
+            let expected_etag = format!("\"sha256:{sha256}\"");
+            let expected_range = format!("bytes {offset}-{end}/{expected_bytes}");
+            if response.status() != StatusCode::PARTIAL_CONTENT
+                || response.content_length() != Some(end - offset + 1)
+                || response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    != Some(expected_etag.as_str())
+                || response
+                    .headers()
+                    .get("content-range")
+                    .and_then(|value| value.to_str().ok())
+                    != Some(expected_range.as_str())
+            {
+                classify_status(response.status())?;
+                return Err(ClientError::Protocol);
+            }
+            let mut copied = 0_u64;
+            let expected_chunk = end - offset + 1;
+            let mut response = response;
+            while let Some(chunk) = response.chunk().await? {
+                copied = copied.saturating_add(chunk.len() as u64);
+                if copied > expected_chunk {
+                    return Err(ClientError::Protocol);
+                }
+                output.write_all(&chunk).await?;
+            }
+            if copied != expected_chunk {
+                return Err(ClientError::Protocol);
+            }
+            offset = end + 1;
+            progress(offset);
+        }
+        output.sync_all().await?;
+        drop(output);
+        tokio::fs::rename(&partial, destination).await?;
+        sync_parent(parent).await?;
+        validate_trusted_file(destination, expected_bytes).await
     }
 
     async fn download_content_addressed(
@@ -1191,7 +1312,15 @@ async fn bounded_body(response: reqwest::Response) -> Result<Vec<u8>, ClientErro
 }
 
 async fn sha256_path(path: &Path, expected_bytes: u64) -> Result<String, ClientError> {
-    let mut file = tokio::fs::File::open(path).await?;
+    let mut file = tokio::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(path)
+        .await?;
+    let before = file.metadata().await?;
+    if !before.file_type().is_file() || before.file_type().is_symlink() || before.nlink() != 1 {
+        return Err(ClientError::Protocol);
+    }
     let mut digest = Sha256::new();
     let mut total = 0_u64;
     // Keep the buffer on the heap: this async future is held by the default
@@ -1212,7 +1341,124 @@ async fn sha256_path(path: &Path, expected_bytes: u64) -> Result<String, ClientE
     if total != expected_bytes {
         return Err(ClientError::Protocol);
     }
+    let after = file.metadata().await?;
+    if before.dev() != after.dev() || before.ino() != after.ino() || before.len() != after.len() {
+        return Err(ClientError::Protocol);
+    }
     Ok(hex::encode(digest.finalize()))
+}
+
+async fn ensure_private_parent(parent: &Path, managed_root: &Path) -> Result<(), ClientError> {
+    let metadata = tokio::fs::symlink_metadata(parent).await?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o022 != 0
+    {
+        return Err(ClientError::Protocol);
+    }
+    if !parent.starts_with(managed_root) {
+        return Err(ClientError::Protocol);
+    }
+    let relative = parent
+        .strip_prefix(managed_root)
+        .map_err(|_| ClientError::Protocol)?;
+    let mut component = managed_root.to_path_buf();
+    for part in relative.components() {
+        component.push(part.as_os_str());
+        let metadata = tokio::fs::symlink_metadata(&component).await?;
+        if metadata.file_type().is_symlink() {
+            return Err(ClientError::Protocol);
+        }
+    }
+    let canonical_root = tokio::fs::canonicalize(managed_root).await?;
+    let canonical_parent = tokio::fs::canonicalize(parent).await?;
+    if !canonical_parent.starts_with(canonical_root) {
+        return Err(ClientError::Protocol);
+    }
+    Ok(())
+}
+
+fn partial_path(path: &Path) -> PathBuf {
+    let mut value = path.as_os_str().to_os_string();
+    value.push(".partial");
+    PathBuf::from(value)
+}
+
+fn validate_trusted_metadata(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
+    metadata.file_type().is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata.nlink() == 1
+        && metadata.uid() == rustix::process::geteuid().as_raw()
+        && metadata.mode() & 0o777 == 0o600
+        && metadata.len() == expected_bytes
+}
+
+async fn inspect_trusted_final(
+    path: &Path,
+    expected_bytes: u64,
+) -> Result<Option<tokio::fs::File>, ClientError> {
+    let path_metadata = match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if !validate_trusted_metadata(&path_metadata, expected_bytes) {
+        return Err(ClientError::Protocol);
+    }
+    let file = tokio::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(path)
+        .await
+        .map_err(|_| ClientError::Protocol)?;
+    let opened_metadata = file.metadata().await?;
+    if !validate_trusted_metadata(&opened_metadata, expected_bytes)
+        || opened_metadata.dev() != path_metadata.dev()
+        || opened_metadata.ino() != path_metadata.ino()
+    {
+        return Err(ClientError::Protocol);
+    }
+    Ok(Some(file))
+}
+
+async fn open_trusted_partial(path: &Path) -> Result<tokio::fs::File, ClientError> {
+    if let Ok(metadata) = tokio::fs::symlink_metadata(path).await {
+        if !validate_trusted_metadata(&metadata, metadata.len()) {
+            return Err(ClientError::Protocol);
+        }
+    }
+    let file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .write(true)
+        .mode(0o600)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(path)
+        .await
+        .map_err(|_| ClientError::Protocol)?;
+    let metadata = file.metadata().await?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.nlink() != 1
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o777 != 0o600
+    {
+        return Err(ClientError::Protocol);
+    }
+    Ok(file)
+}
+
+async fn validate_trusted_file(path: &Path, expected_bytes: u64) -> Result<(), ClientError> {
+    inspect_trusted_final(path, expected_bytes)
+        .await?
+        .map(|_| ())
+        .ok_or(ClientError::Protocol)
+}
+
+async fn sync_parent(parent: &Path) -> Result<(), ClientError> {
+    tokio::fs::File::open(parent).await?.sync_all().await?;
+    Ok(())
 }
 
 async fn bounded_body_limit(
@@ -1282,6 +1528,8 @@ mod tests {
         collections::HashMap,
         io::{Read, Write},
         net::TcpListener,
+        os::unix::fs::PermissionsExt,
+        path::{Path, PathBuf},
         thread,
         time::Duration,
     };
@@ -1642,7 +1890,7 @@ mod tests {
     #[derive(Clone, Copy)]
     enum DistributionFixtureMode {
         Good,
-        CorruptFirstObject,
+        WrongEtagFirstObject,
     }
 
     fn authenticated_test_client(controller: &str, node_id: &str) -> AgentHttpClient {
@@ -1741,17 +1989,19 @@ mod tests {
                     .unwrap();
                 assert!(end >= start && end < source.len());
                 assert!(end - start < 8 * 1024 * 1024);
-                let mut body = source[start..=end].to_vec();
-                if matches!(mode, DistributionFixtureMode::CorruptFirstObject)
-                    && digest == assignment.objects[0].sha256
-                    && !body.is_empty()
-                {
-                    body[0] ^= 0xff;
-                }
+                let body = source[start..=end].to_vec();
+                let response_digest =
+                    if matches!(mode, DistributionFixtureMode::WrongEtagFirstObject)
+                        && digest == assignment.objects[0].sha256
+                    {
+                        "0".repeat(64)
+                    } else {
+                        digest.to_owned()
+                    };
                 write!(
                     stream,
                     "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nETag: \"sha256:{}\"\r\nConnection: close\r\n\r\n",
-                    body.len(), start, end, source.len(), digest
+                    body.len(), start, end, source.len(), response_digest
                 )
                 .unwrap();
                 stream.write_all(&body).unwrap();
@@ -1787,6 +2037,17 @@ mod tests {
         assert_eq!(evidence.oci_image_digest, format!("sha256:{image_digest}"));
         assert_eq!(std::fs::read(&evidence.oci_archive_path).unwrap(), archive);
         assert_eq!(std::fs::read(&evidence.model_paths[0]).unwrap(), model);
+        assert_eq!(
+            std::fs::metadata(&evidence.oci_archive_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert!(
+            !PathBuf::from(format!("{}.partial", evidence.oci_archive_path.display())).exists()
+        );
         let reused_evidence = client
             .download_distribution(&assignment.plan_digest, root.path())
             .await
@@ -1845,8 +2106,10 @@ mod tests {
             .join("models")
             .join(&assignment.model_artifact_set_sha256)
             .join("weights/model.bin");
+        let partial_path = PathBuf::from(format!("{}.partial", model_path.display()));
         std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
-        std::fs::write(&model_path, &model[..5]).unwrap();
+        std::fs::write(&partial_path, &model[..5]).unwrap();
+        std::fs::set_permissions(&partial_path, std::fs::Permissions::from_mode(0o600)).unwrap();
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
@@ -1872,7 +2135,7 @@ mod tests {
                 values
             },
             2,
-            DistributionFixtureMode::CorruptFirstObject,
+            DistributionFixtureMode::WrongEtagFirstObject,
         );
         assert!(matches!(
             corrupt_client
@@ -1881,6 +2144,50 @@ mod tests {
             Err(ClientError::Protocol)
         ));
         assert_eq!(corrupt_server.join().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn direct_distribution_object_resumes_private_partial_atomically() {
+        let model = b"small model object";
+        let (archive, image_digest) = oci_archive_fixture();
+        let assignment = distribution_assignment_fixture(model, &archive, &image_digest);
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(model), model.to_vec());
+        objects.insert(hex_sha256(&archive), archive);
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects,
+            1,
+            DistributionFixtureMode::Good,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("config.json");
+        let partial = partial_path(&destination);
+        std::fs::write(&partial, &model[..5]).unwrap();
+        std::fs::set_permissions(&partial, std::fs::Permissions::from_mode(0o600)).unwrap();
+        client
+            .download_distribution_object(
+                &assignment.plan_digest,
+                &assignment.objects[0].sha256,
+                model.len() as u64,
+                &destination,
+            )
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&destination).unwrap(), model);
+        assert!(!partial.exists());
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn trusted_partial_paths_keep_same_stem_objects_distinct() {
+        let json = Path::new("/tmp/config.json");
+        let yaml = Path::new("/tmp/config.yaml");
+        assert_ne!(partial_path(json), partial_path(yaml));
+        assert_eq!(
+            partial_path(json),
+            PathBuf::from("/tmp/config.json.partial")
+        );
     }
 
     #[tokio::test]
