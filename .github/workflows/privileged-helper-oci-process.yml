@@ -9,7 +9,7 @@ on:
       - rust/crates/vonk-agent/**
       - rust/crates/vonk-agent-helper/**
       - rust/crates/vonk-agent-protocol/**
-      - tests/nodes/test_privileged_helper_oci_process.sh
+      - tests/acceptance/privileged_helper_oci_process.sh
   workflow_dispatch:
 
 permissions:
@@ -69,7 +69,12 @@ jobs:
         run: |
           set -euo pipefail
           sudo --preserve-env=VONK_HELPER_BINARY,VONK_HELPER_PROBE_BINARY,VONK_HELPER_FIXTURE,VONK_HELPER_REPORT_ROOT \
-            tests/nodes/test_privileged_helper_oci_process.sh
+            tests/acceptance/privileged_helper_oci_process.sh
+      - name: Normalize helper proof evidence permissions
+        if: always()
+        shell: bash
+        run: |
+          sudo chmod -R a+rX "$RUNNER_TEMP/vonk-helper-process-proof" 2>/dev/null || true
       - name: Upload helper process evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
