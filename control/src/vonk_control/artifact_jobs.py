@@ -53,7 +53,12 @@ _SLOT_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")
 _EXTENSION = re.compile(r"\.[a-z0-9][a-z0-9._-]{0,15}\Z")
 _PARAMETER_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 _UNSAFE_PARAMETER_KEY = re.compile(
-    r"password|secret|token|authorization|private.?key|command|shell|environment|"
+    r"^(?:apikey|passwordhash)$|"
+    r"(?:^|[_-])(?:password|secret|authorization|command|shell|environment)"
+    r"(?:$|[_-])|"
+    r"(?:^|[_-])(?:api|access|auth|bearer|hf|huggingface)[_-]?token$|"
+    r"(?:^|[_-])private[_-]?key$|"
+    r"^token$|"
     r"(?:^|[_-])(?:path|file|filename|filepath|directory|folder)(?:$|[_-])",
     re.IGNORECASE,
 )
@@ -128,10 +133,43 @@ def _recipe_interface(document: Mapping[str, object]) -> str:
 
 def _finite_parameter_number(value: object) -> bool:
     return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(float(value))
+        (isinstance(value, float) and math.isfinite(value))
+        or (isinstance(value, int) and not isinstance(value, bool))
     )
+
+
+def _settings_parameters(document: Mapping[str, object]) -> list[dict[str, object]]:
+    settings = document.get("settings")
+    knobs = settings.get("knobs") if isinstance(settings, Mapping) else None
+    if knobs is None:
+        return []
+    if not isinstance(knobs, Mapping) or len(knobs) > 64:
+        raise ArtifactJobError("artifact parameter contract is invalid")
+    parameters: list[dict[str, object]] = []
+    for name, setting in knobs.items():
+        if not isinstance(name, str) or not isinstance(setting, Mapping):
+            raise ArtifactJobError("artifact parameter contract is invalid")
+        value = setting.get("value")
+        if isinstance(value, bool):
+            kind = "boolean"
+        elif isinstance(value, int):
+            kind = "integer"
+        elif isinstance(value, float):
+            kind = "float"
+        elif isinstance(value, str):
+            kind = "string"
+        else:
+            raise ArtifactJobError("artifact parameter contract is invalid")
+        parameters.append(
+            {
+                "name": name,
+                "type": kind,
+                "default": value,
+                "minimum": None,
+                "maximum": None,
+            }
+        )
+    return parameters
 
 
 def _validate_parameter_definition(raw: Mapping[str, object]) -> dict[str, object]:
@@ -341,9 +379,7 @@ def _compile_contract(
         }
     else:
         raise ArtifactJobError("artifact input contract is invalid")
-    raw_parameters = document.get("parameters", [])
-    if not isinstance(raw_parameters, list) or len(raw_parameters) > 128:
-        raise ArtifactJobError("artifact parameter contract is invalid")
+    raw_parameters = _settings_parameters(document)
     parameters: list[dict[str, object]] = []
     for raw in raw_parameters:
         if not isinstance(raw, Mapping):

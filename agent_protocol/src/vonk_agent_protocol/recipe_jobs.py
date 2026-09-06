@@ -41,7 +41,12 @@ _INTERFACES = frozenset(
     {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
 )
 _UNSAFE_PARAMETER_KEY = re.compile(
-    r"password|secret|token|authorization|private.?key|command|shell|environment|"
+    r"^(?:apikey|passwordhash)$|"
+    r"(?:^|[_-])(?:password|secret|authorization|command|shell|environment)"
+    r"(?:$|[_-])|"
+    r"(?:^|[_-])(?:api|access|auth|bearer|hf|huggingface)[_-]?token$|"
+    r"(?:^|[_-])private[_-]?key$|"
+    r"^token$|"
     r"(?:^|[_-])(?:path|file|filename|filepath|directory|folder)(?:$|[_-])",
     re.IGNORECASE,
 )
