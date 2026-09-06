@@ -12,10 +12,10 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .litellm import LiteLlmDeployment, LiteLlmPublisher
 from .route_runtime import PublishedRoute, published_routes_digest
@@ -45,9 +45,15 @@ class ReconciliationInput(Protocol):
     ) -> tuple[str, str, tuple[PublishedRoute, ...], str]: ...
 
 
-class AuthorityRoute(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class _AuthorityContract(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        allow_inf_nan=False,
+    )
 
+
+class AuthorityRoute(_AuthorityContract):
     alias: str = Field(min_length=1, max_length=128)
     workload_id: str = Field(min_length=1, max_length=128)
     api_base: str = Field(min_length=1, max_length=512)
@@ -55,10 +61,8 @@ class AuthorityRoute(BaseModel):
     tokens_per_minute: int = Field(ge=1, le=100_000_000)
 
 
-class AuthorityRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: int = Field(ge=1, le=1)
+class AuthorityRequest(_AuthorityContract):
+    schema_version: int = Field(ge=1, le=1, strict=True)
     reconciliation_id: str = Field(
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     )
@@ -66,6 +70,41 @@ class AuthorityRequest(BaseModel):
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     nonce: str = Field(pattern=r"^[0-9a-f]{32,64}$")
     routes: list[AuthorityRoute] = Field(max_length=64)
+
+
+class AuthorityDeployment(_AuthorityContract):
+    model_name: Literal["hermes-agent"]
+    workload: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")
+    api_base: str = Field(min_length=1, max_length=512)
+    priority: int = Field(ge=1, strict=True)
+    requests_per_minute: int = Field(ge=1, le=100_000, strict=True)
+    tokens_per_minute: int = Field(ge=1, le=100_000_000, strict=True)
+
+    def to_deployment(self) -> LiteLlmDeployment:
+        return LiteLlmDeployment(**self.model_dump())
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> AuthorityDeployment:
+        LiteLlmPublisher._validate_hermes_deployment(self.to_deployment())
+        return self
+
+
+class AuthorityResponse(_AuthorityContract):
+    schema_version: Literal[1]
+    reconciliation_id: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
+    revision: str = Field(pattern=r"^[0-9a-f]{40,64}$")
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    nonce: str = Field(pattern=r"^[0-9a-f]{32,64}$")
+    current: bool = Field(strict=True)
+    eligible: bool = Field(strict=True)
+    fleet_evidence_current: bool = Field(strict=True)
+    routes_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    deployments: list[AuthorityDeployment] = Field(max_length=64)
+    issued_at: int = Field(ge=0, strict=True)
+    expires_at: int = Field(ge=0, strict=True)
+    signature: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class WorkerAuthorityService:
@@ -108,9 +147,7 @@ class WorkerAuthorityService:
             expected_plan_digest,
             expected_routes,
             expected_fleet_evidence,
-        ) = (
-            self._reconciliation_input(reconciliation_id)
-        )
+        ) = self._reconciliation_input(reconciliation_id)
         if (
             not secrets.compare_digest(expected_revision, revision)
             or not secrets.compare_digest(expected_plan_digest, plan_digest)
@@ -194,13 +231,18 @@ def install_worker_authority_routes(
 
     if _TOKEN.fullmatch(token) is None:
         raise ValueError("worker authority token is invalid")
+
     def authenticate(request: Request, document: Mapping[str, object]) -> None:
         supplied = request.headers.get("x-vonk-worker-signature", "")
         expected = worker_document_signature(token, document, purpose="request")
         if not secrets.compare_digest(supplied, expected):
             raise HTTPException(status_code=401, detail="authentication required")
 
-    @app.post("/internal/v1/authority/evaluate", include_in_schema=False)
+    @app.post(
+        "/internal/v1/authority/evaluate",
+        include_in_schema=False,
+        response_model=AuthorityResponse,
+    )
     def authority_evaluate(
         body: AuthorityRequest,
         request: Request,
@@ -210,7 +252,7 @@ def install_worker_authority_routes(
         routes = tuple(PublishedRoute(**route.model_dump()) for route in body.routes)
         try:
             issued_at = service.issued_at()
-            response = {
+            unsigned = {
                 **service.evaluate(
                     body.reconciliation_id,
                     body.revision,
@@ -221,16 +263,22 @@ def install_worker_authority_routes(
                 "issued_at": issued_at,
                 "expires_at": issued_at + _MAX_ATTESTATION_SECONDS,
             }
-            return {
-                **response,
-                "signature": worker_document_signature(
-                    token,
-                    response,
-                    purpose="response",
-                ),
-            }
-        except (OSError, RuntimeError, TypeError, ValueError):
-            raise HTTPException(status_code=503, detail="authority unavailable") from None
+            response = AuthorityResponse.model_validate(
+                {
+                    **unsigned,
+                    "signature": worker_document_signature(
+                        token,
+                        unsigned,
+                        purpose="response",
+                    ),
+                }
+            )
+            return response.model_dump()
+        except (OSError, RuntimeError, TypeError, ValueError, ValidationError):
+            raise HTTPException(
+                status_code=503, detail="authority unavailable"
+            ) from None
+
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *_args, **_kwargs):
@@ -303,16 +351,14 @@ class HttpWorkerAuthority:
                 raw = response.read(_MAX_RESPONSE + 1)
         except (OSError, TimeoutError, urllib.error.URLError) as error:
             raise WorkerAuthorityError("worker authority is unavailable") from error
-        if (
-            status != 200
-            or final_url != request.full_url
-            or len(raw) > _MAX_RESPONSE
-        ):
+        if status != 200 or final_url != request.full_url or len(raw) > _MAX_RESPONSE:
             raise WorkerAuthorityError("worker authority rejected the request")
         try:
             parsed = json.loads(raw)
         except (TypeError, json.JSONDecodeError) as error:
-            raise WorkerAuthorityError("worker authority response is invalid") from error
+            raise WorkerAuthorityError(
+                "worker authority response is invalid"
+            ) from error
         if not isinstance(parsed, Mapping):
             raise WorkerAuthorityError("worker authority response is invalid")
         return parsed
@@ -331,36 +377,25 @@ class HttpWorkerAuthority:
         routes: tuple[PublishedRoute, ...],
     ) -> Mapping[str, object]:
         nonce = secrets.token_hex(16)
-        request_document = {
-            "schema_version": 1,
-            "reconciliation_id": reconciliation_id,
-            "revision": revision,
-            "plan_digest": plan_digest,
-            "nonce": nonce,
-            "routes": [asdict(route) for route in routes],
-        }
-        document = self._request(
+        request_document = AuthorityRequest(
+            schema_version=1,
+            reconciliation_id=reconciliation_id,
+            revision=revision,
+            plan_digest=plan_digest,
+            nonce=nonce,
+            routes=[AuthorityRoute.model_validate(asdict(route)) for route in routes],
+        ).model_dump()
+        raw_document = self._request(
             "/internal/v1/authority/evaluate",
             document=request_document,
         )
-        if set(document) != {
-            "schema_version",
-            "reconciliation_id",
-            "revision",
-            "plan_digest",
-            "nonce",
-            "current",
-            "eligible",
-            "fleet_evidence_current",
-            "routes_sha256",
-            "deployments",
-            "issued_at",
-            "expires_at",
-            "signature",
-        }:
-            raise WorkerAuthorityError("worker authority response is invalid")
-        unsigned = dict(document)
-        signature = unsigned.pop("signature")
+        try:
+            document = AuthorityResponse.model_validate(raw_document)
+        except ValidationError as error:
+            raise WorkerAuthorityError(
+                "worker authority response is invalid"
+            ) from error
+        unsigned = document.model_dump(exclude={"signature"})
         expected_signature = worker_document_signature(
             self._token,
             unsigned,
@@ -369,37 +404,27 @@ class HttpWorkerAuthority:
         expected_routes_digest = published_routes_digest(routes)
         now = self._clock()
         if (
-            document["schema_version"] != 1
-            or document["reconciliation_id"] != reconciliation_id
-            or document["revision"] != revision
-            or document["plan_digest"] != plan_digest
-            or document["nonce"] != nonce
-            or not isinstance(document["current"], bool)
-            or not isinstance(document["eligible"], bool)
-            or not isinstance(document["fleet_evidence_current"], bool)
-            or not isinstance(document["deployments"], list)
-            or (document["eligible"] is True and document["current"] is not True)
+            document.schema_version != 1
+            or document.reconciliation_id != reconciliation_id
+            or document.revision != revision
+            or document.plan_digest != plan_digest
+            or document.nonce != nonce
+            or (document.eligible is True and document.current is not True)
             or (
                 (
-                    document["eligible"] is not True
-                    or document["current"] is not True
-                    or document["fleet_evidence_current"] is not True
+                    document.eligible is not True
+                    or document.current is not True
+                    or document.fleet_evidence_current is not True
                 )
-                and bool(document["deployments"])
+                and bool(document.deployments)
             )
-            or document["routes_sha256"] != expected_routes_digest
-            or not isinstance(signature, str)
-            or not secrets.compare_digest(signature, expected_signature)
-            or isinstance(document["issued_at"], bool)
-            or not isinstance(document["issued_at"], int)
-            or isinstance(document["expires_at"], bool)
-            or not isinstance(document["expires_at"], int)
-            or not document["issued_at"] <= now < document["expires_at"]
-            or document["expires_at"] - document["issued_at"]
-            > _MAX_ATTESTATION_SECONDS
+            or document.routes_sha256 != expected_routes_digest
+            or not secrets.compare_digest(document.signature, expected_signature)
+            or not document.issued_at <= now < document.expires_at
+            or document.expires_at - document.issued_at > _MAX_ATTESTATION_SECONDS
         ):
             raise WorkerAuthorityError("worker authority response is invalid")
-        return document
+        return document.model_dump()
 
     def clear(self) -> None:
         """Discard any prior decision before preparing a new tick."""
@@ -412,27 +437,18 @@ class HttpWorkerAuthority:
     ) -> tuple[LiteLlmDeployment, ...]:
         parsed: list[LiteLlmDeployment] = []
         try:
-            for item in document["deployments"]:
-                if not isinstance(item, Mapping) or set(item) != {
-                    "model_name",
-                    "workload",
-                    "api_base",
-                    "priority",
-                    "requests_per_minute",
-                    "tokens_per_minute",
-                }:
-                    raise TypeError
-                deployment = LiteLlmDeployment(**item)
-                LiteLlmPublisher._validate_hermes_deployment(deployment)
-                parsed.append(deployment)
-        except (KeyError, TypeError, ValueError) as error:
+            response = AuthorityResponse.model_validate(document)
+            for deployment in response.deployments:
+                value = deployment.to_deployment()
+                LiteLlmPublisher._validate_hermes_deployment(value)
+                parsed.append(value)
+        except (KeyError, TypeError, ValueError, ValidationError) as error:
             raise WorkerAuthorityError(
                 "worker authority deployments are invalid"
             ) from error
-        if (
-            len({item.priority for item in parsed}) != len(parsed)
-            or len({item.workload for item in parsed}) != len(parsed)
-        ):
+        if len({item.priority for item in parsed}) != len(parsed) or len(
+            {item.workload for item in parsed}
+        ) != len(parsed):
             raise WorkerAuthorityError("worker authority deployments are ambiguous")
         return tuple(parsed)
 
@@ -530,10 +546,9 @@ class HttpWorkerAuthority:
     ) -> tuple[LiteLlmDeployment, ...]:
         cached = self._require_cached()
         routes_sha256 = published_routes_digest(routes)
-        if (
-            not secrets.compare_digest(cached.revision, revision)
-            or not secrets.compare_digest(cached.routes_sha256, routes_sha256)
-        ):
+        if not secrets.compare_digest(
+            cached.revision, revision
+        ) or not secrets.compare_digest(cached.routes_sha256, routes_sha256):
             raise WorkerAuthorityError("worker authority route identity changed")
         if (
             not cached.current
@@ -542,6 +557,7 @@ class HttpWorkerAuthority:
         ):
             raise WorkerAuthorityError("authority was lost")
         return cached.deployments
+
 
 @dataclass(frozen=True)
 class _CachedAuthority:
