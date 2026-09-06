@@ -13,7 +13,7 @@ No local result below claims a deployed Controller or NVIDIA workload.
 | Recipes | [PR73](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/73) merged at `48b00c1f5f1bbd46ea7141d491b63f2697271923`; [v1.0.3](https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v1.0.3) published with 92 Models, 85 Recipes and 85 archives. Thirteen packages changed; 72 retain their bytes. |
 | Recipe checks | PR workflow `34025493486` and publication workflow `34025838414` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 420 passed, one skipped. Independent validator authority: `26a2dfa804d80a02a39cd42e6deae5f3b0ecc529`. |
 | Canonical acceptance fixture | [PR74](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/74) merged at `807957c9bae653f618d98fb27620f69bf736fe37` after workflow `34029444031` passed. It adds a test-only Model/Recipe/package outside the public catalog. Four focused tests, including actual HTTP serving and production source resolution, passed; a real public download verified the declared 51-byte SHA-256. |
-| Public website | PR58 remains deployed. [PR59](https://github.com/CarstVaartjes/vonk-forge-web/pull/59) at `fd19368a` adds the frontier-AI story, Model/Recipe availability explanation and current product screens. Fourteen affected unit tests, build, three browser journeys and desktop/mobile review passed; publication is pending CI. |
+| Public website | [PR59](https://github.com/CarstVaartjes/vonk-forge-web/pull/59) merged at `5cb2008c` and deployed in workflow `34032392542`; main CI `34032392537` passed. The live `vonkforge.ai` bundle contains the frontier-AI story and both global-to-local explanations. Both live product screenshots match the reviewed bytes. Fourteen affected unit tests, build, three browser journeys and desktop/mobile review passed before publication. |
 | Controller / Spark packages | Current platform integration is not yet published or deployed. |
 
 The v1.0.3 annotated tag binds the exact main commit above. GitHub reports
@@ -155,11 +155,23 @@ in the affected modules then passed. The focused repository suite passed 120
 tests; its two skipped validator cases were made portable and independently
 passed as part of seven validator tests against all 85 Recipes and 92 Models.
 
-Native ARM64 CI at `ad24d720` proved signed image import through the real helper.
-Start correctly rejected the probe's undeclared executable; `47a02738` repairs
-the test image and uses the declared runtime path without changing validation.
-Its next native run is pending. Both repair and upgrade acceptance passed at
-`abc1c240`. These are not live Controller-to-Spark distribution observations.
+CI at `6cafc480` passed all repository shards, Rust, generated clients, Admin
+web, Compose, and repair/upgrade acceptance. Two Controller image tests failed
+because modifying the pinned Skopeo ELF caused an AMD64 startup fault. The
+integrated fix `55cceafe` preserves the original binary and invokes its private
+loader. Actual ARM64 and AMD64 images passed non-root version, TLS inspect,
+archive copy/inspect, and security checks in OrbStack; root independently
+rechecked both images as UID10001. Updated supply-chain verification passed.
+
+Native ARM64 CI proved signed image import through the real helper, but Start
+remains incomplete. Review found mismatched probe identity/installation paths
+and a production filename check that incorrectly reused lowercase, 64-character
+identity rules. A lexical comparison of all 85 compiled Recipe projections
+found 717 selected paths across 57 Recipes that fail that rule, including
+legitimate DeepSeek filenames. This comparison used a synthetic image receipt
+solely to inspect paths; it does not establish builds or execution. The helper
+owner is correcting these issues and running a composed OrbStack proof before
+integration. No live Controller-to-Spark distribution is claimed.
 
 ## Remaining runtime and deployment checks
 

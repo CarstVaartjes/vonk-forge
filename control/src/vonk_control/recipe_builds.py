@@ -46,7 +46,7 @@ def derive_build_input_identity(
     build: Mapping[str, object],
     *,
     source_bundle_sha256: str,
-    builder_binary_digest: str,
+    builder_binary_digest: str | None,
     artifact_format: str = BUILD_ARTIFACT_FORMAT,
     base_images: Sequence[Mapping[str, object]] = (),
     effective_settings: object | None = None,
@@ -80,11 +80,15 @@ def derive_build_input_identity(
     identity: dict[str, object] = {
         "schema_version": BUILD_INPUT_IDENTITY_SCHEMA_VERSION,
         "source_bundle_sha256": source_bundle_sha256,
-        "builder_binary_digest": builder_binary_digest,
         "artifact_format": artifact_format,
         "base_images": copy.deepcopy(list(base_images)),
         "execution_build": executable_fields,
     }
+    # A resolution intent deliberately omits this field.  It must never use
+    # a fabricated digest: only a live builder or a recorded successful
+    # receipt can supply the executable builder identity.
+    if builder_binary_digest is not None:
+        identity["builder_binary_digest"] = builder_binary_digest
     settings = _build_effective_settings(effective_settings)
     if settings:
         identity["effective_build_settings"] = settings
@@ -347,6 +351,35 @@ class RecipeBuildPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class RecipeBuildResolution:
+    """Builder-independent source-build resolution.
+
+    ``input_intent_sha256`` is an immutable request identity, not an
+    executable build identity.  ``build_input_sha256`` is populated only
+    when a succeeded receipt was found and verified with its recorded
+    builder binary digest.  The selected live builder must still be admitted
+    and planned before a new final build identity is usable for dispatch.
+    """
+
+    recipe_revision_id: str
+    recipe_content_sha256: str
+    source_bundle_sha256: str
+    input_intent_sha256: str
+    input_intent: dict[str, object]
+    build_input_sha256: str | None = None
+    build_id: str | None = None
+    builder_node_id: str | None = None
+    builder_binary_digest: str | None = None
+    image_digest: str | None = None
+    oci_layout_sha256: str | None = None
+    image_bytes: int | None = None
+
+    @property
+    def cached(self) -> bool:
+        return self.build_id is not None
+
+
+@dataclass(frozen=True, slots=True)
 class CompletedRecipeBuild:
     build_id: str
     image_digest: str
@@ -402,8 +435,152 @@ class RecipeBuildService:
             _source_policy_document(document, build, source_sha256), bundle
         )
 
+    def resolve(self, recipe_revision_id: str) -> RecipeBuildResolution:
+        """Resolve immutable source-build inputs and an exact cached receipt.
+
+        This method intentionally performs no builder lookup, inventory read,
+        or capacity admission.  A cache hit is accepted only when the
+        current canonical recipe/source policy and executable build inputs
+        reproduce the succeeded row's exact final build identity.  A row's
+        package handle, notes, or source digest alone is never sufficient.
+        """
+        with self._sessions() as session:
+            revision = session.get(CatalogDocumentRevision, recipe_revision_id)
+            if revision is None:
+                raise KeyError(recipe_revision_id)
+            if revision.kind != "recipe" or revision.state != "active":
+                raise RecipeBuildError(
+                    "build.recipe_unresolved", "only a resolved recipe can be built"
+                )
+            document = copy.deepcopy(revision.document)
+            build = _canonical_build(document)
+            source_sha256 = _source_bundle_handle(revision)
+            if session.get(RecipeSourceBundle, source_sha256) is None:
+                raise RecipeBuildError(
+                    "build.source_unavailable", "verified source bundle is unavailable"
+                )
+
+        try:
+            bundle = self._bundles.get(source_sha256)
+            enforce_build_source_policy(
+                _source_policy_document(document, build, source_sha256), bundle
+            )
+        except SourceBundleError as error:
+            raise RecipeBuildError(error.code, str(error)) from error
+        except SourcePolicyError as error:
+            finding = error.report.findings[0]
+            raise RecipeBuildError(finding.code, finding.detail) from error
+
+        dockerfile_path = build.get("dockerfile")
+        dockerfile_payload = (
+            bundle.files.get(dockerfile_path)
+            if isinstance(dockerfile_path, str)
+            else None
+        )
+        if dockerfile_payload is None:
+            raise RecipeBuildError(
+                "build.source_invalid", "recipe Dockerfile authority is unavailable"
+            )
+        base_images = list(dockerfile_base_images(dockerfile_payload))
+        _canonical_build_resources(revision)
+        _canonical_build_platform(build)
+        _declared_image_bytes(document)
+        projected = revision.projected if isinstance(revision.projected, Mapping) else {}
+        model_inputs = projected.get("build_model_artifacts")
+        topology_inputs = projected.get("build_topology_inputs")
+        model_artifacts = (
+            model_inputs
+            if isinstance(model_inputs, Sequence)
+            and not isinstance(model_inputs, (str, bytes))
+            else None
+        )
+        topology = topology_inputs if isinstance(topology_inputs, Mapping) else None
+        intent = derive_build_input_identity(
+            build,
+            source_bundle_sha256=source_sha256,
+            builder_binary_digest=None,
+            artifact_format=BUILD_ARTIFACT_FORMAT,
+            base_images=base_images,
+            effective_settings=document.get("settings"),
+            topology_inputs=topology,
+            model_artifacts=model_artifacts,
+        )
+        intent_sha256 = _digest(intent)
+
+        cached: RecipeBuild | None = None
+        with self._sessions() as session:
+            candidates = session.scalars(
+                select(RecipeBuild)
+                .where(
+                    RecipeBuild.source_bundle_sha256 == source_sha256,
+                    RecipeBuild.state == "succeeded",
+                )
+                .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
+            )
+            for candidate in candidates:
+                if not _valid_succeeded_receipt(candidate):
+                    continue
+                report = candidate.policy_report
+                builder_digest = (
+                    report.get("builder_binary_digest")
+                    if isinstance(report, Mapping)
+                    else None
+                )
+                if (
+                    not isinstance(builder_digest, str)
+                    or _SHA256.fullmatch(builder_digest) is None
+                    or not isinstance(report, Mapping)
+                    or report.get("artifact_format") != BUILD_ARTIFACT_FORMAT
+                    or report.get("source_bundle_sha256") != source_sha256
+                ):
+                    continue
+                exact = derive_build_input_identity(
+                    build,
+                    source_bundle_sha256=source_sha256,
+                    builder_binary_digest=builder_digest,
+                    artifact_format=BUILD_ARTIFACT_FORMAT,
+                    base_images=base_images,
+                    effective_settings=document.get("settings"),
+                    topology_inputs=topology,
+                    model_artifacts=model_artifacts,
+                )
+                if candidate.build_input_sha256 != _digest(exact):
+                    continue
+                cached = candidate
+                break
+
+        if cached is None:
+            return RecipeBuildResolution(
+                recipe_revision_id=revision.id,
+                recipe_content_sha256=revision.content_digest,
+                source_bundle_sha256=source_sha256,
+                input_intent_sha256=intent_sha256,
+                input_intent=copy.deepcopy(intent),
+            )
+        report = cached.policy_report
+        builder_digest = report["builder_binary_digest"]
+        return RecipeBuildResolution(
+            recipe_revision_id=revision.id,
+            recipe_content_sha256=revision.content_digest,
+            source_bundle_sha256=source_sha256,
+            input_intent_sha256=intent_sha256,
+            input_intent=copy.deepcopy(intent),
+            build_input_sha256=cached.build_input_sha256,
+            build_id=cached.id,
+            builder_node_id=cached.builder_node_id,
+            builder_binary_digest=builder_digest,
+            image_digest=cached.image_digest,
+            oci_layout_sha256=cached.oci_layout_sha256,
+            image_bytes=cached.image_bytes,
+        )
+
     def plan(
-        self, recipe_revision_id: str, builder_node_id: str, *, now: datetime
+        self,
+        recipe_revision_id: str,
+        builder_node_id: str,
+        *,
+        now: datetime,
+        resolution: RecipeBuildResolution | None = None,
     ) -> RecipeBuildPlan:
         with self._sessions() as session:
             revision = session.get(CatalogDocumentRevision, recipe_revision_id)
@@ -530,6 +707,19 @@ class RecipeBuildService:
             model_artifacts=(model_inputs if isinstance(model_inputs, Sequence) and not isinstance(model_inputs, (str, bytes)) else None),
         )
         build_input_sha256 = _digest(build_identity)
+        if resolution is not None:
+            intent = copy.deepcopy(build_identity)
+            intent.pop("builder_binary_digest", None)
+            if (
+                resolution.recipe_revision_id != revision.id
+                or resolution.recipe_content_sha256 != revision.content_digest
+                or resolution.source_bundle_sha256 != source_sha256
+                or resolution.input_intent_sha256 != _digest(intent)
+            ):
+                raise RecipeBuildError(
+                    "build.resolution_stale",
+                    "immutable build resolution no longer matches the recipe",
+                )
         proposed_build_id = str(uuid.uuid4())
         limits = {
             "cpu_cores": cpu_cores,
@@ -937,6 +1127,18 @@ def _reserved(session: Session, node_id: str, kind: str) -> int:
             )
         )
         or 0
+    )
+
+
+def _valid_succeeded_receipt(build: RecipeBuild) -> bool:
+    """Require complete immutable evidence before considering a cache hit."""
+    return (
+        build.state == "succeeded"
+        and _OCI_DIGEST.fullmatch(build.image_digest or "") is not None
+        and _SHA256.fullmatch(build.oci_layout_sha256 or "") is not None
+        and isinstance(build.image_bytes, int)
+        and not isinstance(build.image_bytes, bool)
+        and build.image_bytes > 0
     )
 
 
