@@ -122,6 +122,11 @@ secret write path. Sparks receive verified local artifacts without HF tokens.
   per-transfer database sessions, temporary paths, and atomic publication.
 - Long transfers must not block recipe reconciliation, other jobs, or the
   worker heartbeat. Persist claims and checkpoints for restart recovery.
+- Image downloads and independent image builds also run concurrently with
+  Model transfers and each other. Bound pulls by network/disk capacity and
+  builds by each builder's available resources. Deduplicate identical image
+  requests/build inputs; a saturated builder queues its work without blocking
+  other builders or the Controller. Persist separate progress for every job.
 - Respect provider Retry-After and rate-limit reset information. Persist the
   next eligible attempt instead of sleeping inside the main worker loop or
   immediately exhausting retries. Unaffected items/providers continue.
@@ -146,6 +151,8 @@ forced download that preserves the old object until validation succeeds.
 Verify image download, build, retry and forced rebuild through their real
 Controller operations. Prove that an existing workload receipt remains bound
 to its original image and that the new available receipt can be selected later.
+Exercise simultaneous Model downloads, image pulls and independent builds;
+verify resource limits, duplicate request reuse and worker responsiveness.
 Do not substitute a simulated successful build for absent build infrastructure.
 
 In the browser verify parallel selected rows, both Model and Image stages,
