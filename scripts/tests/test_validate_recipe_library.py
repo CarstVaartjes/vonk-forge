@@ -80,6 +80,39 @@ def test_secret_scan_excludes_nested_platform_checkout(tmp_path: Path) -> None:
     _VALIDATOR._scan_secrets(library, platform)
 
 
+def test_selected_model_payload_requires_exact_path_digest_and_size() -> None:
+    body = b"model payload"
+    digest = hashlib.sha256(body).hexdigest()
+    identity = {("weights/model.pt", digest, len(body))}
+
+    assert _VALIDATOR._matches_selected_model_file(
+        "weights/model.pt",
+        body,
+        model_files=identity,
+    )
+    assert not _VALIDATOR._matches_selected_model_file(
+        "adapters/example/model.pt",
+        body,
+        model_files=identity,
+    )
+    assert not _VALIDATOR._matches_selected_model_file(
+        "weights/model.pt",
+        body + b" altered",
+        model_files=identity,
+    )
+
+
+def test_selected_model_payload_does_not_strip_context_prefix() -> None:
+    body = b"model payload"
+    identity = {("weights/model.pt", hashlib.sha256(body).hexdigest(), len(body))}
+
+    assert not _VALIDATOR._matches_selected_model_file(
+        "adapters/example/weights/model.pt",
+        body,
+        model_files=identity,
+    )
+
+
 def test_contract_recipe_library_snapshot_is_validated_end_to_end() -> None:
     candidate = _candidate_library_or_skip()
     result = _run(
