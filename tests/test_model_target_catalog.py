@@ -9,6 +9,7 @@ def test_platform_has_no_shadow_model_target_or_recipe_library_authority() -> No
     """Model and Recipe documents come from the managed canonical library."""
     assert not (ROOT / "config/model-targets").exists()
     assert not (ROOT / "config/recipes").exists()
+    assert not (ROOT / "scripts/import-recipe-library").exists()
     manifest = json.loads(
         (ROOT / "config/recipe-library-manifest.json").read_text(encoding="utf-8")
     )
