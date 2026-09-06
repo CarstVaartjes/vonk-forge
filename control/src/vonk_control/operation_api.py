@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
@@ -12,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -37,10 +39,12 @@ from .models import (
     RoutePublicationOwner,
 )
 from .operation_contract import (
+    OperationCheckpoint,
     OperationEvidenceDownload,
     OperationEvidenceProvenance,
     OperationFailureEvidence,
     OperationMemberProgress,
+    OperationProgress,
     OperationRecovery,
     OperationRecoveryAction,
     normalize_operation_progress,
@@ -135,6 +139,7 @@ _ADMIN_OPERATION_IDS = {
 _HTTP_METHODS = frozenset({"delete", "get", "patch", "post", "put"})
 BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=128)]
 NodeIdentifier = Annotated[str, Field(pattern=NODE_PATTERN)]
+DigestIdentifier = Annotated[str, Field(pattern=DIGEST_PATTERN)]
 
 
 class OperationProjectionError(RuntimeError):
@@ -142,7 +147,7 @@ class OperationProjectionError(RuntimeError):
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class EmptyBody(StrictModel):
@@ -151,6 +156,78 @@ class EmptyBody(StrictModel):
 
 class BoundedErrorResponse(StrictModel):
     detail: str = Field(min_length=1, max_length=256)
+
+
+class HealthzResponse(StrictModel):
+    status: Literal["ok"]
+
+
+class ReadyzResponse(StrictModel):
+    status: Literal["ready"]
+
+
+class AuthorityResponse(StrictModel):
+    revision: str = Field(pattern=DIGEST_PATTERN)
+    documents: dict[str, str] = Field(max_length=256)
+    dependencies: dict[str, list[str]] = Field(max_length=256)
+
+
+class ProposalPreviewResponse(StrictModel):
+    base_revision: str = Field(pattern=DIGEST_PATTERN)
+    digest: str = Field(pattern=DIGEST_PATTERN)
+    patch: str = Field(min_length=1, max_length=16 * 1024 * 1024)
+    affected_documents: list[str] = Field(min_length=1, max_length=32)
+    validation_results: list[str] = Field(max_length=32)
+
+    @field_validator("patch")
+    @classmethod
+    def patch_is_canonical_base64(cls, value: str) -> str:
+        try:
+            decoded = base64.b64decode(value, validate=True)
+        except (ValueError, binascii.Error):
+            raise ValueError("patch must be base64") from None
+        if base64.b64encode(decoded).decode("ascii") != value:
+            raise ValueError("patch must be canonical base64")
+        return value
+
+
+class ChangeResponse(StrictModel):
+    proposal_digest: str = Field(pattern=DIGEST_PATTERN)
+    previous_revision: str = Field(pattern=DIGEST_PATTERN)
+    authority_revision: str = Field(pattern=DIGEST_PATTERN)
+    mode: Literal["database"]
+
+
+class JobResponse(StrictModel):
+    id: str = Field(min_length=1, max_length=128)
+    state: str = Field(min_length=1, max_length=80)
+
+
+class AuditEventResponse(StrictModel):
+    request_id: str = Field(min_length=1, max_length=128)
+    actor: str = Field(min_length=1, max_length=128)
+    action: str = Field(min_length=1, max_length=128)
+    authority_revision: str | None = Field(default=None, max_length=128)
+    targets: list[BoundedIdentifier] = Field(max_length=64)
+    occurred_at: str | None = Field(default=None, max_length=64)
+
+
+class AuditResponse(StrictModel):
+    events: list[AuditEventResponse] = Field(max_length=100)
+
+
+class IdentityHistoryItem(StrictModel):
+    node_id: str = Field(pattern=NODE_PATTERN)
+    agent_state: str = Field(min_length=1, max_length=80)
+    certificate_serial: str | None = Field(default=None, max_length=256)
+    certificate_fingerprint: str | None = Field(default=None, max_length=256)
+    certificate_generation: int | None = Field(default=None, ge=0)
+    enrolled_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class IdentityHistoryResponse(StrictModel):
+    identities: list[IdentityHistoryItem] = Field(max_length=100)
 
 
 def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
@@ -162,19 +239,19 @@ def bounded_error_responses(*status_codes: int) -> dict[int, dict[str, object]]:
 
 
 class EndpointResponse(StrictModel):
-    alias: str = Field(pattern=IDENTIFIER_PATTERN)
-    api_base: str
-    expires_at: str
+    alias: str = Field(pattern=IDENTIFIER_PATTERN, max_length=63)
+    api_base: str = Field(min_length=1, max_length=512)
+    expires_at: str = Field(min_length=1, max_length=64)
     generation: int = Field(ge=1)
     node_id: str = Field(pattern=NODE_PATTERN)
-    observed_at: str
+    observed_at: str = Field(min_length=1, max_length=64)
     plan_digest: str = Field(pattern=DIGEST_PATTERN)
     state: str = Field(pattern=r"^published$")
 
 
 class AgentSummary(StrictModel):
     node_id: str = Field(pattern=NODE_PATTERN)
-    state: str
+    state: str = Field(min_length=1, max_length=80)
     protocol_version: int | None = Field(default=None, ge=1)
     semantic_version: str | None = Field(
         default=None,
@@ -182,11 +259,11 @@ class AgentSummary(StrictModel):
     )
     build_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
     binary_digest: str | None = Field(default=None, pattern=DIGEST_PATTERN)
-    capabilities: list[str]
-    last_seen_at: str | None
+    capabilities: list[str] = Field(max_length=128)
+    last_seen_at: str | None = Field(default=None, max_length=64)
     last_seen_age_seconds: float | None = Field(default=None, ge=0)
     stale: bool
-    certificate_expires_at: str | None
+    certificate_expires_at: str | None = Field(default=None, max_length=64)
 
 
 class AgentsResponse(StrictModel):
@@ -200,7 +277,7 @@ class JobOperationProgress(StrictModel):
     bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
     eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
     total_bytes_known: bool | None = None
-    checkpoint: dict[str, object] | None = None
+    checkpoint: OperationCheckpoint | None = None
     members: list[OperationMemberProgress] | None = Field(default=None, max_length=1024)
 
     @model_serializer(mode="wrap")
@@ -320,7 +397,7 @@ class JobDetailResponse(StrictModel):
 
 
 class JobResumeResponse(StrictModel):
-    id: str
+    id: str = Field(min_length=1, max_length=128)
     state: str = Field(pattern=r"^queued$")
 
 
@@ -338,8 +415,8 @@ class JobsResponse(StrictModel):
 
 
 class JobLogsResponse(StrictModel):
-    job_id: str
-    digests: list[str]
+    job_id: str = Field(min_length=1, max_length=128)
+    digests: list[DigestIdentifier] = Field(max_length=100)
 
 
 @dataclass(frozen=True)
@@ -544,16 +621,12 @@ def job_response(
 ) -> JobDetailResponse:
     projected = [
         JobOperationResponse(
-            id=str(item["id"]),
-            graph_operation_id=(
-                None
-                if item.get("graph_operation_id") is None
-                else str(item["graph_operation_id"])
-            ),
-            node_id=str(item["node_id"]),
-            kind=str(item["kind"]),
-            state=str(item["state"]),
-            attempt=int(item["attempt"]),
+            id=item["id"],
+            graph_operation_id=item.get("graph_operation_id"),
+            node_id=item["node_id"],
+            kind=item["kind"],
+            state=item["state"],
+            attempt=item["attempt"],
             progress=_progress_projection(item.get("progress")),
             updated_at=(
                 None if item.get("updated_at") is None else str(item["updated_at"])
@@ -562,7 +635,7 @@ def job_response(
             provenance=_provenance_projection(item.get("result")),
             evidence_download=_evidence_download_projection(item.get("result")),
             recovery=recovery_for_operation(
-                str(item["state"]),
+                item["state"],
                 supported_actions=item.get("supported_actions"),
                 available_actions=(OperationRecoveryAction.RESUME,),
                 uncertain=bool(
@@ -585,14 +658,14 @@ def job_response(
         else None
     )
     return JobDetailResponse(
-        id=str(job.id),
-        state=str(job.state),
-        kind=str(job.kind),
-        authority_revision=str(job.authority_revision),
+        id=job.id,
+        state=job.state,
+        kind=job.kind,
+        authority_revision=job.authority_revision,
         targets=visible_targets,
         target_next_cursor=target_next_cursor,
         target_total=len(targets),
-        current_attempt=int(job.current_attempt),
+        current_attempt=job.current_attempt,
         status_reason=(
             operation_page.agent_upgrade_diagnostics.get("operator_summary")
             if (
@@ -650,11 +723,32 @@ def _progress_projection(value: object) -> JobOperationProgress | None:
     phase = value.get("phase")
     if not isinstance(phase, str) or not phase.strip() or len(phase) > 80:
         return None
+    recognized = {
+        "completed_bytes",
+        "bytes_done",
+        "bytes_completed",
+        "total_bytes",
+        "bytes_total",
+        "bytes_per_second",
+        "rate_bytes_per_second",
+        "rate",
+        "eta_seconds",
+        "checkpoint",
+        "members",
+        "total_bytes_known",
+        "total_unknown",
+    }
     try:
+        # Validate the durable wire values before the compatibility normalizer
+        # runs. Pydantic's default coercion would turn malformed strings such as
+        # ``"100"`` into an apparently valid byte counter.
+        OperationProgress.model_validate(value, strict=True)
         normalized = normalize_operation_progress(value)
     except (TypeError, ValueError):
         # Unknown extension fields from older agents must not make the whole
         # job status unavailable; retain the stable phase only.
+        if recognized.intersection(value):
+            return None
         normalized = {"phase": phase}
     return JobOperationProgress(**normalized)
 
@@ -680,8 +774,16 @@ def _failure_projection(value: object) -> OperationFailureEvidence | None:
             error_code=error_code,
             summary=summary,
             detail=detail if isinstance(detail, str) else None,
-            retryable=bool(safe.get("retryable", False)),
-            uncertain=bool(safe.get("uncertain", False)),
+            retryable=(
+                safe.get("retryable", False)
+                if isinstance(safe.get("retryable", False), bool)
+                else None
+            ),
+            uncertain=(
+                safe.get("uncertain", False)
+                if isinstance(safe.get("uncertain", False), bool)
+                else None
+            ),
         )
     except (TypeError, ValueError):
         return None
@@ -693,7 +795,9 @@ def _provenance_projection(value: object) -> OperationEvidenceProvenance | None:
     ):
         return None
     try:
-        return OperationEvidenceProvenance.model_validate(value["provenance"])
+        return OperationEvidenceProvenance.model_validate(
+            value["provenance"], strict=True
+        )
     except (TypeError, ValueError):
         return None
 
@@ -704,7 +808,9 @@ def _evidence_download_projection(value: object) -> OperationEvidenceDownload | 
     ):
         return None
     try:
-        return OperationEvidenceDownload.model_validate(value["evidence_download"])
+        return OperationEvidenceDownload.model_validate(
+            value["evidence_download"], strict=True
+        )
     except (TypeError, ValueError):
         return None
 
@@ -744,22 +850,22 @@ def operation_detail_response(
     """Build the bounded generic read representation from a durable projection."""
 
     return OperationDetailResponse(
-        id=str(item["id"]),
-        parent_id=(None if item.get("parent_id") is None else str(item["parent_id"])),
-        node_ids=list(item["node_ids"]),
-        kind=str(item["kind"]),
-        state=str(item["state"]),
-        attempt=int(item["attempt"]),
+        id=item["id"],
+        parent_id=item.get("parent_id"),
+        node_ids=item["node_ids"],
+        kind=item["kind"],
+        state=item["state"],
+        attempt=item["attempt"],
         progress=_progress_projection(item.get("progress")),
         created_at=str(item["created_at"]),
         updated_at=(
-            None if item.get("updated_at") is None else str(item["updated_at"])
+            None if item.get("updated_at") is None else item["updated_at"]
         ),
         failure=_failure_projection(item.get("result")),
         provenance=_provenance_projection(item.get("result")),
         evidence_download=_evidence_download_projection(item.get("result")),
         recovery=recovery_for_operation(
-            str(item["state"]),
+            item["state"],
             supported_actions=item.get("supported_actions"),
             available_actions=available_actions,
             uncertain=bool(

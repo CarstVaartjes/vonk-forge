@@ -49,7 +49,7 @@ class OperationRecoveryAction(StrEnum):
 class OperationCheckpoint(BaseModel):
     """A restart-safe cursor identifying the last completed durable unit."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     key: str = Field(min_length=1, max_length=128)
     sequence: int = Field(ge=0)
@@ -60,7 +60,7 @@ class OperationCheckpoint(BaseModel):
 class OperationMemberProgress(BaseModel):
     """Progress for one node, rank, shard, or other operation member."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     member_id: str = Field(min_length=1, max_length=128)
     phase: str = Field(min_length=1, max_length=80)
@@ -80,7 +80,7 @@ class OperationMemberProgress(BaseModel):
 class OperationProgress(BaseModel):
     """Canonical progress payload persisted on the current operation attempt."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     phase: str = Field(min_length=1, max_length=80)
     completed_bytes: int = Field(default=0, ge=0)
@@ -99,6 +99,33 @@ class OperationProgress(BaseModel):
         if not isinstance(value, Mapping):
             return value
         value = dict(value)
+        for key in (
+            "completed_bytes",
+            "bytes_done",
+            "bytes_completed",
+            "total_bytes",
+            "bytes_total",
+        ):
+            candidate = value.get(key)
+            if candidate is not None and (
+                not isinstance(candidate, int) or isinstance(candidate, bool)
+            ):
+                raise ValueError(f"{key} must be an integer")
+        for key in (
+            "bytes_per_second",
+            "rate_bytes_per_second",
+            "rate",
+            "eta_seconds",
+        ):
+            candidate = value.get(key)
+            if candidate is not None and (
+                not isinstance(candidate, (int, float))
+                or isinstance(candidate, bool)
+            ):
+                raise ValueError(f"{key} must be numeric")
+        for key in ("total_bytes_known", "total_unknown"):
+            if key in value and not isinstance(value[key], bool):
+                raise ValueError(f"{key} must be a boolean")
         # Keep one canonical API vocabulary while accepting common agent names
         # at the boundary during the rollout of this contract.
         aliases = {
@@ -113,7 +140,7 @@ class OperationProgress(BaseModel):
                 value[target] = value[source]
             value.pop(source, None)
         if "total_unknown" in value and "total_bytes_known" not in value:
-            value["total_bytes_known"] = not bool(value["total_unknown"])
+            value["total_bytes_known"] = not value["total_unknown"]
         value.pop("total_unknown", None)
         if value.get("total_bytes") is not None and "total_bytes_known" not in value:
             value["total_bytes_known"] = True

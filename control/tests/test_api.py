@@ -188,6 +188,22 @@ def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -
     assert client.put(f"{route}/extra", content=body).status_code == 413
 
 
+def test_telemetry_request_boundary_allows_one_mib_and_rejects_larger_payloads() -> None:
+    client, _, _, _ = _client("viewer")
+    prefix = b'{"payload":"'
+    suffix = b'"}'
+    body = prefix + b"x" * (1_048_576 - len(prefix) - len(suffix)) + suffix
+
+    # The payload passes the size and duplicate-key boundary, then reaches the
+    # authenticated agent route. No trusted agent identity is supplied here.
+    assert len(body) == 1_048_576
+    assert client.post("/agent/v1/telemetry", content=body).status_code == 401
+    assert (
+        client.post("/agent/v1/telemetry", content=body + b"x").status_code
+        == 413
+    )
+
+
 def test_removed_package_and_deployment_routes_are_not_registered() -> None:
     client, _, _, _ = _client("administrator")
     package_prefix = "/api/v1/" + "packages/"
