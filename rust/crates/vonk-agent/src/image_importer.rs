@@ -2,7 +2,7 @@
 
 use std::{
     fs,
-    io::{self, Read, Write},
+    io::{Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
 };
@@ -70,7 +70,10 @@ impl ImageImporter<'_> {
         request: &RecipeImageImportRequest,
         archive: &Path,
     ) -> Result<PathBuf, ImageImportError> {
-        self.verify(request, archive)?;
+        validate_archive_metadata(archive, request.image_bytes, false)?;
+        if !path_within_root(archive, self.data_root)? {
+            return Err(ImageImportError::Digest);
+        }
         let destination = self.cached_archive_path(&request.oci_layout_sha256)?;
         if destination.exists() {
             self.verify(request, &destination)?;
@@ -80,8 +83,13 @@ impl ImageImporter<'_> {
             fs::create_dir_all(parent)?;
             ensure_private_directory(parent, self.data_root)?;
         }
-        copy_archive_atomic(archive, &destination, request.image_bytes)?;
-        self.verify(request, &destination)?;
+        copy_archive_atomic(
+            archive,
+            &destination,
+            request.image_bytes,
+            Some(&request.oci_layout_sha256),
+        )?;
+        validate_archive_metadata(&destination, request.image_bytes, true)?;
         Ok(destination)
     }
 
@@ -135,7 +143,7 @@ impl ImageImporter<'_> {
                 sync_directory(destination.parent().ok_or(ImageImportError::Digest)?)?;
             }
             Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => {
-                copy_archive_atomic(archive, &destination, image_bytes)?;
+                copy_archive_atomic(archive, &destination, image_bytes, None)?;
             }
             Err(error) => return Err(error.into()),
         }
@@ -325,6 +333,7 @@ fn copy_archive_atomic(
     source: &Path,
     destination: &Path,
     expected_bytes: u64,
+    expected_sha256: Option<&str>,
 ) -> Result<(), ImageImportError> {
     let source_metadata = fs::symlink_metadata(source)?;
     if !validate_archive_metadata_value(&source_metadata, expected_bytes, false) {
@@ -340,28 +349,53 @@ fn copy_archive_atomic(
     {
         return Err(ImageImportError::Digest);
     }
-    let temporary = destination.with_extension(format!("partial.{}", std::process::id()));
-    let mut output = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .mode(0o600)
-        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
-        .open(&temporary)?;
-    let copied = io::copy(&mut input, &mut output)?;
-    if copied != expected_bytes
-        || !validate_archive_metadata_value(&output.metadata()?, expected_bytes, true)
-        || input.metadata()?.ino() != source_metadata.ino()
-        || input.metadata()?.len() != expected_bytes
-    {
+    let temporary =
+        destination.with_extension(format!("partial.{}.{}", std::process::id(), Uuid::new_v4()));
+    let result: Result<(), ImageImportError> = (|| {
+        let mut output = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32,
+            )
+            .open(&temporary)?;
+        let mut digest = expected_sha256.map(|_| Sha256::new());
+        let mut copied = 0_u64;
+        let mut buffer = [0_u8; 1024 * 1024];
+        loop {
+            let read = input.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            output.write_all(&buffer[..read])?;
+            if let Some(digest) = digest.as_mut() {
+                digest.update(&buffer[..read]);
+            }
+            copied = copied
+                .checked_add(read as u64)
+                .ok_or(ImageImportError::Digest)?;
+        }
+        let observed_digest = digest.map(|digest| hex::encode(digest.finalize()));
+        if copied != expected_bytes
+            || observed_digest.as_deref() != expected_sha256
+            || !validate_archive_metadata_value(&output.metadata()?, expected_bytes, true)
+            || input.metadata()?.ino() != source_metadata.ino()
+            || input.metadata()?.len() != expected_bytes
+        {
+            return Err(ImageImportError::Digest);
+        }
+        output.flush()?;
+        output.sync_all()?;
+        drop(output);
+        fs::rename(&temporary, destination)?;
+        sync_directory(destination.parent().ok_or(ImageImportError::Digest)?)?;
+        Ok(())
+    })();
+    if result.is_err() {
         let _ = fs::remove_file(&temporary);
-        return Err(ImageImportError::Digest);
     }
-    output.flush()?;
-    output.sync_all()?;
-    drop(output);
-    fs::rename(&temporary, destination)?;
-    sync_directory(destination.parent().ok_or(ImageImportError::Digest)?)?;
-    Ok(())
+    result
 }
 
 fn sync_directory(path: &Path) -> Result<(), ImageImportError> {

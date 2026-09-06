@@ -786,16 +786,17 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let assignment = self.distribution_manifest(plan_digest).await?;
+        let storage_root = distribution_storage_root(destination_root);
         let model_root = destination_root
             .join("models")
             .join(&assignment.model_artifact_set_sha256);
-        let oci_root = destination_root.join("oci-archives");
+        let oci_root = storage_root.join("oci-archives");
         tokio::fs::create_dir_all(&model_root).await?;
         tokio::fs::create_dir_all(&oci_root).await?;
         tokio::fs::set_permissions(&model_root, std::fs::Permissions::from_mode(0o700)).await?;
         tokio::fs::set_permissions(&oci_root, std::fs::Permissions::from_mode(0o700)).await?;
         ensure_private_parent(&model_root, destination_root).await?;
-        ensure_private_parent(&oci_root, destination_root).await?;
+        ensure_private_parent(&oci_root, storage_root).await?;
         let mut model_paths = Vec::new();
         let mut model_digests = Vec::new();
         let mut downloaded_bytes = 0_u64;
@@ -811,7 +812,12 @@ impl AgentHttpClient {
             } else {
                 continue;
             };
-            if !path.starts_with(destination_root) {
+            let managed_root = if object.kind == "model" {
+                destination_root
+            } else {
+                storage_root
+            };
+            if !path.starts_with(managed_root) {
                 return Err(ClientError::Protocol);
             }
             if let Some(parent) = path.parent() {
@@ -825,7 +831,7 @@ impl AgentHttpClient {
                 &object.sha256,
                 object.bytes,
                 &path,
-                destination_root,
+                managed_root,
                 |bytes| {
                     progress(DistributionProgress {
                         object_sha256: object_digest.clone(),
@@ -1383,6 +1389,18 @@ fn partial_path(path: &Path) -> PathBuf {
     let mut value = path.as_os_str().to_os_string();
     value.push(".partial");
     PathBuf::from(value)
+}
+
+fn distribution_storage_root(destination_root: &Path) -> &Path {
+    destination_root
+        .parent()
+        .filter(|parent| {
+            parent
+                .file_name()
+                .is_some_and(|name| name == "distribution")
+        })
+        .and_then(Path::parent)
+        .unwrap_or(destination_root)
 }
 
 fn validate_trusted_metadata(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
@@ -2033,8 +2051,10 @@ mod tests {
             DistributionFixtureMode::Good,
         );
         let root = tempfile::tempdir().unwrap();
+        let assignment_root = root.path().join("distribution").join("plan");
+        std::fs::create_dir_all(&assignment_root).unwrap();
         let evidence = client
-            .download_distribution(&assignment.plan_digest, root.path())
+            .download_distribution(&assignment.plan_digest, &assignment_root)
             .await
             .unwrap();
         assert_eq!(evidence.oci_image_digest, format!("sha256:{image_digest}"));
@@ -2051,12 +2071,6 @@ mod tests {
         assert!(
             !PathBuf::from(format!("{}.partial", evidence.oci_archive_path.display())).exists()
         );
-        let reused_evidence = client
-            .download_distribution(&assignment.plan_digest, root.path())
-            .await
-            .unwrap();
-        assert_eq!(reused_evidence.downloaded_bytes, evidence.downloaded_bytes);
-
         let importer = crate::image_importer::ImageImporter {
             data_root: root.path(),
         };
@@ -2068,6 +2082,12 @@ mod tests {
                 &evidence.oci_archive_path,
             )
             .unwrap();
+        assert_eq!(cached, evidence.oci_archive_path);
+        let reused_evidence = client
+            .download_distribution(&assignment.plan_digest, &assignment_root)
+            .await
+            .unwrap();
+        assert_eq!(reused_evidence.downloaded_bytes, evidence.downloaded_bytes);
         let reused = importer
             .retain_verified_distribution_archive(
                 &evidence.oci_archive_sha256,
