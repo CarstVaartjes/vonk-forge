@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import tarfile
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from importlib.machinery import SourceFileLoader
@@ -27,7 +28,6 @@ from types import ModuleType
 ROOT = Path(__file__).resolve().parents[1]
 _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 _ARCHIVE_PAYLOAD_PREFIXES = ("image/", "oci/", "weights/", "runtime-distributions/", "patch-bundles/", "execution-harnesses/")
-_ARCHIVE_PAYLOAD_SUFFIXES = (".safetensors", ".bin", ".pt", ".pth", ".ckpt", ".onnx")
 SUPPORTED_CHECKS = frozenset({
     "endpoint.healthy", "chat.nonempty", "chat.output-cap", "completion.nonempty",
     "completion.output-cap", "embedding.nonempty", "tools.called", "inference.completed",
@@ -75,6 +75,8 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--engine", default="docker")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--artifact-root", type=Path, default=Path("/var/lib/vonk/models"))
+    parser.add_argument("--serving-url", help="base URL for executing declared HTTP serving checks")
+    parser.add_argument("--evidence-ledger", type=Path, help="private append-only ledger for serving step evidence")
     args = parser.parse_args()
     if not 0 < args.timeout_seconds <= 3600:
         parser.error("--timeout-seconds must be between 0 and 3600")
@@ -121,8 +123,7 @@ def _contracts(library_root: Path) -> tuple[ModuleType, type, type, object, tupl
 
 def _safe_member(name: str) -> None:
     path = PurePosixPath(name)
-    if (path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts)
-            or name.startswith(_ARCHIVE_PAYLOAD_PREFIXES) or name.endswith(_ARCHIVE_PAYLOAD_SUFFIXES)):
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts) or name.startswith(_ARCHIVE_PAYLOAD_PREFIXES):
         raise QualificationError(f"recipe package contains an unsafe member: {name}")
 
 
@@ -264,6 +265,45 @@ def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot
     actual_models = {name for name in package.files if name.startswith("models/") and name.endswith(".json")}
     if actual_models != expected_models:
         raise QualificationError("Model snapshot closure contains unexpected files")
+    selected_model_files = {
+        (PurePosixPath(file.path).as_posix(), file.sha256, file.size_bytes)
+        for model in models.values()
+        for file in model.files
+    }
+    source_context = (
+        PurePosixPath(recipe.execution.build.context.path)
+        if recipe.execution.mode == "build"
+        else None
+    )
+    fixture_paths = {
+        request.fixture
+        for check in recipe.validation.serving.checks
+        if (request := check.request).transport == "job"
+    }
+    fixture_paths.update(
+        input_path
+        for check in recipe.validation.serving.checks
+        if (request := check.request).transport == "job"
+        for input_path in request.input_slots.values()
+    )
+
+    def is_source_member(name: str) -> bool:
+        if source_context is None:
+            return False
+        try:
+            PurePosixPath(name).relative_to(source_context)
+        except ValueError:
+            return False
+        return True
+
+    for name, content in package.files.items():
+        if name == "recipe.json" or name in expected_models:
+            continue
+        if (PurePosixPath(name).as_posix(), hashlib.sha256(content).hexdigest(), len(content)) in selected_model_files:
+            raise QualificationError(f"selected Model payload is embedded in recipe package: {name}")
+        if is_source_member(name) or name in fixture_paths:
+            continue
+        raise QualificationError(f"recipe package member is outside declared namespaces: {name}")
     return tuple(models.values())
 
 
@@ -418,6 +458,72 @@ def _container(inputs: QualificationInputs, args: argparse.Namespace, architectu
     )
 
 
+def _serving_check_documents(recipe: object) -> tuple[dict[str, object], ...]:
+    return tuple(
+        check.model_dump(mode="json", exclude_none=True)
+        for check in recipe.validation.serving.checks
+    )
+
+
+def _serving_plan_digest(inputs: QualificationInputs) -> str:
+    payload = {
+        "recipe": inputs.recipe.model_dump(mode="json"),
+        "execution": inputs.compiled,
+    }
+    return hashlib.sha256(_canonical_json(payload)).hexdigest()
+
+
+def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Namespace) -> dict[str, object] | None:
+    """Run declared HTTP checks when a real endpoint is supplied.
+
+    Job checks are evaluated by the Controller artifact-job lifecycle and are
+    therefore reported as an honest environment limitation by this local
+    qualifier until that production adapter is available.
+    """
+    if not args.serving_url:
+        return None
+    control_src = args.platform_root / "control" / "src"
+    if str(control_src) not in sys.path:
+        sys.path.insert(0, str(control_src))
+    profile_src = args.platform_root / "src"
+    if str(profile_src) not in sys.path:
+        sys.path.insert(0, str(profile_src))
+    from vonk_control.serving_execution import ServingExecutionError, execute_http_check
+    try:
+        from cluster_profiles.fleet_qualification import EvidenceLedger
+    except ImportError as error:
+        raise QualificationError("qualification evidence ledger is unavailable") from error
+    ledger = EvidenceLedger(args.evidence_ledger) if args.evidence_ledger else None
+    plan_digest = _serving_plan_digest(inputs)
+    recipe_key = f"{inputs.recipe.identity.publisher}/{inputs.recipe.identity.slug}"
+    checks = _serving_check_documents(inputs.recipe)
+    alias_values = tuple(inputs.recipe.interfaces[0].model_aliases) if inputs.recipe.interfaces[0].adapter == "openai" else ()
+    alias = alias_values[0] if alias_values else None
+    results: list[dict[str, object]] = []
+    for check in checks:
+        step = f"serving.{check['name']}"
+        if ledger:
+            ledger.append("step.started", plan_digest=plan_digest, recipe=recipe_key, payload={"step": step, "transport": check["request"]["transport"]})
+        request = check["request"]
+        if request["transport"] != "http":
+            detail = "job serving requires the Controller artifact-job adapter"
+            if ledger:
+                ledger.append("step.blocked", plan_digest=plan_digest, recipe=recipe_key, payload={"step": step, "detail": detail, "status": "environment-limited"})
+            raise EnvironmentLimited(detail)
+        started = time.monotonic()
+        try:
+            result = execute_http_check(args.serving_url, check, timeout_seconds=args.timeout_seconds, model_alias=alias)
+        except ServingExecutionError as error:
+            if ledger:
+                ledger.append("step.failed", plan_digest=plan_digest, recipe=recipe_key, payload={"step": step, "detail": str(error)[:512]})
+            raise QualificationError(f"{step}: {error}") from error
+        result = {"check": check["name"], "elapsed_seconds": round(time.monotonic() - started, 6), **result}
+        results.append(result)
+        if ledger:
+            ledger.append("step.completed", plan_digest=plan_digest, recipe=recipe_key, payload={"step": step, "result": result})
+    return {"scope": "local-http", "status": "passed", "plan_digest": plan_digest, "checks": results, "evidence_ledger": str(args.evidence_ledger) if args.evidence_ledger else None}
+
+
 def _print(value: Mapping[str, object]) -> None:
     print(json.dumps(value, allow_nan=False, sort_keys=True, separators=(",", ":")))
 
@@ -431,7 +537,18 @@ def main() -> int:
         return 1
     if args.level == "structural":
         recipe = inputs.recipe
-        _print({"compiled_roles": len(inputs.compiled), "independent_validator": inputs.independent_validator, "model_count": len(inputs.models), "package": {"members": len(inputs.package.files), "path": str(inputs.package.path), "schema_version": inputs.package.manifest["schema_version"]}, "passed": True, "physical_claim": False, "recipe": recipe.identity.slug, "source_build": recipe.execution.mode == "build", "status": "passed"})
+        try:
+            serving = _run_declared_serving_checks(inputs, args)
+        except EnvironmentLimited as error:
+            _print({"compiled_roles": len(inputs.compiled), "detail": str(error), "independent_validator": inputs.independent_validator, "model_count": len(inputs.models), "passed": False, "physical_claim": False, "recipe": recipe.identity.slug, "status": "environment-limited"})
+            return 3
+        except (OSError, QualificationError) as error:
+            _print({"compiled_roles": len(inputs.compiled), "error": str(error), "independent_validator": inputs.independent_validator, "model_count": len(inputs.models), "passed": False, "physical_claim": False, "recipe": recipe.identity.slug, "status": "failed"})
+            return 1
+        result = {"compiled_roles": len(inputs.compiled), "independent_validator": inputs.independent_validator, "model_count": len(inputs.models), "package": {"members": len(inputs.package.files), "path": str(inputs.package.path), "schema_version": inputs.package.manifest["schema_version"]}, "passed": True, "physical_claim": False, "recipe": recipe.identity.slug, "source_build": recipe.execution.mode == "build", "status": "passed"}
+        if serving is not None:
+            result["serving"] = serving
+        _print(result)
         return 0
     try:
         architecture = _architecture(args.engine, min(args.timeout_seconds, 30.0))
