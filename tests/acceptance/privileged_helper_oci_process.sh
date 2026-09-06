@@ -57,7 +57,8 @@ FROM --platform=linux/arm64 busybox:1.36.1
 RUN addgroup -g 10001 vonk \
     && adduser -D -H -u 10001 -G vonk vonk \
     && mkdir -p /opt/vonk/bin \
-    && ln -s /bin/sh /opt/vonk/bin/vllm \
+    && printf '#!/bin/sh\nexec /bin/sh "$@"\n' >/opt/vonk/bin/vllm \
+    && chmod 0755 /opt/vonk/bin/vllm \
     && mkdir -p /outputs/cache/home /outputs/tmp \
     && chown -R 10001:10001 /outputs
 USER 10001:10001
