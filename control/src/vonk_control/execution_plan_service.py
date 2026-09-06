@@ -21,7 +21,7 @@ from .compiled_execution_plan import (
     execution_identity_sha256,
 )
 from .distribution import ModelCacheVerifiedObjectSource
-from .models import ClusterMappingNode, LocalRecipeRevision, RecipeBuild
+from .models import ClusterMappingNode, CatalogDocumentRevision, RecipeBuild
 from .recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
@@ -100,7 +100,7 @@ class ControllerExecutionPlanService:
         self,
         session: Session,
         *,
-        revision: LocalRecipeRevision,
+        revision: CatalogDocumentRevision,
         build: RecipeBuild,
         mapping_nodes: Sequence[ClusterMappingNode],
         parameters: Mapping[str, object] | None,
@@ -115,7 +115,11 @@ class ControllerExecutionPlanService:
         bind two colliding ``config.json`` files to the wrong selection.
         """
 
-        if revision.content_sha256 is None:
+        if (
+            revision.kind != "recipe"
+            or revision.state != "active"
+            or revision.content_digest is None
+        ):
             raise ExecutionPlanCompilationError("recipe revision digest is unavailable")
         try:
             resolved = (
@@ -125,7 +129,7 @@ class ControllerExecutionPlanService:
             )
             models = tuple(resolved["models"])
             manifest = self._model_cache.resolve_artifact_set(
-                recipe_revision_sha256=revision.content_sha256,
+                recipe_revision_sha256=revision.content_digest,
             )
             artifact_set_sha256 = manifest.digest
             direct_receipts = getattr(

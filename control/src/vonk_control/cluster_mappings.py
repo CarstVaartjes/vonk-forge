@@ -17,7 +17,7 @@ from .models import (
     AgentNode,
     ClusterMapping,
     ClusterMappingNode,
-    LocalRecipeRevision,
+    CatalogDocumentRevision,
     NodeInventorySnapshot,
 )
 from .recipe_contract import RecipeContractError, recipe_topology
@@ -28,6 +28,26 @@ class ClusterMappingError(ValueError):
     def __init__(self, code: str, detail: str) -> None:
         self.code = code
         super().__init__(detail)
+
+
+def _active_recipe_revision(
+    session: Session,
+    revision_id: str | None,
+    *,
+    for_update: bool = False,
+) -> CatalogDocumentRevision | None:
+    """Load only the active canonical Recipe revision used by a mapping."""
+
+    if not isinstance(revision_id, str) or not revision_id:
+        return None
+    statement = select(CatalogDocumentRevision).where(
+        CatalogDocumentRevision.id == revision_id,
+        CatalogDocumentRevision.kind == "recipe",
+        CatalogDocumentRevision.state == "active",
+    )
+    if for_update:
+        statement = statement.with_for_update(of=CatalogDocumentRevision)
+    return session.scalar(statement)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,10 +82,10 @@ class ClusterMappingService:
     ) -> ClusterMappingPlan:
         _mapping_actor(actor)
         with self._sessions() as session:
-            revision = session.get(LocalRecipeRevision, recipe_revision_id)
+            revision = _active_recipe_revision(session, recipe_revision_id)
             if revision is None:
                 raise KeyError(recipe_revision_id)
-            if revision.lifecycle != "resolved" or revision.content_sha256 is None:
+            if revision.state != "active" or revision.content_digest is None:
                 raise ClusterMappingError(
                     "mapping.recipe_unresolved", "only a resolved recipe can be mapped"
                 )
@@ -123,7 +143,7 @@ class ClusterMappingService:
             raise ClusterMappingError(error.code, str(error)) from error
         identity = _plan_identity(
             revision.id,
-            revision.content_sha256,
+            revision.content_digest,
             str(topology["name"]),
             1,
             effective,
@@ -131,7 +151,7 @@ class ClusterMappingService:
         )
         return ClusterMappingPlan(
             recipe_revision_id=revision.id,
-            recipe_content_sha256=revision.content_sha256,
+            recipe_content_sha256=revision.content_digest,
             topology_name=str(topology["name"]),
             generation=1,
             parameters=effective,
@@ -144,13 +164,13 @@ class ClusterMappingService:
     ) -> str:
         actor = _mapping_actor(actor)
         with self._sessions.begin() as session:
-            revision = session.get(
-                LocalRecipeRevision, plan.recipe_revision_id, with_for_update=True
+            revision = _active_recipe_revision(
+                session, plan.recipe_revision_id, for_update=True
             )
             if (
                 revision is None
-                or revision.lifecycle != "resolved"
-                or revision.content_sha256 != plan.recipe_content_sha256
+                or revision.state != "active"
+                or revision.content_digest != plan.recipe_content_sha256
             ):
                 raise ClusterMappingError(
                     "mapping.stale_plan", "recipe changed after mapping preview"

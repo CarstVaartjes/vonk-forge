@@ -25,7 +25,6 @@ from .models import (
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
-    LocalRecipeRevision,
     NodeArtifact,
     NodeInventorySnapshot,
     RecipeBuild,
@@ -86,6 +85,26 @@ class InstallPlanConflict(RuntimeError):
     pass
 
 
+def _active_recipe_revision(
+    session: Session,
+    revision_id: str | None,
+    *,
+    for_update: bool = False,
+) -> CatalogDocumentRevision | None:
+    """Load only an active canonical Recipe revision for admission."""
+
+    if not isinstance(revision_id, str) or not revision_id:
+        return None
+    statement = select(CatalogDocumentRevision).where(
+        CatalogDocumentRevision.id == revision_id,
+        CatalogDocumentRevision.kind == "recipe",
+        CatalogDocumentRevision.state == "active",
+    )
+    if for_update:
+        statement = statement.with_for_update(of=CatalogDocumentRevision)
+    return session.scalar(statement)
+
+
 class InstallAdmissionService:
     def __init__(
         self,
@@ -132,11 +151,11 @@ class InstallAdmissionService:
                 raise KeyError(recipe_build_id)
             if mapping.state != "ready":
                 raise ValueError("cluster mapping is not ready")
-            revision = session.get(LocalRecipeRevision, mapping.recipe_revision_id)
+            revision = _active_recipe_revision(session, mapping.recipe_revision_id)
             if (
                 revision is None
-                or revision.lifecycle != "resolved"
-                or revision.content_sha256 is None
+                or revision.state != "active"
+                or revision.content_digest is None
             ):
                 raise ValueError("recipe revision is not resolved")
             canonical_build_revision = session.get(
@@ -149,7 +168,7 @@ class InstallAdmissionService:
                 or canonical_build_revision is None
                 or canonical_build_revision.kind != "recipe"
                 or canonical_build_revision.state != "active"
-                or canonical_build_revision.content_digest != revision.content_sha256
+                or canonical_build_revision.content_digest != revision.content_digest
             ):
                 raise ValueError("successful recipe build does not match the mapping")
             mapping_nodes = tuple(
@@ -263,7 +282,7 @@ class InstallAdmissionService:
                 )
             except TopologyError as error:
                 topology_reason = AdmissionReason(error.code, str(error))
-            recipe_digest = revision.content_sha256
+            recipe_digest = revision.content_digest
             mapping_generation = mapping.generation
             image_digest = build.image_digest
             image_bytes = build.image_bytes
@@ -514,8 +533,8 @@ class InstallAdmissionService:
             or build.image_digest != plan.image_digest
         ):
             raise InstallPlanConflict("mapping or build changed while reserving")
-        revision = session.get(
-            LocalRecipeRevision, plan.recipe_revision_id, with_for_update=True
+        revision = _active_recipe_revision(
+            session, plan.recipe_revision_id, for_update=True
         )
         mapping_nodes = tuple(
             session.scalars(
@@ -559,8 +578,8 @@ class InstallAdmissionService:
             raise InstallPlanConflict("install.plan_stale_or_blocked")
         if (
             revision is None
-            or revision.lifecycle != "resolved"
-            or revision.content_sha256 != plan.recipe_content_sha256
+            or revision.state != "active"
+            or revision.content_digest != plan.recipe_content_sha256
             or tuple((node.node_id, node.rank, node.role) for node in mapping_nodes)
             != tuple((node.node_id, node.rank, node.role) for node in plan.nodes)
         ):

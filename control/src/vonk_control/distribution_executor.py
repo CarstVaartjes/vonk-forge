@@ -684,7 +684,13 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
 
         node = min(plan.spark_group.nodes, key=lambda item: (item.rank, item.node_id))
         with self._sessions() as session:
-            revision = session.get(CatalogDocumentRevision, plan.recipe_revision_id)
+            revision = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id == plan.recipe_revision_id,
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
+            )
             if revision is None:
                 raise RuntimeError("runtime image preparation recipe revision is unavailable")
             build = (

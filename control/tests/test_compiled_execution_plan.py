@@ -587,7 +587,9 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         role="entrypoint",
     )
     revision = SimpleNamespace(
-        content_sha256=recipe_digest,
+        kind="recipe",
+        state="active",
+        content_digest=recipe_digest,
         document=recipe_document,
     )
     build = SimpleNamespace(
@@ -780,6 +782,16 @@ def test_plan_rejects_incomplete_selected_cache_receipt() -> None:
             _spec(),
             model_artifact_set_sha256="d" * 64,
             model_objects=objects,
+            runtime_image=_image(),
+        )
+
+
+def test_plan_rejects_missing_selected_cache_bytes() -> None:
+    with pytest.raises(CompiledExecutionPlanError):
+        compile_verified_execution_plan(
+            _spec(),
+            model_artifact_set_sha256="d" * 64,
+            model_objects=[],
             runtime_image=_image(),
         )
 

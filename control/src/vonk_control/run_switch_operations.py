@@ -31,7 +31,7 @@ from .models import (
     ClusterMappingNode,
     InstallationNode,
     Job,
-    LocalRecipeRevision,
+    CatalogDocumentRevision,
     NodeArtifact,
     NodeInventorySnapshot,
     RecipeBuild,
@@ -82,6 +82,23 @@ from .run_switch_contract import (
 
 class RunSwitchOperationConflict(RuntimeError):
     """The selected outcome is stale, unsupported, or unsafe to execute."""
+
+
+def _active_recipe_revision(
+    session: Session,
+    revision_id: str | None,
+) -> CatalogDocumentRevision | None:
+    """Load only an active canonical Recipe revision for Run/Switch."""
+
+    if not isinstance(revision_id, str) or not revision_id:
+        return None
+    return session.scalar(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.id == revision_id,
+            CatalogDocumentRevision.kind == "recipe",
+            CatalogDocumentRevision.state == "active",
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1086,7 +1103,9 @@ class RunSwitchOperationService:
             if run is None:
                 raise KeyError(run_id)
             installation = session.get(RecipeInstallation, run.installation_id)
-            revision = session.get(LocalRecipeRevision, run.plan.get("recipe_revision_id"))
+            revision = _active_recipe_revision(
+                session, run.plan.get("recipe_revision_id")
+            )
             mapping = session.get(ClusterMapping, run.mapping_id)
             mapping_nodes = tuple(
                 session.scalars(
@@ -1111,7 +1130,7 @@ class RunSwitchOperationService:
                 if installation is not None
                 else _string_or_none(run.plan.get("model_version_sha256"))
             )
-            recipe_digest = revision.content_sha256 if revision is not None else None
+            recipe_digest = revision.content_digest if revision is not None else None
             _model_document, model_caps, recipe_caps, _document_blockers = self._resolve_documents(
                 session,
                 revision,
@@ -1383,12 +1402,12 @@ class RunSwitchOperationService:
         group = request.spark_group
         node_ids = tuple(node.node_id for node in group.nodes)
         with self._sessions() as session:
-            revision = session.get(LocalRecipeRevision, request.recipe_revision_id)
+            revision = _active_recipe_revision(session, request.recipe_revision_id)
             if revision is None:
                 raise KeyError(request.recipe_revision_id)
             blockers: list[RunSwitchReason] = []
             warnings: list[RunSwitchReason] = []
-            if revision.lifecycle != "resolved" or revision.content_sha256 is None:
+            if revision.state != "active" or revision.content_digest is None:
                 blockers.append(
                     _as_reason(
                         "run-switch.recipe_unresolved",
@@ -1424,7 +1443,7 @@ class RunSwitchOperationService:
                 session,
                 revision,
                 request.model_version_sha256,
-                requested_recipe_digest=revision.content_sha256,
+                requested_recipe_digest=revision.content_digest,
             )
             blockers.extend(document_blockers)
             mapping, mapping_selection, mapping_blockers = self._resolve_mapping(
@@ -1705,7 +1724,7 @@ class RunSwitchOperationService:
                 "action": request.action,
                 "model_version_sha256": request.model_version_sha256,
                 "recipe_revision_id": revision.id,
-                "recipe_content_sha256": revision.content_sha256,
+                "recipe_content_sha256": revision.content_digest,
                 "alias": request.alias,
                 "run_id": None,
                 "spark_group": group,
@@ -1746,7 +1765,7 @@ class RunSwitchOperationService:
     def _resolve_documents(
         self,
         session: Session,
-        revision: LocalRecipeRevision | None,
+        revision: CatalogDocumentRevision | None,
         model_digest: str | None,
         *,
         requested_recipe_digest: str | None,
@@ -1762,7 +1781,7 @@ class RunSwitchOperationService:
         model_caps: list[CapabilityEvidence] = []
         if revision is None:
             return None, [], recipe_caps, blockers
-        if requested_recipe_digest is not None and revision.content_sha256 != requested_recipe_digest:
+        if requested_recipe_digest is not None and revision.content_digest != requested_recipe_digest:
             blockers.append(
                 _as_reason(
                     "run-switch.recipe_digest_changed",
@@ -1816,7 +1835,7 @@ class RunSwitchOperationService:
     def _resolve_mapping(
         self,
         session: Session,
-        revision: LocalRecipeRevision,
+        revision: CatalogDocumentRevision,
         group: SparkGroup,
         *,
         actor: str,
@@ -1975,7 +1994,7 @@ class RunSwitchOperationService:
     def _select_build(
         self,
         session: Session,
-        revision: LocalRecipeRevision,
+        revision: CatalogDocumentRevision,
         build: RecipeBuild | None,
         candidate: RecipeBuild | None,
         group: SparkGroup,
@@ -2131,7 +2150,7 @@ class RunSwitchOperationService:
     @staticmethod
     def _build_evidence(
         session: Session,
-        revision: LocalRecipeRevision | None,
+        revision: CatalogDocumentRevision | None,
         build: RecipeBuild | None,
         candidate: RecipeBuild | None,
         group: SparkGroup,
@@ -2399,7 +2418,7 @@ class RunSwitchOperationService:
     @staticmethod
     def _preparation(
         *,
-        revision: LocalRecipeRevision | None,
+        revision: CatalogDocumentRevision | None,
         group: SparkGroup,
         inspection: ArtifactInspection,
         build: RecipeBuild | None,
@@ -2499,7 +2518,7 @@ class RunSwitchOperationService:
         model = ModelArtifactPreparation(
             artifact_set_sha256=artifact_set_digest,
             model_version_sha256=primary_model_digest,
-            recipe_revision_sha256=revision.content_sha256,
+            recipe_revision_sha256=revision.content_digest,
             artifact_count=max(1, len(model_digests)),
             artifact_set_bytes=artifact_set_bytes,
             dependency_model_version_sha256=sorted(
@@ -2695,7 +2714,7 @@ class RunSwitchOperationService:
     def _fit(
         self,
         session: Session,
-        revision: LocalRecipeRevision | None,
+        revision: CatalogDocumentRevision | None,
         group: SparkGroup,
         *,
         now: datetime,
