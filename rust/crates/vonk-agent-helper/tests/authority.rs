@@ -76,6 +76,44 @@ fn grant_verifier(signer: &Ed25519KeyPair) -> GrantVerifier {
     GrantVerifier::new(signer.public_key().as_ref(), 971).unwrap()
 }
 
+fn runtime_archive_config_id() -> String {
+    format!(
+        "sha256:{}",
+        hex_sha256(br#"{"config":{"User":"10001:10001"}}"#)
+    )
+}
+
+fn runtime_image_archive() -> (Vec<u8>, String) {
+    let config = br#"{"config":{"User":"10001:10001"}}"#;
+    let config_digest = hex_sha256(config);
+    let config_member = format!("{config_digest}.json");
+    let manifest = serde_json::to_vec(&serde_json::json!([{
+        "Config": config_member,
+        "RepoTags": ["localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest"],
+        "Layers": [],
+    }]))
+    .unwrap();
+    let mut builder = tar::Builder::new(Vec::new());
+    let mut header = tar::Header::new_gnu();
+    header.set_size(manifest.len() as u64);
+    header.set_mode(0o600);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, "manifest.json", manifest.as_slice())
+        .unwrap();
+    let mut header = tar::Header::new_gnu();
+    header.set_size(config.len() as u64);
+    header.set_mode(0o600);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, config_member, &config[..])
+        .unwrap();
+    (
+        builder.into_inner().unwrap(),
+        format!("sha256:{config_digest}"),
+    )
+}
+
 #[test]
 fn every_permitted_operation_has_an_exact_typed_shape() {
     let signer = signer(7);
@@ -343,7 +381,11 @@ impl CommandRunner for RecordingRunner {
         } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.get(..2) == Some(&["image".to_owned(), "inspect".to_owned()])
         {
-            format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "d".repeat(64)).into_bytes()
+            format!(
+                "{}\tlinux\tarm64\tv1\t10001:10001\n",
+                runtime_archive_config_id()
+            )
+            .into_bytes()
         } else if executable == std::path::Path::new("/usr/bin/docker")
             && arguments.get(..2) == Some(&["container".to_owned(), "inspect".to_owned()])
         {
@@ -490,12 +532,12 @@ fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRun
 fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
     let (_temp, roots, runner, release) = fixture();
     let image = "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002";
-    let body = b"exact docker archive";
-    let archive_sha256 = hex_sha256(body);
+    let (body, config_id) = runtime_image_archive();
+    let archive_sha256 = hex_sha256(&body);
     let archive_root = roots.agent_data.join("oci-archives");
     fs::create_dir_all(&archive_root).unwrap();
     let archive = archive_root.join(&archive_sha256);
-    fs::write(&archive, body).unwrap();
+    fs::write(&archive, &body).unwrap();
     fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
     let registry_index_digest = format!("sha256:{}", "a".repeat(64));
     let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
@@ -533,7 +575,7 @@ fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
         serde_json::json!({
             "archive_bytes": body.len(),
             "archive_sha256": archive_sha256,
-            "image_config_id": format!("sha256:{}", "d".repeat(64)),
+            "image_config_id": config_id,
             "local_image_reference": image_reference,
             "platform_manifest_digest": platform_manifest_digest,
             "registry_index_digest": registry_index_digest,
@@ -560,12 +602,12 @@ fn assert_archive_import_accepts_load_output(load_output: Vec<u8>, expected_sour
     let (_temp, roots, runner, release) = fixture();
     runner.set_docker_load_stdout(load_output);
     let image = "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002";
-    let body = b"exact docker archive";
-    let archive_sha256 = hex_sha256(body);
+    let (body, config_id) = runtime_image_archive();
+    let archive_sha256 = hex_sha256(&body);
     let archive_root = roots.agent_data.join("oci-archives");
     fs::create_dir_all(&archive_root).unwrap();
     let archive = archive_root.join(&archive_sha256);
-    fs::write(&archive, body).unwrap();
+    fs::write(&archive, &body).unwrap();
     fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
     let registry_index_digest = format!("sha256:{}", "a".repeat(64));
     let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
@@ -601,10 +643,7 @@ fn assert_archive_import_accepts_load_output(load_output: Vec<u8>, expected_sour
         receipt["platform_manifest_digest"],
         platform_manifest_digest
     );
-    assert_eq!(
-        receipt["image_config_id"],
-        format!("sha256:{}", "d".repeat(64))
-    );
+    assert_eq!(receipt["image_config_id"], config_id);
     assert_eq!(
         receipt["local_image_reference"],
         format!("{image}@sha256:{}", "c".repeat(64))
@@ -639,9 +678,8 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let registry_index_digest = format!("sha256:{}", "a".repeat(64));
     let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
     let image_reference = format!("{image}@{platform_manifest_digest}");
-    let archive_body = b"exact docker archive";
-    let archive_sha256 = hex_sha256(archive_body);
-    let image_id = format!("sha256:{}", "d".repeat(64));
+    let (archive_body, image_id) = runtime_image_archive();
+    let archive_sha256 = hex_sha256(&archive_body);
     let state = roots.agent_data.join("runs").join(run_id);
     let outputs = state.join("outputs");
     let metadata = roots.agent_data.join("run-metadata").join(run_id);
@@ -659,7 +697,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let archive_root = roots.agent_data.join("oci-archives");
     fs::create_dir_all(&archive_root).unwrap();
     let archive = archive_root.join(&archive_sha256);
-    fs::write(&archive, archive_body).unwrap();
+    fs::write(&archive, &archive_body).unwrap();
     fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
     fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
     fs::write(

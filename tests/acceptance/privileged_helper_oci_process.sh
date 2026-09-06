@@ -165,7 +165,7 @@ install -d -o vonk-agent -g vonk-agent -m 0700 \
   /var/lib/vonk-forge-agent/installations/proof-install \
   /var/lib/vonk-forge-agent/installations/proof-install/models \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/draft \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101 \
   /var/lib/vonk-forge-agent/installations/proof-install/models/support \
   /var/lib/vonk-forge-agent/runs \
   /var/lib/vonk-forge-agent/runs/$run_id \
@@ -182,7 +182,7 @@ for path in \
   /var/lib/vonk-forge-agent/installations/proof-install \
   /var/lib/vonk-forge-agent/installations/proof-install/models \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/draft \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101 \
   /var/lib/vonk-forge-agent/installations/proof-install/models/support \
   /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache \
   /var/lib/vonk-forge-agent/runs \
@@ -200,7 +200,7 @@ printf 'host_agent_uid=%s\nhost_agent_gid=%s\ncontainer_uid=10001\n' \
 for path in \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary/config.json \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf \
-  /var/lib/vonk-forge-agent/installations/proof-install/models/draft/config.json \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json \
   /var/lib/vonk-forge-agent/installations/proof-install/models/support/LICENSE \
   /var/lib/vonk-forge-agent/installations/proof-install/models/support/__init__.py; do
   printf 'helper-process-proof\n' >"$path"

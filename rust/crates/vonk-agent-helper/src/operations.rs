@@ -3201,7 +3201,7 @@ mod tests {
     }
 
     fn initialize_runtime_fixture(roots: &ManagedRoots) {
-        fs::create_dir_all(runtime_models(&roots).join("sha256")).unwrap();
+        fs::create_dir_all(runtime_models(roots).join("sha256")).unwrap();
         fs::create_dir_all(
             roots
                 .agent_data
