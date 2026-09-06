@@ -83,6 +83,15 @@ def test_recipe_job_request_rejects_traversal_digest_drift_and_unsafe_values(
         RecipeJobRunRequest.parse(payload)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_recipe_job_request_rejects_nonfinite_parameter_numbers(value: float) -> None:
+    claim_document, _result_document = documents()
+    claim_document["payload"]["parameters"]["scale"] = value
+
+    with pytest.raises(AgentProtocolError, match="finite|canonical"):
+        RecipeJobRunRequest.parse(claim_document["payload"])
+
+
 @pytest.mark.parametrize(
     ("media_type", "extension"),
     [

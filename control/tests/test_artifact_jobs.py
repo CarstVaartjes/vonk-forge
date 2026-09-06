@@ -20,7 +20,12 @@ from vonk_agent_protocol import (
 )
 from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
 from vonk_control.artifact_blob_store import ArtifactBlobStore, ArtifactBlobStoreError
-from vonk_control.artifact_jobs import ArtifactJobError, ArtifactJobService
+from vonk_control.artifact_jobs import (
+    ArtifactJobError,
+    ArtifactJobService,
+    _effective_parameters,
+    _validate_parameter_definition,
+)
 from vonk_control.models import (
     AgentOperation,
     ArtifactJob,
@@ -37,6 +42,58 @@ from .test_recipe_operations import (
     installed_recipe,
     setup_services,
 )
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_artifact_float_settings_require_finite_values(value: float) -> None:
+    with pytest.raises(ArtifactJobError, match="contract"):
+        _validate_parameter_definition(
+            {
+                "name": "guidance",
+                "type": "float",
+                "default": value,
+                "minimum": 0.0,
+                "maximum": 64.0,
+            }
+        )
+
+
+def test_artifact_settings_preserve_strict_float_and_max64_name_contract() -> None:
+    definition = _validate_parameter_definition(
+        {
+            "name": "guidance_scale",
+            "type": "float",
+            "default": 1.5,
+            "minimum": 0.0,
+            "maximum": 64.0,
+        }
+    )
+    assert _effective_parameters(
+        {"parameters": [definition]}, {"guidance_scale": 2.25}
+    ) == {"guidance_scale": 2.25}
+    with pytest.raises(ArtifactJobError, match="wrong type"):
+        _effective_parameters(
+            {"parameters": [definition]}, {"guidance_scale": float("nan")}
+        )
+
+    with pytest.raises(ArtifactJobError, match="contract"):
+        _validate_parameter_definition(
+            {
+                "name": "a" * 65,
+                "type": "float",
+                "default": 1.0,
+                "minimum": 0.0,
+                "maximum": 64.0,
+            }
+        )
+    with pytest.raises(ArtifactJobError, match="contract"):
+        _validate_parameter_definition(
+            {
+                "name": "api_token",
+                "type": "string",
+                "default": "secret",
+            }
+        )
 
 
 def _configure_artifact_recipe(document: dict[str, object]) -> None:

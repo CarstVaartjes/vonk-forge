@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -222,6 +223,8 @@ def _parameters(value: object, *, depth: int = 0) -> object:
     if value is None or isinstance(value, bool):
         return value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise AgentProtocolError("job parameter number is not finite")
         return value
     if isinstance(value, str):
         if "\x00" in value or len(value.encode("utf-8")) > 4096:
