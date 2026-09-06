@@ -2,7 +2,7 @@
 
 Updated 2026-09-06. This replaces the earlier status snapshot. Platform
 integration is `codex/interface-integration` at
-`0b2db7a8` (latest checked remote main `0ab88b4f` is included). Local checks, publication,
+`559703eb` (latest checked remote main `0ab88b4f` is included). Local checks, publication,
 Controller deployment and physical Spark execution remain separate results.
 No local result below claims a deployed Controller or NVIDIA workload.
 
@@ -12,6 +12,7 @@ No local result below claims a deployed Controller or NVIDIA workload.
 |---|---|
 | Recipes | [PR73](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/73) merged at `48b00c1f5f1bbd46ea7141d491b63f2697271923`; [v1.0.3](https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v1.0.3) published with 92 Models, 85 Recipes and 85 archives. Thirteen packages changed; 72 retain their bytes. |
 | Recipe checks | PR workflow `34025493486` and publication workflow `34025838414` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 420 passed, one skipped. Independent validator authority: `26a2dfa804d80a02a39cd42e6deae5f3b0ecc529`. |
+| Canonical acceptance fixture | [PR74](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/74) merged at `807957c9bae653f618d98fb27620f69bf736fe37` after workflow `34029444031` passed. It adds a test-only Model/Recipe/package outside the public catalog. Four focused tests, including actual HTTP serving and production source resolution, passed; a real public download verified the declared 51-byte SHA-256. |
 | Public website | PR58 merged at `7eb783d63c5ea87d2efea8834467ddcda52decfd`; workflow `33985962484` deployed canonical compact lists and documentation to `https://abd3b57b.vonk-forge-web.pages.dev`. |
 | Controller / Spark packages | Current platform integration is not yet published or deployed. |
 
@@ -43,6 +44,21 @@ This is a fresh launch with one current contract and no legacy catalog path.
 | P7 Controller web / API / CLI | Paired lists, Model NAS download, Recipe placement, profiles, artifact jobs and rich Fleet surfaces integrated. Retired routes and generated clients removed. Retry UI passed 199 Vitest tests and 18 Library browser journeys; creator attribution passed seven focused tests and its browser journey. | CI at `8ced8a0a` passed Admin web behavior and generated clients. CLI records 97 focused and 23 connected parity tests. Deployed user/agent workflows remain to be observed. |
 | P8 upstream refresh | Reviewed first batch published in v1.0.2; DS4, SparkInfer, GLM and LTX follow-up repairs published in v1.0.3. Every Recipe is represented in the exact QA ledger below. | Real pinned engine parsing remains unverified for 68 Recipes; container start and physical inference remain unverified for the corpus. |
 | P9 acceptance / cleanup | Fresh catalog/PostgreSQL checks and independent UI review recorded. | Retired authoring modules removed. Controller packaging and signed helper policy integrated. Combined suite fixes, actual composed helper execution, compatible consumer publication/deployment, then physical Spark observations remain. |
+| P10 availability / recovery | [Implementation brief](library-availability-design-2026-09-06.md) committed. Model transfer, image preparation, web/CLI and public explanation have separate owners under Sol. | Parallel nonblocking transfers/builds, fair scheduling, provider-aware backoff, durable progress, guided errors, Refresh and forced download/rebuild are in development. They are not yet integrated or deployed. |
+
+The platform now consumes the exact PR74 main revision in its CI fixture
+receipt and both public-contract dependency receipts. The contract source tree
+and rebuilt wheel are byte-identical to the v1.0.3 source. Independent platform
+validation at `73bcf75f` passed all 85 public Recipes, 92 Models, package identity
+and secret checks. The replacement canonical lifecycle harness is integrated
+at `e9994f50`; its 23 focused behavior tests passed. This is not a completed
+composed lifecycle or physical inference result.
+
+The approved supply-chain verifier update `c05fbf7` and its whole cleanup branch
+are integrated. All 39 previously covered active inputs remain; only the two
+deleted runners were removed, and 37 current inputs plus contract-wheel
+integrity verification were added. Final generated evidence must be refreshed
+after the remaining implementation merges.
 
 Root UI repair: `f8ee3122`. Route cleanup: `d6e7e188`, integrated at
 `a251a7b5`; generated clients: `56e7d955`. Artifact settings and finite-number
