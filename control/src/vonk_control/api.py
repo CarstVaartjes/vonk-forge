@@ -787,6 +787,7 @@ def create_app(
         app,
         actor_dependency=authenticated_actor,
         service=recipe_image_availability,
+        cursor_codec=cursor_codec,
     )
 
     @app.get("/api/v1/healthz")
@@ -1873,6 +1874,7 @@ def production_app() -> FastAPI:
         managed_catalog_sync=managed_catalog_sync,
         recipe_builds=recipe_builds,
         recipe_operations=recipe_operations,
+        model_cache=model_cache,
         clock=clock,
         max_parallel=settings.recipe_image_parallel_preparations,
         max_parallel_builds=settings.recipe_build_parallel_preparations,

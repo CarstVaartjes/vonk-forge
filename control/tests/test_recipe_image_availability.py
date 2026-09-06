@@ -5,12 +5,11 @@ import json
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_forge_contracts import RecipeDefinition, content_sha256
-
 from vonk_control.models import Base, CatalogDocumentRevision, Job
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
@@ -22,6 +21,7 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImagePreparationError,
     prepare_runtime_image,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
 PLATFORM_DIGEST = "sha256:" + "e" * 64
@@ -134,7 +134,7 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(tmp_path: 
     with sessions.begin() as session:
         _add_revision(session, "revision-source", recipe)
 
-    def authority(_revision_id: str) -> tuple[RecipeDefinition, dict[str, object]]:
+    def authority(_revision_id: str, *, force: bool = False) -> tuple[RecipeDefinition, dict[str, object]]:
         return recipe, _build_runtime()
 
     def builder(*_: object, **__: object) -> dict[str, object]:
@@ -167,6 +167,42 @@ def test_build_failure_is_bounded_and_exposes_step_and_retry_contract(tmp_path: 
     assert failed.supported_actions == ("retry",)
 
 
+def test_failure_without_step_keeps_structured_retry_fields(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-no-step", recipe)
+
+    def builder(*_: object, **__: object) -> dict[str, object]:
+        raise RecipeImageAvailabilityError(
+            "model_cache.credentials_denied",
+            "access remains denied",
+            retryable=True,
+            retry_time="2026-09-06T13:00:00+00:00",
+            retry_after_seconds=60,
+            recovery_actions=("check_access_and_resume",),
+            log_excerpt="HF denied",
+        )
+
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id, *, force=False: (recipe, _build_runtime()),
+        builder=builder,
+        clock=lambda: datetime.now(UTC),
+        automatic_attempt_limit=1,
+    )
+    queued = service.start("revision-no-step", actor="operator", request_id="n" * 36)
+    assert service.run_pending() == 1
+    failed = service.get(queued.id)
+    assert failed.failure is not None
+    assert failed.failure["code"] == "model_cache.credentials_denied"
+    assert failed.failure["retry_time"] == "2026-09-06T13:00:00+00:00"
+    assert failed.failure["recovery_actions"] == ["check_access_and_resume"]
+
+
 def test_expired_claim_is_reclaimable_after_restart(tmp_path: Path) -> None:
     recipe = _recipe("recipe-image.json")
     engine = create_engine("sqlite:///:memory:")
@@ -178,7 +214,7 @@ def test_expired_claim_is_reclaimable_after_restart(tmp_path: Path) -> None:
     service = RecipeImageAvailabilityService(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
-        authority=lambda _revision_id: (recipe, _runtime()),
+        authority=lambda _revision_id, *, force=False: (recipe, _runtime()),
         transport=Transport(),
         clock=lambda: datetime.now(UTC),
         claim_lease_seconds=10,
@@ -205,7 +241,7 @@ def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
     service = RecipeImageAvailabilityService(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
-        authority=lambda _revision_id: (recipe, _runtime()),
+        authority=lambda _revision_id, *, force=False: (recipe, _runtime()),
         transport=Transport(),
         clock=lambda: now,
     )
@@ -247,7 +283,7 @@ def test_claim_identity_uses_authoritative_image_and_running_claim_is_not_repeat
     service = RecipeImageAvailabilityService(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
-        authority=lambda _revision_id: (recipe, _runtime()),
+        authority=lambda _revision_id, *, force=False: (recipe, _runtime()),
         transport=Transport(),
         clock=lambda: datetime.now(UTC),
     )
@@ -272,7 +308,7 @@ def test_same_immutable_image_reuses_preparation_across_recipe_revisions(tmp_pat
     service = RecipeImageAvailabilityService(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
-        authority=lambda revision_id: (recipe if revision_id.endswith("-a") else recipe_b, _runtime()),
+        authority=lambda revision_id, *, force=False: (recipe if revision_id.endswith("-a") else recipe_b, _runtime()),
         transport=transport,
         clock=lambda: datetime.now(UTC),
         max_parallel=2,
@@ -297,7 +333,7 @@ def test_request_replay_returns_original_before_metadata_refresh(tmp_path: Path)
         _add_revision(session, "revision-replay", recipe)
     calls = 0
 
-    def authority(_revision_id: str) -> tuple[RecipeDefinition, dict[str, object]]:
+    def authority(_revision_id: str, *, force: bool = False) -> tuple[RecipeDefinition, dict[str, object]]:
         nonlocal calls
         calls += 1
         return recipe, _runtime()
@@ -326,7 +362,7 @@ def test_same_work_identity_keeps_distinct_authorization_operations(tmp_path: Pa
     service = RecipeImageAvailabilityService(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
-        authority=lambda _revision_id: (recipe, _runtime()),
+        authority=lambda _revision_id, *, force=False: (recipe, _runtime()),
         transport=transport,
         clock=lambda: datetime.now(UTC),
     )
@@ -341,6 +377,190 @@ def test_same_work_identity_keeps_distinct_authorization_operations(tmp_path: Pa
     assert transport.calls == 1
 
 
+def test_model_child_and_image_complete_through_one_sql_operation(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-model-image", recipe)
+
+    child = SimpleNamespace(
+        id="model-operation",
+        request_key="model-request",
+        state="succeeded",
+        artifact_set_sha256="c" * 64,
+        plan_digest="d" * 64,
+        progress={"phase": "download", "completed_bytes": 1024, "total_bytes": 1024, "total_bytes_known": True},
+        failure=None,
+    )
+
+    class ModelCache:
+        def __init__(self) -> None:
+            self.start_calls = 0
+
+        def download_preview(self, *, recipe_revision_id: str) -> dict[str, object]:
+            assert recipe_revision_id == "revision-model-image"
+            return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
+
+        def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
+            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_versions": [], "artifacts": []})
+
+        def list_operations(self, *, limit: int) -> tuple[object, ...]:
+            return (child,) if self.start_calls else ()
+
+        def start_download(self, **_: object) -> SimpleNamespace:
+            self.start_calls += 1
+            return child
+
+        def get_operation(self, operation_id: str) -> SimpleNamespace:
+            assert operation_id == child.id
+            return child
+
+    model_cache = ModelCache()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id, *, force=False: (recipe, _runtime()),
+        transport=Transport(),
+        model_cache=model_cache,
+        clock=lambda: datetime.now(UTC),
+    )
+    queued = service.start("revision-model-image", actor="operator", request_id="m" * 36)
+    assert queued.model_child is not None
+    assert queued.model_child["id"] == child.id
+    assert model_cache.start_calls == 1
+    second = service.start("revision-model-image", actor="operator-2", request_id="n" * 36)
+    assert second.model_child is not None
+    assert second.model_child["id"] == child.id
+    assert model_cache.start_calls == 1
+    forced = service.start("revision-model-image", actor="operator-3", request_id="f" * 36, force=True)
+    assert forced.model_child is not None
+    assert forced.model_child["id"] == child.id
+    assert model_cache.start_calls == 1
+    assert service.run_pending() == 1
+    completed = service.get(queued.id)
+    assert completed.state == "succeeded"
+    assert completed.result is not None
+    assert completed.result["model_child"]["id"] == child.id
+
+
+def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-overlap", recipe)
+    child = SimpleNamespace(
+        id="model-overlap",
+        request_key="model-overlap-request",
+        state="running",
+        artifact_set_sha256="c" * 64,
+        plan_digest="d" * 64,
+        progress={"phase": "download", "completed_bytes": 40, "total_bytes": 100, "total_bytes_known": True},
+        failure=None,
+    )
+
+    class ModelCache:
+        def download_preview(self, **_: object) -> dict[str, object]:
+            return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
+
+        def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
+            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_versions": [], "artifacts": []})
+
+        def list_operations(self, **_: object) -> tuple[object, ...]:
+            return ()
+
+        def start_download(self, **_: object) -> SimpleNamespace:
+            return child
+
+        def get_operation(self, _operation_id: str) -> SimpleNamespace:
+            return child
+
+    transport = Transport()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id, *, force=False: (recipe, _runtime()),
+        transport=transport,
+        model_cache=ModelCache(),
+        clock=lambda: datetime.now(UTC),
+    )
+    queued = service.start("revision-overlap", actor="operator", request_id="q" * 36)
+    assert service.run_pending() == 1
+    partial = service.get(queued.id)
+    assert partial.state == "partial"
+    assert partial.result is None
+    assert transport.calls == 1
+    assert partial.progress["members"][-1]["member_id"] == "model-cache"
+    child.state = "succeeded"
+    with sessions.begin() as session:
+        row = session.get(Job, queued.id)
+        assert row is not None
+        row.payload = dict(row.payload) | {"retry_after_at": "2000-01-01T00:00:00+00:00"}
+    assert service.run_pending() == 1
+    assert service.get(queued.id).state == "succeeded"
+    assert transport.calls == 1
+
+
+def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(tmp_path: Path) -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    failed = SimpleNamespace(
+        id="failed-model",
+        request_key="failed-request",
+        state="failed",
+        artifact_set_sha256="c" * 64,
+        plan_digest="d" * 64,
+        progress={"phase": "download", "completed_bytes": 4, "total_bytes": 10, "total_bytes_known": True},
+        failure={
+            "code": "access_denied",
+            "detail": "HF access denied",
+            "recovery_actions": ["open_model_access", "check_access_and_resume"],
+            "retryable": False,
+            "retry_time": None,
+            "retry_after_seconds": None,
+            "log_excerpt": "denied",
+            "required_bytes": None,
+            "free_bytes": None,
+            "shortfall_bytes": None,
+        },
+    )
+
+    class ModelCache:
+        def __init__(self) -> None:
+            self.called: dict[str, object] | None = None
+
+        def get_operation(self, _operation_id: str) -> SimpleNamespace:
+            return failed
+
+        def check_access_and_resume(self, operation_id: str, **kwargs: object) -> SimpleNamespace:
+            self.called = {"operation_id": operation_id, **kwargs}
+            return failed
+
+        def list_operations(self, **_: object) -> tuple[object, ...]:
+            return ()
+
+    cache = ModelCache()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id, *, force=False: (_recipe("recipe-image.json"), _runtime()),
+        model_cache=cache,
+        clock=lambda: datetime.now(UTC),
+    )
+    service._resume_model_child(
+        {"id": failed.id, "state": "failed", "failure": failed.failure},
+        actor="operator",
+        parent_request_key="p" * 36,
+    )
+    assert cache.called is not None
+    assert cache.called["artifact_set_sha256"] == "c" * 64
+    assert cache.called["plan_digest"] == "d" * 64
+
+
 def test_force_download_is_a_distinct_operation_for_same_revision(tmp_path: Path) -> None:
     recipe = _recipe("recipe-image.json")
     engine = create_engine("sqlite:///:memory:")
@@ -352,7 +572,7 @@ def test_force_download_is_a_distinct_operation_for_same_revision(tmp_path: Path
     service = RecipeImageAvailabilityService(
         sessions,
         storage=FilesystemRuntimeImageStorage(tmp_path),
-        authority=lambda _revision_id: (recipe, _runtime()),
+        authority=lambda _revision_id, *, force=False: (recipe, _runtime()),
         transport=transport,
         clock=lambda: datetime.now(UTC),
     )
@@ -364,3 +584,69 @@ def test_force_download_is_a_distinct_operation_for_same_revision(tmp_path: Path
     assert service.get(cached.id).state == "succeeded"
     assert service.get(forced.id).state == "succeeded"
     assert transport.calls == 2
+
+
+def test_parent_progress_aggregates_model_and_image_members_once(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime.now(UTC)
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id, *, force=False: (recipe, _runtime()),
+        transport=Transport(),
+        clock=lambda: now,
+    )
+    payload = {
+        "recipe_revision_id": "revision-progress",
+        "recipe_content_sha256": content_sha256(recipe),
+        "progress": {
+            "phase": "prepare",
+            "completed_bytes": 0,
+            "total_bytes": 20,
+            "total_bytes_known": True,
+        },
+        "model_child": {
+            "id": "model-child",
+            "state": "running",
+            "progress": {
+                "phase": "download",
+                "completed_bytes": 40,
+                "total_bytes": 100,
+                "total_bytes_known": True,
+            },
+        },
+    }
+    operation = Job(
+        id="availability-progress",
+        request_id="p" * 36,
+        kind="recipe.image.availability.v2",
+        state="partial",
+        actor="operator",
+        authority_revision="revision-progress",
+        targets=["revision-progress"],
+        payload_digest="a" * 64,
+        payload=payload,
+        result=None,
+        current_attempt=1,
+        created_at=now,
+        updated_at=now,
+    )
+    with sessions.begin() as session:
+        session.add(operation)
+    view = service.get("availability-progress")
+    assert view.progress["completed_bytes"] == 40
+    assert view.progress["total_bytes"] == 120
+    members = {member["member_id"]: member for member in view.progress["members"]}
+    assert members["model-cache"]["completed_bytes"] == 40
+    assert members["model-cache"]["total_bytes"] == 100
+    assert members["runtime-image"]["completed_bytes"] == 0
+    assert members["runtime-image"]["total_bytes"] == 20
+    assert view.image_progress is not None
+    assert view.image_progress["total_bytes"] == 20
+    rows, total, cursor = service.list_page(limit=1)
+    assert total == 1
+    assert len(rows) == 1
+    assert cursor is None

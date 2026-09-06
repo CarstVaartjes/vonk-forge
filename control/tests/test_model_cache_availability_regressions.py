@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_forge_contracts import ModelDefinition, content_sha256
 
-from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache_contract import ModelCacheOperationProgress
 from vonk_control.models import (
     Base,
@@ -218,7 +218,7 @@ def test_failed_future_waits_for_sibling_before_finalizing_failure(tmp_path: Pat
     final = service.get_operation(operation.id)
     assert final.state == "failed"
     assert final.failure is not None
-    assert final.failure["code"] == "model_cache.digest_mismatch"
+    assert final.failure["code"] == "integrity_mismatch"
     assert final.progress["downloaded_bytes"] >= len(b"sibling")
     service.close()
     assert client is not None
@@ -308,7 +308,11 @@ def test_hf_rate_limit_cooldown_survives_restart_but_local_work_progresses(
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.host or "")
         if request.url.host == "huggingface.co" and not allow_hf[0]:
-            return httpx.Response(429, request=request, headers={"Retry-After": "30"})
+            return httpx.Response(
+                429,
+                request=request,
+                headers={"RateLimit": '"resolvers";r=0;t=30'},
+            )
         content = b"hf" if request.url.host == "huggingface.co" else b"local"
         return httpx.Response(200, request=request, content=content)
 
@@ -329,7 +333,11 @@ def test_hf_rate_limit_cooldown_survives_restart_but_local_work_progresses(
         if service.get_operation(first.id).state == "queued":
             break
         time.sleep(0.002)
-    assert service.get_operation(first.id).state == "queued"
+    limited = service.get_operation(first.id)
+    assert limited.state == "queued"
+    assert limited.failure is not None
+    assert limited.failure["retry_after_seconds"] == 30
+    assert limited.failure["retry_time"] == "2026-09-06T12:00:30+00:00"
     service.close()
     if client is not None:
         client.close()
@@ -545,3 +553,206 @@ def test_close_checkpoints_active_transfer_and_fresh_service_resumes(
     assert client is not None and fresh_client is not None
     client.close()
     fresh_client.close()
+
+
+def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
+    tmp_path: Path,
+) -> None:
+    sessions = _database(tmp_path)
+    token_path = tmp_path / "hf-token"
+    token_path.write_text("bad-token\n")
+    requests: list[httpx.Request] = []
+    public_data = b"public model"
+    hf_data = b"gated model"
+    now = [NOW]
+    rate_limit_once = [True]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("weights-z-hf") and request.headers.get(
+            "authorization"
+        ) == "Bearer bad-token":
+            return httpx.Response(403, request=request)
+        if request.url.path.endswith("weights-z-hf") and rate_limit_once[0]:
+            rate_limit_once[0] = False
+            return httpx.Response(
+                429,
+                request=request,
+                headers={"RateLimit": '"resolvers";r=0;t=30'},
+            )
+        content = public_data if request.url.path.endswith("weights-a-public") else hf_data
+        return httpx.Response(200, request=request, content=content)
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=False,
+    )
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "cache",
+        reserve_bytes=0,
+        max_parallel_downloads=1,
+        fixture_sources=True,
+        http_client=client,
+        huggingface_token_path=token_path,
+        clock=lambda: now[0],
+    )
+    artifacts = [
+        _artifact("a-public", public_data, host="huggingface.co")
+        | {
+            "source": "https://huggingface.co/acme/public/resolve/"
+            + "a" * 40
+            + "/weights-a-public"
+        },
+        _artifact("z-hf", hf_data, host="huggingface.co")
+        | {
+            "source": "https://huggingface.co/acme/private/resolve/"
+            + "a" * 40
+            + "/weights-z-hf"
+        },
+    ]
+    first = _start(
+        service,
+        artifacts,
+        "00000000-0000-4000-8000-000000000401",
+    )
+    service.tick()
+    _drain(service, first.id)
+    failed = service.get_operation(first.id)
+    assert failed.state == "failed"
+    assert failed.failure is not None
+    assert failed.failure["code"] == "access_denied"
+    assert set(failed.failure) == {
+        "code",
+        "detail",
+        "recovery_actions",
+        "retryable",
+        "retry_time",
+        "retry_after_seconds",
+        "log_excerpt",
+        "required_bytes",
+        "free_bytes",
+        "shortfall_bytes",
+    }
+    assert "check_access_and_resume" in failed.failure["recovery_actions"]
+    assert failed.progress["downloaded_bytes"] >= len(public_data)
+    assert len(requests) == 2
+    with sessions() as session:
+        persisted = session.get(ModelCacheOperation, first.id)
+        assert persisted is not None
+        assert persisted.payload["failure"]["artifact_key"].endswith("z-hf")
+
+    # Terminal auth failures do not re-enter the automatic scheduler.
+    service.tick()
+    assert len(requests) == 2
+
+    denied = service.check_access_and_resume(
+        first.id,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000000402",
+        artifact_set_sha256=str(first.artifact_set_sha256),
+        plan_digest=str(first.plan_digest),
+    )
+    assert denied.id == first.id
+    assert denied.state == "failed"
+    assert len(requests) == 3
+    denied_repeat = service.check_access_and_resume(
+        first.id,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000000402",
+        artifact_set_sha256=str(first.artifact_set_sha256),
+        plan_digest=str(first.plan_digest),
+    )
+    assert denied_repeat.id == first.id
+    assert len(requests) == 3
+
+    token_path.write_text("good-token\n")
+    resumed = service.check_access_and_resume(
+        first.id,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000000403",
+        artifact_set_sha256=str(first.artifact_set_sha256),
+        plan_digest=str(first.plan_digest),
+    )
+    assert resumed.id == first.id
+    assert resumed.state == "queued"
+    assert resumed.failure is not None
+    assert resumed.failure["code"] == "rate_limited"
+    assert resumed.failure["retryable"] is True
+    assert resumed.failure["retry_after_seconds"] == 30
+    assert resumed.failure["recovery_actions"] == ["resume"]
+    assert resumed.artifact_set_sha256 == first.artifact_set_sha256
+    assert resumed.plan_digest == first.plan_digest
+    assert resumed.progress["downloaded_bytes"] >= len(public_data)
+    now[0] = NOW + timedelta(seconds=31)
+    _drain(service, resumed.id)
+    assert service.get_operation(resumed.id).state == "succeeded"
+    assert len(requests) == 5
+    service.close()
+    client.close()
+
+
+def test_access_recheck_groups_hf_files_by_repository_without_failed_key(
+    tmp_path: Path,
+) -> None:
+    sessions = _database(tmp_path)
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request, content=b"ok")
+
+    service, client = _service(tmp_path, sessions, handler=handler)
+    artifacts = []
+    for index in range(3):
+        repo = "public" if index < 2 else "dependency"
+        artifact = _artifact(
+            f"file-{index}", f"ok-{index}".encode(), host="huggingface.co"
+        )
+        artifact["source"] = (
+            f"https://huggingface.co/acme/{repo}/resolve/"
+            + "a" * 40
+            + f"/weights-{index}"
+        )
+        artifacts.append(artifact)
+    manifest = service.resolve_artifact_set(
+        model_version_sha256="e" * 64,
+        artifacts=artifacts,
+    )
+    service._check_huggingface_access(manifest, failed_artifact_key=None)
+    assert len(requests) == 2
+    assert {request.url.path.split("/")[2] for request in requests} == {
+        "public",
+        "dependency",
+    }
+    service.close()
+    assert client is not None
+    client.close()
+
+
+def test_failed_model_cache_detail_redacts_signed_source_url(tmp_path: Path) -> None:
+    sessions = _database(tmp_path)
+    service, _ = _service(tmp_path, sessions, maximum=1)
+    artifact = _artifact("signed", b"payload")
+    operation = _start(
+        service,
+        [artifact],
+        "00000000-0000-4000-8000-000000000404",
+    )
+    manifest = service.manifest_for_artifact_set(str(operation.artifact_set_sha256))
+    service._finish_failed(
+        operation.id,
+        str(operation.artifact_set_sha256),
+        manifest,
+        ModelCacheStorageError(
+            "model_cache.source_unavailable",
+            "failed at https://cdn.example/model?Signature=signed-download-secret#fragment-secret",
+        ),
+    )
+    failed = service.get_operation(operation.id)
+    assert failed.last_error is not None
+    assert "signed-download-secret" not in failed.last_error
+    assert "fragment-secret" not in failed.last_error
+    assert failed.failure is not None
+    assert "signed-download-secret" not in str(failed.failure["detail"])
+    service.close()
