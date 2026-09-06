@@ -22,6 +22,8 @@ from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
+    RecipeInstallPayload,
+    RecipeStartPayload,
     RecipeRunObservationReceiptClaims,
     SignedRecipeRunObservationReceipt,
     canonical_message,
@@ -736,6 +738,17 @@ def test_canonical_recipe_revision_drives_install_and_schema2_payload(
         payload = compiled[nodes[0]]
         assert payload["schema_version"] == 2
         assert payload["identity"]["recipe_revision_sha256"] == revision.content_digest
+        RecipeInstallPayload.model_validate(
+            {
+                "schema_version": 2,
+                "installation_id": operation.owner_id,
+                "plan_digest": plan.plan_digest,
+                "rank": 0,
+                "role": "entrypoint",
+                "expected_bytes": 120,
+                "compiled_execution_plan": payload,
+            }
+        )
 
 
 def test_fresh_alembic_head_postgres_runs_canonical_recipe_lifecycle(
@@ -1129,6 +1142,8 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
         )
         assert {item.payload["role"] for item in first} == {"worker"}
         assert len(first) == 2
+        for item in first:
+            RecipeStartPayload.model_validate(item.payload)
         stored = session.get(Job, start.id)
         assert stored is not None and len(stored.payload["phases"]) == 2
     for operation in first:
@@ -1155,6 +1170,7 @@ def test_multirank_role_phases_persist_recover_and_stop_in_reverse_order(
             item for item in all_children if item.payload["role"] == "entrypoint"
         )
         assert len(second) == 1
+        RecipeStartPayload.model_validate(second[0].payload)
     recovered.record_node_result(
         start.id,
         second[0].node_id,
@@ -2614,6 +2630,7 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         assert child.payload["endpoint_address"] == "192.168.1.211"
         assert child.payload["world_size"] == 1
         assert child.payload["master_address"] is None
+        RecipeStartPayload.model_validate(child.payload)
         evidence = start_evidence(child.payload)
     blocked_uninstall = service.preview_uninstall(install.owner_id)
     assert blocked_uninstall.allowed is False
