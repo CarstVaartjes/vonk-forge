@@ -218,6 +218,7 @@ def test_worker_has_a_distinct_minimal_image_and_runtime_boundary() -> None:
         "/routes",
         "/supervisor",
         "/state",
+        "/state/agent-artifacts",
         "/run/vonk-normalized-secrets",
     }
     assert "VONK_REPOSITORY_PATH" not in worker["environment"]
@@ -343,15 +344,19 @@ def test_caddy_has_readiness_checks() -> None:
 def test_recipe_images_use_a_dedicated_persistent_volume() -> None:
     rendered = _rendered()
     api = rendered["services"]["control-api"]
+    worker = rendered["services"]["control-worker"]
     api_volumes = {volume["target"]: volume for volume in api["volumes"]}
+    worker_volumes = {volume["target"]: volume for volume in worker["volumes"]}
 
     assert api["tmpfs"] == ["/tmp"]
-    assert api_volumes["/state/agent-artifacts"] == {
+    expected_artifact_volume = {
         "type": "volume",
         "source": "agent-artifacts",
         "target": "/state/agent-artifacts",
         "volume": {},
     }
+    assert api_volumes["/state/agent-artifacts"] == expected_artifact_volume
+    assert worker_volumes["/state/agent-artifacts"] == expected_artifact_volume
     assert "agent-artifacts" in rendered["volumes"]
 
 

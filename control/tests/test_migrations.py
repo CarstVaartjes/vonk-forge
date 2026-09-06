@@ -212,6 +212,54 @@ def test_fresh_baseline_binds_recipe_builds_to_canonical_recipe_revision(
     )
 
 
+def test_empty_legacy_recipe_build_fk_upgrades_to_canonical_postgres(
+    postgres_engine,
+) -> None:
+    config = _config(postgres_engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, "0017_dist_assignments")
+
+    inspector = inspect(postgres_engine)
+    current = next(
+        foreign_key
+        for foreign_key in inspector.get_foreign_keys("recipe_builds")
+        if foreign_key["constrained_columns"] == ["recipe_revision_id"]
+    )
+    assert current["referred_table"] == "catalog_document_revisions"
+    assert current["name"] is not None
+    constraint = postgres_engine.dialect.identifier_preparer.quote(current["name"])
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE local_recipe_revisions (id VARCHAR(36) PRIMARY KEY)")
+        )
+        connection.execute(
+            text(f"ALTER TABLE recipe_builds DROP CONSTRAINT {constraint}")
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE recipe_builds "
+                "ADD CONSTRAINT fk_recipe_builds_legacy_recipe_revision "
+                "FOREIGN KEY (recipe_revision_id) "
+                "REFERENCES local_recipe_revisions (id) ON DELETE RESTRICT"
+            )
+        )
+
+    command.upgrade(config, "head")
+
+    recipe_revision_keys = [
+        foreign_key
+        for foreign_key in inspect(postgres_engine).get_foreign_keys("recipe_builds")
+        if foreign_key["constrained_columns"] == ["recipe_revision_id"]
+    ]
+    assert len(recipe_revision_keys) == 1
+    assert recipe_revision_keys[0]["name"] == (
+        "fk_recipe_builds_canonical_recipe_revision"
+    )
+    assert recipe_revision_keys[0]["referred_table"] == (
+        "catalog_document_revisions"
+    )
+    assert recipe_revision_keys[0]["referred_columns"] == ["id"]
+
+
 def test_runtime_image_receipt_uses_production_identity_fields(
     tmp_path: Path,
 ) -> None:

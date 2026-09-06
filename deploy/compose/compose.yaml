@@ -151,6 +151,7 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - litellm-supervisor-state:/supervisor:ro
       - control-state:/state
+      - agent-artifacts:/state/agent-artifacts
     tmpfs: [/tmp]
     networks: [data, worker-authority]
     depends_on:
