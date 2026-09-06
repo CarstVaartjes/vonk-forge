@@ -8,9 +8,16 @@ from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
 
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DistributionObject
+from vonk_control.agent_api import AgentApiServices
+from vonk_control.agent_jobs import AgentJobService
+from vonk_control.api import create_app
+from vonk_control.audit import MemoryAuditStore
+from vonk_control.auth import TokenCodec
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.compiled_execution_plan import validate_compiled_launch_payload
 from vonk_control.distribution import DistributionService
@@ -22,7 +29,9 @@ from vonk_control.inventory_repository import (
     InventorySnapshotInput,
 )
 from vonk_control.models import (
+    AgentCertificate,
     AgentNode,
+    AgentPresence,
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
@@ -31,6 +40,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RuntimeImageReceipt,
 )
+from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.run_switch_contract import (
@@ -50,6 +60,7 @@ from vonk_control.runtime_image_preparation import (
     persist_runtime_image_receipt,
     prepare_runtime_image,
 )
+from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
@@ -178,7 +189,7 @@ class _Queue:
 class _TargetExecutor(CompositeDistributionPhaseExecutor):
     """Use production receipt/assignment logic with deterministic child evidence."""
 
-    def __init__(self, *args: object, events: list[str], tamper_db: bool = False, **kwargs: object) -> None:
+    def __init__(self, *args: object, events: list[str], tamper_db: str | None = None, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self.events = events
         self.assignments: dict[str, dict[str, object]] = {}
@@ -201,7 +212,10 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
             with self._sessions.begin() as session:
                 row = session.scalar(select(RuntimeImageReceipt))
                 assert row is not None
-                row.platform_manifest_digest = "sha256:" + "a" * 64
+                if self._tamper_db == "platform":
+                    row.platform_manifest_digest = "sha256:" + "a" * 64
+                else:
+                    row.oci_archive_sha256 = "a" * 64
             self._did_tamper = True
         return super().execute(plan, phase, **kwargs)
 
@@ -250,7 +264,11 @@ class _TargetExecutor(CompositeDistributionPhaseExecutor):
 
 
 def _seed() -> tuple[sessionmaker[Session], str, str, str]:
-    engine = create_engine("sqlite:///:memory:")
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     recipe_document = json.loads(
@@ -330,6 +348,20 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
                     architecture="linux-arm64",
                     capabilities=["runtime.vonk.v1", "recipe.operations.v1"],
                 ),
+                AgentCertificate(
+                    serial="serial-direct",
+                    node_id=NODE_ID,
+                    fingerprint="fingerprint-direct",
+                    not_before=NOW,
+                    not_after=NOW.replace(year=2027),
+                ),
+                AgentPresence(
+                    node_id=NODE_ID,
+                    certificate_serial="serial-direct",
+                    certificate_fingerprint="fingerprint-direct",
+                    management_address="10.0.0.42",
+                    observed_at=NOW,
+                ),
             ]
         )
     InventoryRepository(sessions, clock=lambda: NOW).record(
@@ -353,7 +385,7 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
     return sessions, revision_id, recipe_digest, mapping_id
 
 
-def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: bool = False):
+def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | None = None):
     sessions, revision_id, recipe_digest, mapping_id = _seed()
     storage = FilesystemRuntimeImageStorage(tmp_path / "runtime")
     events: list[str] = []
@@ -534,6 +566,8 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
     # Advance once more so the actual lifecycle queues the Spark install child
     # after the persisted Controller spec and target verification.
     service._advance(operation.operation_id)
+    installation_id = None
+    compiled_spec = None
     with sessions() as session:
         operation_row = session.get(Job, operation.operation_id)
         assert operation_row is not None
@@ -546,6 +580,15 @@ def test_direct_published_image_real_run_switch_path_persists_receipt_before_com
         assert installation is not None and installation.state == "installing"
         compiled = installation.plan["compiled_execution_plans"][NODE_ID]
         assert validate_compiled_launch_payload(compiled) == compiled
+        installation_id = installation.id
+        compiled_spec = compiled
+
+    assert installation_id is not None
+    response = _read_spec_endpoint(sessions, tmp_path, installation_id)
+    assert response.status_code == 200
+    assert response.json() == compiled_spec
+    assert response.json()["runtime_image"]["registry_manifest_digest"] == REGISTRY_DIGEST
+    assert response.json()["runtime_image"]["platform_manifest_digest"] == PLATFORM_DIGEST
 
     assert executor.assignments[NODE_ID]["oci_image_digest"] == PLATFORM_DIGEST
     assert executor.assignments[NODE_ID]["oci_archive_sha256"] == ARCHIVE_DIGEST
@@ -560,6 +603,60 @@ def _direct_request(revision_id: str) -> RunSwitchPreviewRequest:
         ),
         alias="synthetic-tiny",
     )
+
+
+class _NoopJobs:
+    def list(self):
+        return []
+
+    def get(self, _job_id):
+        raise KeyError(_job_id)
+
+    def enqueue(self, *_args, **_kwargs):
+        raise AssertionError("the installation spec route must not enqueue work")
+
+
+def _read_spec_endpoint(sessions: sessionmaker[Session], tmp_path: Path, installation_id: str):
+    presence = AgentPresenceService(
+        sessions,
+        ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=lambda: NOW,
+    )
+    operations = AgentJobService(sessions, clock=lambda: NOW)
+    operations.set_contact_consumer(presence.observe_in_session)
+    root = tmp_path / "agent-api"
+    services = AgentApiServices(
+        enrollment=None,
+        operations=operations,
+        sessions=sessions,
+        clock=lambda: NOW,
+        presence=presence,
+        artifact_root=root / "artifacts",
+        source_bundles=SourceBundleStore(root / "source-bundles"),
+    )
+    services.artifact_root.mkdir(parents=True)
+    app = create_app(
+        jobs=_NoopJobs(),
+        tokens=TokenCodec(b"k" * 32),
+        audits=MemoryAuditStore(),
+        fleet=dict,
+        now=lambda: int(NOW.timestamp()),
+        agent=services,
+        trusted_agent_proxy_auth=b"p" * 32,
+    )
+    headers = {
+        "x-vonk-agent-node": NODE_ID,
+        "x-vonk-agent-serial": "serial-direct",
+        "x-vonk-agent-fingerprint": "fingerprint-direct",
+        "x-vonk-agent-verified": "1",
+        "x-vonk-agent-proxy-auth": "p" * 32,
+        "x-vonk-agent-source": "10.0.0.42",
+    }
+    with TestClient(app) as client:
+        return client.get(
+            f"/agent/v1/recipe-installations/{installation_id}/spec",
+            headers=headers,
+        )
 
 
 def test_direct_run_switch_rejects_filesystem_only_receipt_before_compile(
@@ -595,7 +692,34 @@ def test_direct_run_switch_rejects_conflicting_db_receipt_during_target_copy(
 ) -> None:
     service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, _events = _make_service(
         tmp_path,
-        tamper_db=True,
+        tamper_db="platform",
+    )
+    request = _direct_request(revision_id)
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(mode="json"), request_key=str(uuid.uuid4())),
+        actor="test",
+    )
+    for _ in range(10):
+        service._advance(operation.operation_id)
+        with sessions() as session:
+            row = session.get(Job, operation.operation_id)
+            assert row is not None
+            if row.state == "failed":
+                break
+    with sessions() as session:
+        row = session.get(Job, operation.operation_id)
+        assert row is not None and row.state == "failed"
+        assert "receipt authority changed" in (row.status_reason or "")
+        assert session.query(RecipeInstallation).count() == 1
+        assert session.query(RecipeBuild).count() == 0
+
+
+def test_direct_run_switch_rejects_conflicting_db_archive_during_target_copy(
+    tmp_path: Path,
+) -> None:
+    service, sessions, revision_id, _recipe_digest, _mapping_id, _executor, _events = _make_service(
+        tmp_path,
+        tamper_db="archive",
     )
     request = _direct_request(revision_id)
     operation = service.apply(
