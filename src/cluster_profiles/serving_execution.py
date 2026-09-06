@@ -1,4 +1,4 @@
-"""Execute and evaluate canonical recipe serving checks.
+"""Shared execution and evaluation of canonical recipe serving checks.
 
 The recipe producer owns the request and assertion declarations.  This module
 only performs the bounded transport work and evaluates observations against
