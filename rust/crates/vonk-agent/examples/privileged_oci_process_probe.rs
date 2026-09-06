@@ -222,6 +222,7 @@ fn production_start_arguments() -> Vec<String> {
     let archive_bytes: u64 = env_required("VONK_HELPER_ARCHIVE_BYTES").parse().unwrap();
     let registry_digest = env_required("VONK_HELPER_REGISTRY_DIGEST");
     let platform_digest = env_required("VONK_HELPER_PLATFORM_DIGEST");
+    let layout_digest = env_required("VONK_HELPER_LAYOUT_DIGEST");
     let config_id = env_required("VONK_HELPER_CONFIG_ID");
     let image_ref = env_required("VONK_HELPER_IMAGE_REF");
     value["runtime"]["image_digest"] = json!(platform_digest);
@@ -231,9 +232,9 @@ fn production_start_arguments() -> Vec<String> {
     value["runtime_image"]["platform_manifest_digest"] = json!(platform_digest);
     value["runtime_image"]["local_image_config_id"] = json!(config_id);
     value["runtime_image"]["local_image_reference"] = json!(image_ref);
-    value["runtime_image"]["oci_layout_sha256"] = json!(archive_sha);
+    value["runtime_image"]["oci_layout_sha256"] = json!(layout_digest);
     value["runtime_image"]["image_bytes"] = json!(archive_bytes);
-    value["runtime_image"]["distribution_object"]["sha256"] = json!(archive_sha);
+    value["runtime_image"]["distribution_object"]["sha256"] = json!(layout_digest);
     value["runtime_image"]["distribution_object"]["bytes"] = json!(archive_bytes);
     value["runtime_image"]["runtime_interface_label"] = json!("v1");
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();

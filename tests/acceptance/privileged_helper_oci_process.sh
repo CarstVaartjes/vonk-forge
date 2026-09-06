@@ -79,6 +79,7 @@ for _ in {1..30}; do
 done
 platform_ref=$(docker image inspect "$image_platform" --format '{{index .RepoDigests 0}}')
 platform_digest=${platform_ref##*@}
+layout_digest=${platform_digest#sha256:}
 registry_digest=$(curl --fail --silent --show-error --head \
   -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
   "http://localhost:5001/v2/vonk/helper-tiny/manifests/v1" \
@@ -120,6 +121,7 @@ export VONK_HELPER_ARCHIVE_SHA="$archive_sha"
 export VONK_HELPER_ARCHIVE_BYTES="$archive_bytes"
 export VONK_HELPER_REGISTRY_DIGEST="$registry_digest"
 export VONK_HELPER_PLATFORM_DIGEST="$platform_digest"
+export VONK_HELPER_LAYOUT_DIGEST="$layout_digest"
 export VONK_HELPER_CONFIG_ID="$config_id"
 export VONK_HELPER_IMAGE_REF="$image_ref"
 export VONK_HELPER_FIXTURE="$fixture"
@@ -155,6 +157,7 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_BYTES="$archive_bytes" \
   VONK_HELPER_REGISTRY_DIGEST="$VONK_HELPER_REGISTRY_DIGEST" \
   VONK_HELPER_PLATFORM_DIGEST="$platform_digest" \
+  VONK_HELPER_LAYOUT_DIGEST="$layout_digest" \
   VONK_HELPER_CONFIG_ID="$config_id" \
   VONK_HELPER_IMAGE_REF="$image_ref" \
   VONK_HELPER_FIXTURE="$fixture" \
@@ -167,6 +170,7 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_BYTES="$archive_bytes" \
   VONK_HELPER_REGISTRY_DIGEST="$VONK_HELPER_REGISTRY_DIGEST" \
   VONK_HELPER_PLATFORM_DIGEST="$platform_digest" \
+  VONK_HELPER_LAYOUT_DIGEST="$layout_digest" \
   VONK_HELPER_CONFIG_ID="$config_id" \
   VONK_HELPER_IMAGE_REF="$image_ref" \
   VONK_HELPER_FIXTURE="$fixture" \
@@ -186,6 +190,7 @@ sudo -u vonk-agent -g vonk-agent env \
   VONK_HELPER_ARCHIVE_BYTES="$archive_bytes" \
   VONK_HELPER_REGISTRY_DIGEST="$VONK_HELPER_REGISTRY_DIGEST" \
   VONK_HELPER_PLATFORM_DIGEST="$platform_digest" \
+  VONK_HELPER_LAYOUT_DIGEST="$layout_digest" \
   VONK_HELPER_CONFIG_ID="$config_id" \
   VONK_HELPER_IMAGE_REF="$image_ref" \
   VONK_HELPER_FIXTURE="$fixture" \
