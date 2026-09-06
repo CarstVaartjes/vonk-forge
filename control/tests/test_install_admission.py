@@ -35,14 +35,20 @@ RECIPE_DOCUMENT_ID = "00000000-0000-4000-8000-000000000020"
 RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
-def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
-    model = ModelDefinition.model_validate(
-        json.loads(
-            files("vonk_forge_contracts")
-            .joinpath("examples", "model-definition.json")
-            .read_text(encoding="utf-8")
-        )
+def _canonical_catalog_documents(
+    *, denied_jurisdictions: tuple[str, ...] = ()
+) -> tuple[ModelDefinition, RecipeDefinition]:
+    raw_model = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text(encoding="utf-8")
     )
+    if denied_jurisdictions:
+        raw_model["license"]["territorial_restrictions"] = {
+            "denied_jurisdictions": list(denied_jurisdictions),
+            "notice": "Synthetic test restrictions.",
+        }
+    model = ModelDefinition.model_validate(raw_model)
     raw_recipe = json.loads(
         files("vonk_forge_contracts")
         .joinpath("examples", "recipe-image.json")
@@ -63,6 +69,7 @@ def _canonical_catalog_documents() -> tuple[ModelDefinition, RecipeDefinition]:
             "safety_margin_bytes": 10,
         }
     )
+    raw_recipe["models"][0]["model"]["content_sha256"] = content_sha256(model)
     return model, RecipeDefinition.model_validate(raw_recipe)
 
 
@@ -72,18 +79,17 @@ def _seed_canonical_catalog(
     *,
     denied_jurisdictions: tuple[str, ...] = (),
 ) -> CatalogDocumentRevision:
-    model, recipe = _canonical_catalog_documents()
+    model, recipe = _canonical_catalog_documents(
+        denied_jurisdictions=denied_jurisdictions
+    )
     model_digest = content_sha256(model)
     recipe_digest = content_sha256(recipe)
     model_document = model.model_dump(mode="json")
-    if denied_jurisdictions:
-        # The public ModelDefinition v2 contract has no territorial field.  A
-        # test-only projection keeps this informational metadata on the
-        # canonical model row while the identity remains content-addressed.
-        model_document["license"]["territorial_restrictions"] = {
-            "denied_jurisdictions": list(denied_jurisdictions),
-            "notice": "Synthetic test restrictions.",
-        }
+    stored_model = ModelDefinition.model_validate(model_document)
+    assert content_sha256(stored_model) == model_digest
+    recipe_document = recipe.model_dump(mode="json")
+    stored_recipe = RecipeDefinition.model_validate(recipe_document)
+    assert stored_recipe.models[0].model.content_sha256 == model_digest
     with sessions.begin() as session:
         session.add_all(
             [
@@ -135,7 +141,7 @@ def _seed_canonical_catalog(
                     revision_number=1,
                     schema_version=2,
                     state="active",
-                    document=recipe.model_dump(mode="json"),
+                    document=recipe_document,
                     content_digest=recipe_digest,
                     execution_key="b" * 64,
                     created_by="test",
@@ -170,6 +176,42 @@ def _seed_canonical_catalog(
                     model_content_digest=model_digest,
                 ),
             ]
+        )
+        session.flush()
+        stored_model_revision = session.get(
+            CatalogDocumentRevision, MODEL_REVISION_ID
+        )
+        assert stored_model_revision is not None
+        assert content_sha256(
+            ModelDefinition.model_validate(stored_model_revision.document)
+        ) == stored_model_revision.content_digest
+        stored_recipe_revision = session.get(
+            CatalogDocumentRevision, RECIPE_REVISION_ID
+        )
+        assert stored_recipe_revision is not None
+        assert (
+            RecipeDefinition.model_validate(stored_recipe_revision.document)
+            .models[0]
+            .model.content_sha256
+            == stored_model_revision.content_digest
+        )
+        reference = session.scalar(
+            select(CatalogRecipeModelReference).where(
+                CatalogRecipeModelReference.recipe_revision_id == RECIPE_REVISION_ID,
+                CatalogRecipeModelReference.selection_id == recipe.models[0].id,
+            )
+        )
+        assert reference is not None
+        assert (
+            reference.model_kind,
+            reference.model_publisher,
+            reference.model_slug,
+            reference.model_content_digest,
+        ) == (
+            "model",
+            model.identity.publisher,
+            model.identity.slug,
+            model_digest,
         )
         revision = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert revision is not None
