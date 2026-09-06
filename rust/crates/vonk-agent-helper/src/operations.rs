@@ -254,13 +254,13 @@ struct RuntimeRequestOutcome {
     recipe_run_observation: Option<RecipeRunObservationOutcome>,
 }
 
-/// The helper's durable proof that one exact archive was imported into one
-/// exact local image reference.  These identities are deliberately separate:
-/// the registry manifest identifies the signed image, the archive digest
-/// identifies the transferred bytes, and the archive's config digest identifies
-/// the image configuration. Docker stores may expose either that config digest
-/// or the platform manifest as their local image ID, so the operational check
-/// accepts only one of those two identities after the archive is verified.
+/// The helper's durable proof that one Controller-authorized archive delivery
+/// was imported into one exact local image reference. These identities are
+/// deliberately separate: the registry manifest identifies the signed image,
+/// the archive digest identifies the enrolled delivery, the stable archive
+/// metadata binds that delivery to its retained inode, and the config digest
+/// identifies the loaded image. Docker stores may expose either that config
+/// digest or the platform manifest as their local image ID.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct RuntimeImageReceipt {
@@ -269,8 +269,25 @@ struct RuntimeImageReceipt {
     platform_manifest_digest: String,
     archive_sha256: String,
     archive_bytes: u64,
+    archive_identity: RuntimeArchiveIdentity,
     image_config_id: String,
     local_image_reference: String,
+}
+
+/// Stable metadata for the content-addressed archive after the agent has
+/// completed its authenticated delivery.  The helper still checks the live
+/// file type, owner, mode, link count, and length on every use; these values
+/// bind the receipt to the same inode without rereading its payload.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct RuntimeArchiveIdentity {
+    device: u64,
+    inode: u64,
+    bytes: u64,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1047,8 +1064,15 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .ok()
             .filter(|value| (1..=MAX_RUNTIME_ARCHIVE_BYTES).contains(value))
             .ok_or(OperationError::InvalidOperation)?;
-        self.verify_runtime_archive(archive, archive_sha256, expected_bytes)?;
+        // The agent has already authenticated this content-addressed archive
+        // while delivering it from the enrolled Controller.  Keep the
+        // boundary checks here, but do not hash a potentially multi-terabyte
+        // archive again before loading it.
+        let archive_identity = self.inspect_runtime_archive(archive, expected_bytes)?;
         let archive_config_id = runtime_archive_config_digest(archive)?;
+        if archive_identity != self.inspect_runtime_archive(archive, expected_bytes)? {
+            return Err(OperationError::InvalidArtifact);
+        }
         let loaded = self
             .run_docker(&[
                 "load".to_owned(),
@@ -1102,6 +1126,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         ) {
             return Err(OperationError::RuntimeImageIdentityInvalid);
         }
+        if archive_identity != self.inspect_runtime_archive(archive, expected_bytes)? {
+            return Err(OperationError::InvalidArtifact);
+        }
         self.write_image_receipt(
             registry_index_digest,
             platform_manifest_digest,
@@ -1109,6 +1136,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             expected_bytes,
             image_reference,
             &archive_config_id,
+            archive_identity,
         )
         .map_err(|error| match error {
             OperationError::Io(_) | OperationError::InvalidArtifact => {
@@ -1543,6 +1571,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         archive_bytes: u64,
         local_image_reference: &str,
         local_config_id: &str,
+        archive_identity: RuntimeArchiveIdentity,
     ) -> Result<(), OperationError> {
         fs::create_dir_all(&self.roots.runtime_image_receipts)?;
         fs::set_permissions(
@@ -1564,6 +1593,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             platform_manifest_digest: platform_manifest_digest.to_owned(),
             archive_sha256: archive_sha256.to_owned(),
             archive_bytes,
+            archive_identity,
             image_config_id: local_config_id.to_owned(),
             local_image_reference: local_image_reference.to_owned(),
         };
@@ -1626,12 +1656,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
         let (archive_root, _) = self.canonical_archive_root()?;
         let archive = archive_root.join(archive_sha256);
-        self.verify_runtime_archive(archive.as_path(), archive_sha256, receipt.archive_bytes)?;
-        let archive_config_id = runtime_archive_config_digest(&archive)?;
-        if receipt.image_config_id != archive_config_id
+        if self.inspect_runtime_archive(&archive, receipt.archive_bytes)?
+            != receipt.archive_identity
             || !runtime_image_identity_matches(
                 image_config_id,
-                &archive_config_id,
+                &receipt.image_config_id,
                 platform_manifest_digest,
             )
         {
@@ -1661,12 +1690,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
         Ok((archive_root, canonical_root))
     }
 
-    fn verify_runtime_archive(
+    fn inspect_runtime_archive(
         &self,
         path: &Path,
-        expected_digest: &str,
         expected_bytes: u64,
-    ) -> Result<(), OperationError> {
+    ) -> Result<RuntimeArchiveIdentity, OperationError> {
         let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::InvalidArtifact)?;
         if metadata.file_type().is_symlink()
             || !metadata.is_file()
@@ -1679,33 +1707,17 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidArtifact);
         }
-        let mut file = File::open(path).map_err(|_| OperationError::InvalidArtifact)?;
+        let file = File::open(path).map_err(|_| OperationError::InvalidArtifact)?;
         let before = file
             .metadata()
             .map_err(|_| OperationError::InvalidArtifact)?;
-        let mut digest = Sha256::new();
-        let mut consumed = 0_u64;
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            let count = file
-                .read(&mut buffer)
-                .map_err(|_| OperationError::InvalidArtifact)?;
-            if count == 0 {
-                break;
-            }
-            consumed += count as u64;
-            digest.update(&buffer[..count]);
-        }
         let after = file
             .metadata()
             .map_err(|_| OperationError::InvalidArtifact)?;
-        if consumed != expected_bytes
-            || stable_identity(&before) != stable_identity(&after)
-            || hex::encode(digest.finalize()) != expected_digest
-        {
+        if before.len() != expected_bytes || stable_identity(&before) != stable_identity(&after) {
             return Err(OperationError::InvalidArtifact);
         }
-        Ok(())
+        Ok(runtime_archive_identity(&before))
     }
 
     fn require_directory(&self, path: &Path) -> Result<(), OperationError> {
@@ -2957,6 +2969,18 @@ fn stable_identity(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64) {
     )
 }
 
+fn runtime_archive_identity(metadata: &fs::Metadata) -> RuntimeArchiveIdentity {
+    RuntimeArchiveIdentity {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+        bytes: metadata.len(),
+        modified_seconds: metadata.mtime(),
+        modified_nanoseconds: metadata.mtime_nsec(),
+        changed_seconds: metadata.ctime(),
+        changed_nanoseconds: metadata.ctime_nsec(),
+    }
+}
+
 fn sync_directory(path: &Path) -> Result<(), OperationError> {
     OpenOptions::new().read(true).open(path)?.sync_all()?;
     Ok(())
@@ -3851,6 +3875,9 @@ mod tests {
         let archive = roots.agent_data.join("oci-archives").join(&archive_sha256);
         fs::write(&archive, &payload).unwrap();
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+        let archive_identity = executor
+            .inspect_runtime_archive(&archive, payload.len() as u64)
+            .unwrap();
         executor
             .write_image_receipt(
                 &format!("sha256:{}", "a".repeat(64)),
@@ -3859,6 +3886,7 @@ mod tests {
                 payload.len() as u64,
                 &local_reference,
                 &config_id,
+                archive_identity,
             )
             .unwrap();
         executor
@@ -3909,6 +3937,54 @@ mod tests {
         assert_eq!(receipt.platform_manifest_digest, registry_manifest);
         assert_eq!(receipt.image_config_id, config_id);
         assert_eq!(receipt.local_image_reference, local_reference);
+    }
+
+    #[test]
+    fn runtime_image_receipt_rejects_archive_replacement_by_stable_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        fs::create_dir_all(&roots.data).unwrap();
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
+        let (payload, config_id) = docker_save_archive(false);
+        let archive_sha256 = hex_sha256(&payload);
+        let registry_manifest = format!("sha256:{}", "b".repeat(64));
+        let local_reference =
+            format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
+        let archive_root = roots.agent_data.join("oci-archives");
+        fs::create_dir_all(&archive_root).unwrap();
+        let archive = archive_root.join(&archive_sha256);
+        fs::write(&archive, &payload).unwrap();
+        fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+        let archive_identity = executor
+            .inspect_runtime_archive(&archive, payload.len() as u64)
+            .unwrap();
+        executor
+            .write_image_receipt(
+                &format!("sha256:{}", "a".repeat(64)),
+                &registry_manifest,
+                &archive_sha256,
+                payload.len() as u64,
+                &local_reference,
+                &config_id,
+                archive_identity,
+            )
+            .unwrap();
+
+        let mut replacement = payload;
+        replacement[0] ^= 1;
+        fs::write(&archive, replacement).unwrap();
+        assert!(
+            executor
+                .require_image_receipt(
+                    &archive_sha256,
+                    &format!("sha256:{}", "a".repeat(64)),
+                    &registry_manifest,
+                    &local_reference,
+                    &config_id,
+                )
+                .is_err()
+        );
     }
 
     #[test]

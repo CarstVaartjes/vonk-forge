@@ -570,9 +570,19 @@ fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
         &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
     )
     .unwrap();
+    let archive_metadata = fs::metadata(&archive).unwrap();
     assert_eq!(
         receipt,
         serde_json::json!({
+            "archive_identity": {
+                "bytes": body.len(),
+                "changed_nanoseconds": archive_metadata.ctime_nsec(),
+                "changed_seconds": archive_metadata.ctime(),
+                "device": archive_metadata.dev(),
+                "inode": archive_metadata.ino(),
+                "modified_nanoseconds": archive_metadata.mtime_nsec(),
+                "modified_seconds": archive_metadata.mtime(),
+            },
             "archive_bytes": body.len(),
             "archive_sha256": archive_sha256,
             "image_config_id": config_id,
@@ -700,9 +710,19 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     fs::write(&archive, &archive_body).unwrap();
     fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
     fs::create_dir_all(&roots.runtime_image_receipts).unwrap();
+    let archive_metadata = fs::metadata(&archive).unwrap();
     fs::write(
         roots.runtime_image_receipts.join(&archive_sha256),
         serde_json::to_vec(&serde_json::json!({
+            "archive_identity": {
+                "bytes": archive_body.len(),
+                "changed_nanoseconds": archive_metadata.ctime_nsec(),
+                "changed_seconds": archive_metadata.ctime(),
+                "device": archive_metadata.dev(),
+                "inode": archive_metadata.ino(),
+                "modified_nanoseconds": archive_metadata.mtime_nsec(),
+                "modified_seconds": archive_metadata.mtime(),
+            },
             "schema_version": 2,
             "registry_index_digest": registry_index_digest,
             "platform_manifest_digest": platform_manifest_digest,
