@@ -26,21 +26,6 @@ def _nullable_lower_hex(column: str, length: int) -> str:
 
 
 def upgrade() -> None:
-    # Fresh databases have the canonical identities from 0000.  An existing
-    # database already at 0009 still has the legacy local tables; preserve its
-    # non-destructive upgrade path until a dedicated data migration can bind
-    # those rows to canonical identities.
-    tables = set(sa.inspect(op.get_bind()).get_table_names())
-    recipe_table = (
-        "catalog_documents.id"
-        if "catalog_documents" in tables
-        else "local_recipes.id"
-    )
-    revision_table = (
-        "catalog_document_revisions.id"
-        if "catalog_document_revisions" in tables
-        else "local_recipe_revisions.id"
-    )
     op.create_table(
         "recipe_library_sync_runs",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -126,72 +111,5 @@ def upgrade() -> None:
         ["created_at"],
         unique=False,
     )
-    op.create_table(
-        "managed_recipe_library_links",
-        sa.Column("recipe_id", sa.String(length=36), nullable=False),
-        sa.Column("repository", sa.String(length=200), nullable=False),
-        sa.Column("publisher", sa.String(length=63), nullable=False),
-        sa.Column("slug", sa.String(length=63), nullable=False),
-        sa.Column("source_path", sa.String(length=256), nullable=False),
-        sa.Column("remote_commit", sa.String(length=40), nullable=False),
-        sa.Column("remote_content_sha256", sa.String(length=64), nullable=False),
-        sa.Column("local_revision_id", sa.String(length=36), nullable=False),
-        sa.Column("availability", sa.String(length=16), nullable=False),
-        sa.Column("sync_state", sa.String(length=24), nullable=False),
-        sa.Column("last_error", sa.String(length=256), nullable=True),
-        sa.Column("last_seen_run_id", sa.String(length=36), nullable=False),
-        sa.Column("first_synced_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.CheckConstraint(
-            "availability IN ('present','missing')",
-            name="ck_managed_recipe_library_links_availability",
-        ),
-        sa.CheckConstraint(
-            "sync_state IN ('current','update-available','error')",
-            name="ck_managed_recipe_library_links_sync_state",
-        ),
-        sa.CheckConstraint(
-            _lower_hex("remote_content_sha256", 64),
-            name="ck_managed_recipe_library_links_digest",
-        ),
-        sa.CheckConstraint(
-            _lower_hex("remote_commit", 40),
-            name="ck_managed_recipe_library_links_commit",
-        ),
-        sa.ForeignKeyConstraint(["recipe_id"], [recipe_table], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(
-            ["local_revision_id"],
-            [revision_table],
-            ondelete="RESTRICT",
-        ),
-        sa.ForeignKeyConstraint(
-            ["last_seen_run_id"],
-            ["recipe_library_sync_runs.id"],
-            ondelete="RESTRICT",
-        ),
-        sa.PrimaryKeyConstraint("recipe_id"),
-        sa.UniqueConstraint(
-            "repository",
-            "publisher",
-            "slug",
-            name="uq_managed_recipe_library_identity",
-        ),
-    )
-    for column in (
-        "local_revision_id",
-        "availability",
-        "sync_state",
-        "last_seen_run_id",
-        "updated_at",
-    ):
-        op.create_index(
-            op.f(f"ix_managed_recipe_library_links_{column}"),
-            "managed_recipe_library_links",
-            [column],
-            unique=False,
-        )
-
-
 def downgrade() -> None:
-    op.drop_table("managed_recipe_library_links")
     op.drop_table("recipe_library_sync_runs")

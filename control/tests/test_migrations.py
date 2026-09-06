@@ -44,7 +44,6 @@ EXPECTED_BASELINE_TABLES = {
     "job_attempts",
     "job_log_entries",
     "jobs",
-    "managed_recipe_library_links",
     "model_cache_artifacts",
     "model_cache_operations",
     "model_cache_set_artifacts",
@@ -59,16 +58,12 @@ EXPECTED_BASELINE_TABLES = {
     "node_telemetry_samples",
     "observations",
     "recipe_builds",
-    "recipe_global_links",
-    "recipe_import_items",
-    "recipe_imports",
     "recipe_installations",
     "recipe_library_sync_runs",
     "recipe_run_observation_grants",
     "recipe_runs",
     "recipe_source_bundles",
     "source_bundle_archives",
-    "recipe_test_reports",
     "runtime_image_receipts",
     "reconciliation_cancellations",
     "reconciliation_completion_generation",
@@ -133,6 +128,13 @@ def test_fresh_baseline_creates_retained_metadata_with_inert_legacy_storage(
     assert set(Base.metadata.tables) == EXPECTED_BASELINE_TABLES
     assert "agent_node_profiles" in tables
     assert not any(table.startswith("package_") for table in tables)
+    assert not {
+        "managed_recipe_library_links",
+        "recipe_imports",
+        "recipe_import_items",
+        "recipe_global_links",
+        "recipe_test_reports",
+    } & tables
     with engine.connect() as connection:
         assert _metadata_differences_without_retained_legacy(connection) == []
         assert connection.execute(
@@ -206,6 +208,48 @@ def test_fresh_baseline_binds_recipe_builds_to_canonical_recipe_revision(
         foreign_key["referred_table"] != "local_recipe_revisions"
         for foreign_key in recipe_revision_keys
     )
+
+
+def test_runtime_image_receipt_uses_production_identity_fields(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'runtime-image-receipts.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    inspector = inspect(engine)
+
+    assert [column["name"] for column in inspector.get_columns("runtime_image_receipts")] == [
+        "id",
+        "recipe_revision_id",
+        "source",
+        "original_content_digest",
+        "effective_execution_key",
+        "registry_manifest_digest",
+        "platform_manifest_digest",
+        "local_image_config_id",
+        "oci_archive_sha256",
+        "image_bytes",
+        "architecture",
+        "runtime_interface",
+        "runtime_interface_label",
+        "build_id",
+        "verified_at",
+        "state",
+    ]
+    checks = {
+        check["name"] for check in inspector.get_check_constraints("runtime_image_receipts")
+    }
+    assert checks >= {
+        "ck_runtime_image_receipts_source",
+        "ck_runtime_image_receipts_registry_digest",
+        "ck_runtime_image_receipts_platform_digest",
+        "ck_runtime_image_receipts_config_digest",
+        "ck_runtime_image_receipts_archive_digest",
+        "ck_runtime_image_receipts_archive_pair",
+        "ck_runtime_image_receipts_source_build",
+        "ck_runtime_image_receipts_source_artifacts",
+    }
 
 
 def test_existing_compatibility_recovery_revision_upgrades_without_operational_model(

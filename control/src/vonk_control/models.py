@@ -1371,13 +1371,6 @@ class ModelCacheOperation(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-# Transitional import names are aliases only.  They deliberately do not map
-# legacy tables, so Base.metadata and fresh Alembic initialization contain the
-# canonical Model/Recipe catalog exclusively.
-LocalRecipe = CatalogDocument
-LocalRecipeRevision = CatalogDocumentRevision
-
-
 class RecipeLibrarySyncRun(Base):
     """Durable, idempotent evidence for one managed recipe-library refresh."""
 
@@ -1445,175 +1438,6 @@ class RecipeLibrarySyncRun(Base):
         DateTime(timezone=True), nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class ManagedRecipeLibraryLink(Base):
-    """Stable remote identity bound to the latest imported immutable revision."""
-
-    __tablename__ = "managed_recipe_library_links"
-    __table_args__ = (
-        UniqueConstraint(
-            "repository",
-            "publisher",
-            "slug",
-            name="uq_managed_recipe_library_identity",
-        ),
-        CheckConstraint(
-            "availability IN ('present','missing')",
-            name="ck_managed_recipe_library_links_availability",
-        ),
-        CheckConstraint(
-            "sync_state IN ('current','update-available','error')",
-            name="ck_managed_recipe_library_links_sync_state",
-        ),
-        CheckConstraint(
-            _lower_hex("remote_content_sha256", 64),
-            name="ck_managed_recipe_library_links_digest",
-        ),
-        CheckConstraint(
-            _lower_hex("remote_commit", 40),
-            name="ck_managed_recipe_library_links_commit",
-        ),
-    )
-    recipe_id: Mapped[str] = mapped_column(
-        ForeignKey("catalog_documents.id", ondelete="CASCADE"), primary_key=True
-    )
-    repository: Mapped[str] = mapped_column(String(200), nullable=False)
-    publisher: Mapped[str] = mapped_column(String(63), nullable=False)
-    slug: Mapped[str] = mapped_column(String(63), nullable=False)
-    source_path: Mapped[str] = mapped_column(String(256), nullable=False)
-    remote_commit: Mapped[str] = mapped_column(String(40), nullable=False)
-    remote_content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    local_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("catalog_document_revisions.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    availability: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    sync_state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
-    last_error: Mapped[str | None] = mapped_column(String(256))
-    last_seen_run_id: Mapped[str] = mapped_column(
-        ForeignKey("recipe_library_sync_runs.id", ondelete="RESTRICT"),
-        nullable=False,
-        index=True,
-    )
-    first_synced_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-
-
-class RecipeImport(Base):
-    __tablename__ = "recipe_imports"
-    __table_args__ = (
-        UniqueConstraint(
-            "source_kind", "source_sha256", name="uq_recipe_import_source"
-        ),
-        CheckConstraint(
-            "source_kind IN ('local','workload_run','global','recipe_library')",
-            name="ck_recipe_imports_source_kind",
-        ),
-        CheckConstraint(
-            _lower_hex("source_sha256", 64), name="ck_recipe_imports_source_digest"
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    recipe_id: Mapped[str] = mapped_column(
-        ForeignKey("catalog_documents.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    source_kind: Mapped[str] = mapped_column(String(16), nullable=False)
-    source_reference: Mapped[str] = mapped_column(Text, nullable=False)
-    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    redacted_source: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-
-
-class RecipeImportItem(Base):
-    __tablename__ = "recipe_import_items"
-    __table_args__ = (
-        CheckConstraint(
-            "disposition IN ('imported','incorporated','resolved','transformed','resolution_required',"
-            "'overlay_required','unsupported_blocking','dropped_redundant')",
-            name="ck_recipe_import_items_disposition",
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    import_id: Mapped[str] = mapped_column(
-        ForeignKey("recipe_imports.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    source_path: Mapped[str] = mapped_column(Text, nullable=False)
-    disposition: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    destination_path: Mapped[str | None] = mapped_column(Text)
-    reason_code: Mapped[str] = mapped_column(String(128), nullable=False)
-    detail: Mapped[str] = mapped_column(Text, nullable=False)
-    blocking: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-
-
-class RecipeGlobalLink(Base):
-    __tablename__ = "recipe_global_links"
-    __table_args__ = (
-        UniqueConstraint(
-            "global_publisher", "global_slug", name="uq_recipe_global_link_identity"
-        ),
-        CheckConstraint("global_revision >= 1", name="ck_recipe_global_links_revision"),
-        CheckConstraint(
-            _lower_hex("global_content_sha256", 64),
-            name="ck_recipe_global_links_digest",
-        ),
-        CheckConstraint(
-            "sync_state IN ('current','local-ahead','remote-ahead','unavailable')",
-            name="ck_recipe_global_links_state",
-        ),
-    )
-    recipe_id: Mapped[str] = mapped_column(
-        ForeignKey("catalog_documents.id", ondelete="CASCADE"), primary_key=True
-    )
-    global_recipe_id: Mapped[str] = mapped_column(
-        String(36), nullable=False, index=True
-    )
-    global_publisher: Mapped[str] = mapped_column(String(63), nullable=False)
-    global_slug: Mapped[str] = mapped_column(String(63), nullable=False)
-    global_revision: Mapped[int] = mapped_column(Integer, nullable=False)
-    global_content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    sync_state: Mapped[str] = mapped_column(String(24), nullable=False)
-    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class RecipeTestReport(Base):
-    """Publisher-submitted local test evidence bound to one immutable revision."""
-
-    __tablename__ = "recipe_test_reports"
-    __table_args__ = (
-        UniqueConstraint(
-            "recipe_revision_id", "report_sha256", name="uq_recipe_test_report_digest"
-        ),
-        CheckConstraint(
-            _lower_hex("report_sha256", 64), name="ck_recipe_test_reports_digest"
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    recipe_revision_id: Mapped[str] = mapped_column(
-        ForeignKey("catalog_document_revisions.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    report_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    report: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    created_by: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
 
 
 class RecipeBuild(Base):
@@ -1697,19 +1521,16 @@ class RuntimeImageReceipt(Base):
     __table_args__ = (
         UniqueConstraint(
             "recipe_revision_id",
-            "source_type",
+            "source",
             "original_content_digest",
             "effective_execution_key",
-            "image_digest",
+            "platform_manifest_digest",
+            "local_image_config_id",
             name="uq_runtime_image_receipt_identity",
         ),
         CheckConstraint(
-            "source_type IN ('registry','source-build','archive')",
-            name="ck_runtime_image_receipts_source_type",
-        ),
-        CheckConstraint(
-            "state IN ('verified','revoked')",
-            name="ck_runtime_image_receipts_state",
+            "source IN ('published','controller-build')",
+            name="ck_runtime_image_receipts_source",
         ),
         CheckConstraint(
             "length(original_content_digest) = 64 AND original_content_digest = lower(original_content_digest)",
@@ -1720,24 +1541,44 @@ class RuntimeImageReceipt(Base):
             name="ck_runtime_image_receipts_execution_key",
         ),
         CheckConstraint(
-            "length(image_digest) = 71 AND substr(image_digest, 1, 7) = 'sha256:'",
-            name="ck_runtime_image_receipts_image_digest",
+            "length(platform_manifest_digest) = 71 AND substr(platform_manifest_digest, 1, 7) = 'sha256:'",
+            name="ck_runtime_image_receipts_platform_digest",
         ),
         CheckConstraint(
-            "archive_sha256 IS NULL OR (length(archive_sha256) = 64 AND archive_sha256 = lower(archive_sha256))",
+            "registry_manifest_digest IS NULL OR (length(registry_manifest_digest) = 71 AND substr(registry_manifest_digest, 1, 7) = 'sha256:')",
+            name="ck_runtime_image_receipts_registry_digest",
+        ),
+        CheckConstraint(
+            "length(local_image_config_id) = 71 AND substr(local_image_config_id, 1, 7) = 'sha256:'",
+            name="ck_runtime_image_receipts_config_digest",
+        ),
+        CheckConstraint(
+            "oci_archive_sha256 IS NULL OR (length(oci_archive_sha256) = 64 AND oci_archive_sha256 = lower(oci_archive_sha256))",
             name="ck_runtime_image_receipts_archive_digest",
         ),
         CheckConstraint(
-            "archive_bytes IS NULL OR archive_bytes > 0",
-            name="ck_runtime_image_receipts_archive_bytes",
+            "image_bytes IS NULL OR image_bytes > 0",
+            name="ck_runtime_image_receipts_image_bytes",
         ),
         CheckConstraint(
-            "(archive_sha256 IS NULL AND archive_bytes IS NULL) OR (archive_sha256 IS NOT NULL AND archive_bytes IS NOT NULL)",
+            "(oci_archive_sha256 IS NULL AND image_bytes IS NULL) OR (oci_archive_sha256 IS NOT NULL AND image_bytes IS NOT NULL)",
             name="ck_runtime_image_receipts_archive_pair",
         ),
         CheckConstraint(
-            "source_type != 'source-build' OR build_id IS NOT NULL",
+            "(source = 'published' AND build_id IS NULL) OR (source = 'controller-build' AND build_id IS NOT NULL)",
             name="ck_runtime_image_receipts_source_build",
+        ),
+        CheckConstraint(
+            "source = 'published' OR (registry_manifest_digest IS NULL AND oci_archive_sha256 IS NOT NULL AND image_bytes IS NOT NULL)",
+            name="ck_runtime_image_receipts_source_artifacts",
+        ),
+        CheckConstraint(
+            "length(architecture) BETWEEN 1 AND 32 AND length(runtime_interface) BETWEEN 1 AND 64 AND length(runtime_interface_label) BETWEEN 1 AND 128",
+            name="ck_runtime_image_receipts_runtime_identity",
+        ),
+        CheckConstraint(
+            "state IN ('verified','revoked')",
+            name="ck_runtime_image_receipts_state",
         ),
         ForeignKeyConstraint(
             ["recipe_revision_id"],
@@ -1756,19 +1597,17 @@ class RuntimeImageReceipt(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     recipe_revision_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    source_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    recipe_publisher: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
-    recipe_slug: Mapped[str] = mapped_column(String(63), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
     original_content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     effective_execution_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    image_digest: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
-    registry_parent: Mapped[str | None] = mapped_column(String(255))
-    selected_platform_manifest: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    config_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    archive_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
-    archive_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    registry_manifest_digest: Mapped[str | None] = mapped_column(String(71), index=True)
+    platform_manifest_digest: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
+    local_image_config_id: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
+    oci_archive_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    image_bytes: Mapped[int | None] = mapped_column(BigInteger)
     architecture: Mapped[str] = mapped_column(String(32), nullable=False)
-    interface: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_interface: Mapped[str] = mapped_column(String(64), nullable=False)
+    runtime_interface_label: Mapped[str] = mapped_column(String(128), nullable=False)
     build_id: Mapped[str | None] = mapped_column(String(36), index=True)
     verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="verified", index=True)
