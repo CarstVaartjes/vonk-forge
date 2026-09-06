@@ -98,16 +98,61 @@ test "$manifest_push_succeeded" = true
 docker manifest inspect --insecure "$image_name" >"$report_root/manifest-inspect.json"
 platform_ref=$(docker image inspect "$image_platform" --format '{{index .RepoDigests 0}}')
 platform_digest=${platform_ref##*@}
+docker manifest inspect --insecure "$platform_ref" >"$report_root/platform-manifest-inspect.json"
+platform_config_digest=$(python3 - "$report_root/platform-manifest-inspect.json" <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    manifest = json.load(handle)
+config = manifest.get("config", {}).get("digest")
+if not isinstance(config, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", config) is None:
+    raise SystemExit("platform manifest did not expose one valid config digest")
+print(config)
+PY
+)
 registry_digest=$(printf '%s\n' "$manifest_push_output" \
   | grep -Eo 'sha256:[0-9a-f]{64}' \
   | tail -n 1)
 test -n "$registry_digest"
 test "$registry_digest" != "$platform_digest"
-config_id=$(docker image inspect "$image_platform" --format '{{.Id}}')
+docker_local_image_id=$(docker image inspect "$image_platform" --format '{{.Id}}')
 docker image inspect "$platform_ref" >"$report_root/source-image-ref-inspect.json"
 docker save --output "$fixture_dir/image.oci.tar" "$platform_ref"
 archive_sha=$(sha256sum "$fixture_dir/image.oci.tar" | awk '{print $1}')
 archive_bytes=$(stat -c '%s' "$fixture_dir/image.oci.tar")
+archive_config_digest=$(python3 - "$fixture_dir/image.oci.tar" <<'PY'
+import hashlib
+import json
+import re
+import sys
+import tarfile
+
+with tarfile.open(sys.argv[1], "r") as archive:
+    manifest_entries = json.load(archive.extractfile("manifest.json"))
+    if len(manifest_entries) != 1:
+        raise SystemExit("archive must contain exactly one image")
+    config_path = manifest_entries[0].get("Config")
+    if not isinstance(config_path, str) or re.fullmatch(
+        r"blobs/sha256/[0-9a-f]{64}(?:\.json)?", config_path
+    ) is None:
+        raise SystemExit("archive config path is invalid")
+    config = archive.extractfile(config_path).read()
+    config_digest = "sha256:" + hashlib.sha256(config).hexdigest()
+    config_name = config_path.rsplit("/", 1)[1]
+    config_name = config_name.removesuffix(".json")
+    if config_digest != "sha256:" + config_name:
+        raise SystemExit("archive config digest does not match its blob name")
+print(config_digest)
+PY
+)
+test "$platform_config_digest" = "$archive_config_digest"
+test "$platform_config_digest" != "$platform_digest"
+config_id=$archive_config_digest
+printf 'registry_index_digest=%s\nplatform_manifest_digest=%s\nplatform_config_digest=%s\narchive_config_digest=%s\ndocker_local_image_id=%s\n' \
+  "$registry_digest" "$platform_digest" "$platform_config_digest" "$archive_config_digest" "$docker_local_image_id" \
+  >"$report_root/image-identities.txt"
 local_image="localhost/vonk/compiled-runtime-$archive_sha"
 image_ref="$local_image@$platform_digest"
 cp "$fixture_dir/image.oci.tar" "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
@@ -264,5 +309,6 @@ grep -q 'tmp-fresh' "$report_root/container.log"
 test -f /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/home/helper-entrypoint-ok
 test "$(cat /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache/helper-cache-ok)" = cache-created
 test -f /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/helper-tmp-ok
-printf 'helper-process-proof=passed\narchive_sha256=%s\narchive_bytes=%s\nimage_ref=%s\nplatform_digest=%s\nconfig_id=%s\n' \
-  "$archive_sha" "$archive_bytes" "$image_ref" "$platform_digest" "$config_id" | tee "$report_root/summary.txt"
+printf 'helper-process-proof=passed\narchive_sha256=%s\narchive_bytes=%s\nimage_ref=%s\nplatform_digest=%s\nplatform_config_digest=%s\nconfig_id=%s\ndocker_local_image_id=%s\n' \
+  "$archive_sha" "$archive_bytes" "$image_ref" "$platform_digest" "$platform_config_digest" "$config_id" "$docker_local_image_id" \
+  | tee "$report_root/summary.txt"

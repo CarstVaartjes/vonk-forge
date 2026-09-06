@@ -26,6 +26,7 @@ const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
 const MAX_RUNTIME_REQUEST_BYTES: u64 = 64 * 1024;
+const MAX_RUNTIME_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 const MAX_COMPILED_MODEL_FILES: usize = 4096;
 const MAX_COMPILED_MODEL_PATH_BYTES: usize = 512;
 const MAX_COMPILED_MODEL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
@@ -256,8 +257,10 @@ struct RuntimeRequestOutcome {
 /// The helper's durable proof that one exact archive was imported into one
 /// exact local image reference.  These identities are deliberately separate:
 /// the registry manifest identifies the signed image, the archive digest
-/// identifies the transferred bytes, and Docker's config ID identifies the
-/// object actually loaded on this host.
+/// identifies the transferred bytes, and the archive's config digest identifies
+/// the image configuration. Docker stores may expose either that config digest
+/// or the platform manifest as their local image ID, so the operational check
+/// accepts only one of those two identities after the archive is verified.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct RuntimeImageReceipt {
@@ -268,6 +271,12 @@ struct RuntimeImageReceipt {
     archive_bytes: u64,
     image_config_id: String,
     local_image_reference: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DockerSaveManifestEntry {
+    config: String,
 }
 
 struct RuntimeRequestGrantBinding<'a> {
@@ -1039,6 +1048,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .filter(|value| (1..=MAX_RUNTIME_ARCHIVE_BYTES).contains(value))
             .ok_or(OperationError::InvalidOperation)?;
         self.verify_runtime_archive(archive, archive_sha256, expected_bytes)?;
+        let archive_config_id = runtime_archive_config_digest(archive)?;
         let loaded = self
             .run_docker(&[
                 "load".to_owned(),
@@ -1085,13 +1095,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::RuntimeImageIdentityInvalid);
         }
+        if !runtime_image_identity_matches(
+            &inspected.0,
+            &archive_config_id,
+            platform_manifest_digest,
+        ) {
+            return Err(OperationError::RuntimeImageIdentityInvalid);
+        }
         self.write_image_receipt(
             registry_index_digest,
             platform_manifest_digest,
             archive_sha256,
             expected_bytes,
             image_reference,
-            &inspected.0,
+            &archive_config_id,
         )
         .map_err(|error| match error {
             OperationError::Io(_) | OperationError::InvalidArtifact => {
@@ -1604,13 +1621,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || receipt.registry_index_digest != registry_index_digest
             || receipt.platform_manifest_digest != platform_manifest_digest
             || receipt.local_image_reference != local_image_reference
-            || receipt.image_config_id != image_config_id
         {
             return Err(OperationError::InvalidArtifact);
         }
         let (archive_root, _) = self.canonical_archive_root()?;
         let archive = archive_root.join(archive_sha256);
         self.verify_runtime_archive(archive.as_path(), archive_sha256, receipt.archive_bytes)?;
+        let archive_config_id = runtime_archive_config_digest(&archive)?;
+        if receipt.image_config_id != archive_config_id
+            || !runtime_image_identity_matches(
+                image_config_id,
+                &archive_config_id,
+                platform_manifest_digest,
+            )
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
         Ok(())
     }
 
@@ -1685,6 +1711,66 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn require_directory(&self, path: &Path) -> Result<(), OperationError> {
         require_safe_directory(path, self.required_owner_uid)
     }
+}
+
+fn runtime_image_identity_matches(
+    local_image_id: &str,
+    archive_config_id: &str,
+    platform_manifest_digest: &str,
+) -> bool {
+    local_image_id == archive_config_id || local_image_id == platform_manifest_digest
+}
+
+fn runtime_archive_config_digest(path: &Path) -> Result<String, OperationError> {
+    let manifest = read_tar_entry(path, Path::new("manifest.json"), MAX_RUNTIME_CONFIG_BYTES)?;
+    let entries: Vec<DockerSaveManifestEntry> =
+        serde_json::from_slice(&manifest).map_err(|_| OperationError::InvalidArtifact)?;
+    if entries.len() != 1 {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let config_name = entries[0]
+        .config
+        .strip_prefix("blobs/sha256/")
+        .ok_or(OperationError::InvalidArtifact)?;
+    let config = config_name.strip_suffix(".json").unwrap_or(config_name);
+    if !lower_hex(config, 64) {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let config_path = PathBuf::from(format!("blobs/sha256/{config_name}"));
+    let bytes = read_tar_entry(path, &config_path, MAX_RUNTIME_CONFIG_BYTES)?;
+    if hex_sha256(&bytes) != config {
+        return Err(OperationError::InvalidArtifact);
+    }
+    Ok(format!("sha256:{config}"))
+}
+
+fn read_tar_entry(path: &Path, target: &Path, limit: usize) -> Result<Vec<u8>, OperationError> {
+    let file = File::open(path).map_err(|_| OperationError::InvalidArtifact)?;
+    let mut archive = tar::Archive::new(file);
+    let mut found = None;
+    for entry in archive
+        .entries()
+        .map_err(|_| OperationError::InvalidArtifact)?
+    {
+        let mut entry = entry.map_err(|_| OperationError::InvalidArtifact)?;
+        if entry.path().map_err(|_| OperationError::InvalidArtifact)? != target {
+            continue;
+        }
+        if found.is_some() || !entry.header().entry_type().is_file() || entry.size() > limit as u64
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        let size = entry.size() as usize;
+        let mut bytes = Vec::with_capacity(size);
+        entry
+            .read_to_end(&mut bytes)
+            .map_err(|_| OperationError::InvalidArtifact)?;
+        if bytes.len() != size {
+            return Err(OperationError::InvalidArtifact);
+        }
+        found = Some(bytes);
+    }
+    found.ok_or(OperationError::InvalidArtifact)
 }
 
 fn bounded_container_exit_code(output: &CommandOutput) -> i32 {
@@ -2873,6 +2959,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
 
+    use tar::Builder;
     use tempfile::TempDir;
 
     use super::{
@@ -2932,7 +3019,7 @@ mod tests {
                     b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest\n"
                         .to_vec()
                 } else if inspect && !digest_lookup {
-                    format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "c".repeat(64))
+                    format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "b".repeat(64))
                         .into_bytes()
                 } else {
                     Vec::new()
@@ -3131,6 +3218,39 @@ mod tests {
             .join("installations")
             .join("installation-1")
             .join("models")
+    }
+
+    fn docker_save_archive() -> (Vec<u8>, String) {
+        let config = br#"{"config":{"User":"10001:10001"}}"#;
+        let config_digest = hex_sha256(config);
+        let manifest = serde_json::to_vec(&serde_json::json!([
+            {
+                "Config": format!("blobs/sha256/{config_digest}.json"),
+                "RepoTags": ["localhost/vonk/test:latest"],
+                "Layers": [],
+            }
+        ]))
+        .unwrap();
+        let mut builder = Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(manifest.len() as u64);
+        header.set_mode(0o600);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "manifest.json", manifest.as_slice())
+            .unwrap();
+        let config_path = format!("blobs/sha256/{config_digest}.json");
+        let mut header = tar::Header::new_gnu();
+        header.set_size(config.len() as u64);
+        header.set_mode(0o600);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, config_path, &config[..])
+            .unwrap();
+        (
+            builder.into_inner().unwrap(),
+            format!("sha256:{config_digest}"),
+        )
     }
 
     fn runtime_arguments(roots: &ManagedRoots, mounts: &[(PathBuf, &str, bool)]) -> Vec<String> {
@@ -3656,15 +3776,14 @@ mod tests {
         fs::create_dir_all(&roots.data).unwrap();
         let executor =
             OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
-        let payload = [0_u8; 17];
+        let (payload, config_id) = docker_save_archive();
         let archive_sha256 = hex_sha256(&payload);
         let registry_manifest = format!("sha256:{}", "b".repeat(64));
         let local_reference =
             format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
-        let config_id = format!("sha256:{}", "c".repeat(64));
         fs::create_dir_all(roots.agent_data.join("oci-archives")).unwrap();
         let archive = roots.agent_data.join("oci-archives").join(&archive_sha256);
-        fs::write(&archive, payload).unwrap();
+        fs::write(&archive, &payload).unwrap();
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
         executor
             .write_image_receipt(
@@ -3718,8 +3837,9 @@ mod tests {
             &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
         )
         .unwrap();
+        assert_ne!(config_id, registry_manifest);
         assert_eq!(receipt.archive_sha256, archive_sha256);
-        assert_eq!(receipt.archive_bytes, 17);
+        assert_eq!(receipt.archive_bytes, payload.len() as u64);
         assert_eq!(receipt.platform_manifest_digest, registry_manifest);
         assert_eq!(receipt.image_config_id, config_id);
         assert_eq!(receipt.local_image_reference, local_reference);
@@ -3730,15 +3850,15 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(temp.path());
         fs::create_dir_all(&roots.data).unwrap();
-        let payload = b"tiny cached image";
-        let archive_sha256 = hex_sha256(payload);
+        let (payload, config_id) = docker_save_archive();
+        let archive_sha256 = hex_sha256(&payload);
         let registry_manifest = format!("sha256:{}", "b".repeat(64));
         let local_reference =
             format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
         let archive_root = roots.agent_data.join("oci-archives");
         fs::create_dir_all(&archive_root).unwrap();
         let archive = archive_root.join(&archive_sha256);
-        fs::write(&archive, payload).unwrap();
+        fs::write(&archive, &payload).unwrap();
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
         let executor =
             OperationExecutor::new(roots.clone(), &[0; 32], RuntimeImportRunner, None).unwrap();
@@ -3758,10 +3878,14 @@ mod tests {
                 &format!("sha256:{}", "a".repeat(64)),
                 &registry_manifest,
                 &local_reference,
-                &format!("sha256:{}", "c".repeat(64)),
+                &format!("sha256:{}", "b".repeat(64)),
             )
             .unwrap();
-        assert!(roots.runtime_image_receipts.join(&archive_sha256).is_file());
+        let receipt: RuntimeImageReceipt = serde_json::from_slice(
+            &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receipt.image_config_id, config_id);
     }
 
     #[test]
@@ -3769,15 +3893,15 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(temp.path());
         fs::create_dir_all(&roots.data).unwrap();
-        let payload = b"tiny cached image";
-        let archive_sha256 = hex_sha256(payload);
+        let (payload, _config_id) = docker_save_archive();
+        let archive_sha256 = hex_sha256(&payload);
         let registry_manifest = format!("sha256:{}", "b".repeat(64));
         let local_reference =
             format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
         let archive_root = roots.agent_data.join("oci-archives");
         fs::create_dir_all(&archive_root).unwrap();
         let archive = archive_root.join(&archive_sha256);
-        fs::write(&archive, payload).unwrap();
+        fs::write(&archive, &payload).unwrap();
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
         // The runner reports a valid pre-existing local image if asked; the
         // helper must reject before inspecting it because docker load gave no
