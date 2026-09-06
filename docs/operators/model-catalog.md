@@ -24,15 +24,10 @@ does not silently rewrite an accepted recipe. Auxiliary model versions are
 resolved by the same exact content-addressed identity; an adapter must not
 silently fetch a mutable companion checkpoint.
 
-The broader discovery list is maintained separately in the
-[model target ledger](model-targets.md). It distinguishes accepted recipes
-from candidate and blocked upstreams, so the Library can remain trustworthy
-while the project continues to add defaults.
-
 The reviewed public recipe source is the separate [standard recipe
-library](recipe-library.md). The local Library imports an exact library
-snapshot, then remains authoritative for installation, placement, runs, and
-fleet evidence.
+library](recipe-library.md). It is the sole Model and Recipe document
+authority. The Controller synchronizes an exact library snapshot, then
+remains authoritative for installation, placement, runs, and fleet evidence.
 
 ## Exact immutable identity
 
