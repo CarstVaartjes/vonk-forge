@@ -10,6 +10,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from pathlib import Path
 from threading import Event
 
@@ -71,11 +72,6 @@ from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
-FROZEN_CONTRACTS_ROOT = Path(
-    "/private/tmp/vonk-forge-recipes-qwen38-vllm-main57/contracts/src"
-)
-
-
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
 NODE_C = "spk_" + "c" * 32
@@ -108,9 +104,9 @@ def _canonical_recipe_fixture(
         else "recipe-image.json"
     )
     raw = json.loads(
-        (
-            FROZEN_CONTRACTS_ROOT / "vonk_forge_contracts" / "examples" / example
-        ).read_text(encoding="utf-8")
+        files("vonk_forge_contracts")
+        .joinpath("examples", example)
+        .read_text(encoding="utf-8")
     )
     raw["identity"]["slug"] = slug
     recipe = RecipeDefinition.model_validate(raw)
