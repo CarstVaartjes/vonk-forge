@@ -54,13 +54,13 @@ def setup(
         .joinpath("examples", "model-definition.json")
         .read_text()
     )
-    model = ModelDefinition.model_validate(model_document)
-    model_document = model.model_dump(mode="json")
     if denied_jurisdictions:
         model_document["license"]["territorial_restrictions"] = {
             "denied_jurisdictions": list(denied_jurisdictions),
             "notice": "Use is prohibited in the configured territories.",
         }
+    model = ModelDefinition.model_validate(model_document)
+    model_document = model.model_dump(mode="json")
     document["models"][0]["model"]["content_sha256"] = content_sha256(model)
     memory = document["topology"]["roles"][0]["resources"]["memory"]
     memory.update(
@@ -146,7 +146,7 @@ def setup(
         build = RecipeBuild(
             recipe_revision_id=revision_id,
             builder_node_id=node,
-            source_bundle_sha256=document["build"]["context"]["sha256"],
+            source_bundle_sha256="c" * 64,
             build_input_sha256="e" * 64,
             state="succeeded",
             policy_report={"passed": True},
