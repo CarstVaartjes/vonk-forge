@@ -810,18 +810,13 @@ pub struct RecipeImageImportRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct RecipeInstallRequest {
-    pub expected_bytes: u64,
-    pub image_digest: String,
-    pub installation_id: Uuid,
-    pub mapping_generation: u64,
-    pub mapping_id: Uuid,
-    pub plan_digest: String,
-    pub rank: u32,
-    pub recipe_build_id: Uuid,
-    pub recipe_content_sha256: String,
-    pub recipe_revision_id: Uuid,
-    pub role: String,
     pub schema_version: u8,
+    pub installation_id: Uuid,
+    pub plan_digest: String,
+    pub expected_bytes: u64,
+    pub rank: u32,
+    pub role: String,
+    pub compiled_execution_plan: Value,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -837,6 +832,7 @@ pub enum RecipeStartPhase {
 #[serde(deny_unknown_fields)]
 pub struct RecipeStartRequest {
     pub alias: String,
+    pub compiled_execution_plan: Value,
     pub endpoint_address: std::net::IpAddr,
     pub image_digest: String,
     pub installation_id: Uuid,
@@ -941,17 +937,16 @@ impl RecipeOperationRequest {
             }
             Self::JobRun(value) => validate_recipe_job(value),
             Self::Install(value) => {
-                valid_common(value.schema_version, &value.plan_digest)
+                value.schema_version == 2
+                    && lower_hex(&value.plan_digest, 64)
                     && value.expected_bytes <= 16 * 1024_u64.pow(4)
-                    && lower_hex(&value.recipe_content_sha256, 64)
-                    && valid_oci_digest(&value.image_digest)
-                    && value.mapping_generation >= 1
                     && valid_role(&value.role)
+                    && value.compiled_execution_plan.is_object()
             }
             Self::Start(value) => {
                 let valid_phase = match (&value.phase, &value.start_deadline, value.run_generation)
                 {
-                    (None, None, None) => true,
+                    (None, None, None) => value.world_size == 1,
                     (Some(RecipeStartPhase::RankLaunch), Some(deadline), Some(generation)) => {
                         generation > 0
                             && value.world_size > 1
@@ -970,7 +965,8 @@ impl RecipeOperationRequest {
                     }
                     _ => false,
                 };
-                valid_common(value.schema_version, &value.plan_digest)
+                value.schema_version == 2
+                    && lower_hex(&value.plan_digest, 64)
                     && lower_hex(&value.recipe_content_sha256, 64)
                     && valid_oci_digest(&value.image_digest)
                     && value.mapping_generation >= 1
@@ -996,6 +992,7 @@ impl RecipeOperationRequest {
                             && value.master_port.is_some_and(|port| port >= 1024)
                     }
                     && valid_alias(&value.alias)
+                    && value.compiled_execution_plan.is_object()
             }
             Self::Stop(value) => valid_common(value.schema_version, &value.plan_digest),
             Self::Uninstall(value) => {
@@ -1045,6 +1042,7 @@ mod recipe_start_tests {
     ) -> Value {
         let mut payload = serde_json::json!({
             "alias": "distributed-model",
+            "compiled_execution_plan": {},
             "endpoint_address": "100.100.20.30",
             "image_digest": format!("sha256:{}", "a".repeat(64)),
             "installation_id": "00000000-0000-4000-8000-000000000001",
@@ -1061,7 +1059,7 @@ mod recipe_start_tests {
             "reserved_memory_bytes": 1024,
             "role": if rank == 0 { "entrypoint" } else { "worker" },
             "run_id": "00000000-0000-4000-8000-000000000004",
-            "schema_version": 1,
+            "schema_version": 2,
             "world_size": world_size,
         });
         if let Some(phase) = phase {
@@ -1100,7 +1098,7 @@ mod recipe_start_tests {
     }
 
     #[test]
-    fn legacy_start_payloads_without_a_phase_remain_accepted_and_omit_the_field() {
+    fn schema_two_start_payload_requires_phases_for_distributed_runs() {
         let single = parsed_start(start_payload(1, 0, None, None, None)).unwrap();
         assert_eq!(single.phase, None);
         assert_eq!(single.start_deadline, None);
@@ -1115,10 +1113,8 @@ mod recipe_start_tests {
             Some("192.168.100.3"),
             Some("192.168.100.2"),
             None,
-        ))
-        .unwrap();
-        assert_eq!(distributed.phase, None);
-        assert_eq!(distributed.start_deadline, None);
+        ));
+        assert!(distributed.is_err());
     }
 
     #[test]
@@ -1218,6 +1214,44 @@ mod recipe_start_tests {
             Value::String("2026-09-01T14:00:00+02:00".to_owned()),
         );
         assert!(parsed_start(non_utc_deadline).is_err());
+    }
+}
+
+#[cfg(test)]
+mod recipe_install_tests {
+    use super::*;
+
+    #[test]
+    fn schema_two_install_requires_the_inline_compiled_plan() {
+        let payload = serde_json::json!({
+            "compiled_execution_plan": {},
+            "expected_bytes": 1024,
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "plan_digest": "a".repeat(64),
+            "rank": 0,
+            "role": "entrypoint",
+            "schema_version": 2,
+        });
+        let claim = AgentClaim {
+            attempt: 1,
+            authority_revision: "b".repeat(64),
+            deadline: "2026-09-01T12:00:00+00:00".parse().unwrap(),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            operation: "recipe.install".to_owned(),
+            operation_id: Uuid::new_v4(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            schema_version: 1,
+        };
+        let RecipeOperationRequest::Install(request) =
+            RecipeOperationRequest::parse(&claim).expect("schema 2 install wire should parse")
+        else {
+            panic!("expected install request");
+        };
+        assert_eq!(request.schema_version, 2);
+        assert!(request.compiled_execution_plan.is_object());
     }
 }
 
