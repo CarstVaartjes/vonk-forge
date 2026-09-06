@@ -696,7 +696,7 @@ def test_partial_immutable_objects_are_completable_and_conflicts_fail(
     publication = receipt()
     state_bundle, public_bundle = bundles(tmp_path, publication)
     operations: list[str] = []
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     private = FakeR2(
         "state", operations, fail_once={f"{prefix}/commit.json"}
     )
@@ -737,7 +737,7 @@ def test_candidate_data_objects_upload_concurrently_before_commit(
 
     state.commit_candidate(private, publication, state_bundle, public_bundle)
 
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     commit = operations.index(f"state:write:{prefix}/commit.json")
     state_object = operations.index(f"state:write:{prefix}/aptly-state.tar.gz")
     public_object = operations.index(f"state:write:{prefix}/public-tree.tar.gz")
@@ -749,7 +749,7 @@ def test_single_partial_data_object_is_completed_on_exact_retry(tmp_path: Path) 
     publication = receipt()
     state_bundle, public_bundle = bundles(tmp_path, publication)
     operations: list[str] = []
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     private = FakeR2(
         "state",
         operations,
@@ -774,7 +774,7 @@ def test_commit_requires_persisted_data_hashes_to_match(tmp_path: Path) -> None:
     publication = receipt()
     state_bundle, public_bundle = bundles(tmp_path, publication)
     operations: list[str] = []
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     private = FakeR2(
         "state",
         operations,
@@ -803,6 +803,43 @@ def test_committed_manifest_is_the_monotonic_high_water_without_latest(
         state.prepare_candidate(private, older)
 
 
+def test_new_arm64_epoch_ignores_legacy_state_objects() -> None:
+    state = load_state_module()
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    private.objects["versions/legacy/commit.json"] = b"incompatible historical receipt"
+
+    publication = receipt("0.1.0~dev.1786300000+g0123456789ab")
+    prepared = state.prepare_candidate(private, publication)
+
+    assert prepared.mode == "pending"
+    assert "state:list:versions/" not in operations
+    assert "state:read:versions/legacy/commit.json" not in operations
+
+
+def test_new_arm64_epoch_preserves_global_publication_high_water() -> None:
+    state = load_state_module()
+    operations: list[str] = []
+    private = FakeR2("state", operations)
+    historical_version = "0.1.0~dev.1786300001+g0123456789ab"
+    private.objects["latest.json"] = state.canonical_json(
+        {
+            "channel": "dev",
+            "commit": f"versions/{historical_version}/commit.json",
+            "commit_sha256": "a" * 64,
+            "version": historical_version,
+        }
+    )
+
+    with pytest.raises(state.StateError, match="publication epoch"):
+        state.prepare_candidate(
+            private,
+            receipt("0.1.0~dev.1786300000+g0123456789ab"),
+        )
+
+    assert "versions/legacy/commit.json" not in private.objects
+
+
 def test_pending_prepare_only_downloads_predecessor_aptly_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -820,7 +857,7 @@ def test_pending_prepare_only_downloads_predecessor_aptly_state(
 
     prepared = state.prepare_candidate(private, current)
 
-    prefix = f"versions/{previous['version']}"
+    prefix = f"arm64/versions/{previous['version']}"
     assert prepared.state_bundle == state_bundle
     assert f"state:read:{prefix}/aptly-state.tar.gz" in operations
     assert f"state:read:{prefix}/public-tree.tar.gz" not in operations
@@ -845,7 +882,7 @@ def test_prepare_scans_committed_manifests_concurrently(
         state_bundle, public_bundle = bundles(root, publication)
         state.commit_candidate(private, publication, state_bundle, public_bundle)
     private.concurrent_reads = {
-        f"versions/{publication['version']}/commit.json"
+        f"arm64/versions/{publication['version']}/commit.json"
         for publication in committed
     }
 
@@ -873,7 +910,7 @@ def test_concurrent_manifest_scan_rejects_corruption_before_bundle_reads(
         root.mkdir()
         state_bundle, public_bundle = bundles(root, publication)
         state.commit_candidate(private, publication, state_bundle, public_bundle)
-        commit_keys.add(f"versions/{publication['version']}/commit.json")
+        commit_keys.add(f"arm64/versions/{publication['version']}/commit.json")
     private.objects[max(commit_keys)] = b"{}\n"
     private.concurrent_reads = commit_keys
     operations.clear()
@@ -884,7 +921,7 @@ def test_concurrent_manifest_scan_rejects_corruption_before_bundle_reads(
             receipt("0.1.0~dev.1786300002+g0123456789ab"),
         )
 
-    assert operations[0] == "state:list:versions/"
+    assert operations[0] == "state:list:arm64/versions/"
     assert set(operations[1:]) == {
         f"state:read:{key}" for key in commit_keys
     }
@@ -900,7 +937,7 @@ def test_equal_replay_downloads_committed_bundles_concurrently(
     operations: list[str] = []
     private = ConcurrentReadR2("state", operations)
     state.commit_candidate(private, publication, state_bundle, public_bundle)
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     private.concurrent_reads = {
         f"{prefix}/aptly-state.tar.gz",
         f"{prefix}/public-tree.tar.gz",
@@ -926,7 +963,7 @@ def test_commit_precedes_public_bytes_and_single_latest_pointer(
     state.commit_candidate(private, publication, state_bundle, public_bundle)
     state.publish_committed(private, public, publication)
 
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     commit_index = operations.index(f"state:write:{prefix}/commit.json")
     public_indexes = [
         index
@@ -957,7 +994,7 @@ def test_publication_only_downloads_committed_public_tree(tmp_path: Path) -> Non
 
     state.publish_committed(private, public, publication)
 
-    prefix = f"versions/{publication['version']}"
+    prefix = f"arm64/versions/{publication['version']}"
     assert f"state:read:{prefix}/public-tree.tar.gz" in operations
     assert f"state:read:{prefix}/aptly-state.tar.gz" not in operations
 

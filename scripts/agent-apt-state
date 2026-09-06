@@ -32,7 +32,13 @@ CHANNELS = {
     "dev": ("dev", "vonk-forge-dev-archive-keyring.gpg"),
     "stable": ("stable", "vonk-forge-archive-keyring.gpg"),
 }
-COMMIT_RE = re.compile(r"^versions/([^/]+)/commit\.json$")
+# The arm64 contract starts a clean state epoch. Historical objects under the
+# former top-level ``versions/`` prefix remain immutable and are not read.
+STATE_PREFIX = "arm64"
+COMMIT_RE = re.compile(rf"^{STATE_PREFIX}/versions/([^/]+)/commit\.json$")
+LATEST_COMMIT_RE = re.compile(
+    rf"^(?:{STATE_PREFIX}/)?versions/([^/]+)/commit\.json$"
+)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SEMVER_RE = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
@@ -342,7 +348,39 @@ def build_bundle(root: Path, kind: str, publication: dict[str, Any]) -> bytes:
 
 
 def _prefix(receipt: dict[str, Any]) -> str:
-    return f"versions/{receipt['version']}"
+    return f"{STATE_PREFIX}/versions/{receipt['version']}"
+
+
+def _validate_latest_pointer(raw: bytes, channel: str) -> dict[str, Any]:
+    value = parse_canonical_json(raw)
+    commit_match = (
+        value.get("commit")
+        if isinstance(value, dict) and isinstance(value.get("commit"), str)
+        else None
+    )
+    commit_path = LATEST_COMMIT_RE.fullmatch(commit_match or "")
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"channel", "commit", "commit_sha256", "version"}
+        or value["channel"] != channel
+        or commit_path is None
+        or not isinstance(value["commit_sha256"], str)
+        or SHA256_RE.fullmatch(value["commit_sha256"]) is None
+        or not isinstance(value["version"], str)
+        or _version_pattern(channel).fullmatch(value["version"]) is None
+        or commit_path.group(1) != value["version"]
+    ):
+        raise StateError("latest publication pointer is invalid")
+    return value
+
+
+def _latest_version(store: ObjectStore, channel: str) -> str | None:
+    keys = store.list("latest.json")
+    if not keys:
+        return None
+    if keys != ["latest.json"]:
+        raise StateError("latest publication pointer path is invalid")
+    return _validate_latest_pointer(store.read("latest.json"), channel)["version"]
 
 
 def _object_record(key: str, raw: bytes) -> dict[str, object]:
@@ -561,7 +599,7 @@ def prepare_candidate(
     requested = _validate_receipt(publication)
     committed: list[tuple[dict[str, Any], str, bytes]] = []
     commit_keys: list[str] = []
-    for key in store.list("versions/"):
+    for key in store.list(f"{STATE_PREFIX}/versions/"):
         if not key.endswith("/commit.json"):
             continue
         match = COMMIT_RE.fullmatch(key)
@@ -585,6 +623,18 @@ def prepare_candidate(
     )
     high = committed[-1] if committed else None
     high_version = high[0]["publication"]["version"] if high else None
+    published_version = _latest_version(store, requested["channel"])
+    if published_version is not None:
+        published_comparison = _compare_versions(
+            requested["version"], published_version
+        )
+        if published_comparison < 0:
+            raise StateError("refusing to roll back publication epoch")
+        if (
+            published_comparison == 0
+            and (high is None or high_version != requested["version"])
+        ):
+            raise StateError("publication epoch conflicts with latest pointer")
     if high_version is not None:
         comparison = _compare_versions(requested["version"], high_version)
         if comparison < 0:
