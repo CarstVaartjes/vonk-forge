@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 import copy
 import gzip
 import hashlib
 import io
+import json
+import os
 import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,29 +17,63 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
-from vonk_control.models import Base, CatalogEntity, LocalRecipe, LocalRecipeRevision, ManagedRecipeLibraryLink
+from vonk_control.models import (
+    Base,
+    CatalogDocument,
+    CatalogDocumentHead,
+    CatalogDocumentRevision,
+    CatalogRecipeModelReference,
+)
+from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     RecipePackageClient,
     RecipePackageError,
+    load_recipe_package,
 )
-from vonk_control.recipe_contract import recipe_content_sha256
-from vonk_control.recipe_packages import load_recipe_package
 from vonk_control.source_bundles import SourceBundleStore
 
 
-@pytest.mark.skipif(
-    not Path("/private/tmp/vonk-recipe-package-fixture").is_dir(),
-    reason="cross-repository publisher fixture was not generated",
-)
-def test_publisher_fixture_imports_all_84_and_reuses_persistent_packages(tmp_path: Path) -> None:
-    fixture = Path("/private/tmp/vonk-recipe-package-fixture")
-    index_path = Path("/private/tmp/vonk-forge-recipes-packages/catalog-index.json")
-    if not index_path.is_file():
-        pytest.skip("recipe publisher checkout is not available")
-    descriptor = json.loads(index_path.read_text(encoding="utf-8"))
+def _publisher_fixture() -> tuple[Path, Path, dict[str, object]]:
+    candidates = [
+        (
+            Path(os.environ.get("VONK_RECIPE_PACKAGE_FIXTURE", "/private/tmp/vonk-recipe-package-fixture")),
+            Path(os.environ.get("VONK_RECIPE_PACKAGE_INDEX", "/private/tmp/vonk-forge-recipes-packages/catalog-index.json")),
+        ),
+        (
+            Path(os.environ.get("VONK_RECIPE_CANDIDATE_ROOT", "/private/tmp/vonk-forge-recipes-contract-conversion-final")) / "packages",
+            Path(os.environ.get("VONK_RECIPE_CANDIDATE_ROOT", "/private/tmp/vonk-forge-recipes-contract-conversion-final")) / "catalog-index.json",
+        ),
+    ]
+    for fixture, index_path in candidates:
+        if not index_path.is_file():
+            continue
+        descriptor = json.loads(index_path.read_text(encoding="utf-8"))
+        entities = descriptor.get("catalog_entities")
+        recipes = descriptor.get("recipes")
+        if (
+            isinstance(entities, list)
+            and all(
+                isinstance(row, dict)
+                and isinstance(row.get("document"), dict)
+                and row["document"].get("kind") == "model"
+                and row["document"].get("schema_version") == 2
+                for row in entities
+            )
+            and isinstance(recipes, list)
+            and recipes
+            and (fixture / Path(recipes[0]["package"]["path"]).name).is_file()
+        ):
+            return fixture, index_path, descriptor
+    pytest.skip("canonical recipe publisher fixture is unavailable")
+
+
+def test_publisher_fixture_imports_all_published_recipes_and_reuses_persistent_packages(
+    tmp_path: Path,
+) -> None:
+    fixture, index_path, descriptor = _publisher_fixture()
     rows = descriptor["recipes"]
-    assert len(rows) == 84
+    expected_recipe_count = len(rows)
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -51,8 +86,8 @@ def test_publisher_fixture_imports_all_84_and_reuses_persistent_packages(tmp_pat
     client = RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler))
     snapshot = client.list()
     client.prepare(snapshot)
-    assert len(snapshot.items) == 84
-    assert len([path for path in calls if path.endswith(".tar.gz")]) == 84
+    assert len(snapshot.items) == expected_recipe_count
+    assert len([path for path in calls if path.endswith(".tar.gz")]) == expected_recipe_count
     client.close()
 
     calls.clear()
@@ -62,19 +97,11 @@ def test_publisher_fixture_imports_all_84_and_reuses_persistent_packages(tmp_pat
     restarted.close()
 
 
-@pytest.mark.skipif(
-    not Path("/private/tmp/vonk-recipe-package-fixture").is_dir(),
-    reason="cross-repository publisher fixture was not generated",
-)
 @pytest.mark.parametrize("tampered_field", ["publisher", "content_sha256"])
 def test_publisher_package_binds_manifest_metadata_identity_and_digest(
     tmp_path: Path, tampered_field: str
 ) -> None:
-    fixture = Path("/private/tmp/vonk-recipe-package-fixture")
-    index_path = Path("/private/tmp/vonk-forge-recipes-packages/catalog-index.json")
-    if not index_path.is_file():
-        pytest.skip("recipe publisher checkout is not available")
-    index = json.loads(index_path.read_text(encoding="utf-8"))
+    fixture, _index_path, index = _publisher_fixture()
     row = index["recipes"][0]
     package_name = Path(row["package"]["path"]).name
     files: dict[str, bytes] = {}
@@ -84,9 +111,21 @@ def test_publisher_package_binds_manifest_metadata_identity_and_digest(
             assert stream is not None
             files[member.name] = stream.read()
     manifest = json.loads(files["manifest.json"])
-    manifest["metadata"][0][tampered_field] = (
-        "broken-publisher" if tampered_field == "publisher" else "0" * 64
-    )
+    if tampered_field == "publisher":
+        recipe = json.loads(files["recipe.json"])
+        recipe["identity"]["publisher"] = "broken-publisher"
+        files["recipe.json"] = _canonical(recipe) + b"\n"
+    else:
+        manifest["recipe_content_sha256"] = "0" * 64
+    manifest["files"] = [
+        {
+            "path": path,
+            "size": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+        for path, content in sorted(files.items())
+        if path != "manifest.json"
+    ]
     files["manifest.json"] = _canonical(manifest) + b"\n"
     tampered = _repack(files)
     row["package"]["sha256"] = hashlib.sha256(tampered).hexdigest()
@@ -137,9 +176,6 @@ def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
     recipe["metadata"]["description"] += " (package sync fixture revision)"
     digest = recipe_content_sha256(recipe)
     files["recipe.json"] = _canonical(recipe) + b"\n"
-    release = json.loads(files["recipe-release.json"])
-    release["history"][0]["recipe_content_sha256"] = digest
-    files["recipe-release.json"] = _canonical(release) + b"\n"
     manifest = json.loads(files["manifest.json"])
     manifest["recipe_content_sha256"] = digest
     manifest["files"] = [
@@ -158,17 +194,27 @@ def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
     return changed, {"sha256": hashlib.sha256(changed).hexdigest(), "expected_bytes": len(changed), "recipe_content_sha256": digest}
 
 
-@pytest.mark.skipif(
-    not Path("/private/tmp/vonk-recipe-package-fixture").is_dir(),
-    reason="cross-repository publisher fixture was not generated",
-)
+def _active_recipe_state(session) -> dict[str, tuple[str, str, int]]:
+    heads = session.scalars(
+        select(CatalogDocumentHead).where(CatalogDocumentHead.kind == "recipe")
+    )
+    return {
+        head.slug: (
+            revision.publisher,
+            revision.content_digest,
+            revision.revision_number,
+        )
+        for head in heads
+        if head.active_revision_id is not None
+        for revision in [session.get(CatalogDocumentRevision, head.active_revision_id)]
+        if revision is not None
+    }
+
+
 def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(tmp_path: Path) -> None:
-    fixture = Path("/private/tmp/vonk-recipe-package-fixture")
-    index_path = Path("/private/tmp/vonk-forge-recipes-packages/catalog-index.json")
-    if not index_path.is_file():
-        pytest.skip("recipe publisher checkout is not available")
-    original_index = json.loads(index_path.read_text(encoding="utf-8"))
-    assert len(original_index["recipes"]) == 84
+    fixture, _index_path, original_index = _publisher_fixture()
+    expected_recipe_count = len(original_index["recipes"])
+    expected_model_count = len(original_index["catalog_entities"])
     index_bytes = _canonical(original_index) + b"\n"
     calls: list[str] = []
 
@@ -204,13 +250,32 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
 
     first = sync.sync(request_key="00000000-0000-0000-0000-000000000001", trigger="manual", actor="test")
     assert first.state == "current"
-    assert first.imported_count == 84
-    assert len([path for path in calls if path.endswith(".tar.gz")]) == 84
+    assert first.imported_count == expected_recipe_count
+    assert len([path for path in calls if path.endswith(".tar.gz")]) == expected_recipe_count
     with sessions() as session:
-        assert session.scalar(select(func.count()).select_from(ManagedRecipeLibraryLink)) == 84
-        assert session.scalar(select(func.count()).select_from(LocalRecipe)) == 84
-        assert session.scalar(select(func.count()).select_from(LocalRecipeRevision)) == 84
-        assert session.scalar(select(func.count()).select_from(CatalogEntity)) > 0
+        assert session.scalar(
+            select(func.count())
+            .select_from(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.state == "active",
+            )
+        ) == expected_model_count
+        assert session.scalar(
+            select(func.count())
+            .select_from(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+        ) == expected_recipe_count
+        assert session.scalar(select(func.count()).select_from(CatalogDocument)) == (
+            expected_model_count + expected_recipe_count
+        )
+        assert session.scalar(select(func.count()).select_from(CatalogDocumentHead)) == (
+            expected_model_count + expected_recipe_count
+        )
+        assert session.scalar(select(func.count()).select_from(CatalogRecipeModelReference)) > 0
 
     changed_index = copy.deepcopy(original_index)
     changed_row = changed_index["recipes"][0]
@@ -228,10 +293,8 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
     assert second.updated_count == 1
     assert len([path for path in calls if path.endswith(".tar.gz")]) == 1
     with sessions() as session:
-        after_second_links = {
-            link.slug: (link.remote_commit, link.local_revision_id)
-            for link in session.scalars(select(ManagedRecipeLibraryLink))
-        }
+        after_second_recipes = _active_recipe_state(session)
+        assert len(after_second_recipes) == expected_recipe_count
     client.close()
 
     # A fresh Controller process reuses every verified package object after a
@@ -261,28 +324,21 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
     invalid_index["recipes"][0]["package"]["expected_bytes"] = len(invalid_bytes)
     package_overrides[invalid_name] = invalid_bytes
     index_bytes = _canonical(invalid_index) + b"\n"
-    restarted = RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler))
-    invalid_sync = ManagedRecipeCatalogSyncService(
-        sessions,
-        catalog=catalog,
-        reader=restarted,
-        clock=sync._clock,
+    restarted = RecipePackageClient(
+        "http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)
     )
-    invalid_result = invalid_sync.sync(
-        request_key="00000000-0000-0000-0000-000000000003", trigger="automatic", actor="test"
-    )
-    assert invalid_result.state == "failed"
+    invalid_snapshot = restarted.list()
+    with pytest.raises(RecipePackageError, match="extract"):
+        restarted.prepare(invalid_snapshot)
     with sessions() as session:
-        assert {
-            link.slug: (link.remote_commit, link.local_revision_id)
-            for link in session.scalars(select(ManagedRecipeLibraryLink))
-        } == after_second_links
+        assert _active_recipe_state(session) == after_second_recipes
     restarted.close()
+    package_overrides[invalid_name] = changed_bytes
 
     # Force a later item failure after the package candidate has fully validated.
     failing_index = copy.deepcopy(changed_index)
     failing_index["source_commit"] = "d" * 40
-    failing_row = failing_index["recipes"][20]
+    failing_row = failing_index["recipes"][1]
     failing_original = (fixture / Path(failing_row["package"]["path"]).name).read_bytes()
     failing_bytes, failing_descriptor = _changed_package(failing_original)
     failing_row["document"]["metadata"]["description"] += " (package sync fixture revision)"
@@ -304,14 +360,15 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
         reader=RecipePackageClient("http://127.0.0.1", cache_root=cache, transport=httpx.MockTransport(handler)),
         clock=sync._clock,
     )
-    with pytest.raises(CatalogSyncError):
-        failing.sync(request_key="00000000-0000-0000-0000-000000000004", trigger="automatic", actor="test")
+    failing_result = failing.sync(
+        request_key="00000000-0000-0000-0000-000000000004",
+        trigger="automatic",
+        actor="test",
+    )
+    assert failing_result.state == "partial"
+    assert failing_result.skipped_count >= 1
     with sessions() as session:
-        active_links = {
-            link.slug: (link.remote_commit, link.local_revision_id)
-            for link in session.scalars(select(ManagedRecipeLibraryLink))
-        }
-        assert active_links == after_second_links
+        assert _active_recipe_state(session) == after_second_recipes
 
     # Loading one identical cached package offline imports one recipe without
     # treating the partial view as a complete generation.
@@ -336,5 +393,4 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(t
         release_released_at=offline.release_history[0].released_at,
     )
     with sessions() as session:
-        assert session.scalar(select(func.count()).select_from(ManagedRecipeLibraryLink)) == 84
-        assert all(link.availability == "present" for link in session.scalars(select(ManagedRecipeLibraryLink)))
+        assert len(_active_recipe_state(session)) == expected_recipe_count

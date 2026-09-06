@@ -37,7 +37,6 @@ from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
-    LocalRecipe,
 )
 from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
@@ -291,8 +290,6 @@ def test_fresh_orbstack_postgres_imports_exact_published_corpus_and_survives_off
         )
         assert active_model_count == expected_model_count
         assert active_recipe_count == expected_recipe_count
-        assert session.scalar(select(func.count()).select_from(LocalRecipe)) == 0
-
         recipe_revisions = session.scalars(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
