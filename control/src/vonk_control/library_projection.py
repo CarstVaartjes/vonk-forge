@@ -14,11 +14,12 @@ from .library_contract import (
     FreshnessPolicy,
     LibraryCapabilityInventory,
     LibraryModel,
+    LibraryModelIdentity,
+    LibraryRecipeDefinition,
     LibraryRecipeDetail,
     LibraryRecipeList,
     LibraryRecipeSummary,
     LibrarySnapshot,
-    ModelVersionIdentity,
     OperationalState,
     RecipeDiskRequirements,
     RecipeFabric,
@@ -122,11 +123,11 @@ def _canonical_recipe_summary(
     topology = topology if isinstance(topology, Mapping) else {}
     return LibraryRecipeSummary(
         recipe_id=revision.document_id,
+        publisher=revision.publisher,
         slug=revision.slug,
+        content_sha256=revision.content_digest,
         title=_bounded_text(metadata.get("title", revision.slug), 200),
         description=_bounded_text(metadata.get("description", ""), 4_096),
-        source_kind="recipe_library",
-        selected_revision=None,
         capabilities=[],
         topology_name=_bounded_text(topology.get("name", ""), 64) or None,
         installations=[],
@@ -236,8 +237,8 @@ class LibraryProjection:
             generated_at=_utc(self._clock()),
             models=[
                 LibraryModel(
-                    model=ModelVersionIdentity(
-                        kind="model-version",
+                    model=LibraryModelIdentity(
+                        kind="model",
                         publisher=revision.publisher,
                         slug=revision.slug,
                         content_sha256=revision.content_digest,
@@ -245,7 +246,6 @@ class LibraryProjection:
                     recipes=grouped.get(
                         (revision.publisher, revision.slug, revision.content_digest), []
                     ),
-                    model_version=None,
                 )
                 for revision in models
             ],
@@ -271,8 +271,8 @@ class LibraryProjection:
             selection = document["models"][0] if document["models"] else None
             reference = selection.get("model") if isinstance(selection, Mapping) else None
             if isinstance(reference, Mapping):
-                model = ModelVersionIdentity(
-                    kind="model-version",
+                model = LibraryModelIdentity(
+                    kind="model",
                     publisher=str(reference["publisher"]),
                     slug=str(reference["slug"]),
                     content_sha256=str(reference["content_sha256"]),
@@ -286,8 +286,16 @@ class LibraryProjection:
         return LibraryRecipeDetail(
             generated_at=_utc(self._clock()),
             recipe=_canonical_recipe_summary(revision),
-            selected_revision=None,
-            visual_recipe=None,
+            definition=LibraryRecipeDefinition(
+                execution=document.get("execution", {}),
+                models=document.get("models", []),
+                runtime=document.get("runtime", {}),
+                interfaces=document.get("interfaces", []),
+                settings=document.get("settings", {}),
+                validation=document.get("validation", {}),
+                release=document.get("release", {}),
+                provenance=document.get("provenance", {}),
+            ),
             topology=topology,
             operational_state=OperationalState(builds=[], mappings=[], installations=[], runs=[]),
             placement=[],
@@ -295,7 +303,6 @@ class LibraryProjection:
             model=model,
             model_capabilities=LibraryCapabilityInventory(),
             recipe_capabilities=LibraryCapabilityInventory(),
-            model_version=None,
         )
 
     def recipes(

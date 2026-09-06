@@ -12,22 +12,42 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .distributed_lifecycle import DistributedLifecycleError
 from .models import (
     AgentNode,
     AgentOperation,
     AgentPresence,
+    CatalogDocumentRevision,
     Job,
-    LocalRecipeRevision,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
-from .recipe_contract import recipe_topology
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 _EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
+
+
+def _active_recipe_revision(
+    session: Session, revision_id: str
+) -> tuple[CatalogDocumentRevision, RecipeDefinition] | None:
+    revision = session.get(CatalogDocumentRevision, revision_id)
+    if (
+        revision is None
+        or revision.kind != "recipe"
+        or revision.schema_version != 2
+        or revision.state != "active"
+    ):
+        return None
+    try:
+        recipe = RecipeDefinition.model_validate(revision.document)
+    except (TypeError, ValueError):
+        return None
+    if content_sha256(recipe) != revision.content_digest:
+        return None
+    return revision, recipe
 
 
 class _RecoveryJobQueue(Protocol):
@@ -221,21 +241,17 @@ def _recovery_authority(
     failed_rank: int,
 ) -> dict[str, object] | None:
     installation = session.get(RecipeInstallation, run.installation_id)
-    revision = (
-        session.get(LocalRecipeRevision, installation.recipe_revision_id)
+    resolved = (
+        _active_recipe_revision(session, installation.recipe_revision_id)
         if installation is not None
         else None
     )
-    if (
-        installation is None
-        or revision is None
-        or revision.content_sha256 is None
-        or installation.image_digest is None
-    ):
+    if installation is None or resolved is None or installation.image_digest is None:
         raise DistributedLifecycleError("distributed recovery authority is missing")
-    topology = recipe_topology(revision.document)
-    runtime = revision.document.get("runtime")
-    lifecycle = runtime.get("lifecycle") if isinstance(runtime, Mapping) else None
+    revision, recipe = resolved
+    topology = recipe.topology.model_dump(mode="json")
+    runtime = recipe.runtime.model_dump(mode="json")
+    lifecycle = runtime.get("lifecycle")
     if topology.get("mode") != "distributed" or not isinstance(lifecycle, Mapping):
         return None
     failure = lifecycle.get("failure")
@@ -335,7 +351,7 @@ def _recovery_authority(
                 "run_id": run.id,
                 "installation_id": installation.id,
                 "recipe_revision_id": revision.id,
-                "recipe_content_sha256": revision.content_sha256,
+                "recipe_content_sha256": revision.content_digest,
                 "mapping_id": run.mapping_id,
                 "mapping_generation": run.mapping_generation,
                 "run_generation": run.run_generation,
@@ -376,7 +392,7 @@ def _recovery_authority(
     return {
         "deadline": start_deadline,
         "failed_rank": failed_rank,
-        "recipe_content_sha256": revision.content_sha256,
+        "recipe_content_sha256": revision.content_digest,
         "start_phases": [
             [start_payloads[str(role)] for role in start_order],
             [
