@@ -742,6 +742,129 @@
         "title": "AuthSession",
         "type": "object"
       },
+      "AvailabilityOperationFailure": {
+        "additionalProperties": false,
+        "description": "Shared failure wire contract for model and image availability.",
+        "properties": {
+          "code": {
+            "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Detail",
+            "type": "string"
+          },
+          "free_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Free Bytes"
+          },
+          "log_excerpt": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Log Excerpt"
+          },
+          "recovery_actions": {
+            "items": {
+              "$ref": "#/components/schemas/AvailabilityRecoveryAction"
+            },
+            "maxItems": 8,
+            "title": "Recovery Actions",
+            "type": "array"
+          },
+          "required_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Bytes"
+          },
+          "retry_after_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry After Seconds"
+          },
+          "retry_time": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Time"
+          },
+          "retryable": {
+            "default": false,
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "shortfall_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shortfall Bytes"
+          }
+        },
+        "required": [
+          "code",
+          "detail"
+        ],
+        "title": "AvailabilityOperationFailure",
+        "type": "object"
+      },
+      "AvailabilityRecoveryAction": {
+        "enum": [
+          "retry",
+          "resume",
+          "download_again",
+          "force_rebuild",
+          "open_model_access",
+          "configure_hf_token",
+          "check_access_and_resume",
+          "free_space",
+          "inspect"
+        ],
+        "title": "AvailabilityRecoveryAction",
+        "type": "string"
+      },
       "BoundedErrorResponse": {
         "additionalProperties": false,
         "properties": {
@@ -1182,7 +1305,7 @@
             "items": {
               "$ref": "#/components/schemas/CacheArtifactResponse"
             },
-            "maxItems": 128,
+            "maxItems": 1024,
             "title": "Artifacts",
             "type": "array"
           },
@@ -7136,6 +7259,39 @@
         "title": "ModelArtifactPreparation",
         "type": "object"
       },
+      "ModelCacheAccessResumeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_set_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Artifact Set Sha256",
+            "type": "string"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_key",
+          "artifact_set_sha256",
+          "plan_digest"
+        ],
+        "title": "ModelCacheAccessResumeRequest",
+        "type": "object"
+      },
       "ModelCacheDownloadPreviewRequest": {
         "additionalProperties": false,
         "properties": {
@@ -7590,6 +7746,19 @@
       "ModelCacheOperationProgress": {
         "additionalProperties": false,
         "properties": {
+          "bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes Per Second"
+          },
           "completed_artifacts": {
             "minimum": 0.0,
             "title": "Completed Artifacts",
@@ -7612,6 +7781,19 @@
             "title": "Downloaded Bytes",
             "type": "integer"
           },
+          "eta_seconds": {
+            "anyOf": [
+              {
+                "maximum": 1000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta Seconds"
+          },
           "expected_bytes": {
             "anyOf": [
               {
@@ -7623,6 +7805,14 @@
               }
             ],
             "title": "Expected Bytes"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/OperationMemberProgress"
+            },
+            "maxItems": 1024,
+            "title": "Members",
+            "type": "array"
           },
           "phase": {
             "enum": [
@@ -7646,6 +7836,11 @@
             "minimum": 0.0,
             "title": "Total Artifacts",
             "type": "integer"
+          },
+          "total_bytes_known": {
+            "default": true,
+            "title": "Total Bytes Known",
+            "type": "boolean"
           }
         },
         "required": [
@@ -7692,6 +7887,16 @@
             "title": "Created At",
             "type": "string"
           },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Id",
@@ -7705,18 +7910,6 @@
             ],
             "title": "Kind",
             "type": "string"
-          },
-          "last_error": {
-            "anyOf": [
-              {
-                "maxLength": 512,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Error"
           },
           "plan_digest": {
             "anyOf": [
@@ -8008,9 +8201,47 @@
             ],
             "title": "Latest Recipe Revision Sha256"
           },
+          "model_update_ambiguous": {
+            "default": false,
+            "title": "Model Update Ambiguous",
+            "type": "boolean"
+          },
           "model_update_available": {
             "title": "Model Update Available",
             "type": "boolean"
+          },
+          "model_update_candidates": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "maxItems": 16,
+            "title": "Model Update Candidates",
+            "type": "array"
+          },
+          "model_update_from": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Update From"
+          },
+          "model_update_to": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Update To"
           },
           "model_version_sha256": {
             "anyOf": [
@@ -9459,6 +9690,53 @@
         "title": "NodeStatus",
         "type": "object"
       },
+      "OperationCheckpoint": {
+        "additionalProperties": false,
+        "description": "A restart-safe cursor identifying the last completed durable unit.",
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "sequence": {
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "sequence"
+        ],
+        "title": "OperationCheckpoint",
+        "type": "object"
+      },
       "OperationDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -9796,6 +10074,90 @@
           "phase"
         ],
         "title": "OperationMemberProgress",
+        "type": "object"
+      },
+      "OperationProgress": {
+        "additionalProperties": false,
+        "description": "Canonical progress payload persisted on the current operation attempt.",
+        "properties": {
+          "bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes Per Second"
+          },
+          "checkpoint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationCheckpoint"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completed_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Completed Bytes",
+            "type": "integer"
+          },
+          "eta_seconds": {
+            "anyOf": [
+              {
+                "maximum": 1000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta Seconds"
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/OperationMemberProgress"
+            },
+            "maxItems": 1024,
+            "title": "Members",
+            "type": "array"
+          },
+          "phase": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Phase",
+            "type": "string"
+          },
+          "total_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Bytes"
+          },
+          "total_bytes_known": {
+            "default": false,
+            "title": "Total Bytes Known",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "phase"
+        ],
+        "title": "OperationProgress",
         "type": "object"
       },
       "OperationRecovery": {
@@ -11593,6 +11955,569 @@
           "platform"
         ],
         "title": "RecipeImage",
+        "type": "object"
+      },
+      "RecipeImageAvailabilityAction": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/AvailabilityRecoveryAction"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "title": "RecipeImageAvailabilityAction",
+        "type": "object"
+      },
+      "RecipeImageAvailabilityArtifact": {
+        "additionalProperties": false,
+        "properties": {
+          "download_bytes": {
+            "minimum": 0.0,
+            "title": "Download Bytes",
+            "type": "integer"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "model_version_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Version Sha256"
+          },
+          "path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Path",
+            "type": "string"
+          },
+          "repository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repository"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "id",
+          "path",
+          "kind",
+          "source",
+          "sha256",
+          "download_bytes",
+          "roles"
+        ],
+        "title": "RecipeImageAvailabilityArtifact",
+        "type": "object"
+      },
+      "RecipeImageAvailabilityChild": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_set_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Set Sha256"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeImageAvailabilityArtifact"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "model-cache",
+              "runtime-image"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "model_versions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Model Versions",
+            "type": "array"
+          },
+          "plan_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Digest"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/OperationProgress"
+          },
+          "request_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Key"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "partial",
+              "succeeded",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "state",
+          "progress"
+        ],
+        "title": "RecipeImageAvailabilityChild",
+        "type": "object"
+      },
+      "RecipeImageAvailabilityErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "failure": {
+            "$ref": "#/components/schemas/AvailabilityOperationFailure"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "failure"
+        ],
+        "title": "RecipeImageAvailabilityErrorResponse",
+        "type": "object"
+      },
+      "RecipeImageAvailabilityListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeImageAvailabilityResponse"
+            },
+            "title": "Operations",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "operations",
+          "total"
+        ],
+        "title": "RecipeImageAvailabilityListResponse",
+        "type": "object"
+      },
+      "RecipeImageAvailabilityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeImageAvailabilityAction"
+            },
+            "title": "Actions",
+            "type": "array"
+          },
+          "attempt": {
+            "minimum": 0.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/RecipeImageAvailabilityChild"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AvailabilityOperationFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "recipe.image.availability.v2",
+            "title": "Kind",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/OperationProgress"
+          },
+          "recipe_content_sha256": {
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "recipe_revision_id": {
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipeImageAvailabilityResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "partial",
+              "succeeded",
+              "failed"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "request_id",
+          "kind",
+          "state",
+          "attempt",
+          "recipe_revision_id",
+          "recipe_content_sha256",
+          "progress",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RecipeImageAvailabilityResponse",
+        "type": "object"
+      },
+      "RecipeImageAvailabilityResult": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_set_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Set Sha256"
+          },
+          "build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
+          },
+          "build_input_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Input Sha256"
+          },
+          "image_bytes": {
+            "minimum": 1.0,
+            "title": "Image Bytes",
+            "type": "integer"
+          },
+          "image_digest": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Image Digest",
+            "type": "string"
+          },
+          "local_image_config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Image Config Id"
+          },
+          "model_child_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Child Id"
+          },
+          "model_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Digest"
+          },
+          "model_versions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Model Versions",
+            "type": "array"
+          },
+          "oci_archive_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Oci Archive Sha256",
+            "type": "string"
+          },
+          "platform_manifest_digest": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Platform Manifest Digest",
+            "type": "string"
+          },
+          "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Recipe Content Sha256",
+            "type": "string"
+          },
+          "registry_manifest_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Manifest Digest"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "source": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recipe_content_sha256",
+          "source",
+          "platform_manifest_digest",
+          "image_digest",
+          "oci_archive_sha256",
+          "image_bytes"
+        ],
+        "title": "RecipeImageAvailabilityResult",
+        "type": "object"
+      },
+      "RecipeImageAvailabilityRetry": {
+        "additionalProperties": false,
+        "properties": {
+          "request_key": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_key"
+        ],
+        "title": "RecipeImageAvailabilityRetry",
+        "type": "object"
+      },
+      "RecipeImageAvailabilityStart": {
+        "additionalProperties": false,
+        "properties": {
+          "force": {
+            "default": false,
+            "title": "Force",
+            "type": "boolean"
+          },
+          "recipe_revision_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
+          "request_key": {
+            "maxLength": 36,
+            "minLength": 1,
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_key",
+          "recipe_revision_id"
+        ],
+        "title": "RecipeImageAvailabilityStart",
         "type": "object"
       },
       "RecipeImageExecution": {
@@ -21996,6 +22921,283 @@
         "summary": "Get Placement"
       }
     },
+    "/api/v1/library/recipe-image-availability": {
+      "get": {
+        "operationId": "listRecipeImageAvailability",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "recipe_revision_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Recipe Revision Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "partial",
+                    "succeeded",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeImageAvailabilityListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Operations"
+      },
+      "post": {
+        "operationId": "startRecipeImageAvailability",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeImageAvailabilityStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeImageAvailabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeImageAvailabilityErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Start"
+      }
+    },
+    "/api/v1/library/recipe-image-availability/{operation_id}": {
+      "get": {
+        "operationId": "getRecipeImageAvailability",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeImageAvailabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeImageAvailabilityErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get"
+      }
+    },
+    "/api/v1/library/recipe-image-availability/{operation_id}/retry": {
+      "post": {
+        "operationId": "retryRecipeImageAvailability",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeImageAvailabilityRetry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeImageAvailabilityResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecipeImageAvailabilityErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Retry"
+      }
+    },
     "/api/v1/library/recipes": {
       "get": {
         "operationId": "listLibraryRecipes",
@@ -22833,6 +24035,111 @@
           }
         ],
         "summary": "Get Operation"
+      }
+    },
+    "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume": {
+      "post": {
+        "operationId": "checkModelCacheAccessAndResume",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelCacheAccessResumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCacheOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Check Access And Resume"
       }
     },
     "/api/v1/model-cache/operations/{operation_id}/retry": {

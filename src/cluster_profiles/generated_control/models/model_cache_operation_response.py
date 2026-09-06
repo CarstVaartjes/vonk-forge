@@ -17,6 +17,7 @@ from typing import Literal, Union, cast
 from typing import Union
 
 if TYPE_CHECKING:
+  from ..models.availability_operation_failure import AvailabilityOperationFailure
   from ..models.model_cache_operation_progress import ModelCacheOperationProgress
   from ..models.model_cache_operation_response_result_type_0 import ModelCacheOperationResponseResultType0
 
@@ -43,7 +44,7 @@ class ModelCacheOperationResponse:
             request_key (str):
             state (ModelCacheOperationResponseState):
             updated_at (str):
-            last_error (Union[None, Unset, str]):
+            failure (Union['AvailabilityOperationFailure', None, Unset]):
             result (Union['ModelCacheOperationResponseResultType0', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
@@ -59,7 +60,7 @@ class ModelCacheOperationResponse:
     request_key: str
     state: ModelCacheOperationResponseState
     updated_at: str
-    last_error: Union[None, Unset, str] = UNSET
+    failure: Union['AvailabilityOperationFailure', None, Unset] = UNSET
     result: Union['ModelCacheOperationResponseResultType0', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
@@ -68,6 +69,7 @@ class ModelCacheOperationResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.availability_operation_failure import AvailabilityOperationFailure
         from ..models.model_cache_operation_progress import ModelCacheOperationProgress
         from ..models.model_cache_operation_response_result_type_0 import ModelCacheOperationResponseResultType0
         artifact_set_sha256: Union[None, str]
@@ -95,11 +97,13 @@ class ModelCacheOperationResponse:
 
         updated_at = self.updated_at
 
-        last_error: Union[None, Unset, str]
-        if isinstance(self.last_error, Unset):
-            last_error = UNSET
+        failure: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.failure, Unset):
+            failure = UNSET
+        elif isinstance(self.failure, AvailabilityOperationFailure):
+            failure = self.failure.to_dict()
         else:
-            last_error = self.last_error
+            failure = self.failure
 
         result: Union[None, Unset, dict[str, Any]]
         if isinstance(self.result, Unset):
@@ -127,8 +131,8 @@ class ModelCacheOperationResponse:
             "state": state,
             "updated_at": updated_at,
         })
-        if last_error is not UNSET:
-            field_dict["last_error"] = last_error
+        if failure is not UNSET:
+            field_dict["failure"] = failure
         if result is not UNSET:
             field_dict["result"] = result
         if schema_version is not UNSET:
@@ -140,6 +144,7 @@ class ModelCacheOperationResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.availability_operation_failure import AvailabilityOperationFailure
         from ..models.model_cache_operation_progress import ModelCacheOperationProgress
         from ..models.model_cache_operation_response_result_type_0 import ModelCacheOperationResponseResultType0
         d = dict(src_dict)
@@ -192,14 +197,24 @@ class ModelCacheOperationResponse:
 
         updated_at = d.pop("updated_at")
 
-        def _parse_last_error(data: object) -> Union[None, Unset, str]:
+        def _parse_failure(data: object) -> Union['AvailabilityOperationFailure', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
-            return cast(Union[None, Unset, str], data)
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                failure_type_0 = AvailabilityOperationFailure.from_dict(data)
 
-        last_error = _parse_last_error(d.pop("last_error", UNSET))
+
+
+                return failure_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['AvailabilityOperationFailure', None, Unset], data)
+
+        failure = _parse_failure(d.pop("failure", UNSET))
 
 
         def _parse_result(data: object) -> Union['ModelCacheOperationResponseResultType0', None, Unset]:
@@ -238,7 +253,7 @@ class ModelCacheOperationResponse:
             request_key=request_key,
             state=state,
             updated_at=updated_at,
-            last_error=last_error,
+            failure=failure,
             result=result,
             schema_version=schema_version,
         )

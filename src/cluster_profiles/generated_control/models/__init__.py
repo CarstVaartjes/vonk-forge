@@ -20,6 +20,8 @@ from .artifact_storage_impact_nas_coverage import ArtifactStorageImpactNasCovera
 from .artifact_storage_impact_retention import ArtifactStorageImpactRetention
 from .artifact_storage_impact_running_coverage import ArtifactStorageImpactRunningCoverage
 from .artifact_storage_impact_spark_coverage import ArtifactStorageImpactSparkCoverage
+from .availability_operation_failure import AvailabilityOperationFailure
+from .availability_recovery_action import AvailabilityRecoveryAction
 from .bounded_error_response import BoundedErrorResponse
 from .build_argument import BuildArgument
 from .build_compatibility_evidence import BuildCompatibilityEvidence
@@ -198,6 +200,7 @@ from .library_snapshot import LibrarySnapshot
 from .list_artifact_jobs_for_run_response_listartifactjobsforrun import ListArtifactJobsForRunResponseListartifactjobsforrun
 from .list_audit_events_response_audit_view_api_v1_audit_get import ListAuditEventsResponseAuditViewApiV1AuditGet
 from .list_identity_history_response_listidentityhistory import ListIdentityHistoryResponseListidentityhistory
+from .list_recipe_image_availability_state_type_0 import ListRecipeImageAvailabilityStateType0
 from .managed_catalog_stale_recipe import ManagedCatalogStaleRecipe
 from .managed_catalog_sync_problem import ManagedCatalogSyncProblem
 from .managed_catalog_sync_request import ManagedCatalogSyncRequest
@@ -224,6 +227,7 @@ from .model_access_authentication import ModelAccessAuthentication
 from .model_access_visibility import ModelAccessVisibility
 from .model_artifact_preparation import ModelArtifactPreparation
 from .model_artifact_preparation_completeness import ModelArtifactPreparationCompleteness
+from .model_cache_access_resume_request import ModelCacheAccessResumeRequest
 from .model_cache_download_preview_request import ModelCacheDownloadPreviewRequest
 from .model_cache_download_preview_response import ModelCacheDownloadPreviewResponse
 from .model_cache_download_request import ModelCacheDownloadRequest
@@ -245,6 +249,9 @@ from .model_cache_repair_preview_response_current_state import ModelCacheRepairP
 from .model_cache_repair_request import ModelCacheRepairRequest
 from .model_cache_retry_request import ModelCacheRetryRequest
 from .model_cache_update_response import ModelCacheUpdateResponse
+from .model_cache_update_response_model_update_candidates_item import ModelCacheUpdateResponseModelUpdateCandidatesItem
+from .model_cache_update_response_model_update_from_type_0 import ModelCacheUpdateResponseModelUpdateFromType0
+from .model_cache_update_response_model_update_to_type_0 import ModelCacheUpdateResponseModelUpdateToType0
 from .model_cache_updates_response import ModelCacheUpdatesResponse
 from .model_capabilities import ModelCapabilities
 from .model_capability_fact import ModelCapabilityFact
@@ -283,11 +290,13 @@ from .node_connection_online_state import NodeConnectionOnlineState
 from .node_profile_update_request import NodeProfileUpdateRequest
 from .node_status import NodeStatus
 from .node_status_labels import NodeStatusLabels
+from .operation_checkpoint import OperationCheckpoint
 from .operation_detail_response import OperationDetailResponse
 from .operation_evidence_download import OperationEvidenceDownload
 from .operation_evidence_provenance import OperationEvidenceProvenance
 from .operation_failure_evidence import OperationFailureEvidence
 from .operation_member_progress import OperationMemberProgress
+from .operation_progress import OperationProgress
 from .operation_recovery import OperationRecovery
 from .operation_recovery_action import OperationRecoveryAction
 from .operation_response import OperationResponse
@@ -347,6 +356,18 @@ from .recipe_http_serving_request_body_type_0 import RecipeHttpServingRequestBod
 from .recipe_http_serving_request_method import RecipeHttpServingRequestMethod
 from .recipe_identity import RecipeIdentity
 from .recipe_image import RecipeImage
+from .recipe_image_availability_action import RecipeImageAvailabilityAction
+from .recipe_image_availability_artifact import RecipeImageAvailabilityArtifact
+from .recipe_image_availability_child import RecipeImageAvailabilityChild
+from .recipe_image_availability_child_kind import RecipeImageAvailabilityChildKind
+from .recipe_image_availability_child_state import RecipeImageAvailabilityChildState
+from .recipe_image_availability_error_response import RecipeImageAvailabilityErrorResponse
+from .recipe_image_availability_list_response import RecipeImageAvailabilityListResponse
+from .recipe_image_availability_response import RecipeImageAvailabilityResponse
+from .recipe_image_availability_response_state import RecipeImageAvailabilityResponseState
+from .recipe_image_availability_result import RecipeImageAvailabilityResult
+from .recipe_image_availability_retry import RecipeImageAvailabilityRetry
+from .recipe_image_availability_start import RecipeImageAvailabilityStart
 from .recipe_image_execution import RecipeImageExecution
 from .recipe_input_slot import RecipeInputSlot
 from .recipe_integer_setting import RecipeIntegerSetting
@@ -534,6 +555,8 @@ __all__ = (
     "ArtifactStorageImpactRetention",
     "ArtifactStorageImpactRunningCoverage",
     "ArtifactStorageImpactSparkCoverage",
+    "AvailabilityOperationFailure",
+    "AvailabilityRecoveryAction",
     "BoundedErrorResponse",
     "BuildArgument",
     "BuildCompatibilityEvidence",
@@ -712,6 +735,7 @@ __all__ = (
     "ListArtifactJobsForRunResponseListartifactjobsforrun",
     "ListAuditEventsResponseAuditViewApiV1AuditGet",
     "ListIdentityHistoryResponseListidentityhistory",
+    "ListRecipeImageAvailabilityStateType0",
     "ManagedCatalogStaleRecipe",
     "ManagedCatalogSyncProblem",
     "ManagedCatalogSyncRequest",
@@ -738,6 +762,7 @@ __all__ = (
     "ModelAccessVisibility",
     "ModelArtifactPreparation",
     "ModelArtifactPreparationCompleteness",
+    "ModelCacheAccessResumeRequest",
     "ModelCacheDownloadPreviewRequest",
     "ModelCacheDownloadPreviewResponse",
     "ModelCacheDownloadRequest",
@@ -759,6 +784,9 @@ __all__ = (
     "ModelCacheRepairRequest",
     "ModelCacheRetryRequest",
     "ModelCacheUpdateResponse",
+    "ModelCacheUpdateResponseModelUpdateCandidatesItem",
+    "ModelCacheUpdateResponseModelUpdateFromType0",
+    "ModelCacheUpdateResponseModelUpdateToType0",
     "ModelCacheUpdatesResponse",
     "ModelCapabilities",
     "ModelCapabilityFact",
@@ -808,11 +836,13 @@ __all__ = (
     "OperationalRunRouteState",
     "OperationalRunState",
     "OperationalState",
+    "OperationCheckpoint",
     "OperationDetailResponse",
     "OperationEvidenceDownload",
     "OperationEvidenceProvenance",
     "OperationFailureEvidence",
     "OperationMemberProgress",
+    "OperationProgress",
     "OperationRecovery",
     "OperationRecoveryAction",
     "OperationResponse",
@@ -861,6 +891,18 @@ __all__ = (
     "RecipeHttpServingRequestMethod",
     "RecipeIdentity",
     "RecipeImage",
+    "RecipeImageAvailabilityAction",
+    "RecipeImageAvailabilityArtifact",
+    "RecipeImageAvailabilityChild",
+    "RecipeImageAvailabilityChildKind",
+    "RecipeImageAvailabilityChildState",
+    "RecipeImageAvailabilityErrorResponse",
+    "RecipeImageAvailabilityListResponse",
+    "RecipeImageAvailabilityResponse",
+    "RecipeImageAvailabilityResponseState",
+    "RecipeImageAvailabilityResult",
+    "RecipeImageAvailabilityRetry",
+    "RecipeImageAvailabilityStart",
     "RecipeImageExecution",
     "RecipeInputSlot",
     "RecipeIntegerSetting",

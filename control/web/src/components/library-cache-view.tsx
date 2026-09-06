@@ -26,7 +26,7 @@ export async function loadModelCacheInventory(api: ControlApi, signal: AbortSign
   return {...first, entries, next_cursor: null, total: entries.length};
 }
 
-export function LibraryModelDownloadAction({api, model, onComplete}: {api: ControlApi; model: LibraryModel; onComplete?(): void}) {
+export function LibraryModelDownloadAction({api, model, modelAccessUrl, onComplete}: {api: ControlApi; model: LibraryModel; modelAccessUrl?: string; onComplete?(): void}) {
   const [operation, setOperation] = useState<ModelCacheOperationResponse>();
   const [error, setError] = useState("");
   const completedOperation = useRef<string | undefined>(undefined);
@@ -50,7 +50,17 @@ export function LibraryModelDownloadAction({api, model, onComplete}: {api: Contr
       }
     } catch (value) { setError(value instanceof Error ? value.message : "Download to NAS failed"); }
   }
-  return <span className="library-model-download"><button type="button" className="button secondary" disabled={active} onClick={() => void download()}>{active ? "Downloading to NAS…" : operation?.state === "succeeded" ? "Available on NAS" : retryable ? "Retry download" : "Make available"}</button>{operation && <><small role="status">{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}</small><LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/></>}{!active && <details><summary>More actions</summary><button type="button" className="button secondary" onClick={() => void download(true)}>Download again</button></details>}{error && <LibraryAvailabilityFeedback failure={availabilityFailure(error, "Download to NAS failed.")} onRetry={() => void download()} retryLabel="Retry download"/>}{operation?.state === "failed" && <LibraryAvailabilityFeedback failure={availabilityFailure(operation, "Download to NAS failed.")} onRetry={retryable ? () => void download() : undefined} retryLabel="Retry download"/>}</span>;
+  async function checkAccess() {
+    if (!operation?.artifact_set_sha256 || !operation.plan_digest) {
+      setError("The failed operation did not retain its exact cache identity; start a fresh download.");
+      return;
+    }
+    setError("");
+    try {
+      setOperation(await api.checkModelCacheAccessAndResume(operation.id, {schema_version: 2, request_key: crypto.randomUUID(), artifact_set_sha256: operation.artifact_set_sha256, plan_digest: operation.plan_digest}));
+    } catch (value) { setError(value instanceof Error ? value.message : "Model access check failed"); }
+  }
+  return <span className="library-model-download"><button type="button" className="button secondary" disabled={active} onClick={() => void download()}>{active ? "Downloading to NAS…" : operation?.state === "succeeded" ? "Available on NAS" : retryable ? "Retry download" : "Make available"}</button>{operation && <><small role="status">{operation.progress.completed_artifacts} of {operation.progress.total_artifacts || "?"} files · {formatBytes(operation.progress.downloaded_bytes)}</small><LibraryAvailabilityProgress progress={availabilityProgress(operation.progress)}/></>}{!active && <details><summary>More actions</summary><button type="button" className="button secondary" onClick={() => void download(true)}>Download again</button></details>}{error && <LibraryAvailabilityFeedback failure={availabilityFailure(error, "Download to NAS failed.")} onRetry={() => void download()} retryLabel="Retry download"/>}{operation?.state === "failed" && <LibraryAvailabilityFeedback failure={availabilityFailure(operation, "Download to NAS failed.")} modelAccessUrl={modelAccessUrl} onCheckAccessAndResume={() => void checkAccess()} onRetry={retryable ? () => void download() : undefined} retryLabel="Retry download"/>}</span>;
 }
 
 export function aggregateCacheEntries(models: readonly LibraryModel[], inventory?: {entries: CacheEntryResponse[]}): LibraryCacheEntry[] {
