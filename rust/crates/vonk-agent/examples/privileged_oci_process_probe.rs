@@ -219,7 +219,7 @@ fn setup_files() {
 fn production_start_arguments() -> Vec<String> {
     let fixture = fs::read_to_string(env_required("VONK_HELPER_FIXTURE")).unwrap();
     let mut value: Value = serde_json::from_str(&fixture).unwrap();
-    value["runtime"]["executable"] = json!("/bin/sh");
+    value["runtime"]["executable"] = json!("/opt/vonk/bin/vllm");
     value["runtime"]["argv"] = json!([
         "-c",
         "set -eu; printf 'uid=%s\\n' \"$(id -u)\"; touch \"$HOME/helper-entrypoint-ok\" \"$TMPDIR/helper-tmp-ok\"; if [ -e \"$XDG_CACHE_HOME/helper-cache-ok\" ]; then printf 'cache-reused\\n'; else printf 'cache-created\\n' >\"$XDG_CACHE_HOME/helper-cache-ok\"; printf 'cache-created\\n'; fi; if [ -e /tmp/helper-ephemeral-marker ]; then printf 'tmp-reused\\n'; exit 9; fi; touch /tmp/helper-ephemeral-marker; printf 'tmp-fresh\\n'; printf 'helper-argv-once\\n'; sleep 5"
