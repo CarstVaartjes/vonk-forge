@@ -101,17 +101,11 @@ class RunAdmissionService:
         *,
         inventory_max_age: int = 300,
         memory_floor_bytes: int = 4_000_000_000,
-        operator_jurisdiction: str | None = None,
     ) -> None:
         self._sessions = sessions
         self._inventory = InventoryRepository(sessions)
         self._max_age = inventory_max_age
         self._floor = memory_floor_bytes
-        # Territorial declarations remain informational model metadata.  The
-        # run plan deliberately does not derive an operator location or enforce
-        # a territory denial.  Keep accepting the constructor keyword while
-        # callers converge on the geography-free admission contract.
-        del operator_jurisdiction
 
     def plan_run(
         self,
@@ -160,7 +154,6 @@ class RunAdmissionService:
                 )
             legal_admission = territorial_admission(
                 model_document,
-                None,
                 operation="run",
             )
             mapping_nodes = tuple(

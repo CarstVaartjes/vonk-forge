@@ -454,13 +454,11 @@ def test_preview_install_and_run_expose_exact_capacity_math() -> None:
     assert len(install.json()["plan_digest"]) == 64
 
 
-def test_preview_install_exposes_bounded_legal_admission_error() -> None:
+def test_preview_install_exposes_structured_admission_error() -> None:
     client, headers, recipes, _audits = setup()
     blocker = AdmissionReason(
-        "install.license_jurisdiction_required",
-        "This model has territorial license restrictions. Configure "
-        "VONK_OPERATOR_JURISDICTION before installation or execution; admission "
-        "fails closed while it is unset.",
+        "install.capacity_unavailable",
+        "Controller capacity evidence is unavailable.",
     )
     recipes.install_plan = replace(
         recipes.install_plan,

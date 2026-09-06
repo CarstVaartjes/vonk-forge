@@ -29,6 +29,8 @@ def test_catalog_api_exposes_only_canonical_bundle_and_sync_routes() -> None:
     assert "/api/v1/catalog/public-recipes" not in paths
     assert "/api/v1/catalog/imports/public" not in paths
     assert "/api/v1/catalog/imports/recipe-library" not in paths
+    assert "/api/v1/catalog/imports/workload_run" not in paths
+    assert "/api/v1/catalog/imports/workload_run/preview" not in paths
     assert "/api/v1/catalog/recipes" not in paths
     operation_ids = {
         operation["operationId"]

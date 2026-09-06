@@ -74,24 +74,7 @@ MUTATION_ROLES = {
         {"administrator"}
     ),
     ("POST", "/api/v1/model-cache/evict"): frozenset({"administrator"}),
-    # Local catalog authoring and WorkloadRun imports change the controller's
-    # authoritative PostgreSQL state. Keep them administrator-only and list
-    # preview calls too: previews accept untrusted source documents and are
-    # part of the same explicitly audited authorization surface.
-    ("POST", "/api/v1/catalog/recipes"): frozenset({"administrator"}),
-    ("PUT", "/api/v1/catalog/recipes/{recipe_id}/draft"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/recipes/{recipe_id}/resolve"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/catalog/recipes/{recipe_id}/fork"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/imports/workload_run/preview"): frozenset(
-        {"administrator"}
-    ),
-    ("POST", "/api/v1/catalog/imports/workload_run"): frozenset({"administrator"}),
     ("POST", "/api/v1/catalog/managed-recipes/sync"): frozenset({"administrator"}),
-    ("POST", "/api/v1/catalog/recipes/{recipe_id}/resolve-import"): frozenset(
-        {"administrator"}
-    ),
     ("PUT", "/api/v1/catalog/source-bundles/{sha256}"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/source-checks"): frozenset({"administrator"}),
     ("POST", "/api/v1/recipes/build-plans/preview"): frozenset({"administrator"}),
