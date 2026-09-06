@@ -248,8 +248,71 @@ def test_runtime_image_receipt_uses_production_identity_fields(
         "ck_runtime_image_receipts_archive_digest",
         "ck_runtime_image_receipts_archive_pair",
         "ck_runtime_image_receipts_source_build",
-        "ck_runtime_image_receipts_source_artifacts",
+        "ck_runtime_image_receipts_runtime_identity",
     }
+
+
+def test_runtime_image_receipt_rejects_inconsistent_provenance_and_digests(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'runtime-image-receipts-checks.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    insert = text(
+        """
+        INSERT INTO runtime_image_receipts
+          (id, recipe_revision_id, source, original_content_digest,
+           effective_execution_key, registry_manifest_digest,
+           platform_manifest_digest, local_image_config_id, oci_archive_sha256,
+           image_bytes, architecture, runtime_interface, runtime_interface_label,
+           build_id, verified_at, state)
+        VALUES
+          (:id, :recipe_revision_id, :source, :original_content_digest,
+           :effective_execution_key, :registry_manifest_digest,
+           :platform_manifest_digest, :local_image_config_id, :oci_archive_sha256,
+           :image_bytes, :architecture, :runtime_interface, :runtime_interface_label,
+           :build_id, :verified_at, :state)
+        """
+    )
+    base = {
+        "id": "receipt",
+        "recipe_revision_id": "revision",
+        "source": "published",
+        "original_content_digest": "a" * 64,
+        "effective_execution_key": "b" * 64,
+        "registry_manifest_digest": "sha256:" + "c" * 64,
+        "platform_manifest_digest": "sha256:" + "d" * 64,
+        "local_image_config_id": "sha256:" + "e" * 64,
+        "oci_archive_sha256": "f" * 64,
+        "image_bytes": 1,
+        "architecture": "linux-arm64",
+        "runtime_interface": "vonk.runtime.v1",
+        "runtime_interface_label": "v1",
+        "build_id": None,
+        "verified_at": "2026-09-06 12:00:00",
+        "state": "verified",
+    }
+    invalid = (
+        {"registry_manifest_digest": None},
+        {"build_id": "build"},
+        {"source": "controller-build", "build_id": "build"},
+        {"source": "controller-build", "registry_manifest_digest": None},
+        {"oci_archive_sha256": None},
+        {"image_bytes": None},
+        {"original_content_digest": "g" * 64},
+        {"effective_execution_key": "G" * 64},
+        {"oci_archive_sha256": "z" * 64},
+        {"platform_manifest_digest": "sha256:" + "z" * 64},
+        {"architecture": "linux-amd64"},
+        {"runtime_interface": "other.runtime.v1"},
+        {"runtime_interface_label": "v2"},
+    )
+    for number, overrides in enumerate(invalid, start=1):
+        values = {**base, **overrides, "id": f"receipt-{number}"}
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(insert, values)
 
 
 def test_existing_compatibility_recovery_revision_upgrades_without_operational_model(

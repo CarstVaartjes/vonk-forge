@@ -69,6 +69,15 @@ def _lower_hex(column: str, length: int) -> str:
     )
 
 
+def _prefixed_digest(column: str) -> str:
+    """Require a lowercase sha256 digest with its explicit algorithm prefix."""
+
+    return (
+        f"length({column}) = 71 AND substr({column}, 1, 7) = 'sha256:' "
+        f"AND ({_lower_hex(f'substr({column}, 8)', 64)})"
+    )
+
+
 def _nullable_lower_hex(column: str, length: int) -> str:
     return f"{column} IS NULL OR ({_lower_hex(column, length)})"
 
@@ -1528,32 +1537,40 @@ class RuntimeImageReceipt(Base):
             "local_image_config_id",
             name="uq_runtime_image_receipt_identity",
         ),
+        Index(
+            "ix_runtime_image_receipt_effective_identity",
+            "effective_execution_key",
+            "platform_manifest_digest",
+            "local_image_config_id",
+            "oci_archive_sha256",
+        ),
         CheckConstraint(
             "source IN ('published','controller-build')",
             name="ck_runtime_image_receipts_source",
         ),
         CheckConstraint(
-            "length(original_content_digest) = 64 AND original_content_digest = lower(original_content_digest)",
+            _lower_hex("original_content_digest", 64),
             name="ck_runtime_image_receipts_original_digest",
         ),
         CheckConstraint(
-            "length(effective_execution_key) = 64 AND effective_execution_key = lower(effective_execution_key)",
+            _lower_hex("effective_execution_key", 64),
             name="ck_runtime_image_receipts_execution_key",
         ),
         CheckConstraint(
-            "length(platform_manifest_digest) = 71 AND substr(platform_manifest_digest, 1, 7) = 'sha256:'",
+            _prefixed_digest("platform_manifest_digest"),
             name="ck_runtime_image_receipts_platform_digest",
         ),
         CheckConstraint(
-            "registry_manifest_digest IS NULL OR (length(registry_manifest_digest) = 71 AND substr(registry_manifest_digest, 1, 7) = 'sha256:')",
+            "registry_manifest_digest IS NULL OR "
+            f"({_prefixed_digest('registry_manifest_digest')})",
             name="ck_runtime_image_receipts_registry_digest",
         ),
         CheckConstraint(
-            "length(local_image_config_id) = 71 AND substr(local_image_config_id, 1, 7) = 'sha256:'",
+            _prefixed_digest("local_image_config_id"),
             name="ck_runtime_image_receipts_config_digest",
         ),
         CheckConstraint(
-            "oci_archive_sha256 IS NULL OR (length(oci_archive_sha256) = 64 AND oci_archive_sha256 = lower(oci_archive_sha256))",
+            _nullable_lower_hex("oci_archive_sha256", 64),
             name="ck_runtime_image_receipts_archive_digest",
         ),
         CheckConstraint(
@@ -1561,19 +1578,16 @@ class RuntimeImageReceipt(Base):
             name="ck_runtime_image_receipts_image_bytes",
         ),
         CheckConstraint(
-            "(oci_archive_sha256 IS NULL AND image_bytes IS NULL) OR (oci_archive_sha256 IS NOT NULL AND image_bytes IS NOT NULL)",
+            "oci_archive_sha256 IS NOT NULL AND image_bytes IS NOT NULL",
             name="ck_runtime_image_receipts_archive_pair",
         ),
         CheckConstraint(
-            "(source = 'published' AND build_id IS NULL) OR (source = 'controller-build' AND build_id IS NOT NULL)",
+            "(source = 'published' AND registry_manifest_digest IS NOT NULL AND build_id IS NULL) OR "
+            "(source = 'controller-build' AND registry_manifest_digest IS NULL AND build_id IS NOT NULL)",
             name="ck_runtime_image_receipts_source_build",
         ),
         CheckConstraint(
-            "source = 'published' OR (registry_manifest_digest IS NULL AND oci_archive_sha256 IS NOT NULL AND image_bytes IS NOT NULL)",
-            name="ck_runtime_image_receipts_source_artifacts",
-        ),
-        CheckConstraint(
-            "length(architecture) BETWEEN 1 AND 32 AND length(runtime_interface) BETWEEN 1 AND 64 AND length(runtime_interface_label) BETWEEN 1 AND 128",
+            "architecture = 'linux-arm64' AND runtime_interface = 'vonk.runtime.v1' AND runtime_interface_label = 'v1'",
             name="ck_runtime_image_receipts_runtime_identity",
         ),
         CheckConstraint(
