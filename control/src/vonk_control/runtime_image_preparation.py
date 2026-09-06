@@ -915,6 +915,7 @@ def prepare_runtime_image(
     build_receipt: Mapping[str, object] | object | None = None,
     now: datetime | None = None,
     receipt_writer: Callable[[RuntimeImageReceipt], object] | None = None,
+    force: bool = False,
 ) -> RuntimeImageReceipt:
     """Prepare the image selected by a canonical ``RecipeDefinition``.
 
@@ -957,6 +958,7 @@ def prepare_runtime_image(
             expected_architecture=projection["architecture"],
             expected_interface=projection["interface"],
             now=now,
+            force=force,
         )
     if not source_build and receipt.registry_manifest_digest != expected_manifest:
         raise RuntimeImagePreparationError(
@@ -987,14 +989,16 @@ def _prepare_from_registry(
     expected_architecture: str,
     expected_interface: str,
     now: datetime | None,
+    force: bool = False,
 ) -> RuntimeImageReceipt:
-    cached = storage.find_published(
-        expected_manifest,
-        expected_architecture=expected_architecture,
-        expected_runtime_interface=expected_interface,
-    )
-    if cached is not None:
-        return cached
+    if not force:
+        cached = storage.find_published(
+            expected_manifest,
+            expected_architecture=expected_architecture,
+            expected_runtime_interface=expected_interface,
+        )
+        if cached is not None:
+            return cached
     staged = storage.prepare_path()
     expected_interface_label = _runtime_interface_label(expected_interface)
     try:

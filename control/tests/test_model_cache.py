@@ -21,6 +21,7 @@ from vonk_control.distribution import (
 from vonk_control.model_cache import (
     ModelCacheConflict,
     ModelCacheService,
+    _retry_after_seconds,
     _retryable_failure,
 )
 from vonk_control.model_cache_api import (
@@ -634,6 +635,32 @@ def test_model_cache_retry_classification_rejects_terminal_http_and_storage_erro
     assert _retryable_failure(OSError(errno.EACCES, "permission denied")) is False
     assert _retryable_failure(OSError(errno.ENOSPC, "no space left")) is False
     assert _retryable_failure(OSError(errno.ETIMEDOUT, "timed out")) is True
+
+
+def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
+    now = datetime(2026, 9, 5, 12, tzinfo=UTC)
+    assert _retry_after_seconds({"retry-after": "7"}, now=now) == 7
+    assert _retry_after_seconds({"ratelimit-reset": "30"}, now=now) == 30
+    assert _retry_after_seconds(
+        {"x-ratelimit-reset": str(int(now.timestamp()) + 11)}, now=now
+    ) == 11
+
+
+def test_worker_prefers_nonblocking_cache_tick_when_available() -> None:
+    calls: list[str] = []
+
+    class Jobs:
+        def claim(self, *_args, **_kwargs):
+            raise AssertionError("generic jobs should not run before cache tick")
+
+    class Cache:
+        def tick(self):
+            calls.append("tick")
+            return True
+
+    worker = Worker(Jobs(), "worker", {}, model_cache=Cache())
+    assert worker.run_once() is True
+    assert calls == ["tick"]
 
 
 def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
