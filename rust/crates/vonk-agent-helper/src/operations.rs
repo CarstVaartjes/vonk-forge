@@ -1722,41 +1722,28 @@ fn runtime_image_identity_matches(
 }
 
 fn runtime_archive_config_digest(path: &Path) -> Result<String, OperationError> {
-    let manifest = read_tar_entry(path, Path::new("manifest.json"), MAX_RUNTIME_CONFIG_BYTES)?;
-    let entries: Vec<DockerSaveManifestEntry> =
-        serde_json::from_slice(&manifest).map_err(|_| OperationError::InvalidArtifact)?;
-    if entries.len() != 1 {
-        return Err(OperationError::InvalidArtifact);
-    }
-    let config_name = entries[0]
-        .config
-        .strip_prefix("blobs/sha256/")
-        .ok_or(OperationError::InvalidArtifact)?;
-    let config = config_name.strip_suffix(".json").unwrap_or(config_name);
-    if !lower_hex(config, 64) {
-        return Err(OperationError::InvalidArtifact);
-    }
-    let config_path = PathBuf::from(format!("blobs/sha256/{config_name}"));
-    let bytes = read_tar_entry(path, &config_path, MAX_RUNTIME_CONFIG_BYTES)?;
-    if hex_sha256(&bytes) != config {
-        return Err(OperationError::InvalidArtifact);
-    }
-    Ok(format!("sha256:{config}"))
-}
-
-fn read_tar_entry(path: &Path, target: &Path, limit: usize) -> Result<Vec<u8>, OperationError> {
     let file = File::open(path).map_err(|_| OperationError::InvalidArtifact)?;
     let mut archive = tar::Archive::new(file);
-    let mut found = None;
+    let mut manifest = None;
+    let mut config_member = None;
     for entry in archive
         .entries()
         .map_err(|_| OperationError::InvalidArtifact)?
     {
         let mut entry = entry.map_err(|_| OperationError::InvalidArtifact)?;
-        if entry.path().map_err(|_| OperationError::InvalidArtifact)? != target {
+        let entry_path = entry
+            .path()
+            .map_err(|_| OperationError::InvalidArtifact)?
+            .into_owned();
+        let is_manifest = entry_path == Path::new("manifest.json");
+        let config_name = config_member_name(&entry_path);
+        if !is_manifest && config_name.is_none() {
             continue;
         }
-        if found.is_some() || !entry.header().entry_type().is_file() || entry.size() > limit as u64
+        if (is_manifest && manifest.is_some())
+            || (config_name.is_some() && config_member.is_some())
+            || !entry.header().entry_type().is_file()
+            || entry.size() > MAX_RUNTIME_CONFIG_BYTES as u64
         {
             return Err(OperationError::InvalidArtifact);
         }
@@ -1768,9 +1755,41 @@ fn read_tar_entry(path: &Path, target: &Path, limit: usize) -> Result<Vec<u8>, O
         if bytes.len() != size {
             return Err(OperationError::InvalidArtifact);
         }
-        found = Some(bytes);
+        if is_manifest {
+            manifest = Some(bytes);
+        } else {
+            config_member = Some((entry_path, config_name.unwrap(), bytes));
+        }
     }
-    found.ok_or(OperationError::InvalidArtifact)
+    let manifest = manifest.ok_or(OperationError::InvalidArtifact)?;
+    let entries: Vec<DockerSaveManifestEntry> =
+        serde_json::from_slice(&manifest).map_err(|_| OperationError::InvalidArtifact)?;
+    if entries.len() != 1 {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let expected_config =
+        config_member_name(Path::new(&entries[0].config)).ok_or(OperationError::InvalidArtifact)?;
+    let (config_path, config, bytes) = config_member.ok_or(OperationError::InvalidArtifact)?;
+    if config_path != Path::new(&entries[0].config) || config != expected_config {
+        return Err(OperationError::InvalidArtifact);
+    }
+    if hex_sha256(&bytes) != config {
+        return Err(OperationError::InvalidArtifact);
+    }
+    Ok(format!("sha256:{config}"))
+}
+
+fn config_member_name(path: &Path) -> Option<String> {
+    let value = path.to_str()?;
+    let digest = if let Some(value) = value.strip_prefix("blobs/sha256/") {
+        value.strip_suffix(".json").unwrap_or(value)
+    } else {
+        if path.components().count() != 1 {
+            return None;
+        }
+        value.strip_suffix(".json")?
+    };
+    lower_hex(digest, 64).then(|| digest.to_owned())
 }
 
 fn bounded_container_exit_code(output: &CommandOutput) -> i32 {
@@ -3220,12 +3239,17 @@ mod tests {
             .join("models")
     }
 
-    fn docker_save_archive() -> (Vec<u8>, String) {
+    fn docker_save_archive(root_config: bool) -> (Vec<u8>, String) {
         let config = br#"{"config":{"User":"10001:10001"}}"#;
         let config_digest = hex_sha256(config);
+        let config_member = if root_config {
+            format!("{config_digest}.json")
+        } else {
+            format!("blobs/sha256/{config_digest}")
+        };
         let manifest = serde_json::to_vec(&serde_json::json!([
             {
-                "Config": format!("blobs/sha256/{config_digest}.json"),
+                "Config": config_member,
                 "RepoTags": ["localhost/vonk/test:latest"],
                 "Layers": [],
             }
@@ -3239,7 +3263,11 @@ mod tests {
         builder
             .append_data(&mut header, "manifest.json", manifest.as_slice())
             .unwrap();
-        let config_path = format!("blobs/sha256/{config_digest}.json");
+        let config_path = if root_config {
+            format!("{config_digest}.json")
+        } else {
+            format!("blobs/sha256/{config_digest}")
+        };
         let mut header = tar::Header::new_gnu();
         header.set_size(config.len() as u64);
         header.set_mode(0o600);
@@ -3251,6 +3279,18 @@ mod tests {
             builder.into_inner().unwrap(),
             format!("sha256:{config_digest}"),
         )
+    }
+
+    #[test]
+    fn runtime_archive_config_digest_accepts_classic_root_member() {
+        let temp = tempfile::tempdir().unwrap();
+        let (payload, config_id) = docker_save_archive(true);
+        let archive = temp.path().join("image.tar");
+        fs::write(&archive, payload).unwrap();
+        assert_eq!(
+            super::runtime_archive_config_digest(&archive).unwrap(),
+            config_id
+        );
     }
 
     fn runtime_arguments(roots: &ManagedRoots, mounts: &[(PathBuf, &str, bool)]) -> Vec<String> {
@@ -3776,7 +3816,7 @@ mod tests {
         fs::create_dir_all(&roots.data).unwrap();
         let executor =
             OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
-        let (payload, config_id) = docker_save_archive();
+        let (payload, config_id) = docker_save_archive(false);
         let archive_sha256 = hex_sha256(&payload);
         let registry_manifest = format!("sha256:{}", "b".repeat(64));
         let local_reference =
@@ -3850,7 +3890,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(temp.path());
         fs::create_dir_all(&roots.data).unwrap();
-        let (payload, config_id) = docker_save_archive();
+        let (payload, config_id) = docker_save_archive(false);
         let archive_sha256 = hex_sha256(&payload);
         let registry_manifest = format!("sha256:{}", "b".repeat(64));
         let local_reference =
@@ -3893,7 +3933,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(temp.path());
         fs::create_dir_all(&roots.data).unwrap();
-        let (payload, _config_id) = docker_save_archive();
+        let (payload, _config_id) = docker_save_archive(false);
         let archive_sha256 = hex_sha256(&payload);
         let registry_manifest = format!("sha256:{}", "b".repeat(64));
         let local_reference =

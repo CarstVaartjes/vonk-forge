@@ -135,7 +135,8 @@ with tarfile.open(sys.argv[1], "r") as archive:
         raise SystemExit("archive must contain exactly one image")
     config_path = manifest_entries[0].get("Config")
     if not isinstance(config_path, str) or re.fullmatch(
-        r"blobs/sha256/[0-9a-f]{64}(?:\.json)?", config_path
+        r"(?:blobs/sha256/[0-9a-f]{64}(?:\.json)?|[0-9a-f]{64}\.json)",
+        config_path,
     ) is None:
         raise SystemExit("archive config path is invalid")
     config = archive.extractfile(config_path).read()
