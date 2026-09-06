@@ -56,7 +56,7 @@ fn main() {
     };
     let arguments = if action == HostRuntimeAction::ImageImport {
         vec![
-            format!("/var/lib/vonk-forge/oci-archives/{archive_sha}"),
+            format!("/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"),
             archive_sha.clone(),
             archive_bytes.to_string(),
             registry_digest.clone(),
@@ -240,7 +240,9 @@ fn production_start_arguments() -> Vec<String> {
     let invocation = project(
         &plan,
         &CompiledOciPaths {
-            image_archive: PathBuf::from(format!("/var/lib/vonk-forge/oci-archives/{archive_sha}")),
+            image_archive: PathBuf::from(format!(
+                "/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"
+            )),
             model_root: PathBuf::from("/var/lib/vonk-forge/models"),
             input_root: None,
             output_root: PathBuf::from("/var/lib/vonk-forge-agent/runs/proof-run/outputs"),
