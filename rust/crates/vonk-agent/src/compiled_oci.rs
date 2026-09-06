@@ -431,11 +431,11 @@ fn ordered_environment(
     if let Some(port) = placement.master_port {
         add("VONK_MASTER_PORT", port.to_string())?;
     }
-    if plan.runtime.placement.endpoint_address.is_some() {
-        if let Some(endpoint) = &plan.endpoint {
-            add("VONK_LISTEN_HOST", "0.0.0.0".to_owned())?;
-            add("VONK_LISTEN_PORT", endpoint.port.to_string())?;
-        }
+    if plan.runtime.placement.endpoint_address.is_some()
+        && let Some(endpoint) = &plan.endpoint
+    {
+        add("VONK_LISTEN_HOST", "0.0.0.0".to_owned())?;
+        add("VONK_LISTEN_PORT", endpoint.port.to_string())?;
     }
     if let Some(job) = &plan.job {
         add("VONK_INPUT_ROOT", "/inputs".to_owned())?;
@@ -455,16 +455,15 @@ fn publications(plan: &CompiledExecutionPlan) -> Result<Vec<String>, CompiledOci
         };
         result.push(first);
     }
-    if placement.rank == 0 {
-        if let (Some(master), Some(master_port)) = (placement.master_address, placement.master_port)
-        {
-            let publication = match master {
-                IpAddr::V4(address) => format!("{address}:{master_port}:{master_port}"),
-                IpAddr::V6(address) => format!("[{address}]:{master_port}:{master_port}"),
-            };
-            if !result.contains(&publication) {
-                result.push(publication);
-            }
+    if placement.rank == 0
+        && let (Some(master), Some(master_port)) = (placement.master_address, placement.master_port)
+    {
+        let publication = match master {
+            IpAddr::V4(address) => format!("{address}:{master_port}:{master_port}"),
+            IpAddr::V6(address) => format!("[{address}]:{master_port}:{master_port}"),
+        };
+        if !result.contains(&publication) {
+            result.push(publication);
         }
     }
     Ok(result)
