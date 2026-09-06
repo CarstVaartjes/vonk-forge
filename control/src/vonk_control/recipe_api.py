@@ -82,7 +82,7 @@ class PlanReason(StrictModel):
 
 class MappingNodePlanResponse(StrictModel):
     node_id: NodeId
-    rank: int = Field(ge=0, le=31)
+    rank: int
     role: Text64
     endpoint_owner: bool
 
@@ -93,7 +93,7 @@ class MappingPlanResponse(StrictModel):
     topology_name: Text64
     generation: int = Field(ge=1)
     parameters: dict[Text64, Scalar] = Field(max_length=128)
-    nodes: list[MappingNodePlanResponse] = Field(min_length=1, max_length=32)
+    nodes: list[MappingNodePlanResponse]
     placement_digest: Digest
 
 
@@ -117,7 +117,7 @@ class ImageDistributionPlanResponse(StrictModel):
     mapping_id: UuidId
     mapping_generation: int = Field(ge=1)
     image_digest: ImageDigest
-    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    node_ids: list[NodeId] = Field(min_length=1, max_length=1024)
     plan_digest: Digest
 
 
@@ -137,7 +137,7 @@ class SourcePolicyResponse(StrictModel):
 
 class InstallNodePlanResponse(StrictModel):
     node_id: NodeId
-    rank: int = Field(ge=0, le=31)
+    rank: int
     role: Text64
     allowed: bool
     inventory_observed_at: datetime | None
@@ -171,7 +171,7 @@ class InstallPlanResponse(StrictModel):
 
 class RunNodePlanResponse(StrictModel):
     node_id: NodeId
-    rank: int = Field(ge=0, le=31)
+    rank: int
     role: Text64
     endpoint_owner: bool
     port: int
@@ -257,8 +257,8 @@ class UninstallModelImpactResponse(StrictModel):
         pattern=r"^(recipe-only|recipe-and-unused-model|recipe-and-partial-model-cleanup)$"
     )
     dependent_recipe_ids: list[UuidId] = Field(max_length=512)
-    cleanup_node_ids: list[NodeId] = Field(max_length=32)
-    retained_node_ids: list[NodeId] = Field(max_length=32)
+    cleanup_node_ids: list[NodeId] = Field(max_length=1024)
+    retained_node_ids: list[NodeId] = Field(max_length=1024)
 
 
 class UninstallPlanResponse(StrictModel):
@@ -288,7 +288,7 @@ class ModelDeletionInstallationImpactResponse(StrictModel):
     recipe_id: UuidId
     recipe_revision_id: UuidId
     recipe_content_sha256: Digest
-    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    node_ids: list[NodeId] = Field(min_length=1, max_length=1024)
     installed_bytes: int = Field(ge=0)
 
 
@@ -354,7 +354,7 @@ class InstallPreviewRequest(StrictModel):
 
 class MappingPreviewRequest(StrictModel):
     recipe_revision_id: UuidId
-    node_ids: list[NodeId] = Field(min_length=1, max_length=32)
+    node_ids: list[NodeId] = Field(min_length=1, max_length=1024)
     parameters: dict[Text64, Scalar] = Field(default_factory=dict, max_length=128)
 
 
