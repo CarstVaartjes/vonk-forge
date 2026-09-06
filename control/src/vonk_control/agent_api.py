@@ -104,6 +104,10 @@ from .workload_helper_authority import (
 )
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_UUID_TEXT = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
 _MAX_CSR_BYTES = 16 * 1024
 _MAX_EVIDENCE_FIELDS = 8
@@ -452,6 +456,87 @@ class AgentUpgradePreviewRequest(BaseModel):
 
 class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AgentUpgradePreviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    node_ids: list[str] = Field(max_length=64)
+    package: AgentUpgradePackageRequest
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    repair_manifest: AgentRepairManifestRequest | None = None
+    strategy: Literal["one-at-a-time", "all-at-once"]
+
+
+class AgentUpgradeApplyResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=128)
+    state: str = Field(min_length=1, max_length=32)
+
+
+class AgentGrantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    job_id: str = Field(pattern=_UUID_TEXT)
+    operation_id: str = Field(pattern=_UUID_TEXT)
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: str = Field(pattern=_UUID_TEXT)
+    expires_in_seconds: int = Field(ge=1, le=300)
+
+
+class HostRuntimeGrantRequest(AgentGrantRequest):
+    action: Literal["image-import", "image-inspect", "run-inspect", "start", "stop"]
+    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AgentUpgradeGrantRequest(AgentGrantRequest):
+    package_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
+
+
+class PackageHelperReceiptsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    job_id: str = Field(pattern=_UUID_TEXT)
+    operation_id: str = Field(pattern=_UUID_TEXT)
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: str = Field(pattern=_UUID_TEXT)
+    release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    objects: list[dict[str, object]] = Field(max_length=256)
+
+
+class PackageHelperGrantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    request_id: str = Field(pattern=_UUID_TEXT)
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    job_id: str = Field(pattern=_UUID_TEXT)
+    operation_id: str = Field(pattern=_UUID_TEXT)
+    attempt: int = Field(ge=1, le=2**31 - 1)
+    fence: str = Field(pattern=_UUID_TEXT)
+    release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    generation: int = Field(ge=1, le=2**63 - 1)
+    operation: Literal[
+        "prepare", "verify", "start", "health", "infer", "stop", "verify-release"
+    ]
+    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expires_in_seconds: int = Field(ge=1, le=900)
+
+
+class AgentGrantResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    grant: dict[str, object]
+
+
+class PackageHelperReceiptsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    receipts: list[dict[str, object]]
+
+
+class RecipeRunObservationGrantResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1]
+    observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    grant: dict[str, object]
 
 
 def _agent_upgrade_request_material(
@@ -1389,11 +1474,16 @@ def install_agent_routes(
     limiter = enrollment_rate_limiter or EnrollmentRateLimiter()
     authenticated_actor = Depends(actor_dependency)
 
-    @human.post("/upgrades/preview")
+    @human.post(
+        "/upgrades/preview",
+        response_model=AgentUpgradePreviewResponse,
+        response_model_exclude_none=True,
+        responses=bounded_error_responses(401, 403, 409, 503),
+    )
     def preview_agent_upgrade(
         body: AgentUpgradePreviewRequest,
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> AgentUpgradePreviewResponse:
         _require_administrator(authenticated, "/api/v1/agents/upgrades/preview")
         if upgrades is None:
             raise HTTPException(
@@ -1409,39 +1499,44 @@ def install_agent_routes(
             )
         except AgentUpgradeConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
-        return {
-            "authority_revision": plan.authority_revision,
-            "node_ids": list(plan.node_ids),
-            "package": plan.package,
-            "plan_digest": plan.plan_digest,
-            **(
-                {"repair_manifest": plan.repair_manifest}
-                if plan.repair_manifest is not None
-                else {}
-            ),
-            "strategy": plan.strategy,
-        }
+        return AgentUpgradePreviewResponse(
+            authority_revision=plan.authority_revision,
+            node_ids=list(plan.node_ids),
+            package=plan.package,
+            plan_digest=plan.plan_digest,
+            repair_manifest=plan.repair_manifest,
+            strategy=plan.strategy,
+        )
 
-    @human.get("/upgrades/candidate")
+    @human.get(
+        "/upgrades/candidate",
+        response_model=AgentUpgradePackageRequest,
+        responses=bounded_error_responses(401, 403, 503),
+    )
     def current_agent_upgrade(
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> AgentUpgradePackageRequest:
         _require_administrator(authenticated, "/api/v1/agents/upgrades/candidate")
         if upgrades is None:
             raise HTTPException(
                 status_code=503, detail="agent upgrades are unavailable"
             )
         try:
-            return upgrades.current_package()
+            return AgentUpgradePackageRequest.model_validate(upgrades.current_package())
         except AgentUpgradeConflict as error:
             raise HTTPException(status_code=503, detail=str(error)) from None
 
-    @human.post("/upgrades", status_code=status.HTTP_202_ACCEPTED)
+    @human.post(
+        "/upgrades",
+        status_code=status.HTTP_202_ACCEPTED,
+        response_model=AgentUpgradeApplyResponse,
+        responses=bounded_error_responses(401, 403, 409, 503),
+    )
     def apply_agent_upgrade(
         body: AgentUpgradeApplyRequest,
         request: Request,
         authenticated: Actor = authenticated_actor,
-    ) -> dict[str, object]:
+    ) -> AgentUpgradeApplyResponse:
         _require_administrator(authenticated, "/api/v1/agents/upgrades")
         if upgrades is None:
             raise HTTPException(
@@ -1469,7 +1564,7 @@ def install_agent_routes(
                 tuple(job.targets),
             )
         )
-        return {"id": job.id, "state": job.state}
+        return AgentUpgradeApplyResponse(id=job.id, state=job.state)
 
     @human.post(
         "/enrollments/grants",
@@ -2049,11 +2144,11 @@ def install_agent_routes(
                 detail="recipe run observation authority rejected request",
             ) from None
         return _json_response(
-            {
-                "schema_version": 1,
-                "observation_identity_sha256": observation_identity,
-                "grant": grant.to_mapping(),
-            }
+            RecipeRunObservationGrantResponse(
+                schema_version=1,
+                observation_identity_sha256=observation_identity,
+                grant=grant.to_mapping(),
+            ).model_dump()
         )
 
     @agent.get("/source-bundles/{source_sha256}")
@@ -2341,66 +2436,78 @@ def install_agent_routes(
         return required
 
     @agent.post("/host-runtime/grant")
-    def host_runtime_grant(body: dict[str, object], request: Request) -> Response:
+    def host_runtime_grant(
+        body: HostRuntimeGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
             grant = required.issue_grant(
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                action=ContainerRuntimeAction(body["action"]),
-                request_sha256=body["request_sha256"],
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                action=ContainerRuntimeAction(body.action),
+                request_sha256=body.request_sha256,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.get("expires_in_seconds", 30),
+                expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response({"grant": grant.to_mapping()})
+            return _json_response(
+                AgentGrantResponse(grant=grant.to_mapping()).model_dump()
+            )
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="host runtime authority rejected request"
             ) from None
 
     @agent.post("/agent-upgrade/grant")
-    def agent_upgrade_grant(body: dict[str, object], request: Request) -> Response:
+    def agent_upgrade_grant(
+        body: AgentUpgradeGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
             grant = required.issue_agent_upgrade_grant(
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                package_sha256=body["package_sha256"],
-                package_signature=body["package_signature"],
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                package_sha256=body.package_sha256,
+                package_signature=body.package_signature,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.get("expires_in_seconds", 30),
+                expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response({"grant": grant.to_mapping()})
+            return _json_response(
+                AgentGrantResponse(grant=grant.to_mapping()).model_dump()
+            )
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="agent upgrade authority rejected request"
             ) from None
 
     @agent.post("/package-helper/receipts")
-    def package_helper_receipts(body: dict[str, object], request: Request) -> Response:
+    def package_helper_receipts(
+        body: PackageHelperReceiptsRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = workload_helper_service()
         try:
             receipts = required.issue_receipts(
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                release_digest=body["release_digest"],
-                objects=body["objects"],
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                release_digest=body.release_digest,
+                objects=body.objects,
                 certificate_serial=identity.certificate_serial,
             )
             return _json_response(
-                {"receipts": [item.to_mapping() for item in receipts]}
+                PackageHelperReceiptsResponse(
+                    receipts=[item.to_mapping() for item in receipts]
+                ).model_dump()
             )
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
@@ -2408,26 +2515,29 @@ def install_agent_routes(
             ) from None
 
     @agent.post("/package-helper/grant")
-    def package_helper_grant(body: dict[str, object], request: Request) -> Response:
+    def package_helper_grant(
+        body: PackageHelperGrantRequest, request: Request
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = workload_helper_service()
         try:
-            operation = PackageHelperOperation(body["operation"])
             grant = required.issue_grant(
-                request_id=body["request_id"],
-                node_id=body["node_id"],
-                job_id=body["job_id"],
-                operation_id=body["operation_id"],
-                attempt=body["attempt"],
-                fence=body["fence"],
-                release_digest=body["release_digest"],
-                generation=body["generation"],
-                operation=operation,
-                request_digest=body["request_digest"],
+                request_id=body.request_id,
+                node_id=body.node_id,
+                job_id=body.job_id,
+                operation_id=body.operation_id,
+                attempt=body.attempt,
+                fence=body.fence,
+                release_digest=body.release_digest,
+                generation=body.generation,
+                operation=PackageHelperOperation(body.operation),
+                request_digest=body.request_digest,
                 certificate_serial=identity.certificate_serial,
-                expires_in_seconds=body.get("expires_in_seconds", 30),
+                expires_in_seconds=body.expires_in_seconds,
             )
-            return _json_response({"grant": grant.to_mapping()})
+            return _json_response(
+                AgentGrantResponse(grant=grant.to_mapping()).model_dump()
+            )
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="workload helper authority rejected request"
