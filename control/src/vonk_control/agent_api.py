@@ -35,6 +35,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .agent_jobs import AgentJobService, StaleAgentAttempt
 from .agent_upgrades import AgentUpgradeConflict, AgentUpgradeService
@@ -46,6 +47,7 @@ from .auth import (
     agent_identity_from_scope,
     agent_source_from_scope,
 )
+from .distribution import DistributionError, DistributionService
 from .enrollment import (
     MAX_ENROLLMENT_GRANT_TTL_SECONDS,
     EnrollmentDenied,
@@ -65,9 +67,9 @@ from .models import (
     AgentEnrollment,
     AgentNode,
     AgentOperation,
+    CatalogDocumentRevision,
     ClusterMapping,
     InstallationNode,
-    LocalRecipeRevision,
     RecipeBuild,
     RecipeInstallation,
     RecipeRun,
@@ -76,7 +78,6 @@ from .models import (
 )
 from .operation_api import bounded_error_responses
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
-from .recipe_contract import recipe_content_sha256, validate_recipe
 from .recipe_operations import (
     RecipeRunObservation,
     prepare_exact_recipe_run_observation_nodes,
@@ -88,7 +89,6 @@ from .recipe_runtime_specs import (
     resolve_recipe_entities,
 )
 from .source_bundles import SourceBundleError, SourceBundleStore
-from .distribution import DistributionError, DistributionService
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
@@ -2038,13 +2038,16 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=404, detail="recipe specification does not exist"
                 )
-            revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+            revision = session.get(
+                CatalogDocumentRevision, installation.recipe_revision_id
+            )
             mapping = session.get(ClusterMapping, installation.mapping_id)
             build = session.get(RecipeBuild, installation.recipe_build_id)
             if (
                 revision is None
-                or revision.lifecycle != "resolved"
-                or revision.content_sha256 is None
+                or revision.kind != "recipe"
+                or revision.schema_version != 2
+                or revision.state != "active"
                 or mapping is None
                 or mapping.state != "ready"
                 or mapping.generation != installation.mapping_generation
@@ -2056,28 +2059,33 @@ def install_agent_routes(
                 raise HTTPException(
                     status_code=409, detail="recipe specification authority is stale"
                 )
-            document = revision.document
+            try:
+                recipe = RecipeDefinition.model_validate(revision.document)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=409, detail="recipe specification authority is stale"
+                ) from None
+            if content_sha256(recipe) != revision.content_digest:
+                raise HTTPException(
+                    status_code=409, detail="recipe specification authority is stale"
+                )
+            document = recipe.model_dump(mode="json")
             parameters = mapping.parameters
             try:
                 resolved_entities = resolve_recipe_entities(session, document)
-            except RecipeRuntimeSpecError as error:
-                detail = {
-                    "runtime distribution does not implement harness": (
-                        "recipe specification distribution-harness binding is invalid"
-                    ),
-                    "patch bundle does not apply to distribution": (
-                        "recipe specification patch-distribution binding is invalid"
-                    ),
-                }.get(str(error), "recipe specification dependencies are stale")
+            except RecipeRuntimeSpecError:
                 raise HTTPException(
                     status_code=409,
-                    detail=detail,
+                    detail="recipe specification dependencies are stale",
                 ) from None
-        validate_recipe(document)
-        if recipe_content_sha256(document) != revision.content_sha256:
-            raise HTTPException(
-                status_code=409, detail="recipe specification digest changed"
+            package = dict(revision.projected or {})
+            package["image_digest"] = build.image_digest
+            package["image_reference"] = (
+                f"localhost/vonk/recipe-build@{build.image_digest}"
+                if build.image_digest is not None
+                else None
             )
+            package["build_input_sha256"] = build.build_input_sha256
         try:
             spec = compile_runtime_spec(
                 document,
@@ -2085,8 +2093,7 @@ def install_agent_routes(
                 parameters=parameters,
                 role=placement.role,
                 rank=placement.rank,
-                recipe_build_id=build.id,
-                image_digest=build.image_digest,
+                package_handle=package,
             )
         except RecipeRuntimeSpecError as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
