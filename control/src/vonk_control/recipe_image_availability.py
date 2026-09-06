@@ -73,6 +73,7 @@ _INTEGRITY_FAILURE_CODES = frozenset(
         "runtime_image.evidence_invalid",
     }
 )
+_ADMISSION_WAIT_CODES = frozenset({"recipe_image.build_capacity_wait"})
 
 
 class RecipeImageAvailabilityError(RuntimeError):
@@ -451,19 +452,21 @@ class RecipeImageAvailabilityService:
                     force_rebuild = True
             runtime_build_input = runtime.get("build_input_sha256")
             if recipe.execution.mode == "build":
-                if not isinstance(runtime_build_input, str):
+                provisional_intent = runtime.get("input_intent_sha256")
+                if not isinstance(runtime_build_input, str) and not isinstance(provisional_intent, str):
                     raise RecipeImageAvailabilityError(
                         "recipe_image.build_input_missing",
                         "authoritative runtime projection lacks the exact build input digest",
                     )
-                runtime_build_input = _digest(runtime_build_input, field="build_input_sha256")
-                if build_input_sha256 is None:
-                    build_input_sha256 = runtime_build_input
-                elif build_input_sha256 != runtime_build_input:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.identity_conflict",
-                        "submitted build input does not match authoritative runtime metadata",
-                    )
+                if isinstance(runtime_build_input, str):
+                    runtime_build_input = _digest(runtime_build_input, field="build_input_sha256")
+                    if build_input_sha256 is None:
+                        build_input_sha256 = runtime_build_input
+                    elif build_input_sha256 != runtime_build_input:
+                        raise RecipeImageAvailabilityError(
+                            "recipe_image.identity_conflict",
+                            "submitted build input does not match authoritative runtime metadata",
+                        )
             else:
                 build_input_sha256 = None
             model_child = (
@@ -1260,9 +1263,15 @@ class RecipeImageAvailabilityService:
                 with self._sessions.begin() as session:
                     operation = session.get(Job, operation_id)
                     if operation is not None:
+                        assigned_runtime = dict(operation.payload.get("runtime", {}))
+                        if isinstance(build_receipt.get("builder_node_id"), str):
+                            assigned_runtime["builder_node_id"] = build_receipt["builder_node_id"]
+                        if isinstance(build_receipt.get("build_input_sha256"), str):
+                            assigned_runtime["build_input_sha256"] = build_receipt["build_input_sha256"]
                         operation.payload = dict(operation.payload) | {
                             "build_input_sha256": resolved_input,
                             "identity_key": resolved_input,
+                            "runtime": assigned_runtime,
                         }
             self._update_progress(operation_id, "verify")
             return prepare_runtime_image(
@@ -1404,7 +1413,10 @@ class RecipeImageAvailabilityService:
             automatic_attempts = int(retry.get("automatic_attempts", 0))
             if retryable and retry_after is None:
                 retry_after = min(60, 2 ** automatic_attempts)
-            bounded = retryable and automatic_attempts + 1 < self._automatic_attempt_limit
+            bounded = retryable and (
+                str(code) in _ADMISSION_WAIT_CODES
+                or automatic_attempts + 1 < self._automatic_attempt_limit
+            )
             retry["automatic_attempts"] = automatic_attempts + 1
             now = self._clock()
             now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
