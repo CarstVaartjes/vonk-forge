@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor
 from vonk_control.catalog_api import (
@@ -175,3 +177,41 @@ def test_managed_sync_maps_invalid_reader_and_catalog_errors() -> None:
     assert plain_catalog.json()["code"] == "catalog.storage_invalid"
     assert in_progress.status_code == 409
     assert in_progress.json()["code"] == "catalog.sync_in_progress"
+
+
+def test_catalog_json_contract_rejects_coercion_and_top_level_extras() -> None:
+    with pytest.raises(ValidationError):
+        ManagedCatalogSyncResponse.model_validate(
+            {
+                "schema_version": 1,
+                "sync_id": "00000000-0000-4000-8000-000000000001",
+                "request_key": "00000000-0000-4000-8000-000000000002",
+                "trigger": "manual",
+                "state": "current",
+                "repository": "example/recipes",
+                "commit": None,
+                "expected_commit": None,
+                "total_count": "1",
+                "processed_count": 1,
+                "imported_count": 1,
+                "updated_count": 0,
+                "unchanged_count": 0,
+                "skipped_count": 0,
+                "withdrawn_count": 0,
+                "withdrawn_recipes": [],
+                "stale_recipes": [],
+                "problems": [],
+                "created_at": "2026-09-06T00:00:00+00:00",
+                "completed_at": None,
+                "unexpected": True,
+            }
+        )
+
+    client = _sync_client(
+        RecipeLibraryError("recipe_package.response_invalid", "invalid package")
+    )
+    response = client.post(
+        "/api/v1/catalog/managed-recipes/sync",
+        json={"request_key": 1},
+    )
+    assert response.status_code == 422
