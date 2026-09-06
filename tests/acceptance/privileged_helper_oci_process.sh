@@ -67,6 +67,7 @@ DOCKERFILE
 
 docker build --platform linux/arm64 -t "$image_platform" "$fixture_dir" >"$report_root/image-build.log"
 docker run --detach --rm --name "$registry_name" -p 5001:5000 registry:2 >"$report_root/registry-id"
+docker manifest rm "$image_name" >"$report_root/manifest-remove.log" 2>&1 || true
 for _ in {1..30}; do
   docker push "$image_platform" >"$report_root/image-push.log" 2>&1 && break
   sleep 1
@@ -103,12 +104,40 @@ chown vonk-agent:vonk-agent "/var/lib/vonk-forge-agent/oci-archives/$archive_sha
 chmod 0600 "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
 
 install -d -o vonk-agent -g vonk-agent -m 0700 \
+  /var/lib/vonk-forge-agent/installations \
+  /var/lib/vonk-forge-agent/installations/proof-install \
+  /var/lib/vonk-forge-agent/installations/proof-install/models \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary \
   /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101 \
   /var/lib/vonk-forge-agent/installations/proof-install/models/support \
+  /var/lib/vonk-forge-agent/runs \
+  /var/lib/vonk-forge-agent/runs/$run_id \
+  /var/lib/vonk-forge-agent/runs/$run_id/outputs \
+  /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp \
   /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/$run_id \
+  /var/lib/vonk-forge-agent/run-metadata \
   /var/lib/vonk-forge-agent/run-metadata/$run_id \
   /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache
+for path in \
+  /var/lib/vonk-forge-agent \
+  /var/lib/vonk-forge-agent/oci-archives \
+  /var/lib/vonk-forge-agent/installations \
+  /var/lib/vonk-forge-agent/installations/proof-install \
+  /var/lib/vonk-forge-agent/installations/proof-install/models \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/primary \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/dependency-qwen3-8-27b-dspark-b3c99101 \
+  /var/lib/vonk-forge-agent/installations/proof-install/models/support \
+  /var/lib/vonk-forge-agent/installations/proof-install/runtime-cache \
+  /var/lib/vonk-forge-agent/runs \
+  /var/lib/vonk-forge-agent/runs/$run_id \
+  /var/lib/vonk-forge-agent/runs/$run_id/outputs \
+  /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp \
+  /var/lib/vonk-forge-agent/runs/$run_id/outputs/tmp/$run_id \
+  /var/lib/vonk-forge-agent/run-metadata \
+  /var/lib/vonk-forge-agent/run-metadata/$run_id; do
+  stat -c '%u:%g:%a:%F' "$path" >>"$report_root/custody-paths.txt"
+  test "$(stat -c '%u:%g:%a:%F' "$path")" = '10001:10001:700:directory'
+done
 for path in \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary/config.json \
   /var/lib/vonk-forge-agent/installations/proof-install/models/primary/DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf \
