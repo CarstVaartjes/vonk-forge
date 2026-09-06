@@ -127,6 +127,79 @@ def test_sync_imports_canonical_models_and_changed_recipe_once(tmp_path: Path) -
         assert len([row for row in revisions if row.kind == "recipe"]) == 1
 
 
+def test_sync_keys_local_revisions_by_publisher_and_slug(tmp_path: Path) -> None:
+    sessions, service, reader, item = _fixture(tmp_path)
+
+    def variant(*, publisher: str, slug: str) -> RecipeLibraryItem:
+        document = deepcopy(item.document)
+        identity = document["identity"]
+        assert isinstance(identity, dict)
+        identity["publisher"] = publisher
+        identity["slug"] = slug
+        return _item_with_document(
+            replace(item, publisher=publisher, slug=slug, source_path=f"recipes/{slug}.json"),
+            document,
+        )
+
+    first = _sync(sessions, service, reader).sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit=reader.snapshot.commit,
+    )
+    assert first.state == "current"
+
+    other_publisher = variant(publisher="other-publisher", slug=item.slug)
+    same_publisher_a = variant(
+        publisher=item.publisher,
+        slug=f"{item.slug}-variant-a",
+    )
+    same_publisher_b = variant(
+        publisher=item.publisher,
+        slug=f"{item.slug}-variant-b",
+    )
+    reader.snapshot = replace(
+        reader.snapshot,
+        items=(item, other_publisher, same_publisher_a, same_publisher_b),
+    )
+    result = _sync(sessions, service, reader).sync(
+        request_key=str(uuid.uuid4()),
+        trigger="manual",
+        actor="test",
+        expected_commit=reader.snapshot.commit,
+    )
+
+    assert result.state == "current"
+    assert result.imported_count == 3
+    assert result.updated_count == 0
+    assert result.skipped_count == 0
+    with sessions() as session:
+        revisions = session.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        ).all()
+        assert {
+            (row.publisher, row.slug)
+            for row in revisions
+        } == {
+            (item.publisher, item.slug),
+            (other_publisher.publisher, other_publisher.slug),
+            (same_publisher_a.publisher, same_publisher_a.slug),
+            (same_publisher_b.publisher, same_publisher_b.slug),
+        }
+        assert len({row.content_digest for row in revisions}) == 4
+
+
+def test_local_revision_lookup_accepts_more_than_256_identities(tmp_path: Path) -> None:
+    _sessions, service, _reader, _item = _fixture(tmp_path)
+    identities = [
+        (f"publisher-{index}", f"recipe-{index}") for index in range(257)
+    ]
+
+    assert service.recipe_catalog_local_revisions(identities) == {}
+
+
 def test_sync_imports_canonical_recipe_without_readiness_tags(tmp_path: Path) -> None:
     sessions, service, reader, item = _fixture(tmp_path)
     document = deepcopy(item.document)
