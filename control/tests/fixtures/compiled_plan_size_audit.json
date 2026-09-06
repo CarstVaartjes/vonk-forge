@@ -3,7 +3,7 @@
   "recipe_library_commit": "b388f27129ef494d4625d08176b122c926d6117f",
   "catalog_source_commit": "a71d494485a64d338876a6fbd205c588e8cb32c4",
   "recipe_files": 85,
-  "successful_projections": 109,
+  "successful_projections": 107,
   "expected_projections": 109,
   "compiled_plan_bytes": {
     "p50": 21554,
@@ -41,7 +41,26 @@
       "parent_job_payload_bytes": 833904
     }
   ],
-  "duplicate_ltx_failures": [],
+  "duplicate_ltx_failures": [
+    {
+      "recipe": "ltx-2-5-22b-distilled-bf16-diffusers-single",
+      "model_digest": "758426bfab8f18020222df86fb395d9cb8cbacfeb7b0e7105c990fd75a21812",
+      "duplicate_selection_keys": [
+        ["primary", "filtered-snapshot"],
+        ["primary", "filtered-snapshot"]
+      ],
+      "reason": "after receipt deduplication, production CompiledExecutionPlan validation rejects repeated (selection_id,file_id) artifacts; the two selectors have distinct file ids in their selector records but intentionally reuse the same canonical file id and different mounts"
+    },
+    {
+      "recipe": "ltx-2-5-22b-distilled-fp8-cast-diffusers-single",
+      "model_digest": "758426bfab8f18020222df86fb395d9cb8cbacfeb7b0e7105c990fd75a21812",
+      "duplicate_selection_keys": [
+        ["primary", "filtered-snapshot"],
+        ["primary", "filtered-snapshot"]
+      ],
+      "reason": "after receipt deduplication, production CompiledExecutionPlan validation rejects repeated (selection_id,file_id) artifacts; the two selectors have distinct file ids in their selector records but intentionally reuse the same canonical file id and different mounts"
+    }
+  ],
   "adapter_correction": {
     "recipes": [
       "ltx-2-5-22b-distilled-bf16-diffusers-single",
@@ -51,10 +70,10 @@
     "model_digest_suffix": "a21812",
     "reused_file_id": "filtered-snapshot",
     "selection_keys": [
-      ["primary-filtered-snapshot", "filtered-snapshot"],
-      ["primary-filtered-snapshot-2", "filtered-snapshot"]
+      ["primary", "filtered-snapshot"],
+      ["primary", "filtered-snapshot"]
     ],
-    "method": "deduplicate verified receipts by (model_content_sha256,file_id), matching ModelCacheVerifiedObjectSource and Controller compile_verified_execution_plan; retain both distinct selection/path entries in the runtime spec",
-    "result": "both projections compile successfully; the initial two failures were an audit adapter error, not a catalog defect"
+    "method": "deduplicate verified receipts by (model_content_sha256,file_id), matching the production canonical manifest semantics; retain both distinct selector/path entries in the runtime spec and let production plan validation report the repeated materialized identity",
+    "result": "the initial adapter also duplicated the receipt; after correcting that, both projections still hit the production repeated-artifact guard, which root must resolve while preserving both mounts"
   }
 }
