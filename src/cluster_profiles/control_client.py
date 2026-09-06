@@ -115,9 +115,25 @@ class ControlHTTPError(ControlClientError):
         detail: str,
         retry_after_seconds: int | None = None,
         *,
+        code: str | None = None,
+        recovery: tuple[str, ...] = (),
+        retry_time: str | None = None,
+        preserved: str | None = None,
+        required_bytes: int | None = None,
+        free_bytes: int | None = None,
+        shortfall_bytes: int | None = None,
+        log_excerpt: str | None = None,
         sensitive_values: tuple[str, ...] = (),
     ) -> None:
         self.status_code = status_code
+        self.code = code or f"http.{status_code}"
+        self.recovery = recovery
+        self.retry_time = retry_time
+        self.preserved = preserved
+        self.required_bytes = required_bytes
+        self.free_bytes = free_bytes
+        self.shortfall_bytes = shortfall_bytes
+        self.log_excerpt = _sanitize_remote_text(log_excerpt, "", sensitive_values=sensitive_values) if log_excerpt else None
         self.detail = _sanitize_remote_text(
             detail,
             "control API request failed",
@@ -198,6 +214,35 @@ def _sanitize_remote_text(
     if len(text) > _MAX_REMOTE_TEXT:
         text = text[: _MAX_REMOTE_TEXT - len(marker)] + marker
     return text
+
+
+def _structured_http_error_fields(problem: object) -> dict[str, object]:
+    """Extract optional shared availability error metadata without exposing secrets."""
+    if not isinstance(problem, Mapping):
+        return {}
+    code = problem.get("code", problem.get("error_code"))
+    recovery = problem.get("recovery_actions", problem.get("recovery", ()))
+    if isinstance(recovery, str):
+        recovery = (recovery,)
+    elif isinstance(recovery, list):
+        recovery = tuple(item for item in recovery if isinstance(item, str))[:8]
+    else:
+        recovery = ()
+    retry_time = problem.get("retry_time", problem.get("retry_at"))
+    preserved = problem.get("preserved")
+    numeric_fields = {
+        key: problem.get(key) if type(problem.get(key)) is int and problem.get(key) >= 0 else None
+        for key in ("required_bytes", "free_bytes", "shortfall_bytes")
+    }
+    log_excerpt = problem.get("log_excerpt")
+    return {
+        "code": code if isinstance(code, str) and code else None,
+        "recovery": recovery,
+        "retry_time": retry_time if isinstance(retry_time, str) else None,
+        "preserved": preserved if isinstance(preserved, str) else None,
+        **numeric_fields,
+        "log_excerpt": log_excerpt if isinstance(log_excerpt, str) else None,
+    }
 
 
 def _safe_job_observation(
@@ -388,10 +433,43 @@ class ControlClient:
         detail = getattr(parsed, "detail", "control API request failed")
         if not isinstance(detail, str):
             detail = "control API request failed"
+        code = getattr(parsed, "code", None)
+        if not isinstance(code, str) or not code:
+            code = getattr(parsed, "error_code", None)
+        if not isinstance(code, str) or not code:
+            code = None
+        recovery_value = getattr(parsed, "recovery_actions", getattr(parsed, "recovery", ()))
+        if isinstance(recovery_value, str):
+            recovery = (recovery_value,)
+        elif isinstance(recovery_value, (list, tuple)):
+            recovery = tuple(item for item in recovery_value if isinstance(item, str))[:8]
+        else:
+            recovery = ()
+        retry_time = getattr(parsed, "retry_time", None)
+        if not isinstance(retry_time, str):
+            retry_time = getattr(parsed, "retry_at", None)
+        if not isinstance(retry_time, str):
+            retry_time = None
+        preserved = getattr(parsed, "preserved", None)
+        if not isinstance(preserved, str):
+            preserved = None
+        numeric_fields: dict[str, int | None] = {}
+        for key in ("required_bytes", "free_bytes", "shortfall_bytes"):
+            value = getattr(parsed, key, None)
+            numeric_fields[key] = value if type(value) is int and value >= 0 else None
+        log_excerpt = getattr(parsed, "log_excerpt", None)
+        if not isinstance(log_excerpt, str):
+            log_excerpt = None
         raise error_type(
             status_code,
             detail,
             _bounded_retry_after(headers.get("retry-after")),
+            code=code,
+            recovery=recovery,
+            retry_time=retry_time,
+            preserved=preserved,
+            **numeric_fields,
+            log_excerpt=log_excerpt,
             sensitive_values=(self._token,),
         )
 
@@ -506,10 +584,12 @@ class ControlClient:
                 problem = None
             detail = problem.get("detail") if isinstance(problem, dict) else None
             error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
+            fields = _structured_http_error_fields(problem)
             raise error_type(
                 status,
                 detail if isinstance(detail, str) else "control API request failed",
                 _bounded_retry_after(response_headers.get("retry-after")),
+                **fields,
                 sensitive_values=(self._token,),
             )
         if status == 204 or not content:
@@ -671,10 +751,12 @@ class ControlClient:
                     problem = None
                 detail = problem.get("detail") if isinstance(problem, dict) else None
                 error_type = _STATUS_ERRORS.get(error.code, ControlHTTPError)
+                fields = _structured_http_error_fields(problem)
                 raise error_type(
                     error.code,
                     detail if isinstance(detail, str) else "control API request failed",
                     _bounded_retry_after(error.headers.get("retry-after")),
+                    **fields,
                     sensitive_values=(self._token,),
                 ) from None
             except (OSError, urllib.error.URLError) as error:

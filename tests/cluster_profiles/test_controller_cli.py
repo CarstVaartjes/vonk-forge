@@ -1476,6 +1476,97 @@ def test_model_download_reports_canonical_cache_progress_and_terminal_error() ->
     assert '"last_error":"source unavailable"' in stdout.getvalue()
 
 
+def test_forced_model_download_uses_repair_without_changing_exact_identity() -> None:
+    artifact_set = "b" * 64
+    client = _Client(
+        {
+            ("POST", "/api/v1/model-cache/download-preview"): {
+                "plan_digest": "d" * 64,
+                "artifact_set_sha256": artifact_set,
+            },
+            ("POST", "/api/v1/model-cache/repair-preview"): {
+                "plan_digest": "e" * 64,
+            },
+            ("POST", "/api/v1/model-cache/repair"): {"operation_id": "op-1"},
+            ("GET", "/api/v1/operations/op-1"): {"state": "succeeded"},
+        }
+    )
+    result, payload = _invoke(
+        client,
+        "--json",
+        "models",
+        "download",
+        "--model-version-sha256",
+        "a" * 64,
+        "--force",
+        "--request-key",
+        "11111111-1111-4111-8111-111111111111",
+    )
+    assert result == 0
+    assert payload["force"] is True
+    assert client.calls[1][2] == {"artifact_set_sha256": artifact_set}
+    assert client.calls[2][2] == {"artifact_set_sha256": artifact_set, "plan_digest": "e" * 64, "request_key": "11111111-1111-4111-8111-111111111111"}
+
+
+def test_recipe_availability_start_and_status_use_the_durable_exact_route() -> None:
+    client = _Client(
+        {
+            ("POST", "/api/v1/library/recipe-image-availability"): {
+                "schema_version": 2,
+                "id": "op-1",
+                "state": "queued",
+            },
+            ("GET", "/api/v1/library/recipe-image-availability/op-1"): {
+                "schema_version": 2,
+                "id": "op-1",
+                "state": "succeeded",
+                "progress": {"phase": "available", "completed_bytes": 9, "total_bytes": 9},
+                "result": {"image_digest": "sha256:" + "a" * 64},
+            },
+        }
+    )
+    result, payload = _invoke(
+        client,
+        "--json",
+        "recipes",
+        "available",
+        "start",
+        "recipe-revision-1",
+        "--force",
+    )
+    assert result == 0
+    assert payload["state"] == "succeeded"
+    assert client.calls == [
+        (
+            "POST",
+            "/api/v1/library/recipe-image-availability",
+            {"request_key": "request-1", "recipe_revision_id": "recipe-revision-1", "force": True},
+            None,
+        ),
+        ("GET", "/api/v1/library/recipe-image-availability/op-1", None, None),
+    ]
+
+
+def test_recipe_availability_retry_requires_apply_and_returns_json_plan() -> None:
+    client = _Client()
+    result, payload = _invoke(
+        client,
+        "--json",
+        "recipes",
+        "availability",
+        "retry",
+        "op-1",
+    )
+    assert result == 0
+    assert payload == {
+        "apply": False,
+        "body": {"request_key": "request-1"},
+        "method": "POST",
+        "mode": "plan",
+        "path": "/api/v1/library/recipe-image-availability/op-1/retry",
+    }
+
+
 def test_operation_progress_projects_run_switch_subphase_and_node_identity() -> None:
     from cluster_profiles.controller_cli import _operation_progress_line
 
