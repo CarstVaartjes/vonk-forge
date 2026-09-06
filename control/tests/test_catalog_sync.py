@@ -16,7 +16,11 @@ from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import CatalogSyncError, ManagedRecipeCatalogSyncService
 from vonk_control.models import Base, CatalogDocumentRevision
-from vonk_control.recipe_library import RecipeLibraryItem, RecipeLibrarySnapshot
+from vonk_control.recipe_library import (
+    RecipeLibraryError,
+    RecipeLibraryItem,
+    RecipeLibrarySnapshot,
+)
 from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import RecipeDefinition, content_sha256
@@ -78,6 +82,22 @@ def _fixture(tmp_path: Path) -> tuple[sessionmaker, CatalogService, Reader, Reci
         source_bundles=SourceBundleStore(tmp_path / "bundles"),
     )
     return sessions, service, Reader(snapshot), item
+
+
+class FailOnceReader(Reader):
+    def __init__(self, snapshot: RecipeLibrarySnapshot, failing_uri: str) -> None:
+        super().__init__(snapshot)
+        self._failing_uri = failing_uri
+        self._failed = False
+
+    def fetch(self, uri: str) -> RecipeLibraryItem:
+        if uri == self._failing_uri and not self._failed:
+            self.fetches.append(uri)
+            self._failed = True
+            raise RecipeLibraryError(
+                "recipe_library.unavailable", "transient recipe fetch failure"
+            )
+        return super().fetch(uri)
 
 
 def _sync(sessions, service, reader) -> ManagedRecipeCatalogSyncService:
@@ -197,6 +217,39 @@ def test_automatic_sync_reuses_same_commit_without_refetch(tmp_path: Path) -> No
     repeated = sync.automatic()
     assert repeated.id == first.id
     assert reader.fetches == [reader.snapshot.items[0].uri]
+
+
+def test_automatic_sync_retries_partial_same_commit_without_refetching_successes(
+    tmp_path: Path,
+) -> None:
+    sessions, service, reader, item = _fixture(tmp_path)
+    second_document = deepcopy(item.document)
+    second_slug = f"{item.slug}-retry"
+    second_document["identity"]["slug"] = second_slug  # type: ignore[index]
+    second = _item_with_document(
+        replace(item, slug=second_slug, source_path=f"recipes/{second_slug}.json"),
+        second_document,
+    )
+    reader = FailOnceReader(
+        replace(
+            reader.snapshot,
+            items=(reader.snapshot.items[0], second),
+        ),
+        second.uri,
+    )
+    sync = _sync(sessions, service, reader)
+
+    partial = sync.automatic()
+    assert partial.state == "partial"
+    assert partial.skipped_count == 1
+    assert reader.fetches == [reader.snapshot.items[0].uri, second.uri]
+
+    recovered = sync.automatic()
+    assert recovered.state == "current"
+    assert recovered.id != partial.id
+    assert recovered.imported_count == 1
+    assert recovered.unchanged_count == 1
+    assert reader.fetches == [reader.snapshot.items[0].uri, second.uri, second.uri]
 
 
 def test_sync_rejects_preview_commit_mismatch_without_catalog_mutation(tmp_path: Path) -> None:
