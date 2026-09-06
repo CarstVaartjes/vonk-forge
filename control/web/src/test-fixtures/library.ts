@@ -1,190 +1,70 @@
 import type {LibraryModel, LibraryRecipeDetail, LibraryRecipeSummary, LibrarySnapshot} from "../api/types";
 
-const revision = {
-  content_sha256: "a".repeat(64),
-  created_at: "2026-08-15T10:00:00Z",
-  id: "revision-chat",
-  lifecycle: "resolved" as const,
-  revision_number: 3,
-  schema_version: 1 as const,
-};
+const digest = (seed: string): string => seed.repeat(64).slice(0, 64);
+const revisionId = (index: number): string => `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
+
+function modelDocument(index: number): LibraryModel["model_document"] {
+  const publisher = index % 2 === 0 ? "qwen" : "zai-org";
+  const slug = index % 2 === 0 ? `qwen-${index + 3}` : `glm-${index + 5}`;
+  const title = index % 2 === 0 ? `Qwen ${index + 3}` : `GLM ${index + 5}`;
+  return {
+    schema_version: 2, kind: "model",
+    identity: {publisher, slug, version: "1.0", variant: "bf16", model: {publisher, slug, title, architecture: "transformer"}, family: {publisher, slug: slug.split("-")[0]!, title}},
+    metadata: {description: `${title} exact model manifest`, tags: [index % 2 === 0 ? "chat" : "reasoning"]},
+    files: [
+      {id: "weights", path: "model.safetensors", roles: ["weights"], sha256: digest(String(index + 1)), size_bytes: 6_000_000_000 + index * 10_000_000},
+      {id: "config", path: "config.json", roles: ["config"], sha256: digest(String(index + 2)), size_bytes: 16_384},
+    ],
+    format: {container: "safetensors", precision: "BF16", quantization: "none"},
+    capabilities: {chat: true, reasoning: index % 2 === 1, vision: index % 5 === 0},
+    modalities: ["text"], parameters: {active: 7_000_000_000, total: 7_000_000_000},
+    access: {gated: false, credentials: []}, license: {spdx: "Apache-2.0", url: "https://www.apache.org/licenses/LICENSE-2.0", attribution: [], operator_acceptance_required: false},
+    limits: {context_tokens: 32_768, frames: null, resolution_pixels: null, sample_rate_hz: null},
+    lineage: {derivation: "", publisher, relation: "official", source_model: {kind: "model", publisher, slug}},
+    provenance: {attribution: [publisher], evidence_digest: digest("e"), source_revision: digest("r"), source_url: `https://huggingface.co/${publisher}/${slug}`},
+    source: {repository: `https://huggingface.co/${publisher}/${slug}`, revision: digest("s")}, dependencies: [], supersedes: null,
+  } as unknown as LibraryModel["model_document"];
+}
+
+function model(index: number, recipes: LibraryRecipeSummary[]): LibraryModel {
+  const document = modelDocument(index);
+  return {
+    page_local: true, model: {...document.identity, kind: "model", content_sha256: digest(`m${index}`)}, model_document: document,
+    model_capabilities: {schema_version: 2, state: "declared", facts: [{capability: "chat", support: "supported", evidence_status: "declared", evidence_digest: digest("c"), provenance: {source_kind: "model", publisher: document.identity.publisher, slug: document.identity.slug, content_sha256: digest(`m${index}`), evidence_digest: digest("c"), path: "capabilities.chat"}}]}, recipes,
+  } as LibraryModel;
+}
+
+function recipe(index: number): LibraryRecipeSummary {
+  const id = `recipe-${index + 1}`;
+  const title = index === 0 ? "Qwen Chat" : index === 1 ? "Qwen Shared Vision" : `Recipe ${index + 1}`;
+  const definition = {
+    schema_version: 2, kind: "recipe", identity: {publisher: "vonk-forge", slug: id}, metadata: {title, description: `${title} exact execution contract`, tags: ["chat"]},
+    models: (index === 0 ? [0, 1] : [index]).map((modelIndex, modelPosition) => ({id: modelPosition === 0 ? "primary" : `auxiliary-${modelPosition}`, model: {kind: "model", publisher: modelIndex % 2 === 0 ? "qwen" : "zai-org", slug: modelIndex % 2 === 0 ? `qwen-${modelIndex + 3}` : `glm-${modelIndex + 5}`, content_sha256: digest(`m${modelIndex}`)}, files: [{id: "weights", file_id: "weights", roles: ["weights"], mount: {read_only: true, target: `/models/${modelPosition}`}}]})),
+    execution: {mode: "image", image: {repository: "ghcr.io/vonk-forge/vllm", digest: `sha256:${digest("i")}`, platform: "linux/arm64"}}, runtime: {engine: "vllm", entrypoint: ["vllm", "serve"], arguments: [], environment: [], lifecycle: {pre_start: [], post_stop: [], stop_timeout_seconds: 30}},
+    interfaces: [{adapter: "openai", port: 8000, health_path: "/health", model_aliases: [title.toLowerCase().replaceAll(" ", "-")]}],
+    topology: {name: index % 3 === 0 ? "dual" : "single", mode: index % 3 === 0 ? "distributed" : "single", node_count: index % 3 === 0 ? 2 : 1, parallelism: {backend: "native-mp", data: 1, pipeline: 1, tensor: index % 3 === 0 ? 2 : 1, world_size: index % 3 === 0 ? 2 : 1}, fabric: {connectivity: index % 3 === 0 ? "full_mesh" : "none", minimum_bandwidth_mbps: index % 3 === 0 ? 10_000 : 0}, roles: [{name: "worker", count: index % 3 === 0 ? 2 : 1, endpoint_owner: true, resources: {disk: {artifact_bytes: 0, cache_bytes: 0, image_bytes: 1_000_000, rollback_bytes: 0, safety_margin_bytes: 1_000_000, staging_bytes: 0}, memory: {kind: "unified", runtime_growth_bytes: 1_000_000, startup_peak_bytes: 4_000_000, steady_state_bytes: 3_000_000, system_reserve_bytes: 1_000_000}}}], start_order: ["worker"], stop_order: ["worker"]},
+    settings: {kind: "generation", context_tokens: {value: 32_768, change_effect: "restart"}}, release: {version: "1.0.0", released_at: "2026-09-01", history: []}, provenance: {source_kind: "local", source_reference: null, attribution: ["Vonk Forge"]}, validation: {benchmarks: [], serving: {interface: "openai", checks: []}},
+  } as LibraryRecipeSummary["recipe_document"];
+  return {capabilities: ["chat"], content_sha256: digest(`r${index}`), description: definition.metadata.description, installation_returned_count: 0, installation_total_count: 0, installations: [], installations_truncated: false, publisher: "vonk-forge", reasons: [], recipe_capabilities: {schema_version: 2, state: "declared", facts: []}, recipe_document: definition, recipe_id: id, recipe_revision_id: revisionId(index), run_returned_count: 0, run_total_count: 0, runs: [], runs_truncated: false, slug: id, title, topology_name: definition.topology.name} as LibraryRecipeSummary;
+}
 
 export function libraryRecipeSummary(input: Partial<LibraryRecipeSummary> & Pick<LibraryRecipeSummary, "recipe_id" | "slug" | "title">): LibraryRecipeSummary {
-  return {
-    capabilities: ["openai.chat"],
-    description: `${input.title} description`,
-    installation_returned_count: 0,
-    installation_total_count: 0,
-    installations: [],
-    installations_truncated: false,
-    topology_name: "pair",
-    reasons: [],
-    run_returned_count: 0,
-    run_total_count: 0,
-    runs: [],
-    runs_truncated: false,
-    selected_revision: revision,
-    source_kind: "local",
-    ...input,
-  };
+  const base = recipe(0);
+  return {...base, ...input, recipe_document: {...base.recipe_document, metadata: {...base.recipe_document.metadata, title: input.title ?? base.title, description: input.description ?? base.description}, identity: {...base.recipe_document.identity, slug: input.slug}}};
 }
 
-export const chatRecipe = libraryRecipeSummary({recipe_id: "recipe-chat", slug: "qwen-chat", title: "Qwen Chat"});
-export const codeRecipe = libraryRecipeSummary({recipe_id: "recipe-code", slug: "qwen-code", title: "Qwen Code", capabilities: ["openai.completions"]});
-export const unlinkedRecipe = libraryRecipeSummary({recipe_id: "recipe-unlinked", slug: "custom", title: "Custom Runtime", selected_revision: null, topology_name: null, capabilities: []});
+const recipes = Array.from({length: 85}, (_, index) => recipe(index));
+const models = Array.from({length: 92}, (_, index) => {
+  if (index >= 79) return model(index, []);
+  const assigned = recipes.filter((_, recipeIndex) => recipeIndex % 79 === index);
+  if (index === 1) assigned.push(recipes[0]!);
+  return model(index, assigned);
+});
 
-const modelIdentity = {kind: "model-version" as const, publisher: "qwen", slug: "3", content_sha256: "e".repeat(64)};
-const modelFamilyIdentity = {kind: "model-group" as const, publisher: "qwen", slug: "3", content_sha256: "f".repeat(64)};
-const exactModelVersion = {
-  schema_version: 2 as const,
-  identity: modelIdentity,
-  state: "resolved" as const,
-  version: "3",
-  family: {family: "Qwen 3", identity: modelFamilyIdentity, metadata: {title: "Qwen 3", description: "Qwen 3 model family.", tags: ["text"]}},
-  metadata: {title: "Qwen 3 BF16", description: "Qwen 3 BF16 model version.", tags: ["text", "bf16"]},
-  format: {container: "safetensors" as const, precision: "BF16", quantization: "BF16"},
-  model: {kind: "model" as const, publisher: "qwen", slug: "3", content_sha256: "d".repeat(64)},
-  artifacts: [{id: "weights", kind: "huggingface.file" as const, path: "model.safetensors", repository: "Qwen/Qwen3", revision: "c".repeat(40), sha256: "a".repeat(64), download_bytes: 80 * 1024 ** 3, installed_bytes: 80 * 1024 ** 3, roles: ["leader", "worker"]}],
-  dependencies: [],
-} satisfies NonNullable<LibraryModel["model_version"]>;
-const modelCapabilities = {
-  schema_version: 2 as const,
-  state: "declared" as const,
-  facts: [{capability: "text-generation", evidence_digest: "b".repeat(64), evidence_status: "declared" as const, support: "supported" as const, provenance: {content_sha256: modelIdentity.content_sha256, evidence_digest: "b".repeat(64), path: "model/capabilities.json", publisher: "qwen", revision_id: null, slug: "3", source_kind: "model-version" as const}}],
-  provenance: {content_sha256: modelIdentity.content_sha256, evidence_digest: "b".repeat(64), path: "model/capabilities.json", publisher: "qwen", revision_id: null, slug: "3", source_kind: "model-version" as const},
-} satisfies NonNullable<LibraryModel["model_capabilities"]>;
+export const librarySnapshot: LibrarySnapshot = {schema_version: 2, generated_at: "2026-09-06T00:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_delayed_seconds: 20, telemetry_live_seconds: 6}, next_cursor: null, models, unlinked_recipes: []};
+export const chatRecipe = recipes[0]!;
+export const codeRecipe = recipes[1]!;
+export const unlinkedRecipe = libraryRecipeSummary({recipe_id: "recipe-unlinked", recipe_revision_id: revisionId(10_000), slug: "unlinked", title: "Unlinked recipe"} as Partial<LibraryRecipeSummary> & Pick<LibraryRecipeSummary, "recipe_id" | "slug" | "title">);
 
-export const librarySnapshot: LibrarySnapshot = {
-  schema_version: 1,
-  generated_at: "2026-08-15T12:00:00Z",
-  freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
-  models: [{model: modelIdentity, model_version: exactModelVersion, model_capabilities: modelCapabilities, page_local: true, recipes: [chatRecipe, codeRecipe]}],
-  unlinked_recipes: [unlinkedRecipe],
-  next_cursor: null,
-};
-
-export const minimalLibraryDetail: LibraryRecipeDetail = {
-  schema_version: 1,
-  generated_at: "2026-08-15T12:00:00Z",
-  recipe: {recipe_id: chatRecipe.recipe_id, slug: chatRecipe.slug, title: chatRecipe.title, description: chatRecipe.description, source_kind: "local"},
-  selected_revision: revision,
-  visual_recipe: null,
-  topology: null,
-  operational_state: {builds: [], mappings: [], installations: [], runs: []},
-  placement: [],
-  reasons: [],
-};
-
-const GIB = 1024 ** 3;
-const limits = {
-  artifact_evidence_per_node_limit: 512 as const,
-  candidate_node_limit: 32 as const,
-  examined_group_limit: 512 as const,
-  operational_member_evidence_limit: 16384 as const,
-  operational_row_evidence_limit: 512 as const,
-  recommendation_limit: 16 as const,
-  rejected_group_evidence_limit: 16 as const,
-  rejected_node_evidence_limit: 32 as const,
-};
-
-function placementNode(nodeId: string, rank: number, role: string, inventoryAge: number, telemetryAge: number) {
-  return {
-    artifact_reuse_bytes: 20 * GIB,
-    disk_free_after_bytes: 135 * GIB,
-    disk_free_bytes: 200 * GIB,
-    disk_required_bytes: 60 * GIB,
-    disk_reserved_bytes: 5 * GIB,
-    endpoint_owner: rank === 0,
-    fabric_address: `fabric://${nodeId}`,
-    fabric_bandwidth_mbps: 25_000,
-    inventory_age_seconds: inventoryAge,
-    inventory_observed_at: "2026-08-15T11:59:50Z",
-    memory_available_bytes: 100 * GIB,
-    memory_free_after_bytes: 36 * GIB,
-    memory_kind: "unified" as const,
-    memory_required_bytes: 60 * GIB,
-    memory_reserved_bytes: 4 * GIB,
-    node_id: nodeId,
-    rank,
-    role,
-    telemetry_age_seconds: telemetryAge,
-    telemetry_observed_at: "2026-08-15T11:59:58Z",
-  };
-}
-
-const selectedGroup = {
-  eligible: true,
-  group_complete: true as const,
-  install_state: "complete" as const,
-  installation_ids: ["installation-chat"],
-  load_state: "not_loaded" as const,
-  mapping_id: "mapping-chat",
-  node_ids: ["node-alpha", "node-beta"],
-  nodes: [placementNode("node-alpha", 0, "leader", 10, 2), placementNode("node-beta", 1, "worker", 15, 12)],
-  preview_targets: [{kind: "run" as const, input: {installation_id: "installation-chat"}}],
-  topology_name: "pair",
-  ranking_scope: "bounded-advisory" as const,
-  reasons: [{code: "placement.artifact_reuse", detail: "40.0 GiB of exact artifacts can be reused.", severity: "info" as const}],
-  recipe_build_id: "build-chat",
-  recipe_revision_id: "revision-chat",
-  run_ids: [],
-  score: {active_run_count: 0, artifact_reuse_bytes: 40 * GIB, exact_install_complete: true, exact_install_partial: false, maximum_telemetry_age_seconds: 12, minimum_disk_headroom_bytes: 135 * GIB, minimum_memory_headroom_bytes: 36 * GIB},
-};
-
-const rejectedGroup = {
-  ...selectedGroup,
-  eligible: false,
-  install_state: "partial" as const,
-  installation_ids: ["installation-partial"],
-  load_state: "unknown" as const,
-  mapping_id: null,
-  node_ids: ["node-gamma", "node-delta"],
-  nodes: [placementNode("node-gamma", 0, "leader", 350, 30), placementNode("node-delta", 1, "worker", 360, 45)],
-  preview_targets: [],
-  reasons: [{code: "inventory.stale", detail: "Admission inventory is stale for this complete group.", severity: "error" as const}, {code: "telemetry.stale", detail: "Live capacity evidence is stale for this complete group.", severity: "error" as const}],
-  run_ids: ["run-degraded"],
-  score: {...selectedGroup.score, exact_install_complete: false, exact_install_partial: true, maximum_telemetry_age_seconds: 45},
-};
-
-export const fullLibraryDetail: LibraryRecipeDetail = {
-  schema_version: 1,
-  generated_at: "2026-08-15T12:00:00Z",
-  recipe: {recipe_id: chatRecipe.recipe_id, slug: chatRecipe.slug, title: chatRecipe.title, description: "Fast distributed chat model.", source_kind: "local"},
-  selected_revision: revision,
-  visual_recipe: {
-    schema_version: 1,
-    identity: {publisher: "local", slug: "qwen-chat"},
-    metadata: {title: "Qwen Chat", description: "Fast distributed chat model.", tags: ["chat", "multilingual"]},
-    model: {kind: "model-version", publisher: "qwen", slug: "qwen3", content_sha256: "e".repeat(64)},
-    execution: {harness: {kind: "execution-harness", publisher: "vonk-forge", slug: "vllm-openai", content_sha256: "f".repeat(64)}, patch_bundle: null},
-    model_license: null,
-    parameters: [],
-    build: {context: {sha256: "b".repeat(64), expected_bytes: 4096, media_type: "application/vnd.vonk-forge.source-bundle.v1+tar"}, dockerfile: "Dockerfile", target: null, capabilities: [], options: {additional_contexts: [], annotations: [], environment: [], format: "oci", identity_label: true, ignorefile: null, jobs: 1, labels: [], layer_compression: "disabled", layer_labels: [], layers: true, no_hostname: false, no_hosts: false, omit_history: false, os_features: [], os_version: null, shm_bytes: 67108864, skip_unused_stages: true, squash: "none", timestamp: null, unset_environment: [], unset_labels: []}, cpu_cores: 8, download_bytes: 60 * GIB, memory_bytes: 8 * GIB, network_hosts: [], network_mode: "none", platform: "linux/arm64", processes: 4096, temporary_bytes: 12 * GIB, timeout_seconds: 3600},
-    artifacts: [{id: "weights", kind: "huggingface.snapshot", repository: "Qwen/Qwen3", revision: "c".repeat(40), include_paths: ["config.json", "model/model.safetensors"], download_bytes: 50 * GIB, installed_bytes: 52 * GIB, roles: ["leader", "worker"]}],
-    runtime: {distribution: {kind: "runtime-distribution", publisher: "vonk-forge", slug: "python-312-cuda", content_sha256: "1".repeat(64)}, entrypoint: ["vllm", "serve", "/models"], lifecycle_pre_start_count: 1, lifecycle_post_stop_count: 1, stop_timeout_seconds: 30},
-    interfaces: [{adapter: "openai", port: 8000, health_path: "/v1/models", model_aliases: ["qwen-chat"]}],
-    validation: {benchmark_count: 2, checks: ["container.started", "inference.completed"]},
-    provenance: {source_kind: "local", source_reference: "source-bundle", attribution: ["Qwen Team"]},
-  },
-  topology: {
-    name: "pair", mode: "tensor_parallel", node_count: 2,
-    parallelism: {tensor: 2, pipeline: 1, data: 1, backend: "nccl"}, fabric: {connectivity: "connected", minimum_bandwidth_mbps: 10_000}, start_order: ["leader", "worker"], stop_order: ["worker", "leader"],
-    roles: [
-      {name: "leader", count: 1, endpoint_owner: true, artifacts: ["weights"], disk: {image_bytes: 8 * GIB, artifact_bytes: 52 * GIB, staging_bytes: 4 * GIB, cache_bytes: 1 * GIB, rollback_bytes: 2 * GIB, safety_margin_bytes: 3 * GIB}, memory: {kind: "unified", startup_peak_bytes: 72 * GIB, steady_state_bytes: 64 * GIB, runtime_growth_bytes: 4 * GIB, system_reserve_bytes: 8 * GIB}},
-      {name: "worker", count: 1, endpoint_owner: false, artifacts: ["weights"], disk: {image_bytes: 8 * GIB, artifact_bytes: 52 * GIB, staging_bytes: 4 * GIB, cache_bytes: 1 * GIB, rollback_bytes: 2 * GIB, safety_margin_bytes: 3 * GIB}, memory: {kind: "unified", startup_peak_bytes: 72 * GIB, steady_state_bytes: 64 * GIB, runtime_growth_bytes: 4 * GIB, system_reserve_bytes: 8 * GIB}},
-    ],
-  },
-  operational_state: {
-    builds: [{recipe_build_id: "build-chat", recipe_revision_id: "revision-chat", state: "succeeded", image_digest: `sha256:${"d".repeat(64)}`, image_bytes: 8 * GIB}],
-    mappings: [{mapping_id: "mapping-chat", recipe_revision_id: "revision-chat", topology_name: "pair", generation: 4, state: "ready", nodes: [{node_id: "node-alpha", rank: 0, role: "leader", endpoint_owner: true}, {node_id: "node-beta", rank: 1, role: "worker", endpoint_owner: false}]}],
-    installations: [{installation_id: "installation-chat", mapping_id: "mapping-chat", recipe_build_id: "build-chat", recipe_revision_id: "revision-chat", node_ids: ["node-alpha", "node-beta"], state: "installed"}],
-    runs: [],
-  },
-  placement: [{
-    topology_name: "pair", node_count: 2, candidate_node_ids: ["node-alpha", "node-beta", "node-gamma", "node-delta"], evaluated_group_count: 512,
-    evidence_counts: {builds: 1, mappings: 1, mapping_members: 2, installations: 2, installation_members: 4, runs: 1, run_members: 2, truncated_collections: []},
-    limits, recommendations: [selectedGroup], rejected_groups: [rejectedGroup], rejected_nodes: [{node_id: "node-epsilon", reasons: [{code: "inventory.missing", detail: "Admission inventory has not been reported.", severity: "error"}]}], rejected_evidence_truncated: true, search_complete: false,
-    reasons: [{code: "placement.group_search_truncated", detail: "The bounded group search stopped after 512 complete groups.", severity: "warning"}],
-  }],
-  reasons: [{code: "recipe.visual_projection", detail: "Visual recipe fields are bounded to the selected immutable revision.", severity: "info"}],
-};
+export const minimalLibraryDetail: LibraryRecipeDetail = {schema_version: 2, generated_at: "2026-09-06T00:00:00Z", definition: recipes[0]!.recipe_document, recipe: {...recipes[0]!, recipe_revision_id: revisionId(0)}, model_documents: [{model_document: models[0]!.model_document, selection: recipes[0]!.recipe_document.models[0]!}, {model_document: models[1]!.model_document, selection: recipes[0]!.recipe_document.models[1]!}], model_capabilities: models[0]!.model_capabilities, recipe_capabilities: recipes[0]!.recipe_capabilities, operational_state: {builds: [], installations: [], mappings: [], runs: []}, placement: [], reasons: [], topology: recipes[0]!.recipe_document.topology};
+export const fullLibraryDetail = minimalLibraryDetail;
