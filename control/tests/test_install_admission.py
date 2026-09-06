@@ -479,6 +479,34 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
     assert blocked.nodes[0].blockers[0].code == "install.insufficient_disk"
 
 
+@pytest.mark.parametrize(("free", "allowed"), [(130, True), (129, False)])
+def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estimates(
+    tmp_path, free: int, allowed: bool
+) -> None:
+    sessions, now, _node, mapping, _build, sizes = setup(
+        tmp_path, free=free, recipe_mode="image"
+    )
+    with sessions.begin() as session:
+        revision = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        document = json.loads(json.dumps(revision.document))
+        document["topology"]["roles"][0]["resources"]["disk"].update(
+            image_bytes=1, artifact_bytes=1
+        )
+        revision.document = document
+        revision.content_digest = content_sha256(RecipeDefinition.model_validate(document))
+        for artifact in session.scalars(select(NodeArtifact)):
+            session.delete(artifact)
+    plan = _service(
+        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+    ).plan_install(mapping, None, now=now)
+    assert plan.allowed is allowed
+    assert plan.nodes[0].required_download_bytes == 100
+    assert plan.nodes[0].required_bytes == 120
+    assert {reason.code for reason in plan.nodes[0].blockers} == (
+        set() if allowed else {"install.insufficient_disk"}
+    )
+
+
 def test_territorial_license_install_admission_is_informational(tmp_path) -> None:
     sessions, now, _node, mapping, _build, sizes = setup(
         tmp_path,

@@ -423,7 +423,11 @@ class RecipeOperationService:
         """
 
         if not plan.allowed:
-            raise RecipeOperationConflict("install plan is blocked")
+            reasons = list(dict.fromkeys(
+                f"{reason.code}: {reason.detail}"[:200]
+                for node in plan.nodes for reason in node.blockers
+            ))
+            raise RecipeOperationConflict("install plan is blocked: " + "; ".join(reasons[:3]))
         now = self._clock()
         with self._sessions.begin() as session:
             existing = session.scalar(

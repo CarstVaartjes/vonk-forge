@@ -214,7 +214,7 @@ def _prebuilt_oci_source(root: Path, payload: bytes):
 
 
 def _local_build_oci_source(sessions, root: Path, revision_id: str, payload: bytes):
-    archive_root = root / "oci-archives"
+    archive_root = root / "image-cache"
     archive_root.mkdir(parents=True)
     archive_sha256 = hashlib.sha256(payload).hexdigest()
     image_digest = "sha256:" + hashlib.sha256(b"locally-built-image").hexdigest()

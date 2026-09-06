@@ -152,7 +152,7 @@ def test_prebuilt_pull_export_is_verified_and_receipt_is_immediately_readable(
     assert receipt.local_image_reference is None
     assert receipt.runtime_interface == "vonk.runtime.v1"
     assert receipt.runtime_interface_label == "v1"
-    assert storage.root == tmp_path / "objects" / "oci-archives"
+    assert storage.root == tmp_path / "objects" / "image-cache"
     assert Path(receipt.archive_path).parent == storage.root
     assert Path(receipt.archive_path).read_bytes() == ARCHIVE
     assert storage.read_receipt(ARCHIVE_DIGEST) == receipt
@@ -303,7 +303,7 @@ def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
     )
 
 
-def test_built_archive_manifest_must_match_the_builder_receipt(tmp_path: Path) -> None:
+def test_docker_export_keeps_build_provenance_separate_from_reconstructed_manifest(tmp_path: Path) -> None:
     storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
     (storage.root / ARCHIVE_DIGEST).write_bytes(ARCHIVE)
 
@@ -311,17 +311,21 @@ def test_built_archive_manifest_must_match_the_builder_receipt(tmp_path: Path) -
         def inspect_archive(self, archive: Path, **kwargs: object) -> PulledImageEvidence:
             return replace(super().inspect_archive(archive, **kwargs), manifest_digest=IMAGE_DIGEST)
 
-    with pytest.raises(RuntimeImagePreparationError, match="source-build image digest"):
-        prepare_runtime_image(
-            _recipe("recipe-source-build.json"),
-            runtime=_runtime(),
-            storage=storage,
-            transport=DifferentArchive(),
-            build_receipt={
-                "state": "succeeded", "image_digest": BUILT_IMAGE_DIGEST,
-                "oci_layout_sha256": ARCHIVE_DIGEST, "image_bytes": len(ARCHIVE),
-            },
-        )
+    receipt = prepare_runtime_image(
+        _recipe("recipe-source-build.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=DifferentArchive(),
+        build_receipt={
+            "state": "succeeded", "image_digest": BUILT_IMAGE_DIGEST,
+            "oci_layout_sha256": ARCHIVE_DIGEST, "image_bytes": len(ARCHIVE),
+        },
+    )
+    assert receipt.platform_manifest_digest == BUILT_IMAGE_DIGEST
+    assert receipt.image_digest == BUILT_IMAGE_DIGEST
+    assert receipt.oci_archive_sha256 == ARCHIVE_DIGEST
+    assert receipt.local_image_config_id == "sha256:" + "d" * 64
+    assert storage.read_receipt(ARCHIVE_DIGEST) == receipt
 
 
 def test_packaged_skopeo_transport_rejects_unlabeled_image(

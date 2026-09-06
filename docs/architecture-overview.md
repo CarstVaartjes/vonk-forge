@@ -193,11 +193,18 @@ three-node recipe never rebuilds independently on the other two nodes. Model
 downloads are independent of recipes: the Controller can fill the NAS model
 cache before any runtime image or Spark assignment exists, and recipes reuse
 the same content-addressed model files. Published images and local builds both
-use Docker-save archives in the shared `oci-archives` directory. The original
+use Docker-save archives in the shared `image-cache` directory. The original
 registry pin remains separate from the exported platform manifest, config ID,
-and archive checksum; the Controller inspects the exported image before use.
-Model
-weights and other declared artifacts are installed separately, with disk checks before
+and archive checksum; the Controller inspects the exported config and platform
+before use. Docker-save does not retain the original manifest, so its
+reconstructed manifest digest is never compared with the builder's original.
+Model files live under `/state/model-cache`; image archives live under
+`/state/agent-artifacts/image-cache`, shared by the API and worker. Both caches
+reuse successful content verification while device, inode, size, timestamps,
+ownership, and mode remain unchanged. Changes trigger a new byte scan. The
+verification cache is bounded and process-local; authorization is still checked
+on every operation, and explicit storage reconciliation performs a full scan.
+Model weights and other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
 start. Multi-node v1 uses ordinary TCP over the declared direct-fabric
 addresses; it does not claim GPUDirect RDMA support. The resulting workload
