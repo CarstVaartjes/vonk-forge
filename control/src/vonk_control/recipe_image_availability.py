@@ -655,9 +655,25 @@ class RecipeImageAvailabilityService:
                             f"vonk:recipe-availability-model-retry:{child_id}:{parent_request_key}",
                         )
                     )
-                    operation = self._model_cache.retry(
-                        child_id, actor=actor, request_key=retry_key
-                    )
+                    actions = child.get("failure")
+                    actions = actions.get("recovery_actions", []) if isinstance(actions, Mapping) else []
+                    if (
+                        "check_access_and_resume" in actions
+                        and isinstance(operation.artifact_set_sha256, str)
+                        and isinstance(operation.plan_digest, str)
+                        and callable(getattr(self._model_cache, "check_access_and_resume", None))
+                    ):
+                        operation = self._model_cache.check_access_and_resume(
+                            child_id,
+                            actor=actor,
+                            request_key=retry_key,
+                            artifact_set_sha256=operation.artifact_set_sha256,
+                            plan_digest=operation.plan_digest,
+                        )
+                    else:
+                        operation = self._model_cache.retry(
+                            child_id, actor=actor, request_key=retry_key
+                        )
             return dict(child) | {
                 "id": operation.id,
                 "state": operation.state,
