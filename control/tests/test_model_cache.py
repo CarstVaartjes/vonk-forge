@@ -651,6 +651,12 @@ def test_provider_retry_after_and_rate_limit_reset_are_bounded_hints() -> None:
     assert _retry_after_seconds(
         {"Retry-After": "7", "RateLimit": '"resolvers";r=0;t=123'}, now=now
     ) == 123
+    assert _retry_after_seconds(
+        {"RateLimit": '"resolvers";r=0;t=123junk'}, now=now
+    ) is None
+    assert _retry_after_seconds(
+        {"RateLimit": '"resolvers";r=0;t=999999999999999999999'}, now=now
+    ) == 365 * 24 * 60 * 60
 
 
 def test_worker_prefers_nonblocking_cache_tick_when_available() -> None:

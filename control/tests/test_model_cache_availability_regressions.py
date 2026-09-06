@@ -564,6 +564,8 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     requests: list[httpx.Request] = []
     public_data = b"public model"
     hf_data = b"gated model"
+    now = [NOW]
+    rate_limit_once = [True]
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -571,6 +573,13 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
             "authorization"
         ) == "Bearer bad-token":
             return httpx.Response(403, request=request)
+        if request.url.path.endswith("weights-z-hf") and rate_limit_once[0]:
+            rate_limit_once[0] = False
+            return httpx.Response(
+                429,
+                request=request,
+                headers={"RateLimit": '"resolvers";r=0;t=30'},
+            )
         content = public_data if request.url.path.endswith("weights-a-public") else hf_data
         return httpx.Response(200, request=request, content=content)
 
@@ -586,6 +595,7 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         fixture_sources=True,
         http_client=client,
         huggingface_token_path=token_path,
+        clock=lambda: now[0],
     )
     artifacts = [
         _artifact("a-public", public_data, host="huggingface.co")
@@ -627,6 +637,10 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     assert "check_access_and_resume" in failed.failure["recovery_actions"]
     assert failed.progress["downloaded_bytes"] >= len(public_data)
     assert len(requests) == 2
+    with sessions() as session:
+        persisted = session.get(ModelCacheOperation, first.id)
+        assert persisted is not None
+        assert persisted.payload["failure"]["artifact_key"].endswith("z-hf")
 
     # Terminal auth failures do not re-enter the automatic scheduler.
     service.tick()
@@ -660,11 +674,17 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
         artifact_set_sha256=str(first.artifact_set_sha256),
         plan_digest=str(first.plan_digest),
     )
-    assert resumed.id != first.id
+    assert resumed.id == first.id
     assert resumed.state == "queued"
+    assert resumed.failure is not None
+    assert resumed.failure["code"] == "rate_limited"
+    assert resumed.failure["retryable"] is True
+    assert resumed.failure["retry_after_seconds"] == 30
+    assert resumed.failure["recovery_actions"] == ["resume"]
     assert resumed.artifact_set_sha256 == first.artifact_set_sha256
     assert resumed.plan_digest == first.plan_digest
     assert resumed.progress["downloaded_bytes"] >= len(public_data)
+    now[0] = NOW + timedelta(seconds=31)
     _drain(service, resumed.id)
     assert service.get_operation(resumed.id).state == "succeeded"
     assert len(requests) == 5
