@@ -25,7 +25,7 @@ COPY config/execution-harnesses /config/execution-harnesses
 COPY --from=web /web/dist ./src/vonk_control/web
 COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/
 COPY inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl /wheels/
-RUN test "$(sha256sum /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl | cut -d' ' -f1)" = "17b2778f29b1c0f38ec91115477fb7b7dfdb85a77ce7098c477b3886d1f7130f" \
+RUN test "$(sha256sum /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl | cut -d' ' -f1)" = "24894efe048755576cc365a9fb3233bd4af3be3028cb38394b2fba533acb628f" \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')"
 RUN python -m pip install --no-cache-dir --prefix=/install \
     /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl \

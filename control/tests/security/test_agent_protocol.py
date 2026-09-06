@@ -8,6 +8,7 @@ import tomllib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 from sqlalchemy import create_engine
@@ -324,6 +325,48 @@ def test_control_environment_installs_the_verified_protocol_wheel() -> None:
     ]
 
 
+def test_control_environment_preserves_the_canonical_zero_byte_model_contract() -> None:
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--project",
+            "control",
+            "python",
+            "-c",
+            dedent(
+                """
+                from vonk_agent_protocol import AgentProtocolError, DistributionObject
+
+                empty = DistributionObject.parse({
+                    "name": "support/empty.safetensors",
+                    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                    "bytes": 0,
+                    "kind": "model",
+                })
+                try:
+                    DistributionObject.parse({
+                        "name": "support/empty.safetensors",
+                        "sha256": "0" * 64,
+                        "bytes": 0,
+                        "kind": "model",
+                    })
+                except AgentProtocolError:
+                    inconsistent = True
+                else:
+                    inconsistent = False
+                print(empty.bytes == 0 and inconsistent)
+                """
+            ),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "True"
+
+
 def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() -> None:
     if shutil.which("docker") is None:
         pytest.skip("Docker CLI is unavailable")
@@ -362,7 +405,29 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() 
             "python",
             image,
             "-c",
-            "import importlib.metadata, json; from importlib.resources import files; from vonk_agent_protocol import DistributionObject; from vonk_control.recipe_runtime_specs import compile_runtime_spec; from vonk_forge_contracts import ModelDefinition, RecipeDefinition; recipe = RecipeDefinition.model_validate(json.loads(files('vonk_forge_contracts').joinpath('examples/recipe-image.json').read_text())); model = ModelDefinition.model_validate(json.loads(files('vonk_forge_contracts').joinpath('examples/model-definition.json').read_text())); compiled = compile_runtime_spec(recipe, models=[model], role='entrypoint', rank=0); print(json.dumps({'protocol': importlib.metadata.version('vonk-agent-protocol'), 'contracts': importlib.metadata.version('vonk-forge-public-contracts'), 'model': ModelDefinition.__name__, 'recipe': RecipeDefinition.__name__, 'distribution': DistributionObject.__name__, 'compiled_interface': compiled['runtime']['interface'], 'compiled_image': compiled['runtime']['image']}))",
+            dedent(
+                """
+                import importlib.metadata, json
+                from importlib.resources import files
+                from vonk_agent_protocol import AgentProtocolError, DistributionObject
+                from vonk_control.recipe_runtime_specs import compile_runtime_spec
+                from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+
+                def rejects(value):
+                    try:
+                        DistributionObject.parse(value)
+                    except AgentProtocolError:
+                        return True
+                    return False
+
+                recipe = RecipeDefinition.model_validate(json.loads(files("vonk_forge_contracts").joinpath("examples/recipe-image.json").read_text()))
+                model = ModelDefinition.model_validate(json.loads(files("vonk_forge_contracts").joinpath("examples/model-definition.json").read_text()))
+                compiled = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+                empty = DistributionObject.parse({"name": "support/empty.safetensors", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "bytes": 0, "kind": "model"})
+                inconsistent = rejects({"name": "support/empty.safetensors", "sha256": "0" * 64, "bytes": 0, "kind": "model"})
+                print(json.dumps({"protocol": importlib.metadata.version("vonk-agent-protocol"), "contracts": importlib.metadata.version("vonk-forge-public-contracts"), "model": ModelDefinition.__name__, "recipe": RecipeDefinition.__name__, "distribution": DistributionObject.__name__, "zero_byte_model": empty.bytes == 0, "inconsistent_zero_byte_rejected": inconsistent, "compiled_interface": compiled["runtime"]["interface"], "compiled_image": compiled["runtime"]["image"]}))
+                """
+            ),
         ],
         check=True,
         capture_output=True,
@@ -376,6 +441,8 @@ def test_root_context_image_installs_contracts_and_protocol_from_build_inputs() 
         "model": "ModelDefinition",
         "recipe": "RecipeDefinition",
         "distribution": "DistributionObject",
+        "zero_byte_model": True,
+        "inconsistent_zero_byte_rejected": True,
         "compiled_interface": "vonk.runtime.v1",
         "compiled_image": "registry.example/vonk/vllm@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     }
