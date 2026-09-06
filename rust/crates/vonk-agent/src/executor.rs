@@ -18,10 +18,10 @@ use crate::{
         AgentHttpClient, ClientError, DistributionDownloadEvidence, DistributionProgress,
         ExactRecipeRunObservation,
     },
-    health::{HealthEvidence, wait_ready, wait_ready_until},
+    health::{wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
     image_importer::ImageImporter,
-    oci::{OciRuntime, RecipeRunStartIdentity},
+    oci::{OciError, OciRuntime, RecipeRunStartIdentity},
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
@@ -29,7 +29,7 @@ use crate::{
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
-    HostRuntimeAction, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
+    HostRuntimeAction, ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
     RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
     RecipeStartPhase, RecipeStartRequest, canonical_json, hex_sha256,
 };
@@ -39,9 +39,9 @@ const JOB_CANCEL_EXIT_CODE: i32 = 130;
 const JOB_CANCEL_STOP_TIMEOUT_SECONDS: u16 = 5;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
 
-pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionPlan, ()> {
-    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).map_err(|_| ())?;
-    plan.validate().map_err(|_| ())?;
+pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionPlan, OciError> {
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone())?;
+    plan.validate()?;
     Ok(plan)
 }
 
@@ -441,10 +441,8 @@ pub fn runtime_arguments_for_plan(
     arguments
 }
 
-pub fn runtime_arguments_digest(arguments: &[String]) -> Result<String, ()> {
-    canonical_json(&arguments.to_vec())
-        .map(|value| hex_sha256(&value))
-        .map_err(|_| ())
+pub fn runtime_arguments_digest(arguments: &[String]) -> Result<String, ProtocolError> {
+    canonical_json(&arguments.to_vec()).map(|value| hex_sha256(&value))
 }
 
 pub fn recipe_install_success_body(installed_bytes: u64) -> Value {
@@ -456,7 +454,7 @@ pub fn recipe_start_success_body(
     spec: &CompiledExecutionPlan,
     artifact_set_digest: &str,
     runtime_guard_arguments: &[String],
-) -> Result<Value, ()> {
+) -> Result<Value, ProtocolError> {
     let runtime_arguments_sha256 = runtime_arguments_digest(runtime_guard_arguments)?;
     let (image_digest, model_identity) = readiness_identity(spec);
     let endpoint = format!(
@@ -510,29 +508,22 @@ pub fn recipe_start_success_body(
             "ready": true,
         }),
         None => {
-            let evidence = HealthEvidence {
-                recipe_revision_id: request.recipe_revision_id.to_string(),
-                recipe_content_sha256: request.recipe_content_sha256.clone(),
-                image_digest,
-                artifact_set_digest: artifact_set_digest.to_owned(),
-                model_identity,
-                rank: request.rank,
-                world_size: request.world_size,
-                endpoint: endpoint.clone(),
-                memory_reservation_bytes: request.reserved_memory_bytes,
-                ready: true,
-            };
-            let evidence_digest = canonical_json(&evidence)
-                .map(|value| hex_sha256(&value))
-                .map_err(|_| ())?;
-            let mut evidence_value = serde_json::to_value(&evidence).map_err(|_| ())?;
-            evidence_value.as_object_mut().ok_or(())?.insert(
-                "evidence_digest".to_owned(),
-                Value::String(evidence_digest.clone()),
-            );
+            let evidence = json!({
+                "recipe_revision_id": request.recipe_revision_id.to_string(),
+                "recipe_content_sha256": request.recipe_content_sha256,
+                "image_digest": image_digest,
+                "artifact_set_digest": artifact_set_digest,
+                "model_identity": model_identity,
+                "rank": request.rank,
+                "world_size": request.world_size,
+                "endpoint": endpoint,
+                "memory_reservation_bytes": request.reserved_memory_bytes,
+                "ready": true,
+            });
+            let (evidence, evidence_digest) = evidence_with_digest(evidence);
             return Ok(json!({
                 "endpoint": endpoint,
-                "evidence": evidence_value,
+                "evidence": evidence,
                 "evidence_digest": evidence_digest,
             }));
         }
