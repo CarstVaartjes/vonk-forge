@@ -131,21 +131,6 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/jobs/{job_id}/resume"): "resumeJob",
     ("get", "/api/v1/jobs/{job_id}/logs"): "listJobLogs",
     ("get", "/api/v1/jobs/{job_id}/logs/{digest}"): "getJobLog",
-    ("get", "/api/v1/catalog/recipes"): "listLocalRecipes",
-    ("post", "/api/v1/catalog/recipes"): "createLocalRecipe",
-    ("get", "/api/v1/catalog/recipes/{recipe_id}"): "getLocalRecipe",
-    ("put", "/api/v1/catalog/recipes/{recipe_id}/draft"): "updateLocalRecipeDraft",
-    ("post", "/api/v1/catalog/recipes/{recipe_id}/resolve"): "resolveLocalRecipe",
-    ("post", "/api/v1/catalog/recipes/{recipe_id}/fork"): "forkLocalRecipe",
-    (
-        "post",
-        "/api/v1/catalog/imports/workload_run/preview",
-    ): "previewWorkloadRunImport",
-    ("post", "/api/v1/catalog/imports/workload_run"): "applyWorkloadRunImport",
-    (
-        "post",
-        "/api/v1/catalog/recipes/{recipe_id}/resolve-import",
-    ): "resolveWorkloadRunImport",
 }
 _HTTP_METHODS = frozenset({"delete", "get", "patch", "post", "put"})
 BoundedIdentifier = Annotated[str, Field(min_length=1, max_length=128)]

@@ -113,7 +113,6 @@ class InstallAdmissionService:
         sizes: ArtifactSizeResolver,
         inventory_max_age: int = 300,
         disk_floor_bytes: int = 10_000_000_000,
-        operator_jurisdiction: str | None = None,
         compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
     ) -> None:
         self._sessions = sessions
@@ -124,11 +123,6 @@ class InstallAdmissionService:
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
         self._disk_floor = disk_floor_bytes
-        # Territorial declarations remain informational model metadata.  The
-        # install plan deliberately does not derive an operator location or
-        # enforce a territory denial.  Keep accepting the constructor keyword
-        # while callers converge on the geography-free admission contract.
-        del operator_jurisdiction
         self._compiled_plan_provider = compiled_plan_provider
 
     def plan_install(
@@ -256,7 +250,6 @@ class InstallAdmissionService:
             }
             legal_admission = territorial_admission(
                 model_document,
-                None,
                 operation="install",
             )
             topology_reason: AdmissionReason | None = None

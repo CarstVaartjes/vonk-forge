@@ -469,31 +469,6 @@ def test_territorial_license_install_admission_is_informational(tmp_path) -> Non
         "install.license_territorial_restrictions_informational"
     )
 
-    eu_member = _service(
-        sessions,
-        sizes=sizes,
-        inventory_max_age=300,
-        disk_floor_bytes=10,
-        operator_jurisdiction="NL",
-    ).plan_install(mapping, build, now=now)
-    assert eu_member.allowed is True
-    assert eu_member.nodes[0].warnings[0].code == (
-        "install.license_territorial_restrictions_informational"
-    )
-
-    permitted = _service(
-        sessions,
-        sizes=sizes,
-        inventory_max_age=300,
-        disk_floor_bytes=10,
-        operator_jurisdiction="US",
-    ).plan_install(mapping, build, now=now)
-    assert permitted.allowed is True
-    assert permitted.nodes[0].warnings[0].code == (
-        "install.license_territorial_restrictions_informational"
-    )
-
-
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
     sessions, now, node, mapping, build, sizes = setup(tmp_path, free=80)
     with sessions.begin() as session:

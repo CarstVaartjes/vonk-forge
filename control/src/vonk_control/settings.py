@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .legal_admission import operator_jurisdiction
 from .presence import ManagementAddressPolicy, PresenceError
 
 
@@ -160,7 +159,6 @@ class Settings:
     worker_api_token: bytes
     management_cidrs: str
     direct_fabric_cidrs: str
-    operator_jurisdiction: str | None
     package_helper_grant_private_key_path: Path | None = None
     package_helper_receipt_private_key_path: Path | None = None
     host_runtime_grant_private_key_path: Path | None = None
@@ -324,14 +322,6 @@ class Settings:
             raise SettingsError(
                 "model cache reserve must be between zero and one TiB"
             )
-        try:
-            configured_jurisdiction = operator_jurisdiction(
-                os.environ.get("VONK_OPERATOR_JURISDICTION")
-            )
-        except ValueError as error:
-            raise SettingsError(
-                f"VONK_OPERATOR_JURISDICTION is invalid: {error}"
-            ) from error
         controller_ca_path = (
             _secret_path("VONK_CONTROLLER_CA_FILE") if agent_enabled else None
         )
@@ -564,7 +554,6 @@ class Settings:
             worker_api_token=worker_api_token,
             management_cidrs=management_cidrs,
             direct_fabric_cidrs=direct_fabric_cidrs,
-            operator_jurisdiction=configured_jurisdiction,
             package_helper_grant_private_key_path=package_helper_grant_private_key_path,
             package_helper_receipt_private_key_path=package_helper_receipt_private_key_path,
             host_runtime_grant_private_key_path=host_runtime_grant_private_key_path,
@@ -597,7 +586,6 @@ class WorkerSettings:
     internal_api_timeout_seconds: float
     management_cidrs: str
     direct_fabric_cidrs: str
-    operator_jurisdiction: str | None
     state_path: Path
     agent_artifact_root: Path
     artifact_job_storage_max_bytes: int
@@ -673,14 +661,6 @@ class WorkerSettings:
             except PresenceError as error:
                 raise SettingsError(str(error)) from error
         try:
-            configured_jurisdiction = operator_jurisdiction(
-                os.environ.get("VONK_OPERATOR_JURISDICTION")
-            )
-        except ValueError as error:
-            raise SettingsError(
-                f"VONK_OPERATOR_JURISDICTION is invalid: {error}"
-            ) from error
-        try:
             artifact_job_storage_max_bytes = int(
                 os.environ.get("VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES", str(16 * 1024**3))
             )
@@ -730,7 +710,6 @@ class WorkerSettings:
             internal_api_timeout_seconds=timeout,
             management_cidrs=management_cidrs,
             direct_fabric_cidrs=direct_fabric_cidrs,
-            operator_jurisdiction=configured_jurisdiction,
             state_path=_absolute_root("VONK_STATE_PATH", "/srv/vonk-forge/state"),
             agent_artifact_root=_absolute_root(
                 "VONK_AGENT_ARTIFACT_ROOT", "/state/agent-artifacts"

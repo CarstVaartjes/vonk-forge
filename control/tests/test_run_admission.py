@@ -262,29 +262,6 @@ def test_territorial_license_run_admission_is_informational(tmp_path) -> None:
         "run.license_territorial_restrictions_informational"
     )
 
-    south_korea = RunAdmissionService(
-        sessions,
-        inventory_max_age=300,
-        memory_floor_bytes=50,
-        operator_jurisdiction="KR",
-    ).plan_run(installation, alias="hunyuan", now=now)
-    assert south_korea.allowed is True
-    assert south_korea.nodes[0].warnings[0].code == (
-        "run.license_territorial_restrictions_informational"
-    )
-
-    permitted = RunAdmissionService(
-        sessions,
-        inventory_max_age=300,
-        memory_floor_bytes=50,
-        operator_jurisdiction="US",
-    ).plan_run(installation, alias="hunyuan", now=now)
-    assert permitted.allowed is True
-    assert permitted.nodes[0].warnings[0].code == (
-        "run.license_territorial_restrictions_informational"
-    )
-
-
 def test_system_reserve_is_a_floor_not_workload_memory(tmp_path) -> None:
     sessions, now, _node, installation = setup(
         tmp_path,

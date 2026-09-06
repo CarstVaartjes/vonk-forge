@@ -14,7 +14,6 @@ def test_database_secret_is_read_from_file(tmp_path: Path, monkeypatch) -> None:
     assert settings.recipe_library_api_url == "https://api.github.com"
     assert settings.recipe_library_sync_interval_seconds == 900
     assert settings.agent_release_api_url == "https://install.vonkforge.ai"
-    assert settings.operator_jurisdiction is None
 
 
 def test_optional_huggingface_token_uses_file_path_without_exposing_value(
@@ -55,17 +54,6 @@ def test_optional_huggingface_token_rejects_symlink(tmp_path: Path, monkeypatch)
 
     with pytest.raises(SettingsError, match="regular non-symlink"):
         Settings.from_env_and_secrets()
-
-
-def test_operator_jurisdiction_is_explicit_and_strict(monkeypatch) -> None:
-    monkeypatch.setenv("VONK_DATABASE_URL", "postgresql://db/control")
-    monkeypatch.setenv("VONK_OPERATOR_JURISDICTION", "NL")
-    assert Settings.from_env_and_secrets().operator_jurisdiction == "NL"
-
-    for invalid in ("nl", "NLD", " NL", "N1", "ZZ"):
-        monkeypatch.setenv("VONK_OPERATOR_JURISDICTION", invalid)
-        with pytest.raises(SettingsError, match="VONK_OPERATOR_JURISDICTION"):
-            Settings.from_env_and_secrets()
 
 
 def test_global_catalog_origin_is_https_or_explicit_loopback(monkeypatch) -> None:

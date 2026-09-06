@@ -118,8 +118,6 @@ from .run_switch_api import install_run_switch_routes
 from .run_switch_operations import RunSwitchOperationService
 from .source_bundles import DatabaseSourceBundleStore
 from .telemetry import TelemetryResolution
-from .workload_run_api import install_workload_run_routes
-from .workload_run_workflow import WorkloadRunWorkflow
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -494,7 +492,6 @@ def create_app(
     catalog: CatalogService | None = None,
     recipe_library: Any | None = None,
     managed_catalog_sync: Any | None = None,
-    workload_run: WorkloadRunWorkflow | None = None,
     recipe_operations: RecipeOperationService | None = None,
     run_switch_operations: RunSwitchOperationService | None = None,
     artifact_jobs: ArtifactJobService | None = None,
@@ -758,9 +755,6 @@ def create_app(
         actor_dependency=authenticated_actor,
         profiles=fleet_profiles,
         audits=audits,
-    )
-    install_workload_run_routes(
-        app, actor_dependency=authenticated_actor, audits=audits, workflow=workload_run
     )
     install_recipe_operation_routes(
         app,
@@ -1741,14 +1735,12 @@ def production_app() -> FastAPI:
             sizes=DeclaredArtifactSizeResolver(),
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
-            operator_jurisdiction=settings.operator_jurisdiction,
             compiled_plan_provider=execution_plans.compile_installation,
         ),
         run_admission=RunAdmissionService(
             sessions,
             inventory_max_age=300,
             memory_floor_bytes=4_000_000_000,
-            operator_jurisdiction=settings.operator_jurisdiction,
         ),
         agent_jobs=agent_services.operations,
         clock=clock,
@@ -1905,14 +1897,6 @@ def production_app() -> FastAPI:
         catalog=catalog_service,
         recipe_library=recipe_library,
         managed_catalog_sync=managed_catalog_sync,
-        workload_run=WorkloadRunWorkflow(
-            sessions,
-            clock=clock,
-            bundles=database_bundles,
-            recipe_resolver=lambda document, actor: (
-                catalog_service.resolve_recipe_revision(document, actor=actor)
-            ),
-        ),
         browser_auth=BrowserAuthService(
             sessions,
             token_signing_key=settings.token_signing_key,
