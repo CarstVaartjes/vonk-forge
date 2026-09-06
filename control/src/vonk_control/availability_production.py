@@ -113,7 +113,8 @@ class RecipeImageAvailabilityProduction:
 def build_recipe_image_availability(
     sessions: sessionmaker[Session],
     *,
-    settings: Any,
+    settings: Any | None = None,
+    artifact_root: Any | None = None,
     managed_catalog_sync: Any | None,
     recipe_builds: Any,
     recipe_operations: Any,
@@ -124,12 +125,16 @@ def build_recipe_image_availability(
 ) -> RecipeImageAvailabilityProduction:
     """Compose canonical catalog resolution, OCI storage, and image execution.
 
-    The scheduler refreshes the reviewed library periodically.  Each request
-    resolves its selected immutable revision from SQL, so a refresh can
-    advance the global head without changing an operation's identity.
+    Catalog refresh is owned by the production app's automatic sync task.
+    Each request resolves its selected immutable revision from SQL, so a
+    refresh can advance the global head without changing an operation's
+    identity.  The optional scheduler only claims durable operations.
     """
 
-    storage = FilesystemRuntimeImageStorage(settings.agent_artifact_root)
+    image_root = artifact_root or getattr(settings, "agent_artifact_root", None)
+    if image_root is None:
+        raise ValueError("recipe image artifact root is required")
+    storage = FilesystemRuntimeImageStorage(image_root)
     transport = SkopeoOCIImageTransport()
 
     def authority(
