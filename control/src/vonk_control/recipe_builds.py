@@ -222,14 +222,22 @@ def _canonical_model_build_inputs(artifacts: Sequence[object]) -> list[dict[str,
     return sorted(projected, key=lambda item: (str(item["path"]), str(item["sha256"]), item["download_bytes"]))
 
 
-def _canonical_build(document: Mapping[str, object]) -> Mapping[str, object]:
+def _canonical_build(
+    document: Mapping[str, object], projected: Mapping[str, object] | None = None
+) -> Mapping[str, object]:
     execution = document.get("execution")
     if not isinstance(execution, Mapping) or execution.get("mode") != "build":
         raise RecipeBuildError("build.not_required", "recipe selects a prebuilt image")
     build = execution.get("build")
     if not isinstance(build, Mapping):
         raise RecipeBuildError("build.contract_invalid", "canonical execution.build is unavailable")
-    return {**build, "dockerfile": _bundle_dockerfile_path(build)}
+    compiled = {**build, "dockerfile": _bundle_dockerfile_path(build)}
+    if projected is not None:
+        # Executable platform policy participates in the same cache identity
+        # as the Dockerfile and base images. Resource quotas do not.
+        compiled["options"] = copy.deepcopy(projected.get("build_options", {}))
+        compiled["security"] = copy.deepcopy(projected.get("build_security", {}))
+    return compiled
 
 
 def _bundle_dockerfile_path(build: Mapping[str, object]) -> object:
@@ -430,7 +438,7 @@ class RecipeBuildService:
                     "build.recipe_unresolved", "only a resolved recipe can be checked"
                 )
             document = copy.deepcopy(revision.document)
-            build = _canonical_build(document)
+            build = _canonical_build(document, revision.projected)
             source_sha256 = _source_bundle_handle(revision)
             if (
                 session.get(RecipeSourceBundle, source_sha256) is None
@@ -464,7 +472,7 @@ class RecipeBuildService:
                     "build.recipe_unresolved", "only a resolved recipe can be built"
                 )
             document = copy.deepcopy(revision.document)
-            build = _canonical_build(document)
+            build = _canonical_build(document, revision.projected)
             source_sha256 = _source_bundle_handle(revision)
             if session.get(RecipeSourceBundle, source_sha256) is None:
                 raise RecipeBuildError(
@@ -608,7 +616,7 @@ class RecipeBuildService:
                 )
             _validate_builder(node)
             document = copy.deepcopy(revision.document)
-            build = _canonical_build(document)
+            build = _canonical_build(document, revision.projected)
             source_sha256 = _source_bundle_handle(revision)
             public_network = _public_build_network(build)
             if (

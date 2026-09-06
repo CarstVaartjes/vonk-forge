@@ -140,9 +140,24 @@ privilege, then records the exact OCI image digest and immutable archive
 digest. The durable build identity also binds the builder agent's reported
 binary SHA-256 and the Docker-archive format. An accepted result therefore
 cannot be reused after a builder implementation or export-format change. The
-declared archive output bound follows the recipe's temporary build envelope, so
-large CUDA-based images are not constrained by a small log-size constant;
-diagnostic stdout/stderr remains independently capped.
+archive output budget follows the largest declared per-node image budget;
+diagnostic stdout/stderr remains independently capped. Actual exported sizes
+and digests come from the builder receipt.
+
+The Controller compiles build policy when it imports a source Recipe. Authors
+do not repeat Podman defaults or security settings in recipe documents. The
+rootless build receives up to eight CPU cores, 4,096 tasks, 24 hours, and a
+memory budget equal to the declared image budget, bounded between 2 and 64 GiB.
+Temporary storage reserves the larger of the declared staging budget and three
+times the image budget (capped at 16 TiB), with the separate host disk reserve
+and current free-memory admission checks still enforced. These are planning
+budgets, not measurements or model-download sizes.
+
+Build steps receive only CHOWN, DAC_OVERRIDE, FOWNER, FSETID, SETFCAP, SETGID,
+and SETUID inside the existing rootless user namespace, so package installation
+and file ownership operations work. Builds receive no GPU, host mounts, socket,
+or privileged mode. The complete Podman option set is compiled centrally;
+options and capabilities participate in the immutable image build identity.
 
 Rootless Podman ends at the build/export boundary. Accepted workloads run on
 DGX Spark's supported Docker Engine and NVIDIA Container Toolkit. The

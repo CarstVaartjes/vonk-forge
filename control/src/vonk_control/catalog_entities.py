@@ -216,7 +216,47 @@ def _revision(root: CatalogDocument, parsed: ModelDefinition | RecipeDefinition,
         projected = {"identity": parsed.identity.model_dump(mode="json"), "modalities": parsed.modalities, "artifact_count": len(parsed.files), "download_bytes": download, "installed_bytes": installed}
     else:
         projected = {"title": parsed.metadata.title, "description": parsed.metadata.description, "tags": parsed.metadata.tags, "runtime_engine": parsed.runtime.engine, "topology": parsed.topology.model_dump(mode="json")}
+        projected.update(_build_projection(parsed))
     return CatalogDocumentRevision(document_id=root.id, kind=str(parsed.kind), publisher=parsed.identity.publisher, slug=parsed.identity.slug, revision_number=number, schema_version=2, state="candidate", document=copy.deepcopy(clean), content_digest=content_sha256(parsed), artifact_key=artifact_key, execution_key=_digest(_execution_projection(parsed)), download_bytes=download, installed_bytes=installed, projected=projected, created_by=actor, created_at=now)
+
+
+def _build_projection(recipe: RecipeDefinition) -> dict[str, object]:
+    """Compile platform-owned rootless build policy for every source recipe.
+
+    These are admission budgets, not measured image sizes. The builder still
+    measures and verifies the exported archive before it can be distributed.
+    No public Recipe fields or local author overrides grant build authority.
+    """
+    if recipe.execution.mode != "build":
+        return {}
+    gib = 1024**3
+    disks = [role.resources.disk for role in recipe.topology.roles]
+    image_bytes = max(disk.image_bytes for disk in disks)
+    return {
+        "build_resources": {
+            "cpu_cores": 8,
+            "download_bytes": image_bytes,
+            "temporary_bytes": min(16 * 1024**4, max(3 * image_bytes, *(disk.staging_bytes for disk in disks))),
+            "memory_bytes": min(64 * gib, max(2 * gib, image_bytes)),
+            "processes": 4096,
+            "timeout_seconds": 86_400,
+        },
+        # Installation/ownership operations inside the existing rootless
+        # namespace only. GPU, host mounts, sockets and privilege stay off.
+        "build_security": {
+            "capabilities": ["CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "SETFCAP", "SETGID", "SETUID"],
+        },
+        "build_options": {
+            "additional_contexts": [], "annotations": [], "environment": [],
+            "format": "oci", "identity_label": True, "ignorefile": None,
+            "jobs": 1, "labels": [], "layer_compression": "disabled",
+            "layer_labels": [], "layers": True, "no_hostname": False,
+            "no_hosts": False, "omit_history": False, "os_features": [],
+            "os_version": None, "shm_bytes": 64 * 1024**2,
+            "skip_unused_stages": True, "squash": "none", "timestamp": None,
+            "unset_environment": [], "unset_labels": [],
+        },
+    }
 
 
 def _execution_projection(parsed: ModelDefinition | RecipeDefinition) -> object:

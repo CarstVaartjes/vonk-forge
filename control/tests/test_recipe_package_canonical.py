@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import tarfile
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,10 +14,24 @@ import httpx
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol.contracts import _validate_recipe_build_payload
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
-from vonk_control.models import Base, CatalogDocumentRevision
-from vonk_control.recipe_builds import _canonical_build, _source_policy_document
+from vonk_control.inventory_repository import (
+    InventoryRepository,
+    InventorySnapshotInput,
+)
+from vonk_control.models import (
+    AgentNode,
+    Base,
+    CatalogDocumentRevision,
+    RecipeSourceBundle,
+)
+from vonk_control.recipe_builds import (
+    RecipeBuildService,
+    _canonical_build,
+    _source_policy_document,
+)
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     RecipePackageClient,
@@ -123,6 +138,61 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     assert inspect_build_source_policy(
         _source_policy_document(item.document, build, bundle.sha256), bundle
     ).passed
+    # Exercise the actual package -> catalog -> builder path. Supplying fake
+    # build_resources/options in a test-only projection hid an import failure.
+    engine = create_engine(f"sqlite:///{tmp_path / 'build.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 9, 6, tzinfo=UTC)
+    catalog = CatalogService(
+        sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()
+    )
+    view = catalog.import_recipe_library(
+        "package-test", library_commit=item.library_commit,
+        source_path=item.source_path, document=item.document,
+        expected_content_sha256=item.content_sha256,
+        dependency_documents=item.dependencies, package_handle=item.package_handle,
+        package_sha256=item.package_handle.package_sha256,
+        source_bundle_sha256=bundle.sha256,
+    )
+    node_id = "spk_" + "1" * 32
+    with sessions.begin() as session:
+        session.add(AgentNode(
+            node_id=node_id, state="active", architecture="linux-arm64",
+            semantic_version="1.2.3", build_digest="sha256:" + "a" * 64,
+            binary_digest="1" * 64, self_test_passed=True,
+            capabilities=["recipe.build.v1"], last_seen_at=now,
+        ))
+        session.add(RecipeSourceBundle(
+            sha256=bundle.sha256,
+            media_type="application/vnd.vonk-forge.source-bundle.v1+tar",
+            archive_bytes=len(bundle.archive), total_bytes=bundle.manifest.total_bytes,
+            file_count=len(bundle.manifest.files),
+            storage_key=f"{bundle.sha256[:2]}/{bundle.sha256}.tar",
+            manifest={"files": [asdict(entry) for entry in bundle.manifest.files]},
+            verified_at=now,
+        ))
+        revision = session.scalar(select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.content_digest == view.content_sha256
+        ))
+        revision_id = revision.id
+    InventoryRepository(sessions, clock=lambda: now).record(InventorySnapshotInput(
+        node_id=node_id, observed_at=now,
+        disk_total_bytes=45 * 1024**3, disk_free_bytes=30 * 1024**3,
+        host_memory_total_bytes=6 * 1024**3, host_memory_free_bytes=4 * 1024**3,
+        gpu_memory_total_bytes=0, gpu_memory_free_bytes=0, gpu_count=0,
+        artifact_store_read_only=False, capabilities=("recipe.build.v1",),
+    ))
+    builder = RecipeBuildService(sessions, bundles=bundles)
+    resolution = builder.resolve(revision_id)
+    plan = builder.plan(revision_id, node_id, now=now, resolution=resolution)
+    _validate_recipe_build_payload(plan.agent_payload)
+    assert plan.agent_payload["dockerfile"] == "Dockerfile"
+    assert plan.agent_payload["limits"]["memory_bytes"] <= 4 * 1024**3
+    assert plan.agent_payload["limits"]["gpu"] == 0
+    assert all(plan.agent_payload["limits"][name] is False for name in (
+        "privileged", "host_mounts", "container_socket"
+    ))
     client.close()
 
 
