@@ -78,6 +78,76 @@ def test_candidate_package_decodes_and_restart_only_reads_index(tmp_path: Path) 
     restarted.close()
 
 
+def test_canonical_synthetic_nested_source_path_lists_and_fetches(
+    tmp_path: Path,
+) -> None:
+    index_path = ROOT / "tests/fixtures/canonical-synthetic-canary/index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    row = index["recipes"][0]
+    package = (ROOT / row["package"]["path"]).read_bytes()
+    assert row["source_path"] == (
+        "tests/fixtures/canonical-synthetic-canary/recipe.json"
+    )
+    index_bytes = json.dumps(index).encode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("index.json"):
+            return httpx.Response(
+                200, headers={"content-type": "application/json"}, content=index_bytes
+            )
+        return httpx.Response(
+            200, headers={"content-type": PACKAGE_MEDIA_TYPE}, content=package
+        )
+
+    client = RecipePackageClient(
+        "http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(handler),
+    )
+    snapshot = client.list()
+    item = client.fetch(snapshot.items[0].uri)
+    assert item.source_path == row["source_path"]
+    assert item.package_handle is not None
+    assert item.package_handle.package_sha256 == row["package"]["sha256"]
+    client.close()
+
+
+@pytest.mark.parametrize(
+    "source_path",
+    (
+        "../recipe.json",
+        "/recipes/recipe.json",
+        "recipes\\recipe.json",
+        "recipes/\x00recipe.json",
+        "recipes//recipe.json",
+    ),
+)
+def test_candidate_package_rejects_unsafe_source_path(
+    tmp_path: Path, source_path: str
+) -> None:
+    index, row, _package = _fixture()
+    index = copy.deepcopy(index)
+    index["recipes"] = [copy.deepcopy(row)]
+    index["recipes"][0]["source_path"] = source_path
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("index.json")
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            content=json.dumps(index).encode(),
+        )
+
+    client = RecipePackageClient(
+        "http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(RecipePackageError, match="invalid"):
+        client.list()
+    client.close()
+
+
 def test_candidate_package_rejects_model_snapshot_digest_mismatch(tmp_path: Path) -> None:
     index, row, package = _fixture()
     files = _archive_files(package)
