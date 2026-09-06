@@ -51,6 +51,19 @@ def _failure_document(error: RecipeImageAvailabilityError) -> dict[str, object]:
     return AvailabilityOperationFailure.model_validate(raw).model_dump(mode="json")
 
 
+def _view_document(view: Any) -> dict[str, object]:
+    document = view.document()
+    failure = document.get("failure")
+    if not isinstance(failure, dict):
+        return document
+    try:
+        from .operation_contract import AvailabilityOperationFailure
+    except ImportError:
+        return document
+    document["failure"] = AvailabilityOperationFailure.model_validate(failure).model_dump(mode="json")
+    return document
+
+
 def _service(service: RecipeImageAvailabilityService | None) -> RecipeImageAvailabilityService:
     if service is None:
         raise HTTPException(status_code=503, detail="recipe image availability is unavailable")
@@ -88,7 +101,7 @@ def install_recipe_image_availability_routes(
                 request_id=body.request_key,
                 force=body.force,
             )
-            return view.document()
+            return _view_document(view)
         except RecipeImageAvailabilityError as error:
             return JSONResponse(
                 status_code=status.HTTP_409_CONFLICT,
@@ -104,7 +117,7 @@ def install_recipe_image_availability_routes(
         _actor: Any = actor_dependency,
     ) -> dict[str, object]:
         try:
-            return _service(service).get(operation_id).document()
+            return _view_document(_service(service).get(operation_id))
         except KeyError:
             raise HTTPException(status_code=404, detail="recipe image availability operation not found") from None
 
@@ -121,11 +134,11 @@ def install_recipe_image_availability_routes(
     ) -> dict[str, object]:
         _mutating(actor)
         try:
-            return _service(service).retry(
+            return _view_document(_service(service).retry(
                 operation_id,
                 actor=actor.subject,
                 request_id=body.request_key,
-            ).document()
+            ))
         except KeyError:
             raise HTTPException(status_code=404, detail="recipe image availability operation not found") from None
         except RecipeImageAvailabilityError as error:
