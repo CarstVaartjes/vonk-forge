@@ -92,7 +92,7 @@ def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None
     assert components["LibraryRecipeSummary"]["properties"]["recipe_document"] == {
         "$ref": "#/components/schemas/RecipeDefinition"
     }
-    assert components["LibraryRecipeSummary"]["properties"]["recipe_revision_id"] == {
+    assert components["LibraryRecipeIdentity"]["properties"]["recipe_revision_id"] == {
         "pattern": (
             "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
             "[89ab][0-9a-f]{3}-[0-9a-f]{12}$"

@@ -24,6 +24,7 @@ class LibraryRecipeIdentity:
             description (str):
             publisher (str):
             recipe_id (str):
+            recipe_revision_id (str):
             slug (str):
             title (str):
      """
@@ -32,6 +33,7 @@ class LibraryRecipeIdentity:
     description: str
     publisher: str
     recipe_id: str
+    recipe_revision_id: str
     slug: str
     title: str
 
@@ -48,6 +50,8 @@ class LibraryRecipeIdentity:
 
         recipe_id = self.recipe_id
 
+        recipe_revision_id = self.recipe_revision_id
+
         slug = self.slug
 
         title = self.title
@@ -60,6 +64,7 @@ class LibraryRecipeIdentity:
             "description": description,
             "publisher": publisher,
             "recipe_id": recipe_id,
+            "recipe_revision_id": recipe_revision_id,
             "slug": slug,
             "title": title,
         })
@@ -79,6 +84,8 @@ class LibraryRecipeIdentity:
 
         recipe_id = d.pop("recipe_id")
 
+        recipe_revision_id = d.pop("recipe_revision_id")
+
         slug = d.pop("slug")
 
         title = d.pop("title")
@@ -88,6 +95,7 @@ class LibraryRecipeIdentity:
             description=description,
             publisher=publisher,
             recipe_id=recipe_id,
+            recipe_revision_id=recipe_revision_id,
             slug=slug,
             title=title,
         )

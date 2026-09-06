@@ -5893,6 +5893,11 @@
             "title": "Recipe Id",
             "type": "string"
           },
+          "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Recipe Revision Id",
+            "type": "string"
+          },
           "slug": {
             "maxLength": 128,
             "minLength": 1,
@@ -5908,6 +5913,7 @@
         },
         "required": [
           "recipe_id",
+          "recipe_revision_id",
           "publisher",
           "slug",
           "content_sha256",
@@ -6111,12 +6117,12 @@
         },
         "required": [
           "recipe_id",
+          "recipe_revision_id",
           "publisher",
           "slug",
           "content_sha256",
           "title",
           "description",
-          "recipe_revision_id",
           "recipe_document",
           "capabilities",
           "topology_name",

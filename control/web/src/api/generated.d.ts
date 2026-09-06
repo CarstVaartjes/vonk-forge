@@ -3600,6 +3600,8 @@ export interface components {
             publisher: string;
             /** Recipe Id */
             recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
             /** Slug */
             slug: string;
             /** Title */

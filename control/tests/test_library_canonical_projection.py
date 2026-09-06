@@ -190,42 +190,6 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
         assert item.recipe_revision_id == recipe_revision_ids[item.content_sha256]
         assert item.recipe_revision_id not in {item.recipe_id, item.content_sha256}
 
-    first_recipe = recipe_overview.recipes[0]
-    profile_assignment = FleetProfileAssignmentInput.model_validate(
-        {
-            "recipe_revision_id": first_recipe.recipe_revision_id,
-            "topology_name": first_recipe.recipe_document.topology.name,
-            "desired_state": "installed",
-            "nodes": [
-                {
-                    "node_id": "spk_" + "0" * 32,
-                    "rank": 0,
-                    "role": first_recipe.recipe_document.topology.roles[0].name,
-                    "endpoint_owner": True,
-                }
-            ],
-        }
-    )
-    run_input = RunSwitchPreviewRequest.model_validate(
-        {
-            "model_version_sha256": "a" * 64,
-            "recipe_revision_id": first_recipe.recipe_revision_id,
-            "spark_group": {
-                "nodes": [
-                    {
-                        "node_id": "spk_" + "0" * 32,
-                        "rank": 0,
-                        "role": first_recipe.recipe_document.topology.roles[0].name,
-                        "endpoint_owner": True,
-                    }
-                ]
-            },
-            "alias": "canonical",
-        }
-    )
-    assert profile_assignment.recipe_revision_id == first_recipe.recipe_revision_id
-    assert run_input.recipe_revision_id == first_recipe.recipe_revision_id
-
     app = FastAPI()
     install_library_routes(
         app,
@@ -299,6 +263,49 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     assert detail_payload["definition"]["settings"] == expected_recipe.settings.model_dump(
         mode="json"
     )
+    assert detail_payload["recipe"]["recipe_revision_id"] == recipe_revision_ids[
+        detail_payload["recipe"]["content_sha256"]
+    ]
+    assert detail_payload["recipe"]["recipe_revision_id"] not in {
+        detail_payload["recipe"]["recipe_id"],
+        detail_payload["recipe"]["content_sha256"],
+    }
+    profile_assignment = FleetProfileAssignmentInput.model_validate(
+        {
+            "recipe_revision_id": detail_payload["recipe"]["recipe_revision_id"],
+            "topology_name": expected_recipe.topology.name,
+            "desired_state": "installed",
+            "nodes": [
+                {
+                    "node_id": "spk_" + "0" * 32,
+                    "rank": 0,
+                    "role": expected_recipe.topology.roles[0].name,
+                    "endpoint_owner": True,
+                }
+            ],
+        }
+    )
+    run_input = RunSwitchPreviewRequest.model_validate(
+        {
+            "model_version_sha256": "a" * 64,
+            "recipe_revision_id": detail_payload["recipe"]["recipe_revision_id"],
+            "spark_group": {
+                "nodes": [
+                    {
+                        "node_id": "spk_" + "0" * 32,
+                        "rank": 0,
+                        "role": expected_recipe.topology.roles[0].name,
+                        "endpoint_owner": True,
+                    }
+                ]
+            },
+            "alias": "canonical",
+        }
+    )
+    assert profile_assignment.recipe_revision_id == detail_payload["recipe"][
+        "recipe_revision_id"
+    ]
+    assert run_input.recipe_revision_id == detail_payload["recipe"]["recipe_revision_id"]
 
     multi_model_row = next(
         row for row in index["recipes"] if len(row["document"].get("models", [])) > 1
