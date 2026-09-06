@@ -133,8 +133,8 @@ function JobHistory({api, busyJobId, cancelCandidate, job, onCancel, onConfirmCa
     {active && <div className="artifact-job-progress" role="status" aria-live="polite"><span className="artifact-job-progress-track"><span/></span><p>{job.state === "running" ? "The Spark is producing artifacts." : job.state === "queued" ? "Waiting for the assigned Spark." : "Preparing the immutable job request."}</p></div>}
     {job.status_reason && <p className="artifact-job-reason" role={job.state === "failed" ? "alert" : undefined}>{job.status_reason}</p>}
     {job.result_evidence && <dl className="artifact-job-evidence">
-      {job.result_evidence.elapsed_milliseconds !== undefined && <><dt>Elapsed</dt><dd>{(job.result_evidence.elapsed_milliseconds / 1000).toLocaleString()} s</dd></>}
-      {job.result_evidence.peak_memory_bytes !== undefined && <><dt>Peak memory</dt><dd>{formatBytes(job.result_evidence.peak_memory_bytes)}</dd></>}
+      {job.result_evidence.elapsed_milliseconds != null && <><dt>Elapsed</dt><dd>{(job.result_evidence.elapsed_milliseconds / 1000).toLocaleString()} s</dd></>}
+      {job.result_evidence.peak_memory_bytes != null && <><dt>Peak memory</dt><dd>{formatBytes(job.result_evidence.peak_memory_bytes)}</dd></>}
     </dl>}
     {job.state === "succeeded" && job.output_files.length === 0 && <p className="artifact-job-reason">This job succeeded without downloadable outputs.</p>}
     {job.state === "succeeded" && job.output_files.length > 0 && <ul className="artifact-output-list" aria-label={`${job.output_files.length} generated outputs`}>{job.output_files.map(file => <OutputPreview api={api} file={file} job={job} key={`${file.name}:${file.sha256}`}/>)}</ul>}

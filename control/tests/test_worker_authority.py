@@ -19,6 +19,7 @@ from vonk_control.route_runtime import (
     endpoint_evidence_digest,
 )
 from vonk_control.worker_authority import (
+    AuthorityResponse,
     HttpWorkerAuthority,
     WorkerAuthorityError,
     WorkerAuthorityService,
@@ -107,9 +108,68 @@ def test_internal_worker_authority_requires_exact_service_token() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["revision"] == COMMIT
-    assert response.json()["nonce"] == "0" * 32
-    assert response.json()["expires_at"] == 115
+    document = response.json()
+    assert AuthorityResponse.model_validate(document).model_dump() == document
+    assert document["revision"] == COMMIT
+    assert document["nonce"] == "0" * 32
+    assert document["expires_at"] == 115
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("schema_version", "1"),
+        ("routes", "not-a-list"),
+        ("extra", True),
+        (
+            "routes",
+            [
+                {
+                    "alias": ROUTE.alias,
+                    "workload_id": ROUTE.workload_id,
+                    "api_base": ROUTE.api_base,
+                    "requests_per_minute": str(ROUTE.requests_per_minute),
+                    "tokens_per_minute": ROUTE.tokens_per_minute,
+                }
+            ],
+        ),
+    ),
+)
+def test_internal_worker_authority_rejects_coerced_or_wrongly_nested_json(
+    field: str,
+    value: object,
+) -> None:
+    body = {
+        "schema_version": 1,
+        "reconciliation_id": RECONCILIATION_ID,
+        "revision": COMMIT,
+        "plan_digest": PLAN_DIGEST,
+        "nonce": "1" * 32,
+        "routes": [
+            {
+                "alias": ROUTE.alias,
+                "workload_id": ROUTE.workload_id,
+                "api_base": ROUTE.api_base,
+                "requests_per_minute": ROUTE.requests_per_minute,
+                "tokens_per_minute": ROUTE.tokens_per_minute,
+            }
+        ],
+    }
+    body[field] = value
+
+    response = _client().post(
+        "/internal/v1/authority/evaluate",
+        headers={
+            "x-vonk-worker-signature": worker_document_signature(
+                b"w" * 32,
+                body,
+                purpose="request",
+            )
+        },
+        json=body,
+    )
+
+    assert response.status_code == 422
 
 
 def test_internal_worker_authority_fails_closed_before_repository_policy_output() -> (

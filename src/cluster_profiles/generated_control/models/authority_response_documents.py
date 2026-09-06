@@ -12,16 +12,16 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost")
+T = TypeVar("T", bound="AuthorityResponseDocuments")
 
 
 
 @_attrs_define
-class PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost:
+class AuthorityResponseDocuments:
     """
      """
 
-    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+    additional_properties: dict[str, str] = _attrs_field(init=False, factory=dict)
 
 
 
@@ -39,21 +39,21 @@ class PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPo
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        preview_agent_upgrade_response_preview_agent_upgrade_api_v1_agents_upgrades_preview_post = cls(
+        authority_response_documents = cls(
         )
 
 
-        preview_agent_upgrade_response_preview_agent_upgrade_api_v1_agents_upgrades_preview_post.additional_properties = d
-        return preview_agent_upgrade_response_preview_agent_upgrade_api_v1_agents_upgrades_preview_post
+        authority_response_documents.additional_properties = d
+        return authority_response_documents
 
     @property
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> str:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value: str) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:

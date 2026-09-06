@@ -400,7 +400,7 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
     )
     _drain(service, operation.id, timeout_seconds=30)
     result = service.get_operation(operation.id)
-    assert result.state == "succeeded"
+    assert result.state == "succeeded", result.failure
     parsed = ModelCacheOperationProgress.model_validate(result.progress)
     assert len(parsed.members) == 129
     service.close()

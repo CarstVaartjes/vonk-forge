@@ -25,7 +25,7 @@ use crate::{
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
-    workloads::Placement,
+    workloads::{CompiledExecutionPlan, Placement},
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
@@ -38,6 +38,60 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const JOB_CANCEL_EXIT_CODE: i32 = 130;
 const JOB_CANCEL_STOP_TIMEOUT_SECONDS: u16 = 5;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
+
+fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionPlan, ()> {
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).map_err(|_| ())?;
+    plan.validate().map_err(|_| ())?;
+    Ok(plan)
+}
+
+fn same_installed_workload(
+    installed: &CompiledExecutionPlan,
+    requested: &CompiledExecutionPlan,
+) -> bool {
+    installed.identity == requested.identity
+        && installed.artifacts == requested.artifacts
+        && installed.runtime.executable == requested.runtime.executable
+        && installed.runtime.argv == requested.runtime.argv
+        && installed.runtime.env == requested.runtime.env
+        && installed.runtime.image_digest == requested.runtime.image_digest
+        && installed.runtime_image == requested.runtime_image
+        && installed.security.devices == requested.security.devices
+        && installed.security.capabilities == requested.security.capabilities
+        && installed.security.host_network == requested.security.host_network
+        && installed.security.privileged == requested.security.privileged
+        && installed.security.user == requested.security.user
+        && installed.security.mounts == requested.security.mounts
+        && installed.security.read_only_root == requested.security.read_only_root
+        && installed.security.no_new_privileges == requested.security.no_new_privileges
+        && installed.lifecycle == requested.lifecycle
+        && installed.endpoint == requested.endpoint
+        && installed.job == requested.job
+        && installed.topology.name == requested.topology.name
+        && installed.topology.mode == requested.topology.mode
+        && installed.topology.backend == requested.topology.backend
+        && installed.topology.node_count == requested.topology.node_count
+}
+
+fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
+    let image_digest = spec
+        .runtime
+        .image_digest
+        .strip_prefix("sha256:")
+        .unwrap_or_default()
+        .to_owned();
+    let model_identity = spec
+        .artifacts
+        .first()
+        .map(|artifact| {
+            format!(
+                "{}/{}@{}",
+                artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256
+            )
+        })
+        .unwrap_or_default();
+    (image_digest, model_identity)
+}
 
 struct JobScopeCleanup<'runtime, 'data, R: ProcessRunner> {
     runtime: &'runtime OciRuntime<'data, R>,
@@ -497,6 +551,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             });
             let download = {
                 let mut result = None;
+                let archive_root = self.runtime.data_root.join("oci-archives");
                 for attempt in 0..3_u32 {
                     let progress_sender = progress_sender.clone();
                     let current = self
@@ -504,6 +559,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         .download_distribution_with_progress(
                             &request.plan_digest,
                             &destination,
+                            &archive_root,
                             move |item| {
                                 progress_sender.send_replace(Some(item));
                             },
@@ -545,7 +601,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         Ok(path) => path,
                         Err(_) => return failed("distributed OCI archive could not be retained"),
                     };
-                    if self
+                    if let Err(error) = self
                         .execute_host_runtime(
                             claim,
                             HostRuntimeAction::ImageImport,
@@ -557,9 +613,17 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             ),
                         )
                         .await
-                        .is_err()
                     {
-                        return failed("distributed OCI image could not be imported");
+                        // HostRuntimeError exposes only bounded, stable
+                        // categories, never helper stderr or credentials.
+                        return ExecutionResult {
+                            state: "failed",
+                            body: json!({
+                                "reason": format!(
+                                    "distributed OCI image could not be imported: {error}"
+                                ),
+                            }),
+                        };
                     }
                     ExecutionResult {
                         state: "succeeded",
@@ -1112,6 +1176,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Install(request) => {
+                let inline_spec =
+                    match parse_compiled_execution_plan(&request.compiled_execution_plan) {
+                        Ok(spec) => spec,
+                        Err(_) => return failed("compiled execution plan is invalid"),
+                    };
                 let spec = match self
                     .client
                     .recipe_spec(&request.installation_id.to_string())
@@ -1120,10 +1189,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(spec) => spec,
                     Err(_) => return failed("digest-bound recipe specification is unavailable"),
                 };
-                if spec.identity.recipe_revision_sha256 != request.recipe_content_sha256
+                if spec != inline_spec
                     || spec.topology.role != request.role
                     || spec.topology.rank != request.rank
-                    || spec.runtime.image_digest != request.image_digest
+                {
+                    return failed("compiled execution plan does not match the accepted install");
+                }
+                if spec.identity.recipe_revision_sha256.is_empty()
+                    || spec.topology.role != request.role
                 {
                     return failed("recipe specification does not match the accepted install");
                 }
@@ -1161,7 +1234,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .install(
                         &spec,
                         &request.installation_id.to_string(),
-                        &request.recipe_content_sha256,
+                        &spec.identity.recipe_revision_sha256,
                     )
                     .is_err()
                 {
@@ -1178,16 +1251,45 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
             }
             RecipeOperationRequest::Start(request) => {
                 let installation_id = request.installation_id.to_string();
+                let spec = match parse_compiled_execution_plan(&request.compiled_execution_plan) {
+                    Ok(spec) => spec,
+                    Err(_) => return failed("compiled execution plan is invalid"),
+                };
+                if spec.identity.recipe_revision_sha256 != request.recipe_content_sha256
+                    || spec.runtime.image_digest != request.image_digest
+                    || spec.topology.rank != request.rank
+                    || spec.topology.role != request.role
+                    || spec.topology.world_size != request.world_size
+                    || spec.runtime.placement.rank != request.rank
+                    || spec.runtime.placement.role != request.role
+                    || spec.runtime.placement.world_size != request.world_size
+                    || spec.runtime.placement.port != request.port
+                    || spec.runtime.placement.reserved_memory_bytes != request.reserved_memory_bytes
+                    || spec.runtime.placement.local_address != request.local_address
+                    || spec.runtime.placement.master_address != request.master_address
+                    || spec.runtime.placement.master_port != request.master_port
+                    || (spec.runtime.placement.endpoint_address.is_some()
+                        && spec.runtime.placement.endpoint_address
+                            != Some(request.endpoint_address))
+                    || (spec.runtime.placement.endpoint_address.is_none()
+                        && request.world_size > 1
+                        && request.local_address != Some(request.endpoint_address))
+                {
+                    return failed("compiled execution plan does not match start identity");
+                }
                 if self.runtime.recipe_digest(&installation_id).ok().as_deref()
                     != Some(&request.recipe_content_sha256)
                     || self.runtime.verify_installation(&installation_id).is_err()
                 {
                     return failed("installed recipe identity or artifact manifest does not match");
                 }
-                let spec = match self.runtime.load_spec(&installation_id) {
+                let installed_spec = match self.runtime.load_spec(&installation_id) {
                     Ok(spec) => spec,
                     Err(_) => return failed("installed recipe specification is corrupt"),
                 };
+                if !same_installed_workload(&installed_spec, &spec) {
+                    return failed("start plan does not match installed workload identity");
+                }
                 let Some(endpoint) = spec.endpoint.as_ref() else {
                     return failed("installed recipe is not a persistent service");
                 };
@@ -1399,16 +1501,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         Ok(arguments) => hex_sha256(&arguments),
                         Err(_) => return failed("rank launch evidence is unavailable"),
                     };
+                    let (evidence_image_digest, evidence_model_identity) =
+                        readiness_identity(&spec);
                     let evidence = json!({
                         "phase": "rank-launch",
                         "run_id": run_id,
                         "run_generation": request.run_generation,
                         "recipe_revision_id": request.recipe_revision_id.to_string(),
                         "recipe_content_sha256": request.recipe_content_sha256,
-                        "image_digest": spec.runtime.image_digest,
+                        "image_digest": evidence_image_digest,
                         "artifact_set_digest": artifact_set_digest,
                         "runtime_arguments_sha256": runtime_arguments_sha256,
-                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}/{}@{}", artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256)).unwrap_or_default(),
+                        "model_identity": evidence_model_identity,
                         "rank": request.rank,
                         "role": request.role,
                         "world_size": request.world_size,
@@ -1506,16 +1610,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         Ok(arguments) => hex_sha256(&arguments),
                         Err(_) => return failed("collective readiness evidence is unavailable"),
                     };
+                    let (evidence_image_digest, evidence_model_identity) =
+                        readiness_identity(&spec);
                     let evidence = json!({
                         "phase": "collective-readiness",
                         "run_id": run_id,
                         "run_generation": request.run_generation,
                         "recipe_revision_id": request.recipe_revision_id.to_string(),
                         "recipe_content_sha256": request.recipe_content_sha256,
-                        "image_digest": spec.runtime.image_digest,
+                        "image_digest": evidence_image_digest,
                         "artifact_set_digest": artifact_set_digest,
                         "runtime_arguments_sha256": runtime_arguments_sha256,
-                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}/{}@{}", artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256)).unwrap_or_default(),
+                        "model_identity": evidence_model_identity,
                         "rank": request.rank,
                         "role": request.role,
                         "world_size": request.world_size,
@@ -1536,26 +1642,16 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         }),
                     };
                 }
+                let (evidence_image_digest, evidence_model_identity) = readiness_identity(&spec);
                 let evidence = HealthEvidence {
                     recipe_revision_id: request.recipe_revision_id.to_string(),
                     recipe_content_sha256: request.recipe_content_sha256,
-                    image_digest: spec.runtime.image_digest.clone(),
+                    image_digest: evidence_image_digest,
                     artifact_set_digest: self
                         .runtime
                         .artifact_set_digest(&installation_id)
                         .unwrap_or_default(),
-                    model_identity: spec
-                        .artifacts
-                        .first()
-                        .map(|artifact| {
-                            format!(
-                                "{}/{}@{}",
-                                artifact.model.publisher,
-                                artifact.model.slug,
-                                artifact.model.content_sha256
-                            )
-                        })
-                        .unwrap_or_default(),
+                    model_identity: evidence_model_identity,
                     rank: request.rank,
                     world_size: request.world_size,
                     endpoint: format!(
@@ -2209,8 +2305,9 @@ mod tests {
     use super::{
         ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor, RunOncePolicy,
         distribution_success_evidence, normalize_execution_result, output_media_type,
-        run_interruptible_job, run_once_with_claim_hook, run_once_with_heartbeat_interval,
-        wait_for_launch_stability, wait_ready_with_runtime_guard,
+        parse_compiled_execution_plan, readiness_identity, run_interruptible_job,
+        run_once_with_claim_hook, run_once_with_heartbeat_interval, wait_for_launch_stability,
+        wait_ready_with_runtime_guard,
     };
     use crate::{
         client::{AgentHttpClient, ClientError, DistributionDownloadEvidence},
@@ -2241,6 +2338,39 @@ mod tests {
     };
 
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn readiness_identity_uses_controller_evidence_digest_forms() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let (image_digest, model_identity) = readiness_identity(&plan);
+        assert_eq!(image_digest, &plan.runtime.image_digest[7..]);
+        let artifact = &plan.artifacts[0];
+        assert_eq!(
+            model_identity,
+            format!(
+                "{}/{}@{}",
+                artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256
+            )
+        );
+    }
+
+    #[test]
+    fn compiled_plan_parser_rejects_malformed_or_unsafe_mounts() {
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        assert!(parse_compiled_execution_plan(&value).is_ok());
+        value["security"]["mounts"][0]["target"] = json!("/etc");
+        assert!(parse_compiled_execution_plan(&value).is_err());
+        value["security"]["mounts"][0]["target"] = json!("/models");
+        value["runtime"].as_object_mut().unwrap().remove("argv");
+        assert!(parse_compiled_execution_plan(&value).is_err());
+    }
 
     struct NoProcess;
 

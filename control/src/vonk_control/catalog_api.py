@@ -18,6 +18,7 @@ from .catalog_service import (
     CatalogService,
 )
 from .catalog_sync import CatalogSyncError, CatalogSyncView
+from .library_contract import Digest, UuidId
 from .recipe_library_types import RecipeLibraryError
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -72,17 +73,20 @@ class ManagedRecipeCatalogSync(Protocol):
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # API JSON is a typed boundary.  Pydantic's default lax mode would turn
+    # values such as ``1`` into ``"1"`` and accept integer flags as booleans,
+    # which makes malformed requests indistinguishable from canonical ones.
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class CatalogProblem(StrictModel):
     code: str = Field(min_length=1, max_length=128)
     detail: str = Field(min_length=1, max_length=256)
-    request_id: str = Field(pattern=_UUID)
+    request_id: UuidId
 
 
 class ManagedCatalogSyncRequest(StrictModel):
-    request_key: str = Field(default_factory=lambda: str(uuid.uuid4()), pattern=_UUID)
+    request_key: UuidId = Field(default_factory=lambda: str(uuid.uuid4()))
     expected_commit: str | None = Field(default=None, pattern=r"^[0-9a-f]{40}$")
 
 
@@ -93,23 +97,23 @@ class ManagedCatalogSyncProblem(StrictModel):
 
 
 class ManagedCatalogWithdrawnRecipe(StrictModel):
-    recipe_id: str = Field(pattern=_UUID)
+    recipe_id: UuidId
     recipe_uri: str | None = Field(default=None, max_length=256)
     release_version: str | None = Field(default=None, pattern=_SEMVER, max_length=64)
     model_version_key: str | None = Field(default=None, max_length=256)
 
 
 class ManagedCatalogStaleRecipe(StrictModel):
-    recipe_id: str = Field(pattern=_UUID)
-    current_revision_id: str = Field(pattern=_UUID)
+    recipe_id: UuidId
+    current_revision_id: UuidId
     stale_installation_count: int = Field(ge=0)
     stale_run_count: int = Field(ge=0)
 
 
 class ManagedCatalogSyncResponse(StrictModel):
     schema_version: Literal[1] = 1
-    sync_id: str = Field(pattern=_UUID)
-    request_key: str = Field(pattern=_UUID)
+    sync_id: UuidId
+    request_key: UuidId
     trigger: Literal["manual", "automatic"]
     state: Literal["syncing", "current", "partial", "failed"]
     repository: str = Field(min_length=1, max_length=200)
@@ -130,7 +134,7 @@ class ManagedCatalogSyncResponse(StrictModel):
 
 
 class SourceBundleResponse(StrictModel):
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sha256: Digest
     archive_bytes: int = Field(ge=1)
     total_bytes: int = Field(ge=0)
     file_count: int = Field(ge=1, le=4096)

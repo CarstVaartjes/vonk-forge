@@ -29,7 +29,11 @@ from .models import (
     RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
-from .run_switch_contract import RunSwitchPhase, RunSwitchPlan
+from .run_switch_contract import (
+    ArtifactVerificationResult,
+    RunSwitchPhase,
+    RunSwitchPlan,
+)
 from .run_switch_operations import PhaseExecution
 
 
@@ -80,23 +84,19 @@ class DurableDistributionPhaseExecutor:
             targets = tuple(phase.node_ids)
             cached = self._cached_targets(plan, targets)
             if len(cached) == len(targets):
-                return PhaseExecution(result={
-                    "skipped": True,
-                    "verified": True,
-                    "verified_digests": list(plan.storage.artifact_digests),
-                    "verified_image_digest": (
-                        plan.preparation.runtime_image.image_digest
-                        if plan.preparation is not None
-                        else plan.image_digest
-                    ),
-                    "verified_oci_layout_sha256": (
-                        plan.preparation.runtime_image.oci_layout_sha256
-                        if plan.preparation is not None
-                        else plan.build.oci_layout_sha256
-                    ),
-                    "cached_nodes": list(cached),
-                    "cached_target_totals": {node_id: self._target_bytes(plan, node_id) for node_id in cached},
-                })
+                return PhaseExecution(
+                    result=self._verification_result(
+                        plan,
+                        progress,
+                        skipped=True,
+                        cached_nodes=cached,
+                        cached_target_totals={
+                            node_id: self._target_bytes(plan, node_id)
+                            for node_id in cached
+                        },
+                        verified_registry_manifest_digest=plan.image_digest,
+                    )
+                )
             return PhaseExecution(result=self._verify_evidence(plan, progress, targets, cached))
         targets = tuple(phase.node_ids)
         cached = self._cached_targets(plan, targets)
@@ -106,6 +106,7 @@ class DurableDistributionPhaseExecutor:
                 "skipped": True,
                 "verified": phase.kind == "verify",
                 "verified_digests": list(plan.storage.artifact_digests),
+                "verified_build_id": self._runtime_identity(plan, progress)[3],
                 "verified_image_digest": (
                     plan.preparation.runtime_image.image_digest
                     if plan.preparation is not None
@@ -192,6 +193,26 @@ class DurableDistributionPhaseExecutor:
             cached_totals = child.payload.get("target_totals", {})
             if not isinstance(cached_totals, Mapping):
                 cached_totals = {}
+            assignments = child.payload.get("assignments", {})
+            if not isinstance(assignments, Mapping):
+                assignments = {}
+
+            def target_total(node_id: str) -> int | None:
+                declared = self._int(cached_totals.get(node_id))
+                assignment = assignments.get(node_id)
+                if not isinstance(assignment, Mapping):
+                    return declared
+                try:
+                    parsed = DistributionAssignment.parse(assignment)
+                except (TypeError, ValueError):
+                    return None
+                if parsed.node_id != node_id:
+                    return None
+                assigned = sum(item.bytes for item in parsed.objects)
+                if declared is not None and assigned != declared:
+                    return None
+                return declared if declared is not None else assigned
+
             for node_id in cached_nodes:
                 total = self._int(cached_totals.get(node_id))
                 members.append({
@@ -210,14 +231,41 @@ class DurableDistributionPhaseExecutor:
                 ))
                 raw = (attempt.progress if attempt is not None else None) or {}
                 result = (attempt.result if attempt is not None else None) or {}
+                member_state = self._member_state(operation.state)
+                if member_state in {"pending", "unknown"} and attempt is not None:
+                    # A terminal result is the durable handoff even when a
+                    # restart observed the parent operation row before its
+                    # aggregate state was reconciled.
+                    member_state = self._member_state(attempt.state)
+                expected_total = target_total(operation.node_id)
+                terminal_downloaded = self._int(result.get("downloaded_bytes"))
+                evidence_error = None
+                if member_state == "succeeded" and (
+                    expected_total is None or terminal_downloaded != expected_total
+                ):
+                    member_state = "failed"
+                    evidence_error = "distributed transfer byte evidence mismatch"
                 members.append({
                     "node_id": operation.node_id,
                     "phase": "transfer",
-                    "state": self._member_state(operation.state),
-                    "completed_bytes": self._int(raw.get("bytes")) or self._int(raw.get("completed_bytes")) or 0,
-                    "total_bytes": self._int(raw.get("total_bytes"))
-                    or self._int(cached_totals.get(operation.node_id)),
-                    "error": result.get("reason") if isinstance(result, Mapping) else None,
+                    "state": member_state,
+                    # The agent's terminal distribution evidence reports the
+                    # aggregate payload under ``downloaded_bytes``. Preserve
+                    # that exact handoff in the durable child projection;
+                    # otherwise a successful import appears pending with zero
+                    # bytes even though its result body is complete.
+                    "completed_bytes": (
+                        (
+                            self._int(raw.get("bytes"))
+                            or self._int(raw.get("completed_bytes"))
+                            if member_state != "succeeded"
+                            else terminal_downloaded
+                        )
+                        or 0
+                    ),
+                    "total_bytes": self._int(raw.get("total_bytes")) or expected_total,
+                    "error": evidence_error
+                    or (result.get("reason") if isinstance(result, Mapping) else None),
                 })
                 if isinstance(result, Mapping) and result:
                     evidence.append({"node_id": operation.node_id, **dict(result)})
@@ -226,6 +274,18 @@ class DurableDistributionPhaseExecutor:
             if isinstance(target_order, list):
                 members = [by_node[node_id] for node_id in target_order if isinstance(node_id, str) and node_id in by_node]
             state = child.state
+            if state == "succeeded" and any(
+                item.get("state") == "failed" for item in members
+            ):
+                state = "failed"
+            projection_reason = next(
+                (
+                    item.get("error")
+                    for item in members
+                    if isinstance(item.get("error"), str) and item.get("error")
+                ),
+                None,
+            )
             completed = sum(self._int(item.get("completed_bytes")) or 0 for item in members)
             totals = [self._int(item.get("total_bytes")) for item in members]
             total = sum(value for value in totals if value is not None) if all(value is not None for value in totals) else None
@@ -240,7 +300,53 @@ class DurableDistributionPhaseExecutor:
                 "members": members,
                 "evidence": evidence,
             }
+            if child.status_reason or projection_reason:
+                payload["reason"] = child.status_reason or projection_reason
+            if state != child.state:
+                child.state = state
+                child.status_reason = payload.get("reason")
+            child.result = payload
+            child.updated_at = self._clock()
+            session.commit()
             return _ChildView(state=state, result=payload)
+
+    @staticmethod
+    def _verification_result(
+        plan: RunSwitchPlan,
+        progress: Mapping[str, object],
+        *,
+        skipped: bool = False,
+        cached_nodes: Sequence[str] = (),
+        cached_target_totals: Mapping[str, int] | None = None,
+        verified_image_digest: str | None = None,
+        verified_registry_manifest_digest: str | None = None,
+        verified_oci_layout_sha256: str | None = None,
+        evidence: Sequence[Mapping[str, object]] = (),
+    ) -> dict[str, object]:
+        resolved_image_digest, resolved_layout_digest, _image_bytes, build_id = (
+            DurableDistributionPhaseExecutor._runtime_identity(plan, progress)
+        )
+        result = ArtifactVerificationResult(
+            skipped=skipped,
+            verified=True,
+            verified_digests=list(plan.storage.artifact_digests),
+            verified_build_id=build_id,
+            verified_image_digest=(
+                verified_image_digest
+                if verified_image_digest is not None
+                else resolved_image_digest
+            ),
+            verified_registry_manifest_digest=verified_registry_manifest_digest,
+            verified_oci_layout_sha256=(
+                verified_oci_layout_sha256
+                if verified_oci_layout_sha256 is not None
+                else resolved_layout_digest
+            ),
+            cached_nodes=list(cached_nodes),
+            cached_target_totals=dict(cached_target_totals or {}),
+            evidence=[dict(item) for item in evidence],
+        )
+        return result.model_dump(mode="json")
 
     def _ensure_child(
         self,
@@ -306,7 +412,10 @@ class DurableDistributionPhaseExecutor:
                 ],
             }
             child = Job(
-                id=str(uuid.uuid5(uuid.UUID(request_key), f"artifact-child:{phase.index}")),
+                # The request key provides replay identity. Job/operation IDs
+                # are persisted once and follow the shared helper UUIDv4
+                # contract when this transfer requests Docker image import.
+                id=str(uuid.uuid4()),
                 request_id=child_request,
                 kind="artifact-distribution",
                 state="queued",
@@ -344,7 +453,7 @@ class DurableDistributionPhaseExecutor:
                         "authority_revision": plan.plan_digest,
                         "plan_digest": plan.plan_digest,
                     },
-                    operation_id=str(uuid.uuid5(uuid.UUID(child.id), node_id)),
+                    operation_id=str(uuid.uuid4()),
                 )
             return child.id
 
@@ -736,15 +845,15 @@ class DurableDistributionPhaseExecutor:
                 raise RuntimeError(f"target {node_id} image import evidence is missing")
             if receipt.get("verified_oci_layout_sha256") != expected_layout:
                 raise RuntimeError(f"target {node_id} OCI archive evidence is not exact")
-        return {
-            "verified": True,
-            "verified_digests": sorted(expected_digests),
-            "verified_image_digest": expected_image,
-            "verified_registry_manifest_digest": expected_registry,
-            "verified_oci_layout_sha256": expected_layout,
-            "cached_nodes": sorted(cached_nodes),
-            "evidence": [dict(receipts[node_id]) for node_id in sorted(receipts)],
-        }
+        return self._verification_result(
+            plan,
+            progress,
+            cached_nodes=sorted(cached_nodes),
+            verified_image_digest=expected_image,
+            verified_registry_manifest_digest=expected_registry,
+            verified_oci_layout_sha256=expected_layout,
+            evidence=[dict(receipts[node_id]) for node_id in sorted(receipts)],
+        )
 
     @staticmethod
     def _member_state(value: str) -> str:

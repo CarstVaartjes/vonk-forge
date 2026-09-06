@@ -1,16 +1,57 @@
 # Launch implementation and evidence
 
-Updated 2026-09-06. This replaces the earlier status snapshot. Platform
-integration is `codex/interface-integration`
-(latest checked remote main `0ab88b4f` is included). Local checks, publication,
-Controller deployment and physical Spark execution remain separate results.
-No local result below claims a deployed Controller or NVIDIA workload.
+Updated 2026-09-07. The current integration branch is
+`codex/launch-run-operation-repair`, based on remote main `cb6edee0`.
+[PR614](https://github.com/CarstVaartjes/vonk-forge/pull/614) carries the combined
+Controller/Spark contract and trusted-cache corrections. Local checks,
+publication, Controller deployment and physical Spark execution remain
+separate results.
+
+## Current checkpoint
+
+- At `bef6a88c`, [CI34065413598](https://github.com/CarstVaartjes/vonk-forge/actions/runs/34065413598)
+  passed all 18 active jobs, including complete repository/Controller shards,
+  native Rust tests/lint, generated clients and web behavior.
+- The same checkpoint passed the privileged-helper OCI and agent-recovery
+  workflows. The subsequent Rust schema-2 install/start integration passed
+  247 native tests; explicit-null placement-key presence is now integrated too.
+- All 85 Recipes and 92 Model records pass catalog validation against the
+  integration. The recipe contract source is unchanged by v1.0.4.
+- Artifact verification now has one typed producer/consumer result with the
+  required `verified_build_id`. Controller API responses, CLI/web clients,
+  telemetry values and retry-safe batching use matching contracts. The
+  [contract guide](api-contracts.md) explains ownership and handoff tests.
+- The disposable ARM64 lifecycle test built an image, transferred it through
+  the Controller, imported it, and persisted 143-series telemetry samples.
+  It then exposed an install/start wire mismatch. That correction and its
+  connected Python/Rust test are in progress; full lifecycle acceptance is
+  still pending.
+- Current catalog compilation exposes two distinct remaining issues: 24
+  placements exceed the previous 64 KiB launch-message ceiling, and two LTX
+  recipes mount the same selected file at two valid targets. The latter must
+  preserve both `/models/license-token-preflight` and `/models/target` while
+  materializing the file once. The production NAS cache already deduplicates
+  receipts; the failure is the compiled plan's repeated-file restriction.
+  Passing catalog validation does not establish these runtime projections.
+- Three narrowly scoped corrections await exact user approval after automatic
+  approval review rejected them: allow unbound rendezvous addresses at Install
+  while requiring them at distributed Start; allow the Controller routing alias
+  to differ from the engine model name; recognize only the helper's exact
+  read-only UID10001 model ACL on subsequent Starts. Their unmerged worker
+  branches remain preserved. The ACL correction retains content verification
+  whenever file metadata changes.
+- The NAS Controller is unchanged. Rollback backups and a fresh database are
+  prepared; device identities have not been copied. No selected Model download
+  has started. Deployment follows successful publication and acceptance.
+
+The detailed evidence below records earlier implementation checkpoints; the
+current checkpoint above takes precedence for release and deployment status.
 
 ## Published results
 
 | Component | Verified result |
 |---|---|
-| Recipes | [PR73](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/73) merged at `48b00c1f5f1bbd46ea7141d491b63f2697271923`; [v1.0.3](https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v1.0.3) published with 92 Models, 85 Recipes and 85 archives. Thirteen packages changed; 72 retain their bytes. |
+| Recipes | [PR75](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/75) merged at `2bd0b1ecf4163fa961791d972968a3a420ecc85d`; v1.0.4 publication `34052695195` succeeded with 92 Models and 85 Recipes. It repairs two GLM build-source representations after the v1.0.3 refresh. |
 | Recipe checks | PR workflow `34025493486` and publication workflow `34025838414` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 420 passed, one skipped. Independent validator authority: `26a2dfa804d80a02a39cd42e6deae5f3b0ecc529`. |
 | Canonical acceptance fixture | [PR74](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/74) merged at `807957c9bae653f618d98fb27620f69bf736fe37` after workflow `34029444031` passed. It adds a test-only Model/Recipe/package outside the public catalog. Four focused tests, including actual HTTP serving and production source resolution, passed; a real public download verified the declared 51-byte SHA-256. |
 | Public website | [PR59](https://github.com/CarstVaartjes/vonk-forge-web/pull/59) merged at `5cb2008c` and deployed in workflow `34032392542`; main CI `34032392537` passed. The live `vonkforge.ai` bundle contains the frontier-AI story and both global-to-local explanations. Both live product screenshots match the reviewed bytes. Fourteen affected unit tests, build, three browser journeys and desktop/mobile review passed before publication. |

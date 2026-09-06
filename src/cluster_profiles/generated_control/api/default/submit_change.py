@@ -7,9 +7,9 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
+from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.change_request import ChangeRequest
-from ...models.http_validation_error import HTTPValidationError
-from ...models.submit_change_response_submit_change_api_v1_changes_post import SubmitChangeResponseSubmitChangeApiV1ChangesPost
+from ...models.change_response import ChangeResponse
 from typing import cast
 
 
@@ -41,20 +41,55 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, ChangeResponse]]:
     if response.status_code == 202:
-        response_202 = SubmitChangeResponseSubmitChangeApiV1ChangesPost.from_dict(response.json())
+        response_202 = ChangeResponse.from_dict(response.json())
 
 
 
         return response_202
 
+    if response.status_code == 401:
+        response_401 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 404:
+        response_404 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_404
+
+    if response.status_code == 409:
+        response_409 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_409
+
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = BoundedErrorResponse.from_dict(response.json())
 
 
 
         return response_422
+
+    if response.status_code == 503:
+        response_503 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_503
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -62,7 +97,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, ChangeResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -76,7 +111,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: ChangeRequest,
 
-) -> Response[Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]]:
+) -> Response[Union[BoundedErrorResponse, ChangeResponse]]:
     """ Submit Change
 
     Args:
@@ -87,7 +122,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]]
+        Response[Union[BoundedErrorResponse, ChangeResponse]]
      """
 
 
@@ -107,7 +142,7 @@ def sync(
     client: AuthenticatedClient,
     body: ChangeRequest,
 
-) -> Optional[Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]]:
+) -> Optional[Union[BoundedErrorResponse, ChangeResponse]]:
     """ Submit Change
 
     Args:
@@ -118,7 +153,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]
+        Union[BoundedErrorResponse, ChangeResponse]
      """
 
 
@@ -133,7 +168,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: ChangeRequest,
 
-) -> Response[Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]]:
+) -> Response[Union[BoundedErrorResponse, ChangeResponse]]:
     """ Submit Change
 
     Args:
@@ -144,7 +179,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]]
+        Response[Union[BoundedErrorResponse, ChangeResponse]]
      """
 
 
@@ -164,7 +199,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: ChangeRequest,
 
-) -> Optional[Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]]:
+) -> Optional[Union[BoundedErrorResponse, ChangeResponse]]:
     """ Submit Change
 
     Args:
@@ -175,7 +210,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, SubmitChangeResponseSubmitChangeApiV1ChangesPost]
+        Union[BoundedErrorResponse, ChangeResponse]
      """
 
 

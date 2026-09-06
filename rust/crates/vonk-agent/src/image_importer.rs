@@ -2,7 +2,8 @@
 
 use std::{
     fs,
-    io::Read,
+    io::{Read, Write},
+    os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
 };
 
@@ -69,7 +70,10 @@ impl ImageImporter<'_> {
         request: &RecipeImageImportRequest,
         archive: &Path,
     ) -> Result<PathBuf, ImageImportError> {
-        self.verify(request, archive)?;
+        validate_archive_metadata(archive, request.image_bytes, false)?;
+        if !path_within_root(archive, self.data_root)? {
+            return Err(ImageImportError::Digest);
+        }
         let destination = self.cached_archive_path(&request.oci_layout_sha256)?;
         if destination.exists() {
             self.verify(request, &destination)?;
@@ -77,14 +81,15 @@ impl ImageImporter<'_> {
         }
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent)?;
+            ensure_private_directory(parent, self.data_root)?;
         }
-        let temporary = destination.with_extension(format!("{}.partial", std::process::id()));
-        fs::copy(archive, &temporary)?;
-        if let Err(error) = self.verify(request, &temporary) {
-            let _ = fs::remove_file(&temporary);
-            return Err(error);
-        }
-        fs::rename(&temporary, &destination)?;
+        copy_archive_atomic(
+            archive,
+            &destination,
+            request.image_bytes,
+            Some(&request.oci_layout_sha256),
+        )?;
+        validate_archive_metadata(&destination, request.image_bytes, true)?;
         Ok(destination)
     }
 
@@ -98,8 +103,10 @@ impl ImageImporter<'_> {
         image_bytes: u64,
         archive: &Path,
     ) -> Result<PathBuf, ImageImportError> {
-        if fs::metadata(archive)?.len() != image_bytes
-            || sha256_file(archive)? != archive_sha256
+        // Controller distribution is already assignment-bound and mTLS
+        // authenticated. Keep the digest as the immutable cache ID while
+        // relying on the transfer's private, single-link metadata here.
+        if !valid_sha256(archive_sha256)
             || image_digest.len() != 71
             || !image_digest.starts_with("sha256:")
             || !image_digest[7..]
@@ -109,26 +116,38 @@ impl ImageImporter<'_> {
             return Err(ImageImportError::Digest);
         }
         let destination = self.cached_archive_path(archive_sha256)?;
-        if destination.exists() {
-            if fs::metadata(&destination)?.len() != image_bytes
-                || sha256_file(&destination)? != archive_sha256
-            {
+        let parent = destination.parent().ok_or(ImageImportError::Digest)?;
+        fs::create_dir_all(parent)?;
+        ensure_private_directory(parent, self.data_root)?;
+        if let Ok(metadata) = fs::symlink_metadata(&destination) {
+            if !validate_archive_metadata_value(&metadata, image_bytes, true) {
                 return Err(ImageImportError::Digest);
             }
             return Ok(destination);
         }
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let temporary = destination.with_extension(format!("{}.partial", std::process::id()));
-        fs::copy(archive, &temporary)?;
-        if fs::metadata(&temporary)?.len() != image_bytes
-            || sha256_file(&temporary)? != archive_sha256
+        if !matches!(fs::symlink_metadata(&destination), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
         {
-            let _ = fs::remove_file(&temporary);
             return Err(ImageImportError::Digest);
         }
-        fs::rename(&temporary, &destination)?;
+        validate_archive_metadata(archive, image_bytes, true)?;
+        if !path_within_root(archive, self.data_root)? {
+            return Err(ImageImportError::Digest);
+        }
+        if archive == destination {
+            return Ok(destination);
+        }
+        fs::set_permissions(archive, fs::Permissions::from_mode(0o600))?;
+        match fs::rename(archive, &destination) {
+            Ok(()) => {
+                sync_directory(archive.parent().ok_or(ImageImportError::Digest)?)?;
+                sync_directory(destination.parent().ok_or(ImageImportError::Digest)?)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::CrossesDevices => {
+                copy_archive_atomic(archive, &destination, image_bytes, None)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        validate_archive_metadata(&destination, image_bytes, true)?;
         Ok(destination)
     }
 
@@ -181,9 +200,11 @@ impl ImageImporter<'_> {
         request: &RecipeImageImportRequest,
         archive: &Path,
     ) -> Result<ImageImportEvidence, ImageImportError> {
-        if fs::metadata(archive)?.len() != request.image_bytes
-            || sha256_file(archive)? != request.oci_layout_sha256
-        {
+        validate_archive_metadata(archive, request.image_bytes, false)?;
+        if !path_within_root(archive, self.data_root)? {
+            return Err(ImageImportError::Digest);
+        }
+        if sha256_file(archive)? != request.oci_layout_sha256 {
             return Err(ImageImportError::Digest);
         }
         Ok(ImageImportEvidence {
@@ -214,7 +235,17 @@ impl ImageImporter<'_> {
 }
 
 fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
-    let mut file = fs::File::open(path)?;
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(path)?;
+    let before = file.metadata()?;
+    if !before.is_file() || before.nlink() != 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "OCI archive is not a regular single-link file",
+        ));
+    }
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
@@ -224,5 +255,150 @@ fn sha256_file(path: &Path) -> Result<String, std::io::Error> {
         }
         digest.update(&buffer[..read]);
     }
+    let after = file.metadata()?;
+    if before.dev() != after.dev() || before.ino() != after.ino() || before.len() != after.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "OCI archive changed while hashing",
+        ));
+    }
     Ok(hex::encode(digest.finalize()))
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn validate_archive_metadata(
+    path: &Path,
+    expected_bytes: u64,
+    require_private: bool,
+) -> Result<(), ImageImportError> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !validate_archive_metadata_value(&metadata, expected_bytes, require_private) {
+        return Err(ImageImportError::Digest);
+    }
+    Ok(())
+}
+
+fn validate_archive_metadata_value(
+    metadata: &fs::Metadata,
+    expected_bytes: u64,
+    require_private: bool,
+) -> bool {
+    metadata.is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata.nlink() == 1
+        && metadata.uid() == rustix::process::geteuid().as_raw()
+        && metadata.len() == expected_bytes
+        && (!require_private || metadata.mode() & 0o777 == 0o600)
+}
+
+fn ensure_private_directory(path: &Path, managed_root: &Path) -> Result<(), ImageImportError> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || metadata.mode() & 0o022 != 0
+        || !path_within_root(path, managed_root)?
+    {
+        return Err(ImageImportError::Digest);
+    }
+    Ok(())
+}
+
+fn path_within_root(path: &Path, managed_root: &Path) -> Result<bool, ImageImportError> {
+    if !path.starts_with(managed_root) {
+        return Ok(false);
+    }
+    let relative = path
+        .strip_prefix(managed_root)
+        .map_err(|_| ImageImportError::Digest)?;
+    let mut component = managed_root.to_path_buf();
+    for part in relative.components() {
+        component.push(part.as_os_str());
+        if fs::symlink_metadata(&component)?.file_type().is_symlink() {
+            return Ok(false);
+        }
+    }
+    let root = managed_root.canonicalize()?;
+    let candidate = path.canonicalize()?;
+    Ok(candidate.starts_with(root))
+}
+
+fn copy_archive_atomic(
+    source: &Path,
+    destination: &Path,
+    expected_bytes: u64,
+    expected_sha256: Option<&str>,
+) -> Result<(), ImageImportError> {
+    let source_metadata = fs::symlink_metadata(source)?;
+    if !validate_archive_metadata_value(&source_metadata, expected_bytes, false) {
+        return Err(ImageImportError::Digest);
+    }
+    let mut input = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(source)?;
+    let opened_metadata = input.metadata()?;
+    if opened_metadata.dev() != source_metadata.dev()
+        || opened_metadata.ino() != source_metadata.ino()
+    {
+        return Err(ImageImportError::Digest);
+    }
+    let temporary =
+        destination.with_extension(format!("partial.{}.{}", std::process::id(), Uuid::new_v4()));
+    let result: Result<(), ImageImportError> = (|| {
+        let mut output = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32,
+            )
+            .open(&temporary)?;
+        let mut digest = expected_sha256.map(|_| Sha256::new());
+        let mut copied = 0_u64;
+        let mut buffer = [0_u8; 1024 * 1024];
+        loop {
+            let read = input.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            output.write_all(&buffer[..read])?;
+            if let Some(digest) = digest.as_mut() {
+                digest.update(&buffer[..read]);
+            }
+            copied = copied
+                .checked_add(read as u64)
+                .ok_or(ImageImportError::Digest)?;
+        }
+        let observed_digest = digest.map(|digest| hex::encode(digest.finalize()));
+        if copied != expected_bytes
+            || observed_digest.as_deref() != expected_sha256
+            || !validate_archive_metadata_value(&output.metadata()?, expected_bytes, true)
+            || input.metadata()?.ino() != source_metadata.ino()
+            || input.metadata()?.len() != expected_bytes
+        {
+            return Err(ImageImportError::Digest);
+        }
+        output.flush()?;
+        output.sync_all()?;
+        drop(output);
+        fs::rename(&temporary, destination)?;
+        sync_directory(destination.parent().ok_or(ImageImportError::Digest)?)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn sync_directory(path: &Path) -> Result<(), ImageImportError> {
+    fs::File::open(path)?.sync_all()?;
+    Ok(())
 }

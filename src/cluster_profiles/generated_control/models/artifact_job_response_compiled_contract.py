@@ -12,12 +12,12 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="PreviewProposalResponseProposalPreviewApiV1ProposalsPost")
+T = TypeVar("T", bound="ArtifactJobResponseCompiledContract")
 
 
 
 @_attrs_define
-class PreviewProposalResponseProposalPreviewApiV1ProposalsPost:
+class ArtifactJobResponseCompiledContract:
     """
      """
 
@@ -39,12 +39,12 @@ class PreviewProposalResponseProposalPreviewApiV1ProposalsPost:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        preview_proposal_response_proposal_preview_api_v1_proposals_post = cls(
+        artifact_job_response_compiled_contract = cls(
         )
 
 
-        preview_proposal_response_proposal_preview_api_v1_proposals_post.additional_properties = d
-        return preview_proposal_response_proposal_preview_api_v1_proposals_post
+        artifact_job_response_compiled_contract.additional_properties = d
+        return artifact_job_response_compiled_contract
 
     @property
     def additional_keys(self) -> list[str]:

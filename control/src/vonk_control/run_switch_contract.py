@@ -419,6 +419,27 @@ class RunSwitchProgress(_StrictModel):
         return self
 
 
+class ArtifactVerificationResult(_StrictModel):
+    """Canonical evidence returned by a completed artifact verify phase."""
+
+    skipped: bool = False
+    verified: Literal[True]
+    verified_digests: list[Digest] = Field(max_length=256)
+    # Published images have no Controller build and therefore carry null;
+    # source-build plans must bind this field to their exact RecipeBuild UUID.
+    verified_build_id: UuidId | None
+    verified_image_digest: Annotated[
+        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
+    ]
+    verified_registry_manifest_digest: Annotated[
+        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
+    ] | None = None
+    verified_oci_layout_sha256: Digest
+    cached_nodes: list[NodeId] = Field(default_factory=list, max_length=32)
+    cached_target_totals: dict[NodeId, int] = Field(default_factory=dict)
+    evidence: list[dict[str, object]] = Field(default_factory=list, max_length=64)
+
+
 class RunSwitchOperation(_StrictModel):
     schema_version: Literal[2] = 2
     operation_id: UuidId

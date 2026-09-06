@@ -12,7 +12,7 @@ from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.job_operation_progress_checkpoint_type_0 import JobOperationProgressCheckpointType0
+  from ..models.operation_checkpoint import OperationCheckpoint
   from ..models.operation_member_progress import OperationMemberProgress
 
 
@@ -29,7 +29,7 @@ class JobOperationProgress:
         Attributes:
             phase (str):
             bytes_per_second (Union[None, Unset, float]):
-            checkpoint (Union['JobOperationProgressCheckpointType0', None, Unset]):
+            checkpoint (Union['OperationCheckpoint', None, Unset]):
             completed_bytes (Union[None, Unset, int]):
             eta_seconds (Union[None, Unset, float]):
             members (Union[None, Unset, list['OperationMemberProgress']]):
@@ -39,7 +39,7 @@ class JobOperationProgress:
 
     phase: str
     bytes_per_second: Union[None, Unset, float] = UNSET
-    checkpoint: Union['JobOperationProgressCheckpointType0', None, Unset] = UNSET
+    checkpoint: Union['OperationCheckpoint', None, Unset] = UNSET
     completed_bytes: Union[None, Unset, int] = UNSET
     eta_seconds: Union[None, Unset, float] = UNSET
     members: Union[None, Unset, list['OperationMemberProgress']] = UNSET
@@ -51,7 +51,7 @@ class JobOperationProgress:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.job_operation_progress_checkpoint_type_0 import JobOperationProgressCheckpointType0
+        from ..models.operation_checkpoint import OperationCheckpoint
         from ..models.operation_member_progress import OperationMemberProgress
         phase = self.phase
 
@@ -64,7 +64,7 @@ class JobOperationProgress:
         checkpoint: Union[None, Unset, dict[str, Any]]
         if isinstance(self.checkpoint, Unset):
             checkpoint = UNSET
-        elif isinstance(self.checkpoint, JobOperationProgressCheckpointType0):
+        elif isinstance(self.checkpoint, OperationCheckpoint):
             checkpoint = self.checkpoint.to_dict()
         else:
             checkpoint = self.checkpoint
@@ -133,7 +133,7 @@ class JobOperationProgress:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.job_operation_progress_checkpoint_type_0 import JobOperationProgressCheckpointType0
+        from ..models.operation_checkpoint import OperationCheckpoint
         from ..models.operation_member_progress import OperationMemberProgress
         d = dict(src_dict)
         phase = d.pop("phase")
@@ -148,7 +148,7 @@ class JobOperationProgress:
         bytes_per_second = _parse_bytes_per_second(d.pop("bytes_per_second", UNSET))
 
 
-        def _parse_checkpoint(data: object) -> Union['JobOperationProgressCheckpointType0', None, Unset]:
+        def _parse_checkpoint(data: object) -> Union['OperationCheckpoint', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -156,14 +156,14 @@ class JobOperationProgress:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                checkpoint_type_0 = JobOperationProgressCheckpointType0.from_dict(data)
+                checkpoint_type_0 = OperationCheckpoint.from_dict(data)
 
 
 
                 return checkpoint_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['JobOperationProgressCheckpointType0', None, Unset], data)
+            return cast(Union['OperationCheckpoint', None, Unset], data)
 
         checkpoint = _parse_checkpoint(d.pop("checkpoint", UNSET))
 

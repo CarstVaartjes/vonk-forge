@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://vonk-forge.invalid/schemas/telemetry-report.schema.json",
-  "$comment": "The authenticated agent telemetry envelope remains the current wire schema 1. Rich metrics are explicitly bound to nested schema 2. The canonical report is limited to 65536 UTF-8 bytes.",
+  "$comment": "The authenticated agent telemetry envelope uses wire schema 1 and rich metrics schema 2. Valid metrics retain their full content; senders batch by encoded size. The authenticated transport ceiling is defined by MAX_TELEMETRY_REPORT_BYTES in vonk_agent_protocol.telemetry.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "samples"],
@@ -79,7 +79,7 @@
         "process_name": {"type": "string", "minLength": 1, "maxLength": 128},
         "interface_name": {"type": "string", "minLength": 1, "maxLength": 64},
         "run_id": {"$ref": "#/$defs/identity"},
-        "value": {"type": ["number", "integer", "string", "boolean", "null"]},
+        "value": {"type": ["number", "string", "boolean", "null"], "maxLength": 256},
         "unit": {"type": "string", "minLength": 1, "maxLength": 32},
         "source": {"type": "string", "minLength": 1, "maxLength": 128},
         "measurement_kind": {"enum": ["measured", "derived", "estimated", "configured"]},

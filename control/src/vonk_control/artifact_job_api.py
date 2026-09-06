@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, HTTPException, Path, Request, Response, status
@@ -11,8 +10,19 @@ from starlette.responses import StreamingResponse
 from vonk_agent_protocol import AgentProtocolError
 
 from .artifact_blob_store import ArtifactBlobStore
-from .artifact_jobs import MAX_INPUT_FILE_BYTES, ArtifactJobError, ArtifactJobService
+from .artifact_jobs import (
+    MAX_INPUT_FILE_BYTES,
+    ArtifactFileDeclaration,
+    ArtifactJobCapabilitiesResponse,
+    ArtifactJobError,
+    ArtifactJobListResponse,
+    ArtifactJobResponse,
+    ArtifactJobService,
+    ArtifactJobView,
+    OutputLimits,
+)
 from .auth import Actor, agent_identity_from_scope
+from .operation_api import bounded_error_responses
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -21,22 +31,7 @@ _MEDIA_TYPE = r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class ArtifactFileDeclaration(StrictModel):
-    slot: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
-    name: str = Field(pattern=_NAME)
-    media_type: str = Field(pattern=_MEDIA_TYPE)
-    size_bytes: int = Field(ge=0, le=MAX_INPUT_FILE_BYTES)
-    sha256: str = Field(pattern=_DIGEST)
-
-
-class OutputLimits(StrictModel):
-    max_files: int = Field(ge=1, le=32)
-    max_file_bytes: int = Field(ge=1, le=1024**3)
-    max_total_bytes: int = Field(ge=1, le=2 * 1024**3)
-    allowed_media_types: list[str] = Field(min_length=1, max_length=16)
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class ArtifactJobCreate(StrictModel):
@@ -64,8 +59,8 @@ def _mutating(actor: Actor) -> None:
         raise HTTPException(status_code=403, detail="insufficient role")
 
 
-def _view(value: Any) -> dict[str, object]:
-    return asdict(value)
+def _view(value: ArtifactJobView) -> ArtifactJobResponse:
+    return ArtifactJobResponse.model_validate(value, from_attributes=True)
 
 
 def install_artifact_job_routes(
@@ -76,18 +71,22 @@ def install_artifact_job_routes(
 ) -> None:
     @app.get(
         "/api/v1/artifact-jobs/capabilities",
+        response_model=ArtifactJobCapabilitiesResponse,
+        responses=bounded_error_responses(401, 503),
         operation_id="getArtifactJobCapabilities",
     )
-    def capabilities(_actor: Actor = actor_dependency) -> dict[str, object]:
+    def capabilities(_actor: Actor = actor_dependency) -> ArtifactJobCapabilitiesResponse:
         return _service(service).capabilities()
 
     @app.get(
         "/api/v1/recipes/runs/{run_id}/artifact-jobs",
+        response_model=ArtifactJobListResponse,
+        responses=bounded_error_responses(401, 404, 422, 503),
         operation_id="listArtifactJobsForRun",
     )
     def list_jobs(
         run_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
-    ) -> dict[str, object]:
+    ) -> ArtifactJobListResponse:
         try:
             return {
                 "jobs": [_view(item) for item in _service(service).list_for_run(run_id)]
@@ -99,6 +98,8 @@ def install_artifact_job_routes(
 
     @app.post(
         "/api/v1/recipes/runs/{run_id}/artifact-jobs",
+        response_model=ArtifactJobResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_201_CREATED,
         operation_id="createArtifactJob",
     )
@@ -107,7 +108,7 @@ def install_artifact_job_routes(
         request: Request,
         run_id: str = Path(pattern=_UUID),
         actor: Actor = actor_dependency,
-    ) -> dict[str, object]:
+    ) -> ArtifactJobResponse:
         _mutating(actor)
         try:
             return _view(
@@ -127,6 +128,8 @@ def install_artifact_job_routes(
 
     @app.put(
         "/api/v1/artifact-jobs/{job_id}/inputs/{name}",
+        response_model=ArtifactJobResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="uploadArtifactJobInput",
         openapi_extra={
             "requestBody": {
@@ -154,7 +157,7 @@ def install_artifact_job_routes(
             int, Header(alias="Content-Length", ge=0, le=MAX_INPUT_FILE_BYTES)
         ] = 0,
         actor: Actor = actor_dependency,
-    ) -> dict[str, object]:
+    ) -> ArtifactJobResponse:
         _mutating(actor)
         try:
             return _view(
@@ -176,11 +179,13 @@ def install_artifact_job_routes(
 
     @app.post(
         "/api/v1/artifact-jobs/{job_id}/finalize",
+        response_model=ArtifactJobResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="finalizeArtifactJob",
     )
     def finalize_job(
         job_id: str = Path(pattern=_UUID), actor: Actor = actor_dependency
-    ) -> dict[str, object]:
+    ) -> ArtifactJobResponse:
         _mutating(actor)
         try:
             return _view(_service(service).finalize(job_id))
@@ -193,6 +198,8 @@ def install_artifact_job_routes(
 
     @app.post(
         "/api/v1/artifact-jobs/{job_id}/submit",
+        response_model=ArtifactJobResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         status_code=status.HTTP_202_ACCEPTED,
         operation_id="submitArtifactJob",
     )
@@ -200,7 +207,7 @@ def install_artifact_job_routes(
         request: Request,
         job_id: str = Path(pattern=_UUID),
         actor: Actor = actor_dependency,
-    ) -> dict[str, object]:
+    ) -> ArtifactJobResponse:
         _mutating(actor)
         try:
             return _view(
@@ -217,10 +224,15 @@ def install_artifact_job_routes(
         except (ArtifactJobError, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
 
-    @app.get("/api/v1/artifact-jobs/{job_id}", operation_id="getArtifactJobStatus")
+    @app.get(
+        "/api/v1/artifact-jobs/{job_id}",
+        response_model=ArtifactJobResponse,
+        responses=bounded_error_responses(401, 404, 422, 503),
+        operation_id="getArtifactJobStatus",
+    )
     def job_status(
         job_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
-    ) -> dict[str, object]:
+    ) -> ArtifactJobResponse:
         try:
             return _view(_service(service).get(job_id))
         except KeyError:
@@ -230,6 +242,8 @@ def install_artifact_job_routes(
 
     @app.post(
         "/api/v1/artifact-jobs/{job_id}/cancel",
+        response_model=ArtifactJobResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
         operation_id="cancelArtifactJob",
     )
     def cancel_job(
@@ -237,7 +251,7 @@ def install_artifact_job_routes(
         request: Request,
         job_id: str = Path(pattern=_UUID),
         actor: Actor = actor_dependency,
-    ) -> dict[str, object]:
+    ) -> ArtifactJobResponse:
         _mutating(actor)
         try:
             return _view(
@@ -257,11 +271,13 @@ def install_artifact_job_routes(
 
     @app.get(
         "/api/v1/artifact-jobs/{job_id}/result",
+        response_model=ArtifactJobResponse,
+        responses=bounded_error_responses(401, 404, 409, 422, 503),
         operation_id="getArtifactJobResult",
     )
     def result_metadata(
         job_id: str = Path(pattern=_UUID), _actor: Actor = actor_dependency
-    ) -> dict[str, object]:
+    ) -> ArtifactJobResponse:
         try:
             return _view(_service(service).result_metadata(job_id))
         except KeyError:

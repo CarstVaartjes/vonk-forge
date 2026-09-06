@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Protocol
@@ -12,6 +13,7 @@ from starlette.responses import JSONResponse
 
 from .audit import AuditRecord
 from .auth import Actor
+from .library_contract import Digest, ImageDigest, NodeId, Scalar, Text64, UuidId
 from .recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -67,7 +69,10 @@ class AuditSink(Protocol):
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Keep every JSON request/response model strict.  In particular, the
+    # control surface must not silently coerce strings to IDs or integers to
+    # booleans at the HTTP boundary.
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class PlanReason(StrictModel):
@@ -76,44 +81,44 @@ class PlanReason(StrictModel):
 
 
 class MappingNodePlanResponse(StrictModel):
-    node_id: str
+    node_id: NodeId
     rank: int
-    role: str
+    role: Text64
     endpoint_owner: bool
 
 
 class MappingPlanResponse(StrictModel):
-    recipe_revision_id: str
-    recipe_content_sha256: str
-    topology_name: str
-    generation: int
-    parameters: dict[str, object]
+    recipe_revision_id: UuidId
+    recipe_content_sha256: Digest
+    topology_name: Text64
+    generation: int = Field(ge=1)
+    parameters: dict[Text64, Scalar] = Field(max_length=128)
     nodes: list[MappingNodePlanResponse]
-    placement_digest: str
+    placement_digest: Digest
 
 
 class MappingResponse(StrictModel):
-    mapping_id: str
-    generation: int
-    placement_digest: str
+    mapping_id: UuidId
+    generation: int = Field(ge=1)
+    placement_digest: Digest
 
 
 class BuildPlanResponse(StrictModel):
-    build_id: str
-    recipe_revision_id: str
-    recipe_content_sha256: str
-    builder_node_id: str
-    source_bundle_sha256: str
-    build_input_sha256: str
+    build_id: UuidId
+    recipe_revision_id: UuidId
+    recipe_content_sha256: Digest
+    builder_node_id: NodeId
+    source_bundle_sha256: Digest
+    build_input_sha256: Digest
 
 
 class ImageDistributionPlanResponse(StrictModel):
-    recipe_build_id: str = Field(pattern=_UUID)
-    mapping_id: str = Field(pattern=_UUID)
+    recipe_build_id: UuidId
+    mapping_id: UuidId
     mapping_generation: int = Field(ge=1)
-    image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    node_ids: list[str] = Field(min_length=1, max_length=1024)
-    plan_digest: str = Field(pattern=_DIGEST)
+    image_digest: ImageDigest
+    node_ids: list[NodeId] = Field(min_length=1, max_length=1024)
+    plan_digest: Digest
 
 
 class SourcePolicyFindingResponse(StrictModel):
@@ -125,15 +130,15 @@ class SourcePolicyFindingResponse(StrictModel):
 
 class SourcePolicyResponse(StrictModel):
     passed: bool
-    source_bundle_sha256: str
+    source_bundle_sha256: Digest
     dockerfile: str
     findings: list[SourcePolicyFindingResponse]
 
 
 class InstallNodePlanResponse(StrictModel):
-    node_id: str
+    node_id: NodeId
     rank: int
-    role: str
+    role: Text64
     allowed: bool
     inventory_observed_at: datetime | None
     free_bytes: int | None
@@ -148,22 +153,26 @@ class InstallNodePlanResponse(StrictModel):
 
 
 class InstallPlanResponse(StrictModel):
-    mapping_id: str
-    mapping_generation: int
-    recipe_build_id: str | None
-    image_digest: str
-    recipe_revision_id: str
-    recipe_content_sha256: str
+    mapping_id: UuidId
+    mapping_generation: int = Field(ge=1)
+    recipe_build_id: UuidId | None
+    image_digest: ImageDigest
+    recipe_revision_id: UuidId
+    recipe_content_sha256: Digest
     allowed: bool
     nodes: list[InstallNodePlanResponse]
-    plan_digest: str
-    compiled_execution_plans: dict[str, dict[str, object]] = Field(default_factory=dict)
+    plan_digest: Digest
+    # The payload itself is an explicit versioned extension map owned by the
+    # compiled-launch contract; only its node identity is constrained here.
+    compiled_execution_plans: dict[NodeId, dict[str, object]] = Field(
+        default_factory=dict
+    )
 
 
 class RunNodePlanResponse(StrictModel):
-    node_id: str
+    node_id: NodeId
     rank: int
-    role: str
+    role: Text64
     endpoint_owner: bool
     port: int
     allowed: bool
@@ -182,18 +191,18 @@ class RunNodePlanResponse(StrictModel):
 
 
 class RunPlanResponse(StrictModel):
-    installation_id: str
+    installation_id: UuidId
     alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
-    mapping_id: str
-    mapping_generation: int
-    recipe_revision_id: str
+    mapping_id: UuidId
+    mapping_generation: int = Field(ge=1)
+    recipe_revision_id: UuidId
     allowed: bool
     nodes: list[RunNodePlanResponse]
-    plan_digest: str
+    plan_digest: Digest
 
 
 class StopNodeImpactResponse(StrictModel):
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    node_id: NodeId
     rank: int = Field(ge=0)
     role: str = Field(min_length=1, max_length=64)
     state: str = Field(min_length=1, max_length=24)
@@ -202,26 +211,26 @@ class StopNodeImpactResponse(StrictModel):
 
 
 class StopPlanResponse(StrictModel):
-    run_id: str = Field(pattern=_UUID)
-    installation_id: str = Field(pattern=_UUID)
-    recipe_revision_id: str = Field(pattern=_UUID)
+    run_id: UuidId
+    installation_id: UuidId
+    recipe_revision_id: UuidId
     alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     run_state: str = Field(min_length=1, max_length=24)
     route_state: str = Field(pattern=r"^(withdrawn|pending|published|failed)$")
     route_generation: int | None = Field(default=None, ge=1)
-    route_digest: str | None = Field(default=None, pattern=_DIGEST)
-    authority_digest: str = Field(pattern=_DIGEST)
+    route_digest: Digest | None = None
+    authority_digest: Digest
     allowed: bool
     route_withdrawal: bool
     nodes: list[StopNodeImpactResponse] = Field(max_length=1024)
     total_active_memory_reservation_bytes: int = Field(ge=0)
     blockers: list[PlanReason] = Field(max_length=32)
     warnings: list[PlanReason] = Field(max_length=32)
-    plan_digest: str = Field(pattern=_DIGEST)
+    plan_digest: Digest
 
 
 class UninstallNodeImpactResponse(StrictModel):
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    node_id: NodeId
     rank: int = Field(ge=0)
     role: str = Field(min_length=1, max_length=64)
     state: str = Field(min_length=1, max_length=24)
@@ -229,7 +238,7 @@ class UninstallNodeImpactResponse(StrictModel):
 
 
 class UninstallActiveRunResponse(StrictModel):
-    run_id: str = Field(pattern=_UUID)
+    run_id: UuidId
     alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     state: str = Field(min_length=1, max_length=24)
     route_state: str = Field(pattern=r"^(withdrawn|pending|published|failed)$")
@@ -242,24 +251,24 @@ class UninstallConsequencesResponse(StrictModel):
 
 
 class UninstallModelImpactResponse(StrictModel):
-    model_version_sha256: str = Field(pattern=_DIGEST)
+    model_version_sha256: Digest
     model_title: str = Field(min_length=1, max_length=256)
     effect: str = Field(
         pattern=r"^(recipe-only|recipe-and-unused-model|recipe-and-partial-model-cleanup)$"
     )
-    dependent_recipe_ids: list[str] = Field(max_length=512)
-    cleanup_node_ids: list[str] = Field(max_length=1024)
-    retained_node_ids: list[str] = Field(max_length=1024)
+    dependent_recipe_ids: list[UuidId] = Field(max_length=512)
+    cleanup_node_ids: list[NodeId] = Field(max_length=1024)
+    retained_node_ids: list[NodeId] = Field(max_length=1024)
 
 
 class UninstallPlanResponse(StrictModel):
-    installation_id: str = Field(pattern=_UUID)
-    recipe_id: str = Field(pattern=_UUID)
-    recipe_revision_id: str = Field(pattern=_UUID)
-    recipe_content_sha256: str = Field(pattern=_DIGEST)
+    installation_id: UuidId
+    recipe_id: UuidId
+    recipe_revision_id: UuidId
+    recipe_content_sha256: Digest
     recipe_content: dict[str, object]
-    installation_authority_digest: str = Field(pattern=_DIGEST)
-    original_plan_digest: str = Field(pattern=_DIGEST)
+    installation_authority_digest: Digest
+    original_plan_digest: Digest
     installation_state: str = Field(min_length=1, max_length=24)
     allowed: bool
     nodes: list[UninstallNodeImpactResponse] = Field(max_length=1024)
@@ -271,27 +280,27 @@ class UninstallPlanResponse(StrictModel):
     warnings: list[PlanReason] = Field(max_length=32)
     consequences: UninstallConsequencesResponse
     model_impact: UninstallModelImpactResponse
-    plan_digest: str = Field(pattern=_DIGEST)
+    plan_digest: Digest
 
 
 class ModelDeletionInstallationImpactResponse(StrictModel):
-    installation_id: str = Field(pattern=_UUID)
-    recipe_id: str = Field(pattern=_UUID)
-    recipe_revision_id: str = Field(pattern=_UUID)
-    recipe_content_sha256: str = Field(pattern=_DIGEST)
-    node_ids: list[str] = Field(min_length=1, max_length=1024)
+    installation_id: UuidId
+    recipe_id: UuidId
+    recipe_revision_id: UuidId
+    recipe_content_sha256: Digest
+    node_ids: list[NodeId] = Field(min_length=1, max_length=1024)
     installed_bytes: int = Field(ge=0)
 
 
 class ModelDeletionNodeImpactResponse(StrictModel):
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    installation_ids: list[str] = Field(min_length=1, max_length=512)
-    recipe_ids: list[str] = Field(min_length=1, max_length=512)
+    node_id: NodeId
+    installation_ids: list[UuidId] = Field(min_length=1, max_length=512)
+    recipe_ids: list[UuidId] = Field(min_length=1, max_length=512)
     installed_bytes: int = Field(ge=0)
 
 
 class ModelDeletionPlanResponse(StrictModel):
-    model_version_sha256: str = Field(pattern=_DIGEST)
+    model_version_sha256: Digest
     model_title: str = Field(min_length=1, max_length=256)
     allowed: bool
     installations: list[ModelDeletionInstallationImpactResponse] = Field(
@@ -306,21 +315,21 @@ class ModelDeletionPlanResponse(StrictModel):
     shared_cache_policy: str = Field(
         pattern=r"^remove-unreferenced-model-artifacts-only$"
     )
-    plan_digest: str = Field(pattern=_DIGEST)
+    plan_digest: Digest
 
 
 class OperationResponse(StrictModel):
-    id: str
+    id: UuidId
     kind: str
     owner_id: str
     state: str
-    plan_digest: str
-    nodes: list[str]
+    plan_digest: Digest
+    nodes: list[NodeId]
     result: dict[str, object] | None
 
 
 class RunRankStatusResponse(StrictModel):
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    node_id: NodeId
     rank: int = Field(ge=0)
     role: str = Field(min_length=1, max_length=64)
     state: str = Field(min_length=1, max_length=24)
@@ -330,7 +339,7 @@ class RunRankStatusResponse(StrictModel):
 
 
 class RunStatusResponse(StrictModel):
-    id: str = Field(pattern=_UUID)
+    id: UuidId
     alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
     state: str = Field(min_length=1, max_length=24)
     route_state: str = Field(pattern=r"^(withdrawn|pending|published|failed)$")
@@ -339,85 +348,103 @@ class RunStatusResponse(StrictModel):
 
 
 class InstallPreviewRequest(StrictModel):
-    mapping_id: str = Field(pattern=_UUID)
-    recipe_build_id: str | None = Field(default=None, pattern=_UUID)
+    mapping_id: UuidId
+    recipe_build_id: UuidId | None = None
 
 
 class MappingPreviewRequest(StrictModel):
-    recipe_revision_id: str = Field(pattern=_UUID)
-    node_ids: list[str] = Field(min_length=1, max_length=1024)
-    parameters: dict[str, object] = Field(default_factory=dict, max_length=128)
+    recipe_revision_id: UuidId
+    node_ids: list[NodeId] = Field(min_length=1, max_length=1024)
+    parameters: dict[Text64, Scalar] = Field(default_factory=dict, max_length=128)
 
 
 class MappingRequest(MappingPreviewRequest):
-    placement_digest: str = Field(pattern=_DIGEST)
-    request_key: str = Field(pattern=_UUID)
+    placement_digest: Digest
+    request_key: UuidId
 
 
 class BuildPreviewRequest(StrictModel):
-    recipe_revision_id: str = Field(pattern=_UUID)
-    builder_node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
+    recipe_revision_id: UuidId
+    builder_node_id: NodeId
 
 
 class SourceCheckRequest(StrictModel):
-    recipe_revision_id: str = Field(pattern=_UUID)
+    recipe_revision_id: UuidId
 
 
 class BuildRequest(BuildPreviewRequest):
-    build_input_sha256: str = Field(pattern=_DIGEST)
-    request_key: str = Field(pattern=_UUID)
+    build_input_sha256: Digest
+    request_key: UuidId
 
 
 class ImageDistributionPreviewRequest(StrictModel):
-    recipe_build_id: str = Field(pattern=_UUID)
-    mapping_id: str = Field(pattern=_UUID)
+    recipe_build_id: UuidId
+    mapping_id: UuidId
     mapping_generation: int = Field(ge=1)
 
 
 class ImageDistributionRequest(ImageDistributionPreviewRequest):
-    plan_digest: str = Field(pattern=_DIGEST)
-    request_key: str = Field(pattern=_UUID)
+    plan_digest: Digest
+    request_key: UuidId
 
 
 class InstallRequest(InstallPreviewRequest):
-    plan_digest: str = Field(pattern=_DIGEST)
-    request_key: str = Field(pattern=_UUID)
+    plan_digest: Digest
+    request_key: UuidId
 
 
 class RunPreviewRequest(StrictModel):
-    installation_id: str = Field(pattern=_UUID)
+    installation_id: UuidId
     alias: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,62}$")
 
 
 class RunRequest(RunPreviewRequest):
-    plan_digest: str = Field(pattern=_DIGEST)
-    request_key: str = Field(pattern=_UUID)
+    plan_digest: Digest
+    request_key: UuidId
 
 
 class StopPreviewRequest(StrictModel):
-    run_id: str = Field(pattern=_UUID)
+    run_id: UuidId
 
 
 class StopRequest(StrictModel):
-    plan_digest: str = Field(pattern=_DIGEST)
-    request_key: str = Field(pattern=_UUID)
+    plan_digest: Digest
+    request_key: UuidId
 
 
 class UninstallPreviewRequest(StrictModel):
-    installation_id: str = Field(pattern=_UUID)
+    installation_id: UuidId
 
 
 class ModelDeletionPreviewRequest(StrictModel):
-    model_version_sha256: str = Field(pattern=_DIGEST)
+    model_version_sha256: Digest
 
 
 class UninstallRequest(StrictModel):
-    plan_digest: str = Field(pattern=_DIGEST)
-    request_key: str = Field(pattern=_UUID)
+    plan_digest: Digest
+    request_key: UuidId
 
 
 class RequestKey(StrictModel):
-    request_key: str = Field(pattern=_UUID)
+    request_key: UuidId
+
+
+def _normalize_json(value: object) -> object:
+    """Project Python producer containers into JSON array/object containers."""
+
+    if isinstance(value, tuple):
+        return [_normalize_json(item) for item in value]
+    if isinstance(value, list):
+        return [_normalize_json(item) for item in value]
+    if isinstance(value, Mapping):
+        return {key: _normalize_json(item) for key, item in value.items()}
+    return value
+
+
+def _response(model: type[StrictModel], value: object) -> StrictModel:
+    """Validate a normalized producer projection before FastAPI serialization."""
+
+    return model.model_validate(_normalize_json(value))
 
 
 def install_recipe_operation_routes(
@@ -441,16 +468,19 @@ def install_recipe_operation_routes(
         if actor.role != "administrator":
             raise HTTPException(status_code=403, detail="insufficient role")
 
-    def operation(value: RecipeOperationView) -> dict[str, object]:
-        return {
-            "id": value.id,
-            "kind": value.kind,
-            "owner_id": value.owner_id,
-            "state": value.state,
-            "plan_digest": value.plan_digest,
-            "nodes": list(value.nodes),
-            "result": value.result,
-        }
+    def operation(value: RecipeOperationView) -> OperationResponse:
+        return _response(
+            OperationResponse,
+            {
+                "id": value.id,
+                "kind": value.kind,
+                "owner_id": value.owner_id,
+                "state": value.state,
+                "plan_digest": value.plan_digest,
+                "nodes": value.nodes,
+                "result": value.result,
+            },
+        )
 
     def conflict(request: Request, error: Exception) -> JSONResponse:
         return JSONResponse(
@@ -470,13 +500,16 @@ def install_recipe_operation_routes(
     def preview_mapping(body: MappingPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
         try:
-            return asdict(
-                recipes().preview_mapping(
-                    body.recipe_revision_id,
-                    tuple(body.node_ids),
-                    parameters=body.parameters,
-                    actor=actor.subject,
-                )
+            return _response(
+                MappingPlanResponse,
+                asdict(
+                    recipes().preview_mapping(
+                        body.recipe_revision_id,
+                        tuple(body.node_ids),
+                        parameters=body.parameters,
+                        actor=actor.subject,
+                    )
+                ),
             )
         except (KeyError, RecipeOperationConflict, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
@@ -514,11 +547,14 @@ def install_recipe_operation_routes(
                 (mapping_id, plan.placement_digest, *body.node_ids),
             )
         )
-        return {
-            "mapping_id": mapping_id,
-            "generation": plan.generation,
-            "placement_digest": plan.placement_digest,
-        }
+        return _response(
+            MappingResponse,
+            {
+                "mapping_id": mapping_id,
+                "generation": plan.generation,
+                "placement_digest": plan.placement_digest,
+            },
+        )
 
     @app.post(
         "/api/v1/recipes/source-checks",
@@ -528,7 +564,10 @@ def install_recipe_operation_routes(
     def check_source(body: SourceCheckRequest, actor: Actor = authenticated):
         administrator(actor)
         try:
-            return asdict(recipes().check_build_source(body.recipe_revision_id))
+            return _response(
+                SourcePolicyResponse,
+                asdict(recipes().check_build_source(body.recipe_revision_id)),
+            )
         except (KeyError, RecipeOperationConflict, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
@@ -545,9 +584,10 @@ def install_recipe_operation_routes(
             )
         except (KeyError, RecipeOperationConflict, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        return {
-            key: value for key, value in asdict(plan).items() if key != "agent_payload"
-        }
+        return _response(
+            BuildPlanResponse,
+            {key: value for key, value in asdict(plan).items() if key != "agent_payload"},
+        )
 
     @app.post(
         "/api/v1/recipes/builds",
@@ -598,7 +638,7 @@ def install_recipe_operation_routes(
             )
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
-        return asdict(value)
+        return _response(ImageDistributionPlanResponse, asdict(value))
 
     @app.post(
         "/api/v1/recipes/image-distributions",
@@ -651,7 +691,7 @@ def install_recipe_operation_routes(
             return conflict(request, error)
         value = asdict(plan)
         value["compiled_execution_plans"] = plan.compiled_plan_by_node
-        return value
+        return _response(InstallPlanResponse, value)
 
     @app.post(
         "/api/v1/recipes/installations",
@@ -689,7 +729,10 @@ def install_recipe_operation_routes(
     )
     def preview_run(body: RunPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
-        return asdict(recipes().preview_run(body.installation_id, body.alias))
+        return _response(
+            RunPlanResponse,
+            asdict(recipes().preview_run(body.installation_id, body.alias)),
+        )
 
     @app.post(
         "/api/v1/recipes/stop-plans/preview",
@@ -699,7 +742,10 @@ def install_recipe_operation_routes(
     def preview_stop(body: StopPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
         try:
-            return asdict(recipes().preview_stop(body.run_id))
+            return _response(
+                StopPlanResponse,
+                asdict(recipes().preview_stop(body.run_id)),
+            )
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
@@ -711,7 +757,10 @@ def install_recipe_operation_routes(
     def preview_uninstall(body: UninstallPreviewRequest, actor: Actor = authenticated):
         administrator(actor)
         try:
-            return asdict(recipes().preview_uninstall(body.installation_id))
+            return _response(
+                UninstallPlanResponse,
+                asdict(recipes().preview_uninstall(body.installation_id)),
+            )
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
 
@@ -725,8 +774,9 @@ def install_recipe_operation_routes(
     ):
         administrator(actor)
         try:
-            return asdict(
-                recipes().preview_model_deletion(body.model_version_sha256)
+            return _response(
+                ModelDeletionPlanResponse,
+                asdict(recipes().preview_model_deletion(body.model_version_sha256)),
             )
         except RecipeOperationConflict as error:
             raise HTTPException(status_code=409, detail=str(error)[:256]) from None
@@ -813,7 +863,7 @@ def install_recipe_operation_routes(
             raise HTTPException(
                 status_code=404, detail="recipe run not found"
             ) from None
-        return asdict(value)
+        return _response(RunStatusResponse, asdict(value))
 
     @app.get(
         "/api/v1/recipes/operations/{operation_id}",

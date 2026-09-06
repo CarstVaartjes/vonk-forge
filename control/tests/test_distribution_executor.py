@@ -13,7 +13,8 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import DistributionObject
+from vonk_agent_protocol import DistributionAssignment, DistributionObject
+from vonk_agent_protocol.host_helper import HostHelperOperation, HostOperationKind
 from vonk_control.auth import TokenCodec
 from vonk_control.distribution import (
     ControllerRuntimeImageVerifiedObjectSource,
@@ -79,7 +80,7 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
     executor = DurableDistributionPhaseExecutor(None, None, None, clock=lambda: datetime.now(UTC))
     result = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress={})
     assert result.operation_id is None
-    assert result.result == {"skipped": True, "verified": False, "verified_digests": ["c" * 64], "verified_image_digest": "sha256:" + "d" * 64, "verified_oci_layout_sha256": "e" * 64, "cached_nodes": list(nodes), "cached_target_totals": {node: 0 for node in nodes}}
+    assert result.result == {"skipped": True, "verified": False, "verified_digests": ["c" * 64], "verified_build_id": None, "verified_image_digest": "sha256:" + "d" * 64, "verified_oci_layout_sha256": "e" * 64, "cached_nodes": list(nodes), "cached_target_totals": {node: 0 for node in nodes}}
 
 
 def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> None:  # noqa: F811
@@ -96,15 +97,15 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     executor._archive = lambda _plan, **_kwargs: archive
     targets = [
         SimpleNamespace(node_id=NODE_A, state="preparing", verified_sha256=None, imported_image_digest=None, verified_at=None),
-            SimpleNamespace(node_id=NODE_B, state="ready", verified_sha256="d" * 64, imported_image_digest=None, verified_at=datetime.now(UTC)),
+        SimpleNamespace(node_id=NODE_B, state="ready", verified_sha256="d" * 64, imported_image_digest=None, verified_at=datetime.now(UTC)),
     ]
     image_targets = [
         SimpleNamespace(node_id=NODE_A, state="preparing", verified_sha256=None, imported_image_digest=None, verified_at=None),
-            SimpleNamespace(node_id=NODE_B, state="ready", verified_sha256="c" * 64, imported_image_digest="sha256:" + "e" * 64, verified_at=datetime.now(UTC)),
+        SimpleNamespace(node_id=NODE_B, state="ready", verified_sha256="c" * 64, imported_image_digest="sha256:" + "e" * 64, verified_at=datetime.now(UTC)),
     ]
     preparation = SimpleNamespace(
         model=SimpleNamespace(artifact_set_sha256="d" * 64, artifact_set_bytes=15, targets=targets),
-            runtime_image=SimpleNamespace(image_digest="sha256:" + "e" * 64, oci_layout_sha256="c" * 64, image_bytes=11, build_id=None, targets=image_targets),
+        runtime_image=SimpleNamespace(image_digest="sha256:" + "e" * 64, oci_layout_sha256="c" * 64, image_bytes=11, build_id=None, targets=image_targets),
     )
     plan = SimpleNamespace(
         preparation=preparation,
@@ -121,12 +122,25 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     build_progress = {"phase_results": [{"build_id": str(uuid4()), "image_digest": "sha256:" + "e" * 64, "oci_layout_sha256": "c" * 64, "image_bytes": 11}]}
     first = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress=build_progress)
     assert first.operation_id is not None
+    pending = executor.get(first.operation_id)
+    assert pending.result["progress"]["members"][0]["completed_bytes"] == 0
+    assert isinstance(pending.result["progress"]["members"][0]["completed_bytes"], int)
     with services.sessions.begin() as session:
         child = session.get(Job, first.operation_id)
         assert child is not None
         operation = next(iter(child.payload["assignments"].values()))
         assert operation["assignment_id"]
         stored = session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
+        # Exercise the actual privileged-action consumer contract with IDs
+        # emitted by the transfer producer, rather than hand-written UUIDs.
+        HostHelperOperation(
+            HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
+            {
+                "action": "image-import", "job_id": child.id,
+                "operation_id": stored.id, "attempt": 1,
+                "fence": str(uuid4()), "request_sha256": "a" * 64,
+            },
+        )
         # ArtifactDistributionRequest is a plan reference. The agent fetches
         # the registered assignment through its authenticated distribution API.
         assert stored.payload == {
@@ -144,8 +158,11 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
             lease_deadline=clock.now,
             agent_certificate_serial="serial-a",
             state="succeeded",
-            progress={"bytes": 26, "total_bytes": 26},
+            # The heartbeat is intentionally stale and partial; terminal
+            # evidence below is the authoritative aggregate.
+            progress={"bytes": 3, "total_bytes": 26},
             result={
+                "downloaded_bytes": 26,
                 "verified": True,
                 "verified_digests": ["a" * 64, "b" * 64],
                 "verified_image_digest": "sha256:" + "e" * 64,
@@ -158,10 +175,167 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
     assert [member["node_id"] for member in view.result["members"]] == [NODE_A, NODE_B]
     assert view.result["progress"]["completed_bytes"] == 52
     assert view.result["progress"]["total_bytes"] == 52
+    with services.sessions() as session:
+        persisted = session.get(Job, first.operation_id)
+        assert persisted is not None and persisted.result is not None
+        assert persisted.result["progress"]["completed_bytes"] == 52
+        assert persisted.result["progress"]["members"][0]["state"] == "succeeded"
     replay = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress=build_progress)
     assert replay.operation_id == first.operation_id
     verify = executor.execute(plan, SimpleNamespace(kind="verify", node_ids=[NODE_A, NODE_B], index=1), item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress={"cached_nodes": [NODE_B], "evidence": view.result["evidence"]})
     assert verify.result["verified"] is True
+
+    with services.sessions.begin() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == stored.id,
+                AgentOperationAttempt.attempt == stored.current_attempt,
+            )
+        )
+        assert attempt is not None and attempt.result is not None
+        attempt.result = {**attempt.result, "downloaded_bytes": 25}
+    mismatch = executor.get(first.operation_id)
+    assert mismatch.state == "failed"
+    assert mismatch.result["members"][0]["error"] == (
+        "distributed transfer byte evidence mismatch"
+    )
+
+
+def test_build_verify_handoff_emits_and_validates_exact_build_id() -> None:
+    node_id = NODE_A
+    build_id = str(uuid4())
+    artifact_digest = "c" * 64
+    image_digest = "sha256:" + "a" * 64
+    layout_digest = "b" * 64
+    assignment = DistributionAssignment.parse(
+        {
+            "schema_version": 2,
+            "assignment_id": str(uuid4()),
+            "plan_digest": "d" * 64,
+            "generation": 1,
+            "node_id": node_id,
+            "expires_at": datetime.now(UTC).isoformat(),
+            "model_artifact_set_sha256": artifact_digest,
+            "objects": [
+                {
+                    "name": "configuration.json",
+                    "sha256": artifact_digest,
+                    "bytes": 7,
+                    "kind": "model",
+                },
+                {
+                    "name": "image.oci.tar",
+                    "sha256": layout_digest,
+                    "bytes": 11,
+                    "kind": "oci-archive",
+                },
+            ],
+            "oci_image_digest": image_digest,
+            "oci_archive_sha256": layout_digest,
+        }
+    )
+    plan = SimpleNamespace(
+        preparation=SimpleNamespace(
+            model=SimpleNamespace(
+                artifact_set_sha256=artifact_digest,
+                artifact_set_bytes=7,
+                targets=[SimpleNamespace(
+                    node_id=node_id,
+                    state="ready",
+                    verified_sha256=artifact_digest,
+                    verified_at=datetime.now(UTC),
+                    imported_image_digest=None,
+                )],
+            ),
+            runtime_image=SimpleNamespace(
+                build_id=build_id,
+                image_digest=image_digest,
+                oci_layout_sha256=layout_digest,
+                image_bytes=11,
+                targets=[SimpleNamespace(
+                    node_id=node_id,
+                    state="ready",
+                    verified_sha256=layout_digest,
+                    verified_at=datetime.now(UTC),
+                    imported_image_digest=image_digest,
+                )],
+            ),
+        ),
+        storage=SimpleNamespace(artifact_digests=[artifact_digest]),
+        image_digest=None,
+        build=SimpleNamespace(oci_layout_sha256=layout_digest, image_bytes=11),
+        recipe_build_id=build_id,
+        plan_digest="d" * 64,
+    )
+    progress = {
+        "phase_results": [
+            {
+                "build_id": build_id,
+                "image_digest": image_digest,
+                "oci_layout_sha256": layout_digest,
+                "image_bytes": 11,
+                "state": "succeeded",
+            },
+            {
+                "runtime_image": {
+                    "build_id": build_id,
+                    "image_digest": image_digest,
+                    "oci_archive_sha256": layout_digest,
+                    "image_bytes": 11,
+                }
+            },
+            {"assignments": {node_id: assignment.to_mapping()}},
+            {
+                "node_id": node_id,
+                "downloaded_bytes": 18,
+                "verified": True,
+                "verified_digests": [artifact_digest],
+                "verified_image_digest": image_digest,
+                "imported_image_digest": image_digest,
+                "verified_oci_layout_sha256": layout_digest,
+            },
+        ]
+    }
+    executor = CompositeDistributionPhaseExecutor(
+        None,
+        None,
+        None,
+        model_cache=None,
+        clock=lambda: datetime.now(UTC),
+    )
+    result = executor._verify_evidence(plan, progress, (node_id,), ())
+    assert result["verified_build_id"] == build_id
+    _validate_artifact_execution(plan, SimpleNamespace(kind="verify"), result)
+
+    with pytest.raises(RunSwitchOperationConflict, match="runtime-build-verification-mismatch"):
+        _validate_artifact_execution(
+            plan,
+            SimpleNamespace(kind="verify"),
+            {key: value for key, value in result.items() if key != "verified_build_id"},
+        )
+    with pytest.raises(RunSwitchOperationConflict, match="runtime-build-verification-mismatch"):
+        _validate_artifact_execution(
+            plan,
+            SimpleNamespace(kind="verify"),
+            {**result, "verified_build_id": str(uuid4())},
+        )
+
+    cached = DurableDistributionPhaseExecutor(
+        None,
+        None,
+        None,
+        clock=lambda: datetime.now(UTC),
+    ).execute(
+        plan,
+        SimpleNamespace(kind="verify", node_ids=[node_id], index=0),
+        item_index=0,
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress={},
+    )
+    assert cached.result["skipped"] is True
+    assert cached.result["verified_build_id"] == build_id
+    _validate_artifact_execution(plan, SimpleNamespace(kind="verify"), cached.result)
 
 
 def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> None:  # noqa: F811
@@ -193,6 +367,7 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
     view = executor.get(child_id)
     assert view.state == "failed"
     assert view.result["members"][0]["error"] == "digest mismatch"
+    assert view.result["reason"] == "digest mismatch"
 
 
 @pytest.mark.parametrize("image_prepared", [True, False])
@@ -694,6 +869,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                 )
             )
             assert operation is not None
+            target_bytes = sum(item["bytes"] for item in assignment["objects"])
             operation.state = "succeeded"
             operation.current_attempt = 1
             session.add(
@@ -704,8 +880,11 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
                     lease_deadline=now,
                     agent_certificate_serial="serial-a" if node == NODE_A else "serial-b",
                     state="succeeded",
-                    progress={"bytes": 45, "total_bytes": 45},
+                    # Keep the heartbeat partial to prove terminal
+                    # downloaded_bytes is the authoritative total.
+                    progress={"bytes": 1, "total_bytes": target_bytes},
                     result={
+                        "downloaded_bytes": target_bytes,
                         "verified": True,
                         "verified_digests": [item["sha256"] for item in artifacts],
                         "verified_image_digest": image_digest,
@@ -803,10 +982,11 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     ).activity_provider()
     family_item = run_provider.get_operation(run_id)
     assert family_item["progress"]["completed_bytes"] == 90
+    expected_target_bytes = view.result["members"][0]["total_bytes"]
     assert {
         (item["member_id"], item["completed_bytes"], item["total_bytes"])
         for item in family_item["progress"]["members"]
-    } == {(NODE_A, 45, 45), (NODE_B, 45, 45)}
+    } == {(NODE_A, expected_target_bytes, expected_target_bytes), (NODE_B, expected_target_bytes, expected_target_bytes)}
     restarted_provider = RunSwitchOperationService(
         services.sessions,
         clock=clock,
@@ -827,7 +1007,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     assert {
         (item["member_id"], item["completed_bytes"], item["total_bytes"])
         for item in merged_run["progress"]["members"]
-    } == {(NODE_A, 45, 45), (NODE_B, 45, 45)}
+    } == {(NODE_A, expected_target_bytes, expected_target_bytes), (NODE_B, expected_target_bytes, expected_target_bytes)}
 
     unknown_id = str(uuid.uuid4())
     with services.sessions.begin() as session:

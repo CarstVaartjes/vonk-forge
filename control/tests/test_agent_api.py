@@ -23,7 +23,14 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    HostHelperOperation,
+    HostOperationKind,
+    SignedHostHelperGrant,
+    SignedPackageHelperGrant,
+    SignedPackageObjectReceipt,
+    canonical_message,
+)
 from vonk_control.agent_api import (
     AgentApiServices,
     EnrollmentRateLimiter,
@@ -37,6 +44,7 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
+from vonk_control.host_helper_authority import HostHelperGrantIssuer
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
@@ -71,6 +79,10 @@ from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+from vonk_control.workload_helper_authority import (
+    WorkloadHelperGrantIssuer,
+    WorkloadObjectReceiptIssuer,
+)
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 NODE_A = "spk_" + "a" * 32
@@ -399,10 +411,13 @@ def chunked_asgi_telemetry(
     *,
     extra_headers: tuple[tuple[bytes, bytes], ...],
 ) -> tuple[int, int]:
+    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+
     async def request() -> tuple[int, int]:
         chunks = [
-            b'{"schema_version":1,"samples":[],"padding":"' + b"x" * (40 * 1024),
-            b"x" * (40 * 1024),
+            b'{"schema_version":1,"samples":[],"padding":"'
+            + b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
+            b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
             b'"}',
         ]
         reads = 0
@@ -454,6 +469,68 @@ def chunked_asgi_telemetry(
         return int(start["status"]), reads
 
     return asyncio.run(request())
+
+
+@pytest.mark.parametrize("series_count", [143, 512])
+def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
+    agent_system,
+    series_count: int,
+) -> None:
+    from vonk_agent_protocol import TelemetryReport
+    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+
+    client, services, _, clock = agent_system
+    payload = telemetry_payload(clock)
+    sampled = payload["samples"][0]
+    series = [
+        {
+            "key": f"device.metric_{index}",
+            "scope": "node",
+            "process_name": "測" * 128,
+            "value": "測" * 256,
+            "unit": "state",
+            "source": "native-collector",
+            "measurement_kind": "measured",
+            "observed_at": sampled["observed_at"],
+            "freshness": "fresh",
+            "freshness_threshold_seconds": 6.0,
+            "support_status": "available",
+            "aggregation": "last",
+        }
+        for index in range(series_count)
+    ]
+    sampled["metrics"] = {
+        "schema_version": 2,
+        "series": series,
+        "capabilities": [],
+        "runtimes": [],
+        "workloads": [],
+        "provenance": {
+            "collector": "native-collector",
+            "collector_version": "2",
+            "host_uptime_seconds": 1,
+            "source_observed_at": sampled["observed_at"],
+        },
+    }
+    encoded = canonical_message(payload)
+    assert 64 * 1024 < len(encoded) < MAX_TELEMETRY_REPORT_BYTES
+    assert (
+        len(TelemetryReport.parse(payload).samples[0]["metrics"]["series"])
+        == series_count
+    )
+    response = client.post(
+        "/agent/v1/telemetry",
+        headers=agent_headers(NODE_A, "serial-a"),
+        content=encoded,
+    )
+    assert response.status_code == 204, response.text
+    with services.sessions() as session:
+        row = session.scalar(select(NodeTelemetrySample))
+        assert row is not None
+        assert [item["key"] for item in row.metrics["series"]] == [
+            item["key"] for item in series
+        ]
+        assert all(item["value"] == "測" * 256 for item in row.metrics["series"])
 
 
 def test_agent_posts_authenticated_telemetry_for_certificate_node(
@@ -680,6 +757,229 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
     )
 
 
+def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
+    agent_system,
+) -> None:
+    client, services, _, clock = agent_system
+    request_id = "00000000-0000-4000-8000-000000000005"
+    job_id = "00000000-0000-4000-8000-000000000002"
+    operation_id = "00000000-0000-4000-8000-000000000003"
+    fence = "00000000-0000-4000-8000-000000000004"
+
+    host_issuer = HostHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.generate(),
+        clock=clock,
+        request_id_factory=lambda: uuid.UUID(request_id),
+    )
+    package_issuer = WorkloadHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.generate(),
+        clock=clock,
+        request_id_factory=lambda: uuid.UUID(request_id),
+    )
+    receipt_issuer = WorkloadObjectReceiptIssuer(
+        ed25519.Ed25519PrivateKey.generate()
+    )
+
+    class RecordingHostAuthority:
+        def __init__(self) -> None:
+            self.grant_calls: list[dict[str, object]] = []
+            self.upgrade_calls: list[dict[str, object]] = []
+
+        def issue_grant(self, **kwargs: object) -> object:
+            self.grant_calls.append(kwargs)
+            operation = HostHelperOperation(
+                HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
+                {
+                    "action": kwargs["action"].value,
+                    "job_id": kwargs["job_id"],
+                    "operation_id": kwargs["operation_id"],
+                    "attempt": kwargs["attempt"],
+                    "fence": kwargs["fence"],
+                    "request_sha256": kwargs["request_sha256"],
+                },
+            )
+            return host_issuer.issue_grant(
+                node_id=kwargs["node_id"],
+                operation=operation,
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+        def issue_agent_upgrade_grant(self, **kwargs: object) -> object:
+            self.upgrade_calls.append(kwargs)
+            operation = HostHelperOperation(
+                HostOperationKind.INSTALL_VONK_DEB,
+                {
+                    "package_sha256": kwargs["package_sha256"],
+                    "package_signature": kwargs["package_signature"],
+                },
+            )
+            return host_issuer.issue_grant(
+                node_id=kwargs["node_id"],
+                operation=operation,
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+    class RecordingPackageAuthority:
+        def __init__(self) -> None:
+            self.grant_calls: list[dict[str, object]] = []
+            self.receipt_calls: list[dict[str, object]] = []
+
+        def issue_grant(self, **kwargs: object) -> object:
+            self.grant_calls.append(kwargs)
+            return package_issuer.issue_grant(
+                request_id=kwargs["request_id"],
+                node_id=kwargs["node_id"],
+                job_id=kwargs["job_id"],
+                operation_id=kwargs["operation_id"],
+                attempt=kwargs["attempt"],
+                fence=kwargs["fence"],
+                release_digest=kwargs["release_digest"],
+                generation=kwargs["generation"],
+                operation=kwargs["operation"],
+                request_digest=kwargs["request_digest"],
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+        def issue_receipts(self, **kwargs: object) -> tuple[object, ...]:
+            self.receipt_calls.append(kwargs)
+            return tuple(
+                receipt_issuer.issue_object_receipt(
+                    object_digest=item["object_digest"], size=item["size"]
+                )
+                for item in kwargs["objects"]
+            )
+
+    host = RecordingHostAuthority()
+    package = RecordingPackageAuthority()
+    object.__setattr__(services, "host_runtime_authority", host)
+    object.__setattr__(services, "workload_helper_authority", package)
+    headers = agent_headers(NODE_A, "serial-a")
+    common = {
+        "node_id": NODE_A,
+        "job_id": job_id,
+        "operation_id": operation_id,
+        "attempt": 1,
+        "fence": fence,
+        "expires_in_seconds": 30,
+    }
+
+    host_response = client.post(
+        "/agent/v1/host-runtime/grant",
+        headers=headers,
+        json=common | {"action": "start", "request_sha256": "a" * 64},
+    )
+    assert host_response.status_code == 200
+    assert isinstance(SignedHostHelperGrant.parse(host_response.json()["grant"]), SignedHostHelperGrant)
+    assert host.grant_calls[0]["job_id"] == job_id
+
+    upgrade_response = client.post(
+        "/agent/v1/agent-upgrade/grant",
+        headers=headers,
+        json=common
+        | {
+            "package_sha256": "b" * 64,
+            "package_signature": "c" * 128,
+        },
+    )
+    assert upgrade_response.status_code == 200
+    assert isinstance(
+        SignedHostHelperGrant.parse(upgrade_response.json()["grant"]),
+        SignedHostHelperGrant,
+    )
+
+    receipt_response = client.post(
+        "/agent/v1/package-helper/receipts",
+        headers=headers,
+        json={key: value for key, value in common.items() if key != "expires_in_seconds"}
+        | {
+            "release_digest": "d" * 64,
+            "objects": [{"object_digest": "e" * 64, "size": 17}],
+        },
+    )
+    assert receipt_response.status_code == 200
+    assert isinstance(
+        SignedPackageObjectReceipt.parse(receipt_response.json()["receipts"][0]),
+        SignedPackageObjectReceipt,
+    )
+    assert package.receipt_calls[0]["objects"] == [
+        {"object_digest": "e" * 64, "size": 17}
+    ]
+
+    grant_body = common | {
+        "request_id": request_id,
+        "release_digest": "d" * 64,
+        "generation": "gen-future-stack-001",
+        "operation": "health",
+        "request_digest": "f" * 64,
+    }
+    grant_response = client.post(
+        "/agent/v1/package-helper/grant", headers=headers, json=grant_body
+    )
+    assert grant_response.status_code == 200
+    assert isinstance(
+        SignedPackageHelperGrant.parse(grant_response.json()["grant"]),
+        SignedPackageHelperGrant,
+    )
+    assert package.grant_calls[0]["generation"] == "gen-future-stack-001"
+
+    assert (
+        client.post(
+            "/agent/v1/package-helper/grant",
+            headers=headers,
+            json=grant_body | {"generation": 7},
+        ).status_code
+        == 422
+    )
+    assert len(package.grant_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/package-helper/receipts",
+            headers=headers,
+            json={
+                key: value
+                for key, value in common.items()
+                if key != "expires_in_seconds"
+            }
+            | {
+                "release_digest": "d" * 64,
+                "objects": [
+                    {"object_digest": "e" * 64, "size": 17, "extra": True}
+                ],
+            },
+        ).status_code
+        == 422
+    )
+    assert len(package.receipt_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/host-runtime/grant",
+            headers=headers,
+            json=common
+            | {
+                "job_id": "00000000-0000-5000-8000-000000000002",
+                "action": "start",
+                "request_sha256": "a" * 64,
+            },
+        ).status_code
+        == 422
+    )
+    assert len(host.grant_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/agent-upgrade/grant",
+            headers=headers,
+            json=common
+            | {
+                "attempt": "1",
+                "package_sha256": "b" * 64,
+                "package_signature": "c" * 128,
+            },
+        ).status_code
+        == 422
+    )
+    assert len(host.upgrade_calls) == 1
+
+
 def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
     agent_system,
 ) -> None:
@@ -874,6 +1174,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
 
     assert response.status_code == 204
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
     assert storage.verify_existing(layout_digest, len(payload)).read_bytes() == payload
     assert not (services.artifact_root / layout_digest).exists()
@@ -1564,34 +1865,59 @@ def test_unknown_claim_capability_is_ignored_while_known_capabilities_negotiate(
         assert node.protocol_version == 3
 
 
-def test_newer_claim_fields_and_runtime_attestations_are_forward_compatible(
+@pytest.mark.parametrize(
+    ("field", "nested"),
+    (("future_claim_field", False), ("future_attestation", True)),
+)
+def test_claim_rejects_unknown_structural_fields(
     agent_system,
+    field: str,
+    nested: bool,
 ) -> None:
-    client, services, _, _clock = agent_system
+    client, _services, _, _clock = agent_system
+    payload = {
+        "capabilities": CAPABILITIES,
+        "lease_seconds": 30,
+        "node_id": NODE_A,
+        "protocol_version": 3,
+        "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
+    }
+    if nested:
+        payload["runtime_identity"] = {
+            **PACKAGED_RUNTIME_IDENTITY,
+            field: {"format": "v2"},
+        }
+    else:
+        payload[field] = {"version": 4}
 
+    response = client.post(
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ("lease_seconds", "wait_seconds"))
+def test_claim_rejects_string_encoded_numeric_fields(
+    agent_system,
+    field: str,
+) -> None:
+    client, _services, _, _clock = agent_system
     response = client.post(
         "/agent/v1/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "capabilities": CAPABILITIES,
-            "lease_seconds": 30,
             "node_id": NODE_A,
             "protocol_version": 3,
-            "future_claim_field": {"version": 4},
-            "runtime_identity": {
-                **PACKAGED_RUNTIME_IDENTITY,
-                "future_attestation": {"format": "v2"},
-            },
+            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
+            field: "30",
         },
     )
 
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.semantic_version == PACKAGED_RUNTIME_IDENTITY["semantic_version"]
-        assert node.last_seen_at is not None
-        assert session.get(AgentPresence, NODE_A) is not None
+    assert response.status_code == 422
 
 
 def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact_fence_validation(
@@ -3437,6 +3763,7 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
     payload = b"accepted recipe image archive"
     digest = hashlib.sha256(payload).hexdigest()
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
     (storage.root / digest).write_bytes(payload)
     services.operations.enqueue(

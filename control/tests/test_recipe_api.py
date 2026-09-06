@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
@@ -21,6 +23,7 @@ from vonk_control.recipe_action_plans import (
     UninstallNodeImpact,
     UninstallPlan,
 )
+from vonk_control.recipe_api import MappingPlanResponse, MappingPreviewRequest
 from vonk_control.recipe_builds import RecipeBuildPlan
 from vonk_control.recipe_operations import (
     ImageDistributionPreview,
@@ -39,6 +42,48 @@ OPERATION = "00000000-0000-4000-8000-000000000004"
 MAPPING = "00000000-0000-4000-8000-000000000005"
 BUILD = "00000000-0000-4000-8000-000000000006"
 NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
+
+
+def test_recipe_api_preserves_1024_node_collection_bound() -> None:
+    node_ids = [f"spk_{index:032x}" for index in range(33)]
+    request = MappingPreviewRequest.model_validate(
+        {
+            "recipe_revision_id": REVISION,
+            "node_ids": node_ids,
+            "parameters": {},
+        }
+    )
+    response = MappingPlanResponse.model_validate(
+        {
+            "recipe_revision_id": REVISION,
+            "recipe_content_sha256": "a" * 64,
+            "topology_name": "large-topology",
+            "generation": 1,
+            "parameters": {},
+            "nodes": [
+                {
+                    "node_id": node_id,
+                    "rank": index,
+                    "role": "worker",
+                    "endpoint_owner": index == 0,
+                }
+                for index, node_id in enumerate(request.node_ids)
+            ],
+            "placement_digest": "b" * 64,
+        }
+    )
+
+    assert len(request.node_ids) == len(response.nodes) == 33
+    assert len(response.model_dump(mode="json")["nodes"]) == 33
+
+    with pytest.raises(ValidationError):
+        MappingPreviewRequest.model_validate(
+            {
+                "recipe_revision_id": REVISION,
+                "node_ids": [f"spk_{index:032x}" for index in range(1025)],
+                "parameters": {},
+            }
+        )
 
 
 class Jobs:
@@ -812,6 +857,17 @@ def test_stop_and_uninstall_contracts_are_admin_only_strict_and_digest_bound() -
     assert denied.status_code == 403
     assert extra.status_code == 422
     assert stop_unbound.status_code == uninstall_unbound.status_code == 422
+
+    malformed = client.post(
+        "/api/v1/recipes/mapping-plans/preview",
+        headers=headers(),
+        json={
+            "recipe_revision_id": 1,
+            "node_ids": [NODE],
+            "parameters": {},
+        },
+    )
+    assert malformed.status_code == 422
 
 
 def test_administrator_run_status_is_typed_rank_health_without_secrets() -> None:
