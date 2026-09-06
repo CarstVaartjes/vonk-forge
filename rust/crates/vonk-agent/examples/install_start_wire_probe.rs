@@ -1,221 +1,121 @@
 #![forbid(unsafe_code)]
 
-//! A tiny stdin/stdout wire probe for the schema-2 recipe install/start path.
+//! Stdin/stdout probe for the connected schema-2 recipe install/start wire.
 //!
-//! The input is one Controller AgentClaim per line.  The probe deliberately
-//! goes through the same protocol parser and compiled-plan validator used by
-//! the production agent before producing one canonical AgentResult line.
+//! Each input line is a Controller AgentClaim.  The probe validates the claim,
+//! invokes the production RecipeOperationRequest parser, projects the typed
+//! compiled plan through the production OCI argument builder, and emits the
+//! exact success body used by the production executor.
 
-use std::io::{self, BufRead, Write};
+use std::{
+    io::{self, BufRead, Write},
+    path::Path,
+};
 
-use serde_json::{Map, Value, json};
-use sha2::{Digest, Sha256};
-use vonk_agent::workloads::CompiledExecutionPlan;
-use vonk_agent_protocol::{AgentClaim, AgentResult, RecipeOperationRequest, canonical_json};
+use vonk_agent::{
+    compiled_oci::CompiledOciPaths,
+    executor::{
+        parse_compiled_execution_plan, recipe_install_success_body, recipe_start_success_body,
+        runtime_arguments_for_plan,
+    },
+    oci::{RuntimeStartPlan, start_arguments_for_paths},
+};
+use vonk_agent_protocol::{AgentClaim, AgentResult, RecipeOperationRequest, RecipeStartRequest};
 
-fn digest(value: &Value) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(canonical_json(value).expect("bounded JSON is canonicalizable"));
-    hex::encode(hasher.finalize())
-}
+const PROBE_DATA_ROOT: &str = "/var/lib/vonk-forge";
 
-fn required_string<'a>(payload: &'a Map<String, Value>, name: &str) -> &'a str {
-    payload
-        .get(name)
-        .and_then(Value::as_str)
-        .unwrap_or_else(|| panic!("recipe payload is missing {name}"))
-}
-
-fn plan_from_claim(claim: &AgentClaim) -> Result<CompiledExecutionPlan, String> {
-    let raw = claim
-        .payload
-        .get("compiled_execution_plan")
-        .ok_or_else(|| "compiled execution plan is missing".to_owned())?;
-    let plan: CompiledExecutionPlan = serde_json::from_value(raw.clone())
-        .map_err(|_| "compiled execution plan is invalid".to_owned())?;
-    plan.validate()
-        .map_err(|_| "compiled execution plan is invalid".to_owned())?;
-    Ok(plan)
-}
-
-fn model_identity(plan: &CompiledExecutionPlan) -> Result<String, String> {
-    let artifact = plan
-        .artifacts
-        .first()
-        .ok_or_else(|| "compiled execution plan has no model artifact".to_owned())?;
-    Ok(format!(
-        "{}/{}@{}",
-        artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256
-    ))
-}
-
-fn image_digest(plan: &CompiledExecutionPlan) -> Result<String, String> {
-    plan.runtime
-        .image_digest
-        .strip_prefix("sha256:")
-        .map(str::to_owned)
-        .ok_or_else(|| "compiled execution plan image digest is invalid".to_owned())
-}
-
-fn start_evidence(claim: &AgentClaim, plan: &CompiledExecutionPlan) -> Result<Value, String> {
-    let payload = claim
-        .payload
-        .as_object()
-        .ok_or_else(|| "recipe payload is not an object".to_owned())?;
-    let model_identity = model_identity(plan)?;
-    let image_digest = image_digest(plan)?;
-    let recipe_revision_id = required_string(payload, "recipe_revision_id");
-    let recipe_content_sha256 = required_string(payload, "recipe_content_sha256");
-    let rank = payload
-        .get("rank")
-        .cloned()
-        .ok_or_else(|| "recipe payload is missing rank".to_owned())?;
-    let world_size = payload
-        .get("world_size")
-        .cloned()
-        .ok_or_else(|| "recipe payload is missing world_size".to_owned())?;
-    let memory_reservation_bytes = payload
-        .get("reserved_memory_bytes")
-        .cloned()
-        .ok_or_else(|| "recipe payload is missing reserved_memory_bytes".to_owned())?;
-    let artifact_set_digest = plan.identity.model_artifact_set_sha256.clone();
-    let phase = payload.get("phase").and_then(Value::as_str);
-    let exact_inspection = payload.get("run_generation").is_some();
-    let mut identity = Map::new();
-
-    identity.insert("recipe_revision_id".to_owned(), json!(recipe_revision_id));
-    identity.insert(
-        "recipe_content_sha256".to_owned(),
-        json!(recipe_content_sha256),
-    );
-    identity.insert("image_digest".to_owned(), json!(image_digest));
-    identity.insert("artifact_set_digest".to_owned(), json!(artifact_set_digest));
-    identity.insert("model_identity".to_owned(), json!(model_identity));
-    identity.insert("rank".to_owned(), rank);
-    identity.insert("world_size".to_owned(), world_size);
-    identity.insert(
-        "memory_reservation_bytes".to_owned(),
-        memory_reservation_bytes,
-    );
-
-    if phase == Some("rank-launch") {
-        identity.insert("phase".to_owned(), json!("rank-launch"));
-        identity.insert(
-            "run_id".to_owned(),
-            json!(required_string(payload, "run_id")),
-        );
-        identity.insert("role".to_owned(), json!(required_string(payload, "role")));
-        for name in ["local_address", "master_address", "master_port"] {
-            identity.insert(
-                name.to_owned(),
-                payload
-                    .get(name)
-                    .cloned()
-                    .ok_or_else(|| format!("recipe payload is missing {name}"))?,
-            );
-        }
-        identity.insert("process_running".to_owned(), json!(true));
-        identity.insert("fabric_projection_bound".to_owned(), json!(true));
-        identity.insert("launched".to_owned(), json!(true));
-    } else {
-        let endpoint_address = required_string(payload, "endpoint_address");
-        let port = payload
-            .get("port")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| "recipe payload has an invalid port".to_owned())?;
-        let host = if endpoint_address.contains(':') {
-            format!("[{endpoint_address}]")
-        } else {
-            endpoint_address.to_owned()
-        };
-        identity.insert(
-            "endpoint".to_owned(),
-            json!(format!("http://{host}:{port}")),
-        );
-        identity.insert("ready".to_owned(), json!(true));
-        if phase == Some("collective-readiness") {
-            identity.insert("phase".to_owned(), json!("collective-readiness"));
-            identity.insert(
-                "run_id".to_owned(),
-                json!(required_string(payload, "run_id")),
-            );
-            identity.insert("role".to_owned(), json!(required_string(payload, "role")));
-        }
-    }
-
-    if exact_inspection {
-        identity.insert(
-            "run_generation".to_owned(),
-            payload
-                .get("run_generation")
-                .cloned()
-                .ok_or_else(|| "recipe payload is missing run_generation".to_owned())?,
-        );
-        identity.insert(
-            "runtime_arguments_sha256".to_owned(),
-            json!(digest(&json!({
-                "runtime": &plan.runtime,
-                "placement": &plan.topology,
-            }))),
-        );
-        if phase != Some("rank-launch") {
-            for name in ["local_address", "master_address", "master_port"] {
-                identity.insert(
-                    name.to_owned(),
-                    payload
-                        .get(name)
-                        .cloned()
-                        .ok_or_else(|| format!("recipe payload is missing {name}"))?,
-                );
-            }
-        }
-    }
-
-    let evidence_digest = digest(&Value::Object(identity.clone()));
-    identity.insert("evidence_digest".to_owned(), json!(evidence_digest));
-    Ok(Value::Object(identity))
+fn runtime_plan(
+    request: &RecipeStartRequest,
+    spec: &vonk_agent::workloads::CompiledExecutionPlan,
+) -> Result<RuntimeStartPlan, String> {
+    let data_root = Path::new(PROBE_DATA_ROOT);
+    let run_id = request.run_id.to_string();
+    let installation_id = request.installation_id.to_string();
+    let run_root = data_root.join("runs").join(&run_id);
+    let main = start_arguments_for_paths(
+        spec,
+        &CompiledOciPaths {
+            image_archive: data_root
+                .join("oci-archives")
+                .join(&spec.runtime_image.oci_layout_sha256),
+            model_root: data_root
+                .join("installations")
+                .join(&installation_id)
+                .join("models"),
+            input_root: spec.job.as_ref().map(|_| run_root.join("inputs")),
+            output_root: run_root.join("outputs"),
+            cache_root: data_root
+                .join("installations")
+                .join(&installation_id)
+                .join("runtime-cache"),
+            runtime_spec: data_root
+                .join("run-metadata")
+                .join(&run_id)
+                .join("runtime.json"),
+        },
+        &run_id,
+    )
+    .map_err(|_| "compiled OCI projection is invalid".to_owned())?;
+    Ok(RuntimeStartPlan {
+        image_digest: spec.runtime_image.image_digest.clone(),
+        registry_index_digest: spec
+            .runtime_image
+            .registry_manifest_digest
+            .clone()
+            .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone()),
+        platform_manifest_digest: spec.runtime_image.platform_manifest_digest.clone(),
+        archive_sha256: spec.runtime_image.oci_layout_sha256.clone(),
+        image_reference: spec.runtime_image.local_image_reference(),
+        pre_start: Vec::new(),
+        main,
+    })
 }
 
 fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
-    // Validate the complete production claim before accepting any plan or
-    // emitting any result, then call the production recipe parser explicitly.
+    // Keep this explicit even though RecipeOperationRequest::parse validates
+    // the claim too: the wire probe must exercise the authenticated claim
+    // boundary before touching the operation payload.
     claim
         .validate()
         .map_err(|_| "agent claim is invalid".to_owned())?;
-    let _request = RecipeOperationRequest::parse(claim)
+    let request = RecipeOperationRequest::parse(claim)
         .map_err(|_| "recipe operation payload is invalid".to_owned())?;
-    let plan = plan_from_claim(claim)?;
-    let payload = claim
-        .payload
-        .as_object()
-        .ok_or_else(|| "recipe payload is not an object".to_owned())?;
-    let evidence = if claim.operation == "recipe.install" {
-        json!({
-            "installed_bytes": payload
-                .get("expected_bytes")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| "recipe payload has invalid expected_bytes".to_owned())?,
-        })
-    } else if claim.operation == "recipe.start" {
-        start_evidence(claim, &plan)?
-    } else {
-        return Err("probe only accepts recipe.install and recipe.start".to_owned());
+    let result = match request {
+        RecipeOperationRequest::Install(request) => {
+            let _spec = parse_compiled_execution_plan(&request.compiled_execution_plan)
+                .map_err(|_| "compiled execution plan is invalid".to_owned())?;
+            recipe_install_success_body(request.expected_bytes)
+        }
+        RecipeOperationRequest::Start(request) => {
+            let spec = parse_compiled_execution_plan(&request.compiled_execution_plan)
+                .map_err(|_| "compiled execution plan is invalid".to_owned())?;
+            let plan = runtime_plan(&request, &spec)?;
+            let runtime_arguments = runtime_arguments_for_plan(&plan, &plan.main);
+            recipe_start_success_body(
+                &request,
+                &spec,
+                &spec.identity.model_artifact_set_sha256,
+                &runtime_arguments,
+            )
+            .map_err(|_| "readiness evidence is unavailable".to_owned())?
+        }
+        _ => return Err("probe only accepts recipe.install and recipe.start".to_owned()),
     };
-    let result = AgentResult {
+    let message = AgentResult {
         attempt: claim.attempt,
         deadline: claim.deadline,
         fence: claim.fence,
         job_id: claim.job_id,
         node_id: claim.node_id.clone(),
         operation_id: claim.operation_id,
-        result: json!({"status": "ok", "evidence": evidence}),
+        result,
         schema_version: 1,
         state: "succeeded".to_owned(),
     };
-    result
+    message
         .validate()
         .map_err(|_| "canonical agent result is invalid".to_owned())?;
-    Ok(result)
+    Ok(message)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

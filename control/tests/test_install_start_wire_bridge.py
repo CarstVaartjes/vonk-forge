@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -10,9 +11,15 @@ from typing import Any
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentResult
+from vonk_agent_protocol import (
+    AgentOperation as ProtocolAgentOperation,
+    AgentProtocolError,
+    AgentResult,
+    RecipeOperationRequest,
+    canonical_message,
+)
 
-from vonk_control.models import AgentOperation
+from vonk_control.models import AgentOperation, InstallationNode, RunNode
 
 from control.tests.test_recipe_operations import (
     NOW,
@@ -38,22 +45,23 @@ def install_start_wire_probe() -> Path:
     if not target_root.is_absolute():
         target_root = repository / target_root
     target = target_root / "debug" / "examples" / "install_start_wire_probe"
-    if not target.is_file():
-        subprocess.run(
-            [
-                "cargo",
-                "build",
-                "--locked",
-                "--package",
-                "vonk-agent",
-                "--example",
-                "install_start_wire_probe",
-            ],
-            cwd=repository,
-            check=True,
-        )
+    subprocess.run(
+        [
+            "cargo",
+            "build",
+            "--locked",
+            "--package",
+            "vonk-agent",
+            "--example",
+            "install_start_wire_probe",
+        ],
+        cwd=repository,
+        check=True,
+    )
     if not target.is_file() or not os.access(target, os.X_OK):
-        raise AssertionError(f"cargo did not produce an executable wire probe: {target}")
+        raise AssertionError(
+            f"cargo did not produce an executable wire probe: {target}"
+        )
     return target
 
 
@@ -77,10 +85,10 @@ def _queued_children(sessions, operation_id: str) -> tuple[AgentOperation, ...]:
     with sessions() as session:
         return tuple(
             session.scalars(
-            select(AgentOperation)
-            .where(AgentOperation.parent_job_id == operation_id)
-            .where(AgentOperation.state == "queued")
-            .order_by(AgentOperation.node_id, AgentOperation.id)
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == operation_id)
+                .where(AgentOperation.state == "queued")
+                .order_by(AgentOperation.node_id, AgentOperation.id)
             )
         )
 
@@ -97,14 +105,19 @@ def _bridge(
         input=input_document,
         text=True,
         capture_output=True,
-        check=True,
+        check=False,
     )
+    assert completed.returncode == 0, completed.stderr
     output_lines = [line for line in completed.stdout.splitlines() if line.strip()]
     assert len(output_lines) == len(rows), completed.stdout
     parsed = tuple(AgentResult.parse(json.loads(line)) for line in output_lines)
-    for result in parsed:
+    for row, result in zip(rows, parsed, strict=True):
         assert result.state == "succeeded"
-        evidence = result.result["evidence"]
+        evidence = result.result.get("evidence", result.result)
+        if row.kind == "recipe.install":
+            assert set(result.result) == {"installed_bytes"}
+        else:
+            assert "evidence" in result.result
         if "image_digest" in evidence:
             assert not str(evidence["image_digest"]).startswith("sha256:")
         if "model_identity" in evidence:
@@ -112,20 +125,41 @@ def _bridge(
     return parsed
 
 
+def _assert_omitted_start_field_rejected(
+    probe: Path, row: AgentOperation, field: str
+) -> None:
+    payload = dict(row.payload)
+    payload.pop(field)
+    claim = _claim(row)
+    claim["payload"] = payload
+    claim["payload_digest"] = hashlib.sha256(canonical_message(payload)).hexdigest()
+    with pytest.raises(AgentProtocolError):
+        RecipeOperationRequest.parse(ProtocolAgentOperation.RECIPE_START, payload)
+    completed = subprocess.run(
+        [str(probe)],
+        input=json.dumps(claim, separators=(",", ":")) + "\n",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode != 0
+    assert not completed.stdout
+
+
 def _project(
     service,
-    operation_id: str,
+    sessions,
     rows: tuple[AgentOperation, ...],
     results: tuple[AgentResult, ...],
 ) -> None:
     for row, result in zip(rows, results, strict=True):
         assert result.operation_id == row.id
-        service.record_node_result(
-            operation_id,
-            row.node_id,
-            succeeded=True,
-            evidence=result.result["evidence"],
-        )
+        with sessions.begin() as session:
+            operation = session.get(AgentOperation, row.id)
+            assert operation is not None
+            operation.state = result.state
+            operation.updated_at = NOW
+            service.consume_agent_result(session, operation, None, result)
 
 
 def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
@@ -143,8 +177,16 @@ def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
     install_rows = _queued_children(sessions, install_operation.id)
     assert len(install_rows) == 1
     install_results = _bridge(install_start_wire_probe, install_rows)
-    _project(service, install_operation.id, install_rows, install_results)
+    _project(service, sessions, install_rows, install_results)
     assert service.get(install_operation.id).state == "succeeded"
+    with sessions() as session:
+        node = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == install_operation.owner_id,
+                InstallationNode.node_id == install_rows[0].node_id,
+            )
+        )
+        assert node is not None and node.state == "installed"
 
     start_plan = service.preview_run(install_operation.owner_id, "qwen")
     start_operation = service.start(
@@ -156,8 +198,20 @@ def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
     start_rows = _queued_children(sessions, start_operation.id)
     assert len(start_rows) == 1
     start_results = _bridge(install_start_wire_probe, start_rows)
-    _project(service, start_operation.id, start_rows, start_results)
+    for field in ("local_address", "master_address", "master_port"):
+        _assert_omitted_start_field_rejected(
+            install_start_wire_probe, start_rows[0], field
+        )
+    _project(service, sessions, start_rows, start_results)
     assert service.get(start_operation.id).state == "succeeded"
+    with sessions() as session:
+        node = session.scalar(
+            select(RunNode).where(
+                RunNode.run_id == start_operation.owner_id,
+                RunNode.node_id == start_rows[0].node_id,
+            )
+        )
+        assert node is not None and node.state == "running"
 
 
 def test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back(
@@ -184,12 +238,26 @@ def test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back
     assert len(rank_rows) == 2
     assert {row.payload.get("phase") for row in rank_rows} == {"rank-launch"}
     rank_results = _bridge(install_start_wire_probe, rank_rows)
-    _project(service, start_operation.id, rank_rows, rank_results)
+    _project(service, sessions, rank_rows, rank_results)
     assert service.get(start_operation.id).state == "running"
+    with sessions() as session:
+        nodes_after_launch = tuple(
+            session.scalars(
+                select(RunNode).where(RunNode.run_id == start_operation.owner_id)
+            )
+        )
+        assert {node.state for node in nodes_after_launch} == {"starting"}
 
     readiness_rows = _queued_children(sessions, start_operation.id)
     assert len(readiness_rows) == 1
     assert readiness_rows[0].payload.get("phase") == "collective-readiness"
     readiness_results = _bridge(install_start_wire_probe, readiness_rows)
-    _project(service, start_operation.id, readiness_rows, readiness_results)
+    _project(service, sessions, readiness_rows, readiness_results)
     assert service.get(start_operation.id).state == "succeeded"
+    with sessions() as session:
+        nodes_after_readiness = tuple(
+            session.scalars(
+                select(RunNode).where(RunNode.run_id == start_operation.owner_id)
+            )
+        )
+        assert {node.state for node in nodes_after_readiness} == {"running"}
