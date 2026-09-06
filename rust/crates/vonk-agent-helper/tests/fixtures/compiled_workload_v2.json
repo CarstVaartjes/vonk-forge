@@ -6,7 +6,7 @@
     "harness_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
     "build_input_sha256": null,
     "model_artifact_set_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-    "model_artifact_bytes": 15
+    "model_artifact_bytes": 33
   },
   "runtime": {
     "executable": "/opt/vonk/bin/vllm",
@@ -17,6 +17,8 @@
     ],
     "env": [
       {"name": "HOME", "value": "/outputs/cache/home"},
+      {"name": "XDG_CACHE_HOME", "value": "/outputs/cache"},
+      {"name": "TMPDIR", "value": "/outputs/tmp"},
       {"name": "VONK_RUNTIME_SPEC", "value": "/run/vonk/runtime.json"}
     ],
     "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
@@ -72,6 +74,46 @@
         "bytes": 8,
         "kind": "model"
       }
+    },
+    {
+      "selection_id": "primary",
+      "file_id": "deepseek-long-gguf",
+      "path": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+      "sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+      "size_bytes": 11,
+      "roles": ["model"],
+      "mount": {"target": "/models/primary", "read_only": true},
+      "model": {
+        "publisher": "vonk-forge",
+        "slug": "primary-model",
+        "content_sha256": "1212121212121212121212121212121212121212121212121212121212121212"
+      },
+      "distribution_object": {
+        "name": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+        "sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+        "bytes": 11,
+        "kind": "model"
+      }
+    },
+    {
+      "selection_id": "support",
+      "file_id": "license",
+      "path": "LICENSE",
+      "sha256": "1313131313131313131313131313131313131313131313131313131313131313",
+      "size_bytes": 7,
+      "roles": ["model"],
+      "mount": {"target": "/models/support", "read_only": true},
+      "model": {
+        "publisher": "vonk-forge",
+        "slug": "support-model",
+        "content_sha256": "1313131313131313131313131313131313131313131313131313131313131313"
+      },
+      "distribution_object": {
+        "name": "LICENSE",
+        "sha256": "1313131313131313131313131313131313131313131313131313131313131313",
+        "bytes": 7,
+        "kind": "model"
+      }
     }
   ],
   "runtime_image": {
@@ -93,6 +135,7 @@
     "devices": [],
     "capabilities": [],
     "host_network": false,
+    "network_mode": "none",
     "privileged": false,
     "user": "10001:10001",
     "mounts": [

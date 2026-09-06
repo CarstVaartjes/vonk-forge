@@ -37,6 +37,7 @@ fn request_root() -> String {
 }
 
 const AUTH_SEED: [u8; 32] = [42; 32];
+const PROBE_RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
 
 fn main() {
     let mode = env::args().nth(1).expect("mode setup|import|start");
@@ -72,7 +73,7 @@ fn main() {
             production_start_arguments(),
         )
     };
-    let job_id = Uuid::parse_str("40000000-0000-4000-8000-000000000004").unwrap();
+    let job_id = Uuid::parse_str(PROBE_RUN_ID).unwrap();
     let operation_id = if action == HostRuntimeAction::ImageImport {
         Uuid::parse_str("50000000-0000-4000-8000-000000000005").unwrap()
     } else {
@@ -249,15 +250,19 @@ fn production_start_arguments() -> Vec<String> {
             image_archive: PathBuf::from(format!(
                 "/var/lib/vonk-forge-agent/oci-archives/{archive_sha}"
             )),
-            model_root: PathBuf::from("/var/lib/vonk-forge/models"),
+            model_root: PathBuf::from(
+                "/var/lib/vonk-forge-agent/installations/proof-install/models",
+            ),
             input_root: None,
-            output_root: PathBuf::from("/var/lib/vonk-forge-agent/runs/proof-run/outputs"),
+            output_root: PathBuf::from(format!(
+                "/var/lib/vonk-forge-agent/runs/{PROBE_RUN_ID}/outputs"
+            )),
             cache_root: PathBuf::from(
                 "/var/lib/vonk-forge-agent/installations/proof-install/runtime-cache",
             ),
-            runtime_spec: PathBuf::from(
-                "/var/lib/vonk-forge-agent/run-metadata/proof-run/runtime.json",
-            ),
+            runtime_spec: PathBuf::from(format!(
+                "/var/lib/vonk-forge-agent/run-metadata/{PROBE_RUN_ID}/runtime.json"
+            )),
         },
     )
     .unwrap();
@@ -266,7 +271,7 @@ fn production_start_arguments() -> Vec<String> {
         1..1,
         [
             "--name".to_owned(),
-            "vonk-proof-run".to_owned(),
+            format!("vonk-{PROBE_RUN_ID}"),
             "--restart".to_owned(),
             "no".to_owned(),
         ],
