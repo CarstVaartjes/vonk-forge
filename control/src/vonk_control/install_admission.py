@@ -374,17 +374,17 @@ class InstallAdmissionService:
                     )
                 )
             elif image_bytes > int(disk["image_bytes"]):
-                blockers.append(
+                warnings.append(
                     AdmissionReason(
                         "install.image_size_underdeclared",
-                        "Built image is larger than this role declares.",
+                        "Image exceeds the recipe's estimate; disk admission uses its verified size.",
                     )
                 )
             if actual_artifact_bytes > int(disk["artifact_bytes"]):
-                blockers.append(
+                warnings.append(
                     AdmissionReason(
                         "install.artifact_size_underdeclared",
-                        "External artifacts are larger than this role declares.",
+                        "Model files exceed the recipe's estimate; disk admission uses their verified sizes.",
                     )
                 )
             snapshot = inventory_by_node.get(mapping_node.node_id)
@@ -467,7 +467,10 @@ class InstallAdmissionService:
                 )
             )
             reused = reused_image + reused_artifacts
-            required_download = max(0, actual_artifact_bytes - reused_artifacts)
+            required_download = (
+                max(0, actual_artifact_bytes - reused_artifacts)
+                + max(0, (image_bytes or 0) - reused_image)
+            )
             required = (
                 required_download
                 + int(disk["staging_bytes"])

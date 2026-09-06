@@ -73,6 +73,7 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/run_switch_operations.py",
         "control/src/vonk_control/distribution_executor.py",
         "control/src/vonk_control/runtime_image_preparation.py",
+        "control/src/vonk_control/cached_file_verification.py",
         "control/src/vonk_control/recipe_operation_worker.py",
         "control/src/vonk_control/availability_production.py",
         "control/src/vonk_control/model_cache.py",

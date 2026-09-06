@@ -461,12 +461,21 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 .join("distribution")
                 .join(&request.plan_digest);
             let (progress_sender, mut progress_receiver) =
-                tokio::sync::mpsc::unbounded_channel::<DistributionProgress>();
+                tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
             let progress_client = self.client.clone();
             let progress_claim = claim.clone();
             let progress_deadline = lease_deadline.clone();
             let progress_task = tokio::spawn(async move {
-                while let Some(item) = progress_receiver.recv().await {
+                // Progress is a snapshot, not an event log. Coalesce fast
+                // transfer updates instead of accumulating an unbounded queue
+                // of heartbeat requests before image import can begin.
+                let mut cadence = tokio::time::interval(Duration::from_secs(1));
+                cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                while progress_receiver.changed().await.is_ok() {
+                    cadence.tick().await;
+                    let Some(item) = progress_receiver.borrow_and_update().clone() else {
+                        continue;
+                    };
                     let progress = AgentProgress {
                         attempt: progress_claim.attempt,
                         deadline: *progress_deadline.borrow(),
@@ -496,7 +505,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             &request.plan_digest,
                             &destination,
                             move |item| {
-                                let _ = progress_sender.send(item);
+                                progress_sender.send_replace(Some(item));
                             },
                         )
                         .await;
@@ -517,6 +526,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
                 result.expect("bounded distribution retry always records a result")
             };
+            // The reporter exits only when every sender is dropped. Keep it
+            // alive through retries, then close it before waiting; otherwise
+            // a finished transfer can wait forever before importing its image.
+            drop(progress_sender);
             let _ = progress_task.await;
             return match download {
                 Ok(evidence) => {

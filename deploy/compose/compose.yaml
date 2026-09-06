@@ -153,7 +153,10 @@ services:
       - control-state:/state
       - agent-artifacts:/state/agent-artifacts
     tmpfs: [/tmp]
-    networks: [data, worker-authority]
+    # The cache worker fetches pinned models and OCI images from public
+    # providers. Keep its outbound network separate from ingress and do not
+    # publish worker ports; the API and database retain internal networks.
+    networks: [data, worker-authority, artifact-egress]
     depends_on:
       postgres: {condition: service_healthy}
       control-api: {condition: service_healthy}
@@ -391,6 +394,7 @@ networks:
   agent-proxy: {internal: true}
   application: {internal: true}
   worker-authority: {internal: true}
+  artifact-egress: {}
   data: {internal: true}
   litellm-data: {internal: true}
   cluster-egress: {}

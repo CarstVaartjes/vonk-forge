@@ -36,7 +36,8 @@ RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
 def _canonical_catalog_documents(
-    *, denied_jurisdictions: tuple[str, ...] = (), recipe_mode: str = "build"
+    *, denied_jurisdictions: tuple[str, ...] = (), recipe_mode: str = "build",
+    disk_estimates: tuple[int, int] = (30, 70),
 ) -> tuple[ModelDefinition, RecipeDefinition]:
     raw_model = json.loads(
         files("vonk_forge_contracts")
@@ -64,8 +65,8 @@ def _canonical_catalog_documents(
     }
     raw_recipe["topology"]["roles"][0]["resources"]["disk"].update(
         {
-            "image_bytes": 30,
-            "artifact_bytes": 70,
+            "image_bytes": disk_estimates[0],
+            "artifact_bytes": disk_estimates[1],
             "staging_bytes": 20,
             "cache_bytes": 0,
             "rollback_bytes": 0,
@@ -82,9 +83,11 @@ def _seed_canonical_catalog(
     *,
     denied_jurisdictions: tuple[str, ...] = (),
     recipe_mode: str = "build",
+    disk_estimates: tuple[int, int] = (30, 70),
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents(
-        denied_jurisdictions=denied_jurisdictions, recipe_mode=recipe_mode
+        denied_jurisdictions=denied_jurisdictions, recipe_mode=recipe_mode,
+        disk_estimates=disk_estimates,
     )
     model_digest = content_sha256(model)
     recipe_digest = content_sha256(recipe)
@@ -381,6 +384,7 @@ def setup(
     observed_age=0,
     denied_jurisdictions=(),
     recipe_mode="build",
+    disk_estimates=(30, 70),
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'install.sqlite'}")
@@ -417,6 +421,7 @@ def setup(
         now,
         denied_jurisdictions=tuple(denied_jurisdictions),
         recipe_mode=recipe_mode,
+        disk_estimates=disk_estimates,
     )
     mappings = ClusterMappingService(sessions)
     mapping_plan = mappings.preview(resolved.id, (node_id,), {}, "admin")
@@ -477,6 +482,27 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
     blocked = service.plan_install(mapping, None, now=now)
     assert blocked.allowed is False
     assert blocked.nodes[0].blockers[0].code == "install.insufficient_disk"
+
+
+@pytest.mark.parametrize(("free", "allowed"), [(130, True), (129, False)])
+def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estimates(
+    tmp_path, free: int, allowed: bool
+) -> None:
+    sessions, now, _node, mapping, _build, sizes = setup(
+        tmp_path, free=free, recipe_mode="image", disk_estimates=(1, 1)
+    )
+    with sessions.begin() as session:
+        for artifact in session.scalars(select(NodeArtifact)):
+            session.delete(artifact)
+    plan = _service(
+        sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
+    ).plan_install(mapping, None, now=now)
+    assert plan.allowed is allowed
+    assert plan.nodes[0].required_download_bytes == 100
+    assert plan.nodes[0].required_bytes == 120
+    assert {reason.code for reason in plan.nodes[0].blockers} == (
+        set() if allowed else {"install.insufficient_disk"}
+    )
 
 
 def test_territorial_license_install_admission_is_informational(tmp_path) -> None:

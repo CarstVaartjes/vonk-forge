@@ -95,7 +95,7 @@ def test_production_factory_separates_api_service_and_worker_scheduler(tmp_path)
     }
     api = build_recipe_image_availability(**kwargs)
     assert api.scheduler is None
-    assert api.storage.root == tmp_path / "api-artifacts" / "oci-archives"
+    assert api.storage.root == tmp_path / "api-artifacts" / "image-cache"
     api.close()
 
     worker = build_recipe_image_availability(

@@ -20,7 +20,7 @@ import re
 import subprocess
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -29,11 +29,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import RecipeDefinition
 
+from .cached_file_verification import verified_files
 from .models import CatalogDocumentRevision, RecipeBuild, RuntimeImageAuthorization
 from .models import RuntimeImageReceipt as RuntimeImageReceiptRow
 
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+IMAGE_CACHE_DIRECTORY = "image-cache"
 
 
 class RuntimeImagePreparationError(ValueError):
@@ -106,17 +108,14 @@ class SkopeoOCIImageTransport:
         observed_digest = _run_text(
             [self.executable, "inspect", *_platform_args(expected_architecture), "--format", "{{.Digest}}", source]
         ).strip()
-        raw_manifest = _run_text(
-            [self.executable, "inspect", *_platform_args(expected_architecture), "--raw", source]
-        )
         config = _run_json_text(
             _run_text(
                 [self.executable, "inspect", *_platform_args(expected_architecture), "--config", source]
             )
         )
-        if _IMAGE_DIGEST.fullmatch(observed_digest) is None:
+        if observed_digest != expected_manifest:
             raise RuntimeImagePreparationError(
-                "runtime_image.digest_mismatch", "skopeo resolved an invalid platform image digest"
+                "runtime_image.digest_mismatch", "skopeo resolved a different recipe image digest"
             )
         if not isinstance(config, Mapping):
             raise RuntimeImagePreparationError(
@@ -132,20 +131,25 @@ class SkopeoOCIImageTransport:
             raise RuntimeImagePreparationError(
                 "runtime_image.interface_mismatch", "OCI image runtime interface label does not match the recipe"
             )
-        config_id = _config_digest(raw_manifest)
         _run_text(
-            [self.executable, "copy", *_platform_args(expected_architecture), source, f"oci-archive:{destination}"]
+            [self.executable, "copy", *_platform_args(expected_architecture), source, f"docker-archive:{destination}"]
         )
         archive_bytes, archive_sha = _file_digest(destination, 16 * 1024**4)
-        return PulledImageEvidence(
-            manifest_digest=observed_digest,
+        # Registry pins may identify a multi-platform index. Docker's native
+        # archive conversion also changes manifest representation. Inspect the
+        # actual exported single-platform image instead of treating the source
+        # index digest as its runnable identity.
+        exported = self.inspect_archive(
+            destination,
+            expected_architecture=expected_architecture,
+            expected_runtime_interface=expected_runtime_interface,
+            expected_archive_sha256=archive_sha,
+            expected_archive_bytes=archive_bytes,
+        )
+        return replace(
+            exported,
             requested_manifest_digest=expected_manifest,
-            config_id=config_id,
             local_reference=reference,
-            architecture=architecture,
-            runtime_interface=interface,
-            archive_sha256=archive_sha,
-            archive_bytes=archive_bytes,
         )
 
     def inspect_archive(
@@ -158,7 +162,7 @@ class SkopeoOCIImageTransport:
         expected_archive_bytes: int,
     ) -> PulledImageEvidence:
         expected_runtime_interface = _runtime_interface_label(expected_runtime_interface)
-        source = f"oci-archive:{archive}"
+        source = f"docker-archive:{archive}"
         observed_digest = _run_text(
             [self.executable, "inspect", *_platform_args(expected_architecture), "--format", "{{.Digest}}", source]
         ).strip()
@@ -685,12 +689,12 @@ class FilesystemRuntimeImageStorage:
     """Content-addressed Controller/NAS storage under the OCI namespace.
 
     The caller supplies the shared Controller artifact root.  Runtime image
-    archives and their receipts are kept in the explicit ``oci-archives``
+    archives and their receipts are kept in the explicit ``image-cache``
     namespace so model/build objects cannot be confused with OCI payloads.
     """
 
     def __init__(self, root: Path, *, maximum_bytes: int = 16 * 1024**4) -> None:
-        self.root = root / "oci-archives"
+        self.root = root / IMAGE_CACHE_DIRECTORY
         self.maximum_bytes = maximum_bytes
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -779,8 +783,9 @@ class FilesystemRuntimeImageStorage:
             raise RuntimeImagePreparationError(
                 "runtime_image.archive_unavailable", "OCI archive is not present in Controller storage"
             )
-        size, digest = _file_digest(path, self.maximum_bytes)
-        if size != expected_bytes or digest != archive_sha256:
+        if not 1 <= expected_bytes <= self.maximum_bytes or not verified_files.verify_path(
+            path, archive_sha256, expected_bytes
+        ):
             raise RuntimeImagePreparationError(
                 "runtime_image.archive_mismatch", "stored OCI archive failed content verification"
             )
@@ -796,7 +801,7 @@ class FilesystemRuntimeImageStorage:
         """Read the atomic receipt index before starting another OCI export.
 
         Receipt files are the content-addressed index: the archive is still
-        re-hashed before reuse, so a partial or corrupt object fails loudly
+        re-hashed when its filesystem identity changes, so a partial or corrupt object fails loudly
         and cannot be mistaken for a cache hit.
         """
 
@@ -849,7 +854,7 @@ class FilesystemRuntimeImageStorage:
         the image boundary.  The durable worker is responsible for calling
         :func:`prepare_runtime_image` when the receipt is absent.  Published
         parent manifests and Controller-built platform images are both valid
-        lookup identities, while the archive is re-hashed before reuse.
+        lookup identities. Unchanged verified files do not need another byte scan.
         """
 
         if _IMAGE_DIGEST.fullmatch(image_digest) is None:
@@ -1010,7 +1015,6 @@ def _prepare_from_registry(
         )
         _validate_evidence(
             evidence,
-            expected_manifest,
             expected_architecture,
             expected_interface_label,
             expected_requested_manifest=expected_manifest,
@@ -1079,6 +1083,22 @@ def _prepare_from_build(
         )
     existing = storage.verify_existing(archive_sha, image_bytes)
     expected_interface_label = _runtime_interface_label(expected_interface)
+    try:
+        cached = storage.read_receipt(archive_sha)
+    except (RuntimeImagePreparationError, AttributeError):
+        cached = None
+    if (
+        cached is not None
+        and cached.source == "controller-build"
+        and cached.image_digest == image_digest
+        and cached.platform_manifest_digest == image_digest
+        and cached.architecture == _wire_architecture(expected_architecture)
+        and cached.runtime_interface == expected_interface
+        and cached.runtime_interface_label == expected_interface_label
+        and cached.image_bytes == image_bytes
+        and cached.build_id == _optional_string(value.get("build_id"), None)
+    ):
+        return cached
     observed = transport.inspect_archive(
         existing,
         expected_architecture=expected_architecture,
@@ -1088,25 +1108,10 @@ def _prepare_from_build(
     )
     _validate_evidence(
         observed,
-        image_digest,
         expected_architecture,
         expected_interface_label,
         expected_requested_manifest=None,
     )
-    try:
-        cached = storage.read_receipt(archive_sha)
-    except (RuntimeImagePreparationError, AttributeError):
-        cached = None
-    if (
-        cached is not None
-        and cached.source == "controller-build"
-        and cached.image_digest == image_digest
-        and cached.platform_manifest_digest == observed.manifest_digest
-        and cached.local_image_config_id == observed.config_id
-        and cached.image_bytes == image_bytes
-        and cached.build_id == _optional_string(value.get("build_id"), None)
-    ):
-        return cached
     receipt = RuntimeImageReceipt(
         schema_version=2,
         source="controller-build",
@@ -1114,12 +1119,17 @@ def _prepare_from_build(
         distribution_slug=slug,
         distribution_content_sha256=content_sha256,
         registry_manifest_digest=_optional_string(value.get("registry_manifest_digest"), None),
-        platform_manifest_digest=observed.manifest_digest,
+        # The authenticated builder binds its original image manifest to this
+        # exact archive checksum. Docker-save drops that original manifest;
+        # Skopeo reconstructs a different manifest when reading the archive.
+        # Preserve build provenance and independently inspect the archive's
+        # actual config/platform, rather than comparing unrelated digests.
+        platform_manifest_digest=image_digest,
         image_digest=image_digest,
         oci_archive_sha256=archive_sha,
         image_bytes=image_bytes,
         local_image_config_id=observed.config_id,
-        # ``oci-archive:...`` is a Controller transport path, never a
+        # ``docker-archive:...`` is a Controller transport path, never a
         # runnable Spark image reference.
         local_image_reference=None,
         architecture=_wire_architecture(observed.architecture),
@@ -1199,7 +1209,6 @@ def _recipe_digest(recipe: RecipeDefinition) -> str:
 
 def _validate_evidence(
     evidence: PulledImageEvidence,
-    expected_manifest: str,
     expected_architecture: str,
     expected_interface: str | None,
     *,

@@ -140,9 +140,24 @@ privilege, then records the exact OCI image digest and immutable archive
 digest. The durable build identity also binds the builder agent's reported
 binary SHA-256 and the Docker-archive format. An accepted result therefore
 cannot be reused after a builder implementation or export-format change. The
-declared archive output bound follows the recipe's temporary build envelope, so
-large CUDA-based images are not constrained by a small log-size constant;
-diagnostic stdout/stderr remains independently capped.
+archive output budget follows the largest declared per-node image budget;
+diagnostic stdout/stderr remains independently capped. Actual exported sizes
+and digests come from the builder receipt.
+
+The Controller compiles build policy when it imports a source Recipe. Authors
+do not repeat Podman defaults or security settings in recipe documents. The
+rootless build receives up to eight CPU cores, 4,096 tasks, 24 hours, and a
+memory budget equal to the declared image budget, bounded between 2 and 64 GiB.
+Temporary storage reserves the larger of the declared staging budget and three
+times the image budget (capped at 16 TiB), with the separate host disk reserve
+and current free-memory admission checks still enforced. These are planning
+budgets, not measurements or model-download sizes.
+
+Build steps receive only CHOWN, DAC_OVERRIDE, FOWNER, FSETID, SETFCAP, SETGID,
+and SETUID inside the existing rootless user namespace, so package installation
+and file ownership operations work. Builds receive no GPU, host mounts, socket,
+or privileged mode. The complete Podman option set is compiled centrally;
+options and capabilities participate in the immutable image build identity.
 
 Rootless Podman ends at the build/export boundary. Accepted workloads run on
 DGX Spark's supported Docker Engine and NVIDIA Container Toolkit. The
@@ -175,7 +190,21 @@ Installation maps a resolved recipe revision to exact node identities and ranks.
 The controller transfers that one verified Docker-loadable archive over the
 authenticated agent channel and each target re-verifies it before import, so a
 three-node recipe never rebuilds independently on the other two nodes. Model
-weights and other declared artifacts are installed separately, with disk checks before
+downloads are independent of recipes: the Controller can fill the NAS model
+cache before any runtime image or Spark assignment exists, and recipes reuse
+the same content-addressed model files. Published images and local builds both
+use Docker-save archives in the shared `image-cache` directory. The original
+registry pin remains separate from the exported platform manifest, config ID,
+and archive checksum; the Controller inspects the exported config and platform
+before use. Docker-save does not retain the original manifest, so its
+reconstructed manifest digest is never compared with the builder's original.
+Model files live under `/state/model-cache`; image archives live under
+`/state/agent-artifacts/image-cache`, shared by the API and worker. Both caches
+reuse successful content verification while device, inode, size, timestamps,
+ownership, and mode remain unchanged. Changes trigger a new byte scan. The
+verification cache is bounded and process-local; authorization is still checked
+on every operation, and explicit storage reconciliation performs a full scan.
+Model weights and other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
 start. Multi-node v1 uses ordinary TCP over the declared direct-fabric
 addresses; it does not claim GPUDirect RDMA support. The resulting workload

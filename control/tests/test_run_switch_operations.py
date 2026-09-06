@@ -548,6 +548,8 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     assert plan.storage.missing_nas_bytes == 1024
     assert plan.preparation is not None
     assert plan.preparation.model.artifact_set_sha256 == MODEL_ARTIFACT_SET
+    assert plan.storage.artifact_set_sha256 == MODEL_ARTIFACT_SET
+    assert plan.storage.artifact_set_bytes == plan.preparation.model.artifact_set_bytes
     assert "run-switch.nas-coverage-unknown" not in {
         reason.code for reason in plan.blockers
     }

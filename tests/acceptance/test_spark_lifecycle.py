@@ -2027,7 +2027,16 @@ class SparkLifecycle:
                 or not isinstance(source, dict)
                 or source.get("state") != "available"
             ):
-                raise LifecycleError("canonical synthetic canary run is not admitted")
+                details = {
+                    "allowed": preview.get("allowed"),
+                    "blockers": preview.get("blockers"),
+                    "phases": planned,
+                    "source_state": source.get("state") if isinstance(source, dict) else None,
+                }
+                raise LifecycleError(
+                    "canonical synthetic canary run is not admitted: "
+                    + self._redact_diagnostics(json.dumps(details))
+                )
             completed.append("source-verified")
             _, operation_payload = self.control.request(
                 "POST",

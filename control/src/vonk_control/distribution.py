@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .cached_file_verification import verified_files
 from .models import (
     ArtifactDistributionAssignment,
     CatalogDocumentRevision,
@@ -35,6 +36,7 @@ from .models import (
     RuntimeImageReceipt,
 )
 from .runtime_image_preparation import (
+    IMAGE_CACHE_DIRECTORY,
     FilesystemRuntimeImageStorage,
     RuntimeImagePreparationError,
 )
@@ -136,21 +138,16 @@ class FilesystemVerifiedObjectSource:
             ):
                 os.close(fd)
                 raise DistributionError("distribution.object_unavailable", "verified object length changed")
-            hasher = hashlib.sha256()
-            remaining = expected_bytes
-            while remaining:
-                chunk = os.read(fd, min(1024 * 1024, remaining))
-                if not chunk:
-                    os.close(fd)
-                    raise DistributionError("distribution.object_unavailable", "verified object is partial")
-                hasher.update(chunk)
-                remaining -= len(chunk)
-            after = os.fstat(fd)
-            if after.st_size != before.st_size or hasher.hexdigest() != digest:
-                os.close(fd)
+            source = os.fdopen(fd, "rb", closefd=True)
+            try:
+                valid = verified_files.verify(source, digest, expected_bytes)
+            except (OSError, ValueError):
+                source.close()
+                raise
+            if not valid:
+                source.close()
                 raise DistributionError("distribution.object_unavailable", "verified object digest mismatch")
-            os.lseek(fd, 0, os.SEEK_SET)
-            return VerifiedObject(os.fdopen(fd, "rb", closefd=True), expected_bytes, digest)
+            return VerifiedObject(source, expected_bytes, digest)
         except DistributionError:
             raise
         except OSError as error:
@@ -161,7 +158,7 @@ class RecipeBuildVerifiedObjectSource(FilesystemVerifiedObjectSource):
     """Verified OCI source backed by succeeded Controller recipe builds."""
 
     def __init__(self, sessions: sessionmaker[Session], artifact_root: Path, **kwargs: object) -> None:
-        super().__init__(artifact_root, **kwargs)
+        super().__init__(artifact_root / IMAGE_CACHE_DIRECTORY, **kwargs)
         self.sessions = sessions
 
     def verify_artifact_set(

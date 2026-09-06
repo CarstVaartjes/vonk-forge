@@ -3609,6 +3609,8 @@ class RunSwitchOperationService:
     @staticmethod
     def _storage(inspection: ArtifactInspection, *, retention: str) -> ArtifactStorageImpact:
         return ArtifactStorageImpact(
+            artifact_set_sha256=inspection.artifact_set_sha256,
+            artifact_set_bytes=inspection.artifact_set_bytes,
             required_bytes=inspection.required_bytes,
             reused_bytes=inspection.reused_bytes,
             copied_bytes=inspection.copied_bytes,
@@ -4022,6 +4024,10 @@ class RunSwitchOperationService:
                 return True
             if child.state not in _TERMINAL_STATES or child.state != "succeeded":
                 reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
+                evidence = _child_progress_payload(child)
+                detail = evidence.get("reason") or evidence.get("status_reason")
+                if isinstance(detail, str) and detail:
+                    reason += ": " + detail[:384]
                 if _transient_distribution_failure(child) and self._queue_transient_retry(
                     operation_id, child, phase_index=phase_index
                 ):
@@ -5174,7 +5180,7 @@ def _validate_artifact_execution(
         expected_set = (
             preparation.model.artifact_set_sha256
             if preparation is not None
-            else None
+            else plan.storage.artifact_set_sha256
         )
         if result.get("artifact_set_sha256") != expected_set:
             raise RunSwitchOperationConflict(
@@ -5187,7 +5193,7 @@ def _validate_artifact_execution(
         expected_bytes = (
             preparation.model.artifact_set_bytes
             if preparation is not None
-            else None
+            else plan.storage.artifact_set_bytes
         )
         completed = result.get("downloaded_bytes")
         total = result.get("total_bytes")

@@ -220,6 +220,10 @@ class SparkFit(_StrictModel):
 class ArtifactStorageImpact(_StrictModel):
     """Byte impact with unknown values preserved as unknown, never guessed."""
 
+    # The model manifest is known before a source build produces an image.
+    # Bind it independently of the combined rollout preparation receipt.
+    artifact_set_sha256: Digest | None = None
+    artifact_set_bytes: int | None = Field(default=None, ge=1)
     required_bytes: int | None = Field(default=None, ge=0)
     reused_bytes: int = Field(default=0, ge=0)
     copied_bytes: int = Field(default=0, ge=0)

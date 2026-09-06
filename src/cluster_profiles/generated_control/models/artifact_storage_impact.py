@@ -37,6 +37,8 @@ class ArtifactStorageImpact:
             retention (ArtifactStorageImpactRetention):
             spark_coverage (ArtifactStorageImpactSparkCoverage):
             artifact_digests (Union[Unset, list[str]]):
+            artifact_set_bytes (Union[None, Unset, int]):
+            artifact_set_sha256 (Union[None, Unset, str]):
             copied_bytes (Union[Unset, int]):  Default: 0.
             missing_nas_bytes (Union[None, Unset, int]):
             missing_spark_bytes (Union[None, Unset, int]):
@@ -52,6 +54,8 @@ class ArtifactStorageImpact:
     retention: ArtifactStorageImpactRetention
     spark_coverage: ArtifactStorageImpactSparkCoverage
     artifact_digests: Union[Unset, list[str]] = UNSET
+    artifact_set_bytes: Union[None, Unset, int] = UNSET
+    artifact_set_sha256: Union[None, Unset, str] = UNSET
     copied_bytes: Union[Unset, int] = 0
     missing_nas_bytes: Union[None, Unset, int] = UNSET
     missing_spark_bytes: Union[None, Unset, int] = UNSET
@@ -78,6 +82,18 @@ class ArtifactStorageImpact:
             artifact_digests = self.artifact_digests
 
 
+
+        artifact_set_bytes: Union[None, Unset, int]
+        if isinstance(self.artifact_set_bytes, Unset):
+            artifact_set_bytes = UNSET
+        else:
+            artifact_set_bytes = self.artifact_set_bytes
+
+        artifact_set_sha256: Union[None, Unset, str]
+        if isinstance(self.artifact_set_sha256, Unset):
+            artifact_set_sha256 = UNSET
+        else:
+            artifact_set_sha256 = self.artifact_set_sha256
 
         copied_bytes = self.copied_bytes
 
@@ -126,6 +142,10 @@ class ArtifactStorageImpact:
         })
         if artifact_digests is not UNSET:
             field_dict["artifact_digests"] = artifact_digests
+        if artifact_set_bytes is not UNSET:
+            field_dict["artifact_set_bytes"] = artifact_set_bytes
+        if artifact_set_sha256 is not UNSET:
+            field_dict["artifact_set_sha256"] = artifact_set_sha256
         if copied_bytes is not UNSET:
             field_dict["copied_bytes"] = copied_bytes
         if missing_nas_bytes is not UNSET:
@@ -168,6 +188,26 @@ class ArtifactStorageImpact:
 
 
         artifact_digests = cast(list[str], d.pop("artifact_digests", UNSET))
+
+
+        def _parse_artifact_set_bytes(data: object) -> Union[None, Unset, int]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, int], data)
+
+        artifact_set_bytes = _parse_artifact_set_bytes(d.pop("artifact_set_bytes", UNSET))
+
+
+        def _parse_artifact_set_sha256(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        artifact_set_sha256 = _parse_artifact_set_sha256(d.pop("artifact_set_sha256", UNSET))
 
 
         copied_bytes = d.pop("copied_bytes", UNSET)
@@ -226,6 +266,8 @@ class ArtifactStorageImpact:
             retention=retention,
             spark_coverage=spark_coverage,
             artifact_digests=artifact_digests,
+            artifact_set_bytes=artifact_set_bytes,
+            artifact_set_sha256=artifact_set_sha256,
             copied_bytes=copied_bytes,
             missing_nas_bytes=missing_nas_bytes,
             missing_spark_bytes=missing_spark_bytes,

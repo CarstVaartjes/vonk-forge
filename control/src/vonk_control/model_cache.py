@@ -29,6 +29,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .cached_file_verification import verified_files
 from .logging import redact_text
 from .models import (
     CatalogDocumentRevision,
@@ -2047,13 +2048,10 @@ class ModelCacheService:
             # copied to a redirect/CDN host.
             token = self._load_huggingface_token()
             token_loaded = True
-            if token is None:
-                raise ModelCacheStorageError(
-                    "model_cache.credentials_invalid",
-                    "Hugging Face credential file is unavailable; configure HF_TOKEN_FILE",
-                    recovery="credentials_invalid",
-                )
-            authenticated = True
+            # Compose always names the optional normalized secret path. Its
+            # absent/empty projection means anonymous public downloads; only
+            # an actual provider denial requires account access and a token.
+            authenticated = token is not None
         for redirect_count in range(_MAX_HTTP_REDIRECTS + 1):
             request_headers = dict(headers)
             if authenticated and _is_hf_canonical_url(current_url):
@@ -2130,8 +2128,12 @@ class ModelCacheService:
         if path is None:
             return None
         try:
-            if path.is_symlink() or not path.is_file():
+            if path.is_symlink():
+                raise RuntimeSecretError("Hugging Face credential path is unsafe")
+            if not path.exists():
                 return None
+            if not path.is_file():
+                raise RuntimeSecretError("Hugging Face credential path is unsafe")
             if path.stat().st_size == 0:
                 return None
             raw = read_runtime_secret(path)
@@ -2163,16 +2165,7 @@ class ModelCacheService:
     def _verify_file(self, path: Path, spec: ArtifactSpec) -> bool:
         if path.is_symlink() or not path.is_file():
             return False
-        try:
-            if path.stat().st_size != spec.expected_bytes:
-                return False
-            digest = hashlib.sha256()
-            with path.open("rb") as source:
-                while chunk := source.read(_CHUNK_BYTES):
-                    digest.update(chunk)
-            return digest.hexdigest() == spec.sha256
-        except OSError:
-            return False
+        return verified_files.verify_path(path, spec.sha256, spec.expected_bytes)
 
     def _object_is_verified(self, spec: ArtifactSpec) -> bool:
         return self._verify_file(self._object_path(spec.sha256), spec)

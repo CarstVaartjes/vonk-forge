@@ -58,7 +58,10 @@ def test_configured_huggingface_token_is_used_on_canonical_request(tmp_path: Pat
     assert requests[0].headers["authorization"] == "Bearer hf_should_not_be_used"
 
 
-def test_public_huggingface_download_is_anonymous_without_token_file(tmp_path: Path) -> None:
+@pytest.mark.parametrize("optional_secret", ["unset", "missing", "empty", "blank"])
+def test_public_huggingface_download_is_anonymous_without_token_file(
+    tmp_path: Path, optional_secret: str
+) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -66,6 +69,11 @@ def test_public_huggingface_download_is_anonymous_without_token_file(tmp_path: P
         return httpx.Response(200, content=b"public model")
 
     service, client = _service(tmp_path, handler)
+    if optional_secret != "unset":
+        path = tmp_path / "optional-hf-token"
+        service._huggingface_token_path = path
+        if optional_secret != "missing":
+            path.write_text("" if optional_secret == "empty" else "\n")
     try:
         response = service._open_http_response(client, SOURCE, {})
         assert response.read() == b"public model"
@@ -74,6 +82,32 @@ def test_public_huggingface_download_is_anonymous_without_token_file(tmp_path: P
         client.close()
     assert len(requests) == 1
     assert "authorization" not in requests[0].headers
+
+
+@pytest.mark.parametrize("unsafe_secret", ["symlink", "directory", "malformed"])
+def test_invalid_huggingface_secret_does_not_downgrade_to_anonymous(
+    tmp_path: Path, unsafe_secret: str
+) -> None:
+    def handler(_request):
+        raise AssertionError("invalid secret must fail before any HTTP request")
+
+    service, client = _service(tmp_path, handler)
+    path = tmp_path / "unsafe-hf-token"
+    if unsafe_secret == "symlink":
+        target = tmp_path / "target"
+        target.write_text("hf_test")
+        path.symlink_to(target)
+    elif unsafe_secret == "directory":
+        path.mkdir()
+    else:
+        path.write_text("hf_bad token")
+    service._huggingface_token_path = path
+    try:
+        with pytest.raises(ModelCacheStorageError) as caught:
+            service._open_http_response(client, SOURCE, {})
+        assert caught.value.code == "model_cache.credentials_invalid"
+    finally:
+        client.close()
 
 
 def test_streamed_huggingface_response_is_consumed_before_cleanup(

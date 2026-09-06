@@ -64,8 +64,8 @@ def test_skopeo_production_transport_uses_real_inspect_copy_and_archive_commands
     assert 'executable: str = "/usr/bin/skopeo"' in source
     assert '"inspect"' in source
     assert '"copy"' in source
-    assert 'f"oci-archive:{destination}"' in source
-    assert 'f"oci-archive:{archive}"' in source
+    assert 'f"docker-archive:{destination}"' in source
+    assert 'f"docker-archive:{archive}"' in source
     assert "docker://{reference}" in source
     assert "--override-arch" in source
     assert "--override-os" in source
