@@ -2,7 +2,7 @@
 
 Updated 2026-09-06. This replaces the earlier status snapshot. Platform
 integration is `codex/interface-integration` at
-`cc0ab30c` (latest remote main `0ab88b4f` is included). Local checks, publication,
+`d8c32baa` (latest checked remote main `0ab88b4f` is included). Local checks, publication,
 Controller deployment and physical Spark execution remain separate results.
 No local result below claims a deployed Controller or NVIDIA workload.
 
@@ -10,18 +10,17 @@ No local result below claims a deployed Controller or NVIDIA workload.
 
 | Component | Verified result |
 |---|---|
-| Recipes | [PR72](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/72) merged at `32b4c094ba0bf6376d419cb06357fe76b160d944`; [v1.0.2](https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v1.0.2) published with 92 Models, 85 Recipes and 85 archives. |
-| Recipe checks | PR workflow `34021339495` and publication workflow `34021548983` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 358 passed, including 307 subtests. |
+| Recipes | [PR73](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/73) merged at `48b00c1f5f1bbd46ea7141d491b63f2697271923`; [v1.0.3](https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v1.0.3) published with 92 Models, 85 Recipes and 85 archives. Thirteen packages changed; 72 retain their bytes. |
+| Recipe checks | PR workflow `34025493486` and publication workflow `34025838414` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 420 passed, one skipped. Independent validator authority: `26a2dfa804d80a02a39cd42e6deae5f3b0ecc529`. |
 | Public website | PR58 merged at `7eb783d63c5ea87d2efea8834467ddcda52decfd`; workflow `33985962484` deployed canonical compact lists and documentation to `https://abd3b57b.vonk-forge-web.pages.dev`. |
 | Controller / Spark packages | Current platform integration is not yet published or deployed. |
 
-The v1.0.2 annotated tag points to the exact main commit above. GitHub reports
+The v1.0.3 annotated tag binds the exact main commit above. GitHub reports
 it as unsigned; the publication job name is not signature evidence. The
-release includes the Mia Qwen3.8 Flash Next dual-Spark vLLM Recipe and the
-first source-refresh batch: six changed/new archives and 79 retained archives.
-Audit reports record retained pins and follow-ups. Publication and structural
-validation do not establish that every engine accepts its options or runs on
-Spark hardware.
+release fixes two DS4 profiles, three SparkInfer profiles, four GLM profiles
+and four LTX profiles. The earlier v1.0.2 release includes the Mia Qwen3.8
+Flash Next dual-Spark vLLM Recipe and the first upstream refresh batch.
+Structural validation does not establish physical Spark inference.
 
 ## Product and work packet
 
@@ -61,7 +60,7 @@ Only a same-commit result explicitly marked current is reused. A partial sync
 retries missing items without refetching successful immutable imports. Seven
 focused tests passed, including fail-once recovery; pinned Ruff 0.16.1 passed.
 
-Bounded model-cache and Run/Switch retries are integrated from `49fe4c67`, including API/CLI routes and generated clients. They reuse the persisted plan/artifact digest, verified bytes and completed-node receipts. Authentication, integrity, permissions and exhausted storage are terminal. UI recovery is being wired to the new persisted retry endpoints; preview/apply is not a replacement for retry. Catalog withdrawal needs separate review: a partial remote
+Bounded model-cache and Run/Switch retries are integrated from `49fe4c67`, including API/CLI routes and generated clients. They reuse the persisted plan/artifact digest, verified bytes and completed-node receipts. Authentication, integrity, permissions and exhausted storage are terminal. UI recovery now uses the persisted retry endpoints, adopts returned operations and polls their progress. Terminal failures do not offer an invalid retry. The reviewed UI follow-up passed 199 Vitest tests, 18 Library browser journeys and its build. Catalog withdrawal needs separate review: a partial remote
 snapshot must never remove previously valid entries or immutable revisions.
 
 ## Every-Recipe engine verification
@@ -97,11 +96,42 @@ Completed branches merged during the audit:
 - Retired local authoring cleanup: `af0b1a96`, merged at `9d4f45ce`.
 - Current generated retry clients and verified supply-chain manifest: `cc0ab30c`.
 
-Historical CI/publication/installer changes are present through current integration; old skip-based CI patches should not be restored. The dirty original UI is superseded by the canonical compact paired lists. One uncommitted current-contract UI test correction was found in an old review checkout and assigned to the current UI owner. The independently fetched public web `7eb783d` tree is identical to historical launch `47f856fe`; it is already published under different commits. Recipe GLM/LTX/SparkInfer/Qwen/DS4 changes are carried by the sole v1.0.3 candidate. An older connected package-to-Controller-to-Library/API/CLI acceptance test was also found absent and is being rebuilt against the current contract. The standalone historical serving-evidence module is under semantic review against the producer-owned qualification path; its filename alone does not prove missing behavior.
+Historical CI/publication/installer changes are present through current integration; old skip-based CI patches should not be restored. The dirty original UI is superseded by the canonical compact paired lists. One uncommitted current-contract UI test correction was recovered in the current UI retry branch and merged. The independently fetched public web `7eb783d` tree is identical to historical launch `47f856fe`; it is already published under different commits. Recipe GLM/LTX/SparkInfer/Qwen/DS4 changes are carried by the sole v1.0.3 candidate. The recovered package-to-Controller-to-Library/API/CLI acceptance test is merged. Exact published-package, producer-freshness and credential-isolation checks pass; its connected Controller case remains environment-dependent. Historical serving execution and durable evidence were genuinely absent. Canonical serving execution and bounded response/evidence handling are now merged; the final assertion review is in progress. The old standalone authored contract was not restored.
 
-Combined checks at this snapshot: 169 receipt/compiler/API/direct tests passed; 92 focused tests passed with 13 skips; 64 development-slice tests passed with their real loopback fixture; 3 CLI parity tests passed. The source/wheel supply-chain verifier passed. The broader Controller/protocol run reached 1,205 passes and two skips, then stopped at 12 failures. Packaging, schema-1 development fixtures, stale compiler/admission fixtures, migration/progress expectations and portable privilege-drop checks have explicit owners. The approved obsolete installer jurisdiction input and documentation cleanup passed the bundle checks; the short-path installer/Tailscale rerun passed 37 tests. The initial Caddy published-socket refusal cleared on an isolated run; its test now waits a bounded interval for that host socket while preserving immediate TLS/authentication failures. This is not a green release gate yet.
+Combined checks: the latest broad Controller/protocol run at `b05d13e0`
+passed 2,378 tests, skipped 128 and found two failures; it excluded only the
+obsolete MIA corpus file under active cleanup. OrbStack was stopped during
+that run, so container-dependent skips are not acceptance. Both failures
+were corrected: the Docker packaging lock now agrees with the latest recipe
+source, and a mutation-ordering fixture advances its clock instead of relying
+on random UUID order at an identical timestamp. The two complete focused
+files then passed 57 tests with nine environment-dependent skips. The public
+contract wheel rebuilt from `48b00c1f` is byte-identical to the recorded wheel
+(`694a60b6…`); both lockfiles now bind that latest source.
 
-Published v1.0.2 QA covers exactly 85 Recipes, with no missing or duplicate rows. All 85 pass public contract, Model/package closure and every-role compilation. Current wrapper evidence is 82 pass, one GLM failure, and two direct-engine rows unverified. Actual parser evidence is 15 pass, two DS4 failures, and 68 unverified. Container startup and physical Spark execution remain unverified for the corpus. The v1.0.3 candidate fixes the GLM mismatch, both DS4 options, three SparkInfer pass-through defects, and the LTX compiled-wire fixture; candidate wrapper and DS4 compiler-to-parser checks passed. Publication is pending final generation and validation.
+Earlier integrated checks include 169 receipt/compiler/API/direct tests, 64
+development-slice tests, 37 installer/Tailscale tests, actual PostgreSQL
+contract checks and a real Caddy socket check. Those results retain their
+original source/environment boundaries. The disk-exhausted second broad run
+is invalid as a release gate; no SQLite/ENOSPC errors were concealed as passes.
+
+The exact v1.0.3 [per-Recipe QA ledger](evidence/recipe-engine-qa-2026-09-06.json)
+covers all 85 canonical publisher/slug identities. All 85 pass contract,
+Model/package closure and every-role compilation; 83 pass wrapper routing
+and two DS4 recipes invoke their engine directly. Actual engine parser
+acceptance is proven for 17, with 68 unverified. No corpus-wide container
+startup or physical Spark inference is claimed.
+
+Canonical recipe variants remain independent for the same Model, creator or
+Spark count. The sync lookup now uses publisher/slug and bounded query chunks,
+including a 257-identity regression. Creator attribution is visible in compact
+Recipe rows/details; a same-Model fixture preserves all four Recipe choices.
+
+Remaining source cleanup is explicitly owned: remove the platform's duplicate
+DS4/MIA definitions/adapters, retire development entrypoints that still read
+old public authorities, and bind supply-chain verification to current inputs.
+The signed helper-process harness is merged and awaits native ARM64 CI; its
+fixture projection is not a live Controller-to-Spark distribution observation.
 
 ## Remaining runtime and deployment checks
 

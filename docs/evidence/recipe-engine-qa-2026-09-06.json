@@ -1,0 +1,3201 @@
+{
+  "schema_version": 1,
+  "candidate_recipe_content_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+  "candidate_pr_head": "48b00c1f5f1bbd46ea7141d491b63f2697271923",
+  "candidate_catalog_source_commit": "e7ed01278954bbe2de95f877dabe5ebc5084d79f",
+  "candidate_recipe_count": 85,
+  "candidate_model_count": 92,
+  "counts": {
+    "contract": {
+      "pass": 85
+    },
+    "model_package": {
+      "pass": 85
+    },
+    "compile_each_role": {
+      "pass": 85
+    },
+    "wrapper_argv": {
+      "not_applicable": 2,
+      "pass": 83
+    },
+    "actual_engine_parser": {
+      "pass": 17,
+      "unverified": 68
+    },
+    "container_start": {
+      "unverified": 85
+    },
+    "physical_spark": {
+      "unverified": 85
+    }
+  },
+  "evidence_boundaries": {
+    "contract_model_package_compile": "static/package/shared-contract and canonical compiler evidence; not a container or GPU run",
+    "wrapper_argv": "real packaged adapter/wrapper parser or process capture where pass; direct engines are not_applicable",
+    "actual_engine_parser": "exact packaged/vendored parser was executed where pass; parser acceptance does not prove model load or inference",
+    "container_start": "requires actual pinned image start; remains unverified in these lanes",
+    "physical_spark": "requires physical DGX Spark execution; remains unverified"
+  },
+  "rows": [
+    {
+      "publisher": "vonk-forge",
+      "slug": "deepseek-v4-flash-0731-ds4-dspark-latency-single",
+      "recipe_content_sha256": "47003fb890da5d3a1d5a6af50c6dacce51822889d49eebadee65978421a93ad2",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "not_applicable",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/deepseek-v4-flash-0731-ds4-dspark-latency-single.structural.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/compile-binding-checks.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/ds4-engine-parser.json",
+        "/private/tmp/vonk-qa-ds4-source/ds4-f4d03f6/ds4-server",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/per-recipe-qa.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/deepseek-v4-flash-0731-ds4-dspark-latency-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-engine-parser-followup-20260906.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/tests/test_deepseek_ds4_recipe.py"
+      ],
+      "findings": [
+        "candidate recipe changed from baseline digest 42d803c8fc93c91f83846763cb6e6450b127612196be56a9974d6a432004df60 to 47003fb890da5d3a1d5a6af50c6dacce51822889d49eebadee65978421a93ad2; status overlays below apply to candidate changes",
+        "final candidate uses the corrected DS4 parser names; exact vendored CPU binary accepted the authored options and reached model opening; no wrapper exists"
+      ],
+      "baseline_recipe_content_sha256": "42d803c8fc93c91f83846763cb6e6450b127612196be56a9974d6a432004df60",
+      "baseline_source_commit": "f4d03f6cf9f11c1e7b630bcb160853acfba7c52a",
+      "recipe_version": "1.2.5",
+      "source_path": "recipes/deepseek-v4-flash-0731-ds4-dspark-latency-single.json",
+      "engine": "ds4",
+      "node_count": 1,
+      "source_reference": "https://github.com/antirez/ds4/tree/f4d03f6cf9f11c1e7b630bcb160853acfba7c52a",
+      "package_sha256": "c78705685e2038ad56c31f6221e5e0d247fdea123f8bce9160044591242bfc54"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "deepseek-v4-flash-0731-ds4-single",
+      "recipe_content_sha256": "1eb9889b96d5bab4f3d9b5684958005bf23bb8c7cbc0c8396a85b2043f81a515",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "not_applicable",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/deepseek-v4-flash-0731-ds4-single.structural.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/compile-binding-checks.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/ds4-engine-parser.json",
+        "/private/tmp/vonk-qa-ds4-source/ds4-f4d03f6/ds4-server",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/per-recipe-qa.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/deepseek-v4-flash-0731-ds4-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-engine-parser-followup-20260906.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/tests/test_deepseek_ds4_recipe.py"
+      ],
+      "findings": [
+        "candidate recipe changed from baseline digest 4123aec29b126d05ade3b09a0cd78ccb45e06d488d8282c0e7d6883ddefe034e to 1eb9889b96d5bab4f3d9b5684958005bf23bb8c7cbc0c8396a85b2043f81a515; status overlays below apply to candidate changes",
+        "final candidate uses the corrected DS4 parser names; exact vendored CPU binary accepted the authored options and reached model opening; no wrapper exists"
+      ],
+      "baseline_recipe_content_sha256": "4123aec29b126d05ade3b09a0cd78ccb45e06d488d8282c0e7d6883ddefe034e",
+      "baseline_source_commit": "f4d03f6cf9f11c1e7b630bcb160853acfba7c52a",
+      "recipe_version": "2.1.2",
+      "source_path": "recipes/deepseek-v4-flash-0731-ds4-single.json",
+      "engine": "ds4",
+      "node_count": 1,
+      "source_reference": "https://github.com/antirez/ds4/tree/f4d03f6cf9f11c1e7b630bcb160853acfba7c52a",
+      "package_sha256": "b09b537725b3e34af1a29be0b5a6997c8f365bd43446eb7b6bdf89d8d7bacfae"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "deepseek-v4-flash-0731-mia-dual",
+      "recipe_content_sha256": "54b5129727710e049a8b9379a1595289007c27de0a0e1afb3b6d1c2082f1381e",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/deepseek-v4-flash-0731-mia-dual.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/deepseek/mia-vllm/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/deepseek-v4-flash-0731-mia-dual.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper process capture stub recorded child argv after authored bindings",
+        "candidate recipe changed from baseline digest None to 54b5129727710e049a8b9379a1595289007c27de0a0e1afb3b6d1c2082f1381e; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.3.2",
+      "source_path": "recipes/deepseek-v4-flash-0731-mia-dual.json",
+      "engine": "vllm",
+      "node_count": 2,
+      "source_reference": "https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/tree/0107cef1835a56d1a2bcdabf7d9e1a085b70338b",
+      "package_sha256": "eb408d2559ab16b7aa3697eb4cf66495eb22cd6da31cec496f540ac76898a581"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "deepseek-v4-flash-0731-mia-sparkinfer-single",
+      "recipe_content_sha256": "ce71403841584a2bc5b8e34f4763ff3f2528b6174ab1e78e6d95fc2bd622a3ad",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/deepseek-v4-flash-0731-mia-sparkinfer-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/deepseek/mia-sparkinfer-single/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/deepseek-v4-flash-0731-mia-sparkinfer-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-vllm-qa-20260906/candidate-delta.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to ce71403841584a2bc5b8e34f4763ff3f2528b6174ab1e78e6d95fc2bd622a3ad; status overlays below apply to candidate changes",
+        "candidate shell wrapper forwarded opaque options to final launcher"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.4",
+      "source_path": "recipes/deepseek-v4-flash-0731-mia-sparkinfer-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-One-DGX-Spark/tree/fdcd538fbf95fb15b2d6850db9613d22b2c889b8",
+      "package_sha256": "b8d114c697e978288540a3da778036a7a2651ae7037e6d711d8de85bf017dd50"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "deepseek-v4-flash-0731-sparkinfer-single",
+      "recipe_content_sha256": "3996a4c1bf47f05fd98552df0431bbb1d30db28df1277d7660430680df990808",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/deepseek-v4-flash-0731-sparkinfer-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/deepseek/sparkinfer-single/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/deepseek-v4-flash-0731-sparkinfer-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-vllm-qa-20260906/candidate-delta.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 3996a4c1bf47f05fd98552df0431bbb1d30db28df1277d7660430680df990808; status overlays below apply to candidate changes",
+        "candidate shell wrapper forwarded opaque options to final launcher"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "0.1.5",
+      "source_path": "recipes/deepseek-v4-flash-0731-sparkinfer-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://github.com/0xSero/deepseek-v4-flash-0731-spark-sparkinfer/tree/590d2172394dd83c1f36ff29f0dc9ec6032ea9e2",
+      "package_sha256": "c69c6b8cd39e179d6672f65825d352ef29ead0890da096229f182c27d28794e1"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "deepseek-v4-flash-0731-sparkinfer-target-only-canary-single",
+      "recipe_content_sha256": "6ce38503aecd816fc0fd2b01b166f8959bb8dd1e4c9758c8dc76408aa33bcd6f",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/deepseek-v4-flash-0731-sparkinfer-target-only-canary-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/deepseek/sparkinfer-target-only-single/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/deepseek-v4-flash-0731-sparkinfer-target-only-canary-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-vllm-qa-20260906/candidate-delta.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 6ce38503aecd816fc0fd2b01b166f8959bb8dd1e4c9758c8dc76408aa33bcd6f; status overlays below apply to candidate changes",
+        "candidate shell wrapper forwarded opaque options to final launcher"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "0.1.3",
+      "source_path": "recipes/deepseek-v4-flash-0731-sparkinfer-target-only-canary-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://github.com/0xSero/deepseek-v4-flash-0731-spark-sparkinfer/tree/590d2172394dd83c1f36ff29f0dc9ec6032ea9e2",
+      "package_sha256": "4c4f9a848696928877b11b41d6ced7d27f866d52f1db557c61ff15d7f3e903b7"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "deepseek-v4-flash-vision-exp-mia-dual",
+      "recipe_content_sha256": "517dfa7fa5e73cce23f5ea4a6a10f70f18f921045bc8c7ae87a68d7c5f02ac0e",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/deepseek-v4-flash-vision-exp-mia-dual.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/deepseek/mia-vllm-vision/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/deepseek-v4-flash-vision-exp-mia-dual.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper process capture stub recorded child argv after authored bindings",
+        "candidate recipe changed from baseline digest None to 517dfa7fa5e73cce23f5ea4a6a10f70f18f921045bc8c7ae87a68d7c5f02ac0e; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.6",
+      "source_path": "recipes/deepseek-v4-flash-vision-exp-mia-dual.json",
+      "engine": "vllm",
+      "node_count": 2,
+      "source_reference": "https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/tree/c444d7032957f5a5437261d5366fd06b27a01760",
+      "package_sha256": "003389e3f855481d26aea0044a869e6ab7d4c740e487ecdaa501a6d2366be5c1"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "flux-2-klein-4b-comfyui-single",
+      "recipe_content_sha256": "5bd230ab28b93e6fe3c47b0c88e7d53f686f1e1cd4121b4a5dfbc6b97ec11d31",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/flux-2-klein-4b-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/flux-2-klein-4b-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/flux-2-klein-4b-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "5bd230ab28b93e6fe3c47b0c88e7d53f686f1e1cd4121b4a5dfbc6b97ec11d31",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.9",
+      "source_path": "recipes/flux-2-klein-4b-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/tree/5f526678002e43af5551dadb73ce2e8c91b43afe",
+      "package_sha256": "a470b28bda161c3f9daaa4de3a45af2f54f959e45380210151726f8987610216"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "flux-2-klein-4b-nvfp4-comfyui-single",
+      "recipe_content_sha256": "861bbd0f81ece0876f80cce203f6b464c63f834f775520e3db2d6a01b7d16491",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/flux-2-klein-4b-nvfp4-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/flux-2-klein-4b-nvfp4-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/flux-2-klein-4b-nvfp4-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "861bbd0f81ece0876f80cce203f6b464c63f834f775520e3db2d6a01b7d16491",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.6",
+      "source_path": "recipes/flux-2-klein-4b-nvfp4-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-nvfp4/tree/1db2b2f776c24b76f1122e5f69ab1949fc620068",
+      "package_sha256": "47a6a4bdc61ec427f9a17963a8006132527777d124ca9de4c349ddaa878e9725"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "gemma-4-26b-a4b-vllm-single",
+      "recipe_content_sha256": "516dce2ab7bf63a6ac3598497f68e3e76b893bc6e718619455357e5d6e1f58e0",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/gemma-4-26b-a4b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/vllm-openai/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/gemma-4-26b-a4b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 516dce2ab7bf63a6ac3598497f68e3e76b893bc6e718619455357e5d6e1f58e0; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.4",
+      "source_path": "recipes/gemma-4-26b-a4b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/google/gemma-4-26B-A4B-it/tree/4d7ae4984b7db7de8f8457170b3f1a419ee76d52",
+      "package_sha256": "f958119a1a88b34f7669295655f10ad3cb7d6c3ae09b9ee1f39b14854dc41513"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "gemma-4-26b-a4b-vllm028-single",
+      "recipe_content_sha256": "9ac10090abef24eccfc4d3f4ca6c44fedf8ac56cd6f7953a953b277182e97ae7",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/gemma-4-26b-a4b-vllm028-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/google/gemma4-vllm-028/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/gemma-4-26b-a4b-vllm028-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 9ac10090abef24eccfc4d3f4ca6c44fedf8ac56cd6f7953a953b277182e97ae7; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.2",
+      "source_path": "recipes/gemma-4-26b-a4b-vllm028-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/google/gemma-4-26B-A4B-it/tree/4d7ae4984b7db7de8f8457170b3f1a419ee76d52",
+      "package_sha256": "01635bbcf29c3152c83efd2920369c4f4dcbc4328fcd6531ec026cb7975d1874"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "glm-5-2-aqlm-vllm-triple",
+      "recipe_content_sha256": "a706c6a50d0c0bb951096b38408c19a31cc979014f0e333491ec3b19d4392fff",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/glm-5-2-aqlm-vllm-triple.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/glm/mia-triple/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/glm-5-2-aqlm-vllm-triple.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-root-glm-compiler-wrapper.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper preflight did not reach exec under bounded stub capture",
+        "candidate recipe changed from baseline digest None to a706c6a50d0c0bb951096b38408c19a31cc979014f0e333491ec3b19d4392fff; status overlays below apply to candidate changes",
+        "actual canonical compiler to packaged GLM wrapper process capture preserved opaque repeated/empty/JSON values and authored overrides; engine process and GPU were stubbed"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.7",
+      "source_path": "recipes/glm-5-2-aqlm-vllm-triple.json",
+      "engine": "vllm",
+      "node_count": 3,
+      "source_reference": "https://github.com/MiaAI-Lab/GLM-5.2-NVFP4-AQLM-Triple-DGX-Sparks/tree/5c85163ccb8d98d395880e71e2dbd03976a3f4ad",
+      "package_sha256": "265b7f2ec5c3ece8f90fc9dcea7be6d8b8a8fc7c5618a0a2fca75061e510795c"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "glm-5-2-quanttrio-vllm-four",
+      "recipe_content_sha256": "36e8e50ef695bdc7c6b5609e674f0bb3da7fbab3bb51869e6108a8ad064dff76",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/glm-5-2-quanttrio-vllm-four.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/glm/eugr-four/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/glm-5-2-quanttrio-vllm-four.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-root-glm-compiler-wrapper.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper process capture stub recorded child argv after authored bindings",
+        "candidate recipe changed from baseline digest None to 36e8e50ef695bdc7c6b5609e674f0bb3da7fbab3bb51869e6108a8ad064dff76; status overlays below apply to candidate changes",
+        "actual canonical compiler to packaged GLM wrapper process capture preserved opaque repeated/empty/JSON values and authored overrides; engine process and GPU were stubbed"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.5",
+      "source_path": "recipes/glm-5-2-quanttrio-vllm-four.json",
+      "engine": "vllm",
+      "node_count": 4,
+      "source_reference": "https://github.com/drowzeys/keys-GLM5.2-Quantrio-INT4-INT8-Mixed-Abliterated-C1-30toks-4x-DGX-Sparks/tree/296699b44e024de938cb8b3251d49d4b1306a507",
+      "package_sha256": "9af76e7d0259f892862c25d9b63e4a8f6ea13aa222403f2a4a882b480b6076dd"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "glm-5-3-flash-exl3-dflash2-vllm-dual",
+      "recipe_content_sha256": "98066a8e94161343c51072abafaea802344dcdf6ffbcb75b088f781b118473d9",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/glm-5-3-flash-exl3-dflash2-vllm-dual.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/glm/mia-exl3-dflash2-dual/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/glm-5-3-flash-exl3-dflash2-vllm-dual.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-root-glm-compiler-wrapper.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper process capture stub recorded child argv after authored bindings",
+        "candidate recipe changed from baseline digest None to 98066a8e94161343c51072abafaea802344dcdf6ffbcb75b088f781b118473d9; status overlays below apply to candidate changes",
+        "actual canonical compiler to packaged GLM wrapper process capture preserved opaque repeated/empty/JSON values and authored overrides; engine process and GPU were stubbed"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.4.1",
+      "source_path": "recipes/glm-5-3-flash-exl3-dflash2-vllm-dual.json",
+      "engine": "vllm",
+      "node_count": 2,
+      "source_reference": "https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks/tree/3021f24c88a0904c768c46ff22a508407e31360a",
+      "package_sha256": "4d1b9f3a5a95318f83ec2f4be155722e13477d20059a25f58c804bb111e8d2e7"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "glm-5-3-flash-nvfp4-ablit-l15-43-dflash2-vllm-dual",
+      "recipe_content_sha256": "07e04efb62c99d63d9043e1b3c9857b26fcf92249c4995184bc0532da58d2387",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/glm-5-3-flash-nvfp4-ablit-l15-43-dflash2-vllm-dual.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/glm/tonyd2wild-dflash2-dual/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/glm-5-3-flash-nvfp4-ablit-l15-43-dflash2-vllm-dual.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-vllm-qa-20260906/candidate-delta.json",
+        "/private/tmp/vonk-root-glm-compiler-wrapper.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper preflight did not reach exec under bounded stub capture",
+        "candidate recipe changed from baseline digest None to 07e04efb62c99d63d9043e1b3c9857b26fcf92249c4995184bc0532da58d2387; status overlays below apply to candidate changes",
+        "candidate wrapper forwarded the exact opaque ordered/repeated/empty/large JSON sequence",
+        "actual canonical compiler to packaged GLM wrapper process capture preserved opaque repeated/empty/JSON values and authored overrides; engine process and GPU were stubbed"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.6",
+      "source_path": "recipes/glm-5-3-flash-nvfp4-ablit-l15-43-dflash2-vllm-dual.json",
+      "engine": "vllm",
+      "node_count": 2,
+      "source_reference": "https://github.com/tonyd2wild/GLM-5.3-Flash-NVFP4-DFlash2-2x-DGX-Spark/tree/3eef46632c45ffb6c397de0716c23b3d2d594798",
+      "package_sha256": "f9af948c86a616ee688930a3f2deba644be3e7106497db19d5db5e74e2f8d27c"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual",
+      "recipe_content_sha256": "ab3944a1e7b681b055bad7f5d9937270d2b8421d7a24facd69fe805172cf0858",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/glm/drowzeys-glm53-1m/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-root-glm-compiler-wrapper.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper process capture stub recorded child argv after authored bindings",
+        "candidate recipe changed from baseline digest None to ab3944a1e7b681b055bad7f5d9937270d2b8421d7a24facd69fe805172cf0858; status overlays below apply to candidate changes",
+        "actual canonical compiler to packaged GLM wrapper process capture preserved opaque repeated/empty/JSON values and authored overrides; engine process and GPU were stubbed"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.5",
+      "source_path": "recipes/glm-5-3-flash-nvfp4-kv-1m-abliterated-vllm-dual.json",
+      "engine": "vllm",
+      "node_count": 2,
+      "source_reference": "https://github.com/drowzeys/keys-vLLm.0.27.1-GLM-5.3-Flash-NVFP4-NVFP4KV-1M-Context-Abliterated/tree/c36b5958412158a69629e7fbed321312e6d0761d",
+      "package_sha256": "a37b2105d949a7b1339f548e40bc1d975b2a116536cf987fed95e1229650b2a0"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "glm-5-3-flash-nvfp4-vllm-dual",
+      "recipe_content_sha256": "ed4bbd737acead3034f4b073cb32a75717c08fc135a2bf382f36a47ee35e5016",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/glm-5-3-flash-nvfp4-vllm-dual.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/glm/glm53-sm121/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/glm-5-3-flash-nvfp4-vllm-dual.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-root-glm-compiler-wrapper.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper process capture stub recorded child argv after authored bindings",
+        "candidate recipe changed from baseline digest None to ed4bbd737acead3034f4b073cb32a75717c08fc135a2bf382f36a47ee35e5016; status overlays below apply to candidate changes",
+        "actual canonical compiler to packaged GLM wrapper process capture preserved opaque repeated/empty/JSON values and authored overrides; engine process and GPU were stubbed"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.2.5",
+      "source_path": "recipes/glm-5-3-flash-nvfp4-vllm-dual.json",
+      "engine": "vllm",
+      "node_count": 2,
+      "source_reference": "https://github.com/MiaAI-Lab/GLM-5.3-Flash-NVFP4-Dual-DGX-Spark/tree/aed98a13ca75140d2691cc5c651ea5817d9a3e44",
+      "package_sha256": "92e89740fdf0c4293fc47c5ed4ed867214a68309eff39897eea645b4345d6377"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "glm-5-3-flash-nvfp4-vllm-four",
+      "recipe_content_sha256": "fa8d5144d8c1cacc2fa923813d42cd75958fcdb8193c9e4c59c5f261ae99727e",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/glm-5-3-flash-nvfp4-vllm-four.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/glm/glm53-sm121/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/glm-5-3-flash-nvfp4-vllm-four.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/vonk-root-glm-compiler-wrapper.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper process capture stub recorded child argv after authored bindings",
+        "candidate recipe changed from baseline digest None to fa8d5144d8c1cacc2fa923813d42cd75958fcdb8193c9e4c59c5f261ae99727e; status overlays below apply to candidate changes",
+        "actual canonical compiler to packaged GLM wrapper process capture preserved opaque repeated/empty/JSON values and authored overrides; engine process and GPU were stubbed"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.3.0",
+      "source_path": "recipes/glm-5-3-flash-nvfp4-vllm-four.json",
+      "engine": "vllm",
+      "node_count": 4,
+      "source_reference": "https://github.com/tonyd2wild/GLM-5.3-Flash-NVFP4-1M-KV-4x-DGX-Spark/tree/8fd2fcd27c04c7fa93e770000b818657f338875d",
+      "package_sha256": "1a31660b9de1c95f8b5b238d47921ba901d3bceb2d2712fe5d3c37be58bfd3e5"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "hunyuan-video-15-distilled-diffusers-single",
+      "recipe_content_sha256": "76f5f7603238b6d6b460ed4ae79b3ea75c83c207e1b172482a5edf8a188447bf",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/hunyuan-video-15-distilled-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/hunyuan-video-15-distilled-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/hunyuan-video-15-distilled-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/hunyuan-video-15-wrapper-argv-delta-32b4c094/delta.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available",
+        "wrapper_argv: packaged adapter imported unavailable runtime dependencies before argparse",
+        "actual packaged Python adapter parser accepted the compiled argv and repeated-option probe; inference dependencies/container/GPU were not run"
+      ],
+      "baseline_recipe_content_sha256": "76f5f7603238b6d6b460ed4ae79b3ea75c83c207e1b172482a5edf8a188447bf",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.4.4",
+      "source_path": "recipes/hunyuan-video-15-distilled-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/tencent/HunyuanVideo-1.5/tree/9b49404b3f5df2a8f0b31df27a0c7ab872e7b038",
+      "package_sha256": "f11c79b5c20506a50e7a51baad8cf0b47a2cfd5e2f481c6cadb6d0212c5bf6a7"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "hunyuan-video-15-i2v-step-distilled-diffusers-single",
+      "recipe_content_sha256": "9a64910660148814474c187c641ddd009ef12cf25530f45c7b8da50889d537a9",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/hunyuan-video-15-i2v-step-distilled-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/hunyuan-video-15-i2v-step-distilled-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/hunyuan-video-15-i2v-step-distilled-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/hunyuan-video-15-wrapper-argv-delta-32b4c094/delta.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available",
+        "wrapper_argv: packaged adapter imported unavailable runtime dependencies before argparse",
+        "actual packaged Python adapter parser accepted the compiled argv and repeated-option probe; inference dependencies/container/GPU were not run"
+      ],
+      "baseline_recipe_content_sha256": "9a64910660148814474c187c641ddd009ef12cf25530f45c7b8da50889d537a9",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.4.4",
+      "source_path": "recipes/hunyuan-video-15-i2v-step-distilled-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/tencent/HunyuanVideo-1.5/tree/9b49404b3f5df2a8f0b31df27a0c7ab872e7b038",
+      "package_sha256": "dccc5c6743c75e16853df33e9a5db7e30176e3e067f38d041d010d59eae810f7"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "hunyuan-video-15-t2v-diffusers-single",
+      "recipe_content_sha256": "e84c36248bc46e32ecf7db127acb3e9567baf8cc159e5ff80422e7a92948c80a",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/hunyuan-video-15-t2v-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/hunyuan-video-15-t2v-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/hunyuan-video-15-t2v-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json",
+        "/private/tmp/hunyuan-video-15-wrapper-argv-delta-32b4c094/delta.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available",
+        "wrapper_argv: packaged adapter imported unavailable runtime dependencies before argparse",
+        "actual packaged Python adapter parser accepted the compiled argv and repeated-option probe; inference dependencies/container/GPU were not run"
+      ],
+      "baseline_recipe_content_sha256": "e84c36248bc46e32ecf7db127acb3e9567baf8cc159e5ff80422e7a92948c80a",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.4.4",
+      "source_path": "recipes/hunyuan-video-15-t2v-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/tencent/HunyuanVideo-1.5/tree/9b49404b3f5df2a8f0b31df27a0c7ab872e7b038",
+      "package_sha256": "3e4bfa4b8e6bb7ca1cb411e868ce165fca8e514d65b8bdfd015dd84a7e122fc7"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "hunyuan-video-foley-xl-pytorch-single",
+      "recipe_content_sha256": "a09945b0aca571ea626a36b11f0790388cd2224bf9da051fe48b57e4c3d55b86",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/hunyuan-video-foley-xl-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/hunyuan-video-foley-xl-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [],
+      "baseline_recipe_content_sha256": "a09945b0aca571ea626a36b11f0790388cd2224bf9da051fe48b57e4c3d55b86",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.4.3",
+      "source_path": "recipes/hunyuan-video-foley-xl-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/tencent/HunyuanVideo-Foley/tree/3abd4e833b95b8db0fc9c687afc52483a48e9a97",
+      "package_sha256": "a986078d000e268612210ac1aa06a59bd15f12e4c4bff94b859d5a60a47747c9"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "hunyuan-video-foley-xxl-pytorch-single",
+      "recipe_content_sha256": "7c0b8a6d12161c97206113d5f098a9244a153d2c342f5bd996f780731245a480",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/hunyuan-video-foley-xxl-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/hunyuan-video-foley-xxl-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [],
+      "baseline_recipe_content_sha256": "7c0b8a6d12161c97206113d5f098a9244a153d2c342f5bd996f780731245a480",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.4.3",
+      "source_path": "recipes/hunyuan-video-foley-xxl-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/tencent/HunyuanVideo-Foley/tree/3abd4e833b95b8db0fc9c687afc52483a48e9a97",
+      "package_sha256": "c65d1adce040a436fbf8e24d9279940416f72af18103fa348bc71ddafc6d80a8"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "hunyuan3d-omni-pytorch-single",
+      "recipe_content_sha256": "26714eca6f379120c0788e8a22e3bcf6bb37d272a0e1f2dbb518dd7fb56c6a0b",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/hunyuan3d-omni-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/hunyuan3d-omni-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "parser capture unverified: packaged parser imports unavailable in the QA venv"
+      ],
+      "baseline_recipe_content_sha256": "26714eca6f379120c0788e8a22e3bcf6bb37d272a0e1f2dbb518dd7fb56c6a0b",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.8",
+      "source_path": "recipes/hunyuan3d-omni-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/tencent/Hunyuan3D-Omni/tree/70e803bfb4e127d534049d8ab8c8cb511780d485",
+      "package_sha256": "9b00fc919cd645dc45a3daca7dec016995d7e9eb6c913758c1a3a84c04522e1b"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "hunyuanocr-1-5-vllm-dflash-single",
+      "recipe_content_sha256": "e9cd42ac8d57932aaccc6cc296d9f48acd54eb9d2f080b7d863238c9ff5f0610",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/hunyuanocr-1-5-vllm-dflash-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/hunyuanocr-1-5-vllm-dflash-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [],
+      "baseline_recipe_content_sha256": "e9cd42ac8d57932aaccc6cc296d9f48acd54eb9d2f080b7d863238c9ff5f0610",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.2.3",
+      "source_path": "recipes/hunyuanocr-1-5-vllm-dflash-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/tencent/HunyuanOCR/tree/47644ecc4fc854efa4f505155158831f36773ee4",
+      "package_sha256": "672406f5562f3624865cded9db650f3086df4f99959a48604fb2c9b98ceeda68"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "inkling-975b-a41b-nvfp4-sglang-eight",
+      "recipe_content_sha256": "bb17dd226f1377deae995836850a39242b868c82aab8cce710b4e38a1acfde32",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/inkling-975b-a41b-nvfp4-sglang-eight.structural.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/compile-binding-checks.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/sglang-wrapper-capture-v3.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/per-recipe-qa.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/inkling-975b-a41b-nvfp4-sglang-eight.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "packaged SGLang wrapper captured exact child argv with ordered/repeated/empty/large values",
+        "actual SGLang parser unavailable in control venv and no runnable image was available"
+      ],
+      "baseline_recipe_content_sha256": "bb17dd226f1377deae995836850a39242b868c82aab8cce710b4e38a1acfde32",
+      "baseline_source_commit": "b7252cc6b0c78b25ecea7ee5efa91a6ae37d0f19",
+      "recipe_version": "1.0.7",
+      "source_path": "recipes/inkling-975b-a41b-nvfp4-sglang-eight.json",
+      "engine": "sglang",
+      "node_count": 8,
+      "source_reference": "https://github.com/sgl-project/sglang/tree/b7252cc6b0c78b25ecea7ee5efa91a6ae37d0f19",
+      "package_sha256": "194935efe28ea64184ee9554a0d78dd176b1529cf669f8f776de6199e04e78a4"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "inkling-small-nvfp4-sglang-dual",
+      "recipe_content_sha256": "d58fef1e3a7b61f07f67968f6b21d042bea34b3b4dd9151613200ab21b4da17b",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/inkling-small-nvfp4-sglang-dual.structural.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/compile-binding-checks.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/sglang-wrapper-capture-v3.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/per-recipe-qa.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/inkling-small-nvfp4-sglang-dual.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "packaged SGLang wrapper captured exact child argv with ordered/repeated/empty/large values",
+        "actual SGLang parser unavailable in control venv and no runnable image was available"
+      ],
+      "baseline_recipe_content_sha256": "d58fef1e3a7b61f07f67968f6b21d042bea34b3b4dd9151613200ab21b4da17b",
+      "baseline_source_commit": "a74222ef6e690f851e2e4ff1c0be7dc1357be313",
+      "recipe_version": "1.0.4",
+      "source_path": "recipes/inkling-small-nvfp4-sglang-dual.json",
+      "engine": "sglang",
+      "node_count": 2,
+      "source_reference": "https://github.com/sgl-project/sglang/blob/a74222ef6e690f851e2e4ff1c0be7dc1357be313/docs_new/src/snippets/configs/thinkingmachines/inkling-small.jsx",
+      "package_sha256": "45497a68a911efa5ef8941c34cb73dfc2b96a29f4cc3b72f9c53f70978bf2741"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "laguna-s-2-1-nvfp4-vllm-low-memory-canary-single",
+      "recipe_content_sha256": "31ba29430d0180535c6efb2254b4baaa8a88ab4863a242c06132ffae11760b16",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/laguna-s-vllm/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 31ba29430d0180535c6efb2254b4baaa8a88ab4863a242c06132ffae11760b16; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.4",
+      "source_path": "recipes/laguna-s-2-1-nvfp4-vllm-low-memory-canary-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/poolside/Laguna-S-2.1-NVFP4/tree/826aacdf6d8b2699d4e367def6f17c83b06044c2",
+      "package_sha256": "a75232da9351b5909ff4ca60b517aef4c4a1ba86039f5f0156b1680f73122f20"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "laguna-s-2-1-nvfp4-vllm-single",
+      "recipe_content_sha256": "c593eebc9efb306f3ecf8e80aa51ceb8b9cc9eced55efcd2329dd6615806bc0f",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/laguna-s-2-1-nvfp4-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/laguna-s-vllm/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/laguna-s-2-1-nvfp4-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to c593eebc9efb306f3ecf8e80aa51ceb8b9cc9eced55efcd2329dd6615806bc0f; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.8",
+      "source_path": "recipes/laguna-s-2-1-nvfp4-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/poolside/Laguna-S-2.1-NVFP4/tree/826aacdf6d8b2699d4e367def6f17c83b06044c2",
+      "package_sha256": "06f82cd6f5f3758d332556cce080c4706b442381da63ec25bf246018c95a6dc8"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "laguna-xs-2-1-nvfp4-vllm-single",
+      "recipe_content_sha256": "bf4dfd3e0ab4cacf461439683c82856fa74e96fdc7b79ff09f677452b8e52823",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/laguna-xs-2-1-nvfp4-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/laguna-vllm/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/laguna-xs-2-1-nvfp4-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to bf4dfd3e0ab4cacf461439683c82856fa74e96fdc7b79ff09f677452b8e52823; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.6",
+      "source_path": "recipes/laguna-xs-2-1-nvfp4-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/poolside/Laguna-XS-2.1-NVFP4/tree/d32afde8b09af1539b49ff96ff5551c674485f8e",
+      "package_sha256": "09c7579be3e8c0c9f4c709b8377e943eecfe97dd268bae60e4d7cb8c42d1ab55"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "lfm2-5-vl-3b-vllm-single",
+      "recipe_content_sha256": "0b74c1e8982b80c90a624491e1ea75851c8412923a918e5f3c69656598c83b13",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/lfm2-5-vl-3b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/liquidai/lfm25-vl-vllm/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/lfm2-5-vl-3b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 0b74c1e8982b80c90a624491e1ea75851c8412923a918e5f3c69656598c83b13; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.3",
+      "source_path": "recipes/lfm2-5-vl-3b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/LiquidAI/LFM2.5-VL-3B/tree/a3af5799199acdd2a4f56ac4342816abb46c12a9",
+      "package_sha256": "f6e951894040782a55801e74fc0d36931c2927c3dd86766db2f2695e9f2c4dd6"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "lfm2-5-vl-3b-vllm028-single",
+      "recipe_content_sha256": "ff79d759934c8bd0e85faa5f25b12d490e5269bdb578c53d56c94931bdb1b1ad",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/lfm2-5-vl-3b-vllm028-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/liquidai/lfm25-vl-vllm-028/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/lfm2-5-vl-3b-vllm028-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to ff79d759934c8bd0e85faa5f25b12d490e5269bdb578c53d56c94931bdb1b1ad; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.3",
+      "source_path": "recipes/lfm2-5-vl-3b-vllm028-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/LiquidAI/LFM2.5-VL-3B/tree/a3af5799199acdd2a4f56ac4342816abb46c12a9",
+      "package_sha256": "f4ce095e566a2a740e831e66aa02336a73069a8ae41c5ea96bf77ec26ffa74e0"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ling-3-0-flash-dspark-sglang-single",
+      "recipe_content_sha256": "089bfa0ef80281e2d3af9e435bc8c81025e45bfb33e139b932d2dd0ee2c07340",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/ling-3-0-flash-dspark-sglang-single.structural.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/compile-binding-checks.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/sglang-wrapper-capture-v3.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/per-recipe-qa.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ling-3-0-flash-dspark-sglang-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "packaged SGLang wrapper captured exact child argv with ordered/repeated/empty/large values",
+        "actual SGLang parser unavailable in control venv and no runnable image was available"
+      ],
+      "baseline_recipe_content_sha256": "089bfa0ef80281e2d3af9e435bc8c81025e45bfb33e139b932d2dd0ee2c07340",
+      "baseline_source_commit": "ca840cb8d032353e24648aeee06312b0938348f6",
+      "recipe_version": "1.0.5",
+      "source_path": "recipes/ling-3-0-flash-dspark-sglang-single.json",
+      "engine": "sglang",
+      "node_count": 1,
+      "source_reference": "https://github.com/MiaAI-Lab/Ling-3.0-Flash-SGLang-DSpark-DGX-Spark/blob/ca840cb8d032353e24648aeee06312b0938348f6/README.md",
+      "package_sha256": "8f1ef49de3b8c76bd10bc61349d5927d81aecce286b8e8fd790f8cc10e49437d"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ltx-2-19b-dev-bf16-diffusers-single",
+      "recipe_content_sha256": "05196f8ee2ab7cd27763dd0e777122897d292cab1d34e1f3c5096f2e03040e34",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/ltx-2-19b-dev-bf16-diffusers-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ltx-2-19b-dev-bf16-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "candidate recipe changed from baseline digest 33817fb7c2da6727b328e142e268b43936fe580934ede5e4f3ab00a0352064d1 to 05196f8ee2ab7cd27763dd0e777122897d292cab1d34e1f3c5096f2e03040e34; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": "33817fb7c2da6727b328e142e268b43936fe580934ede5e4f3ab00a0352064d1",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "3.2.6",
+      "source_path": "recipes/ltx-2-19b-dev-bf16-diffusers-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Lightricks/LTX-2/tree/dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
+      "package_sha256": "cd7c111eef03f6133c51c6698942ad6c22cbb9b326ef5e4abf6dda56af159fd2"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ltx-2-19b-dev-fp4-pytorch-single",
+      "recipe_content_sha256": "617e8bb17b22a3aac4cae9970d219d46422d6e9070eee9e78f2ed418842ed52b",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/ltx-2-19b-dev-fp4-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ltx-2-19b-dev-fp4-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [],
+      "baseline_recipe_content_sha256": "617e8bb17b22a3aac4cae9970d219d46422d6e9070eee9e78f2ed418842ed52b",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.3.5",
+      "source_path": "recipes/ltx-2-19b-dev-fp4-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Lightricks/LTX-2/tree/dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
+      "package_sha256": "85326587f550b91f3f5935540a06fd308c4e21b2ed98ec6e258663f2307216f6"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ltx-2-19b-distilled-diffusers-single",
+      "recipe_content_sha256": "652b41c345b427a2494e907615bcfcd81dbb67ce685ec8d018ed8b32d00959d3",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/ltx-2-19b-distilled-diffusers-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ltx-2-19b-distilled-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "candidate recipe changed from baseline digest e8292d87ae6ee06ade790459cab6320c036de8183010571675c7292d02aa843f to 652b41c345b427a2494e907615bcfcd81dbb67ce685ec8d018ed8b32d00959d3; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": "e8292d87ae6ee06ade790459cab6320c036de8183010571675c7292d02aa843f",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "3.1.6",
+      "source_path": "recipes/ltx-2-19b-distilled-diffusers-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Lightricks/LTX-2/tree/dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
+      "package_sha256": "ce25589728e1d56f795a3a753fc92bda81e4bf61e92b107ad98dd771cff1d38b"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ltx-2-19b-distilled-fp8-diffusers-single",
+      "recipe_content_sha256": "cc433d82d3e32bab129ba7cb0a90bbe7b1c6656273b905f40596d49457b3b23e",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/ltx-2-19b-distilled-fp8-diffusers-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ltx-2-19b-distilled-fp8-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "candidate recipe changed from baseline digest 6341c058dd89066fa1fac2d92548d2829166291737089d9cd2a819774fbcbf65 to cc433d82d3e32bab129ba7cb0a90bbe7b1c6656273b905f40596d49457b3b23e; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": "6341c058dd89066fa1fac2d92548d2829166291737089d9cd2a819774fbcbf65",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "3.1.6",
+      "source_path": "recipes/ltx-2-19b-distilled-fp8-diffusers-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Lightricks/LTX-2/tree/dfcc2108383fe1aaa0584bdf55d368a4bdadd90c",
+      "package_sha256": "0f210e6b06de1e3a8d2da0a82f6cf7d33d1ad166a31ac04513ca75701e434e08"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ltx-2-3-22b-distilled-1-1-diffusers-single",
+      "recipe_content_sha256": "9fbecd06cd1c9b3c4f953b35d8a02d5ee8a4d5d825fadb0de380d47d5dbdcffb",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/ltx-2-3-22b-distilled-1-1-diffusers-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ltx-2-3-22b-distilled-1-1-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "candidate recipe changed from baseline digest 5294423c2e964dc1131d79da5f7a0d7755f2f3e21f2319566f6bfba697c605f2 to 9fbecd06cd1c9b3c4f953b35d8a02d5ee8a4d5d825fadb0de380d47d5dbdcffb; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": "5294423c2e964dc1131d79da5f7a0d7755f2f3e21f2319566f6bfba697c605f2",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "3.2.7",
+      "source_path": "recipes/ltx-2-3-22b-distilled-1-1-diffusers-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Lightricks/LTX-2.3/tree/6b5a83e3045eaf8e46cfa0acce512412aa2b9cce",
+      "package_sha256": "95f708b16136573a6f57e13d8e9fd7ff6356ffb6b6b5605d7fcf23146585e607"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ltx-2-5-22b-distilled-bf16-diffusers-single",
+      "recipe_content_sha256": "6d31e81944371ace76774acbfe8a30510ccff502a78d61b8ff98349c1ee6b08f",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/ltx-2-5-22b-distilled-bf16-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/ltx-2-5-22b-distilled-bf16-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ltx-2-5-22b-distilled-bf16-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "6d31e81944371ace76774acbfe8a30510ccff502a78d61b8ff98349c1ee6b08f",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.1.5",
+      "source_path": "recipes/ltx-2-5-22b-distilled-bf16-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Lightricks/LTX-2.5-Diffusers/tree/426936f8b22dc28e4def61e515478b0b7e4a53cc",
+      "package_sha256": "1da201586a5e998fd8b65d937e32ac6e13412ee71deef16c783b67fcad887b79"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ltx-2-5-22b-distilled-fp8-cast-diffusers-single",
+      "recipe_content_sha256": "18228fadc42b63ba0545fac001a8b730fed730f7d14b046da796df5f40ce94f9",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/ltx-2-5-22b-distilled-fp8-cast-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/ltx-2-5-22b-distilled-fp8-cast-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ltx-2-5-22b-distilled-fp8-cast-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "18228fadc42b63ba0545fac001a8b730fed730f7d14b046da796df5f40ce94f9",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.5",
+      "source_path": "recipes/ltx-2-5-22b-distilled-fp8-cast-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Lightricks/LTX-2.5-Diffusers/tree/426936f8b22dc28e4def61e515478b0b7e4a53cc",
+      "package_sha256": "e9f94400a810e57ad58adf73e3bcf98c73b284cff323691365f70451a804ca66"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "minimax-h3-diffusers-single",
+      "recipe_content_sha256": "a17f82034a0d5fd3679ea0e87775ef87fe2f1fa4da83883a05191620d16be771",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/minimax-h3-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/minimax-h3-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/minimax-h3-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "a17f82034a0d5fd3679ea0e87775ef87fe2f1fa4da83883a05191620d16be771",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "3.0.5",
+      "source_path": "recipes/minimax-h3-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/MiniMaxAI/MiniMax-H3/tree/42ed227ee7df40d41602854ae760620d6eb651fe",
+      "package_sha256": "13610a9f0ec17de6f180a1d7bf09f2b6eb0e8b404f709409c35e829c6b235dcc"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "minimax-h3-fl2va-diffusers-single",
+      "recipe_content_sha256": "c7e4de1eb860e522919a852c8711135ed85f928f0954f32803bec1735f4e0710",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/minimax-h3-fl2va-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/minimax-h3-fl2va-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/minimax-h3-fl2va-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "c7e4de1eb860e522919a852c8711135ed85f928f0954f32803bec1735f4e0710",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.6",
+      "source_path": "recipes/minimax-h3-fl2va-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/MiniMaxAI/MiniMax-H3/tree/42ed227ee7df40d41602854ae760620d6eb651fe",
+      "package_sha256": "fe8ca98313ca0999b76d2fff8e98e6e8a2cb621a78e54dabcef13bd5904d4a76"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "moss-vl-realtime-11b-pytorch-single",
+      "recipe_content_sha256": "f441b4503252b8c4cfed62ea5bdc4a14e974cc9dd4541e3bda51b9037320c500",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/moss-vl-realtime-11b-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/moss-vl-realtime-11b-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "parser capture unverified: packaged parser imports unavailable in the QA venv"
+      ],
+      "baseline_recipe_content_sha256": "f441b4503252b8c4cfed62ea5bdc4a14e974cc9dd4541e3bda51b9037320c500",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.6",
+      "source_path": "recipes/moss-vl-realtime-11b-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/OpenMOSS-Team/MOSS-VL-Realtime/tree/25e81cb952d5f353a5690f2c1ea09a725815df80",
+      "package_sha256": "449ffb617c1416c8d1780dfd2db1ff539f45650ae0b8c498068c4cc7a18fc141"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "mova-360p-diffusers-single",
+      "recipe_content_sha256": "e8eddf6b00e0e9c8c67edc0f33a292b925e02ceeb4ae824c916b993e5cc42d21",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/mova-360p-diffusers-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/mova-360p-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [],
+      "baseline_recipe_content_sha256": "e8eddf6b00e0e9c8c67edc0f33a292b925e02ceeb4ae824c916b993e5cc42d21",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.9",
+      "source_path": "recipes/mova-360p-diffusers-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/OpenMOSS-Team/MOVA-360p/tree/eab4aa91d6d5eb515e259a0c8533c90062b117a5",
+      "package_sha256": "4131cbf27572b8cf9c1fb6dcff4b8b3cee8eca40013d837ed33a7d84fe019370"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "mova-720p-diffusers-single",
+      "recipe_content_sha256": "96d319d04c5efd5b8a32c7331a2fd509ee07d8b4b5ac8b6ae7d0fcd85b5f3eef",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/mova-720p-diffusers-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/mova-720p-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [],
+      "baseline_recipe_content_sha256": "96d319d04c5efd5b8a32c7331a2fd509ee07d8b4b5ac8b6ae7d0fcd85b5f3eef",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.9",
+      "source_path": "recipes/mova-720p-diffusers-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/OpenMOSS-Team/MOVA-720p/tree/8462bea9a317a3591279faeedfd3ca01b055cb59",
+      "package_sha256": "b4d78765da057b41b8a9592eb3bf476bf2860f6c0eb5e5cc9b5f27127448bbfc"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "muse-glimmer-30b-bf16-vllm-single",
+      "recipe_content_sha256": "c6cecb8e7c19f17ae7fe261ac8d07ba2fcaf9ffd7c4545755cfd6134b2b82284",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/muse-glimmer-30b-bf16-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/muse-glimmer-vllm/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/muse-glimmer-30b-bf16-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to c6cecb8e7c19f17ae7fe261ac8d07ba2fcaf9ffd7c4545755cfd6134b2b82284; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.5",
+      "source_path": "recipes/muse-glimmer-30b-bf16-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/meta-models/Muse-Glimmer-30B/tree/a4e59da52a7bc87ae7251dd5545c0dd437c44b68",
+      "package_sha256": "b27b4bcc3a2ac1cdeed579383112785b0fcf1cf2fe062309b886c8723c36a0d5"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "nemotron-3-5-lightning-30b-a3b-vllm-dspark-latency-single",
+      "recipe_content_sha256": "25272e48dda3cf1afe99920bd869d781ec3fdee5a291d879f74eec85dd5d44b3",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/nemotron-3-5-lightning-30b-a3b-vllm-dspark-latency-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/nvidia/nemotron/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/nemotron-3-5-lightning-30b-a3b-vllm-dspark-latency-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 25272e48dda3cf1afe99920bd869d781ec3fdee5a291d879f74eec85dd5d44b3; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.5",
+      "source_path": "recipes/nemotron-3-5-lightning-30b-a3b-vllm-dspark-latency-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4/tree/cc84af2fe71647d87f4486c064f320e1e7535243",
+      "package_sha256": "277d4b54b1eb972f3336d9a9c98668b167cf33f21c7df8f3ff76058492108020"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "nemotron-3-5-lightning-30b-a3b-vllm-single",
+      "recipe_content_sha256": "3ca878778fea992f397f649de4964bc3ba2184add38c122fd192bc9991b7e7b4",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/nemotron-3-5-lightning-30b-a3b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/nvidia/nemotron/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/nemotron-3-5-lightning-30b-a3b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 3ca878778fea992f397f649de4964bc3ba2184add38c122fd192bc9991b7e7b4; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.3.6",
+      "source_path": "recipes/nemotron-3-5-lightning-30b-a3b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4/tree/cc84af2fe71647d87f4486c064f320e1e7535243",
+      "package_sha256": "e99b1641b7573cf803e3041974eb007c7afc5d25ed79877ea25f9617180a5d08"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "nemotron-3-5-lightning-dspark-lowmem-canary-single",
+      "recipe_content_sha256": "c82c266b02a1a163c81cf6c82c228e78697982716ff3238acb4712fdf0c91a47",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/nemotron-3-5-lightning-dspark-lowmem-canary-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/nvidia/nemotron/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/nemotron-3-5-lightning-dspark-lowmem-canary-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to c82c266b02a1a163c81cf6c82c228e78697982716ff3238acb4712fdf0c91a47; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.2",
+      "source_path": "recipes/nemotron-3-5-lightning-dspark-lowmem-canary-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4/tree/cc84af2fe71647d87f4486c064f320e1e7535243",
+      "package_sha256": "a65db8fe97331e70a521e0313b2917adcd56a7b921591fa1af9e9da0522c12dd"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "nemotron-3-nano-30b-a3b-vllm-single",
+      "recipe_content_sha256": "748e53ec5d457891b2eb1770212585da95d4c82b2c19b60f86a6a637e06311b1",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/nemotron-3-nano-30b-a3b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/nvidia/nemotron-vllm-0-20-0/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/nemotron-3-nano-30b-a3b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 748e53ec5d457891b2eb1770212585da95d4c82b2c19b60f86a6a637e06311b1; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.6",
+      "source_path": "recipes/nemotron-3-nano-30b-a3b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4/tree/ce1b118ae66ec705d02c241525192832eb045fd3",
+      "package_sha256": "d8095ca867f1b4d44379cc639ea5129b531b0f9bf2ae827a8e53bbb602feaa6d"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "nemotron-3-nano-omni-30b-a3b-vllm-single",
+      "recipe_content_sha256": "47a9003f082ab80d377bd0aecf2e587c394764eae8e2a87d41d341efba7f7094",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/nemotron-3-nano-omni-30b-a3b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/nvidia/nemotron-vllm-0-20-0/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/nemotron-3-nano-omni-30b-a3b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 47a9003f082ab80d377bd0aecf2e587c394764eae8e2a87d41d341efba7f7094; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.7",
+      "source_path": "recipes/nemotron-3-nano-omni-30b-a3b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4/tree/16993199e436da4ba75ddc410855f87e0d996ee6",
+      "package_sha256": "4795913f005addd63e0d334c448fd4440edc5413f3a9c446b15aa4d1fde71c9f"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "nemotron-3-super-120b-a12b-vllm-single",
+      "recipe_content_sha256": "0ede708d8617f8179e747f323da82f73f0787e43a9e5ed120bf5897c084c488c",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/nemotron-3-super-120b-a12b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/vllm-openai/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/nemotron-3-super-120b-a12b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 0ede708d8617f8179e747f323da82f73f0787e43a9e5ed120bf5897c084c488c; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.1.6",
+      "source_path": "recipes/nemotron-3-super-120b-a12b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4/tree/ff433f5493e25d631c9f12b5d55c674229923d02",
+      "package_sha256": "bff33fa2874985a6e970f2bb242334f8c41478d69629a10d92045d64ed58c022"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "nvidia-qwen-image-flash-diffusers-single",
+      "recipe_content_sha256": "8102d933ed362537dc815dc0ae0d3a82485275e43cc3f1dde6ba0d7dbd3a8619",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/nvidia-qwen-image-flash-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/nvidia-qwen-image-flash-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/nvidia-qwen-image-flash-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "8102d933ed362537dc815dc0ae0d3a82485275e43cc3f1dde6ba0d7dbd3a8619",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.2.6",
+      "source_path": "recipes/nvidia-qwen-image-flash-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/nvidia/Qwen-Image-Flash/tree/eafac15f6140e6dd9c6031217d658ac10bfb604b",
+      "package_sha256": "4c795e76fd0dc222ad1a49b0cfd15a9c373e2a39814fca95c9e83d51fd51c435"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ornith-1-5-35b-a3b-nvfp4-vllm-single",
+      "recipe_content_sha256": "abe291824db78623d727b502b8585563b0297d1ab032bc8c00377decb889e573",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/ornith-1-5-35b-a3b-nvfp4-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/vllm-openai/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ornith-1-5-35b-a3b-nvfp4-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to abe291824db78623d727b502b8585563b0297d1ab032bc8c00377decb889e573; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.2",
+      "source_path": "recipes/ornith-1-5-35b-a3b-nvfp4-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/ornith-ai/Ornith-1.5-35B-A3B-NVFP4/tree/94e431d9cc47fa1986a7a1a4e9a80f7f118b03aa",
+      "package_sha256": "5665d3ab4f3c31e0a2e10a72cb28d515e082c97c03046c9b1e9e48debd912d05"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "pixal3d-pytorch-single",
+      "recipe_content_sha256": "7c43cce575fa7e21a947bddba5602d1ea1e687b16a06bc342725235992a76ff6",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/pixal3d-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/pixal3d-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "parser capture unverified: archive has no conventional run.py/main.py/generate.py"
+      ],
+      "baseline_recipe_content_sha256": "7c43cce575fa7e21a947bddba5602d1ea1e687b16a06bc342725235992a76ff6",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.7",
+      "source_path": "recipes/pixal3d-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://github.com/TencentARC/Pixal3D/tree/f7cf38429b0bd264f1995f0f8743a88b1c728b94",
+      "package_sha256": "d84e92cae57f5b4035b903e2fc79741d2d06eaa70a932433d9fd4ecc92e0a93a"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-2512-comfyui-single",
+      "recipe_content_sha256": "6e6f232c793651608769b018c5243de6ed39c519e5c598b8e53d531085241efa",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-2512-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-2512-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-2512-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "6e6f232c793651608769b018c5243de6ed39c519e5c598b8e53d531085241efa",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.10",
+      "source_path": "recipes/qwen-image-2512-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/tree/7beb7b647f04469fbe64ba8adc2bb0d7e5e9f73f",
+      "package_sha256": "f97bad0ff50c0b820ccaa7614aacc7638e4fdf17b63f05232c8a813a02a0fb97"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-2512-diffusers-single",
+      "recipe_content_sha256": "f615ceb1316636ef10d738bd2bf9a66d5a50a4b1954deefb09023fd11588f4dd",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-2512-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-2512-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-2512-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "f615ceb1316636ef10d738bd2bf9a66d5a50a4b1954deefb09023fd11588f4dd",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.2.6",
+      "source_path": "recipes/qwen-image-2512-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Qwen/Qwen-Image-2512/tree/25468b98e3276ca6700de15c6628e51b7de54a26",
+      "package_sha256": "67eb8291d8313d1fee738fccedea493b773e0ba2b23b01413366c8c03517a0a8"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-2512-fp8-lightning-comfyui-single",
+      "recipe_content_sha256": "b16ceff40e2fd8db6b86395579dc80369f7ccc8c0574ded3a6b9ba790e4c0b06",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-2512-fp8-lightning-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-2512-fp8-lightning-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-2512-fp8-lightning-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "b16ceff40e2fd8db6b86395579dc80369f7ccc8c0574ded3a6b9ba790e4c0b06",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.6",
+      "source_path": "recipes/qwen-image-2512-fp8-lightning-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/lightx2v/Qwen-Image-2512-Lightning/tree/a52649c9d0f6e1a248bff13f0df33bb8a2abdb52",
+      "package_sha256": "1dfa42b87313c0a618e92803395fe50d46f6a339d268538ca903b314b02c2569"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-2512-lightning-diffusers-single",
+      "recipe_content_sha256": "e556f182cb30e04d0d9f44307595a880b2540bc1965fa700183969b134137267",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-2512-lightning-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-2512-lightning-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-2512-lightning-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "e556f182cb30e04d0d9f44307595a880b2540bc1965fa700183969b134137267",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.2.8",
+      "source_path": "recipes/qwen-image-2512-lightning-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/lightx2v/Qwen-Image-2512-Lightning/tree/a52649c9d0f6e1a248bff13f0df33bb8a2abdb52",
+      "package_sha256": "f993403d922164bc7e207f062e1a292992d46ba14f5d3784a63f39253c3da031"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-edit-2511-comfyui-single",
+      "recipe_content_sha256": "b1041893acd652dd449e12281a4ba9aed86f223f90be797d01aba02501f799ba",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-edit-2511-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-edit-2511-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-edit-2511-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "b1041893acd652dd449e12281a4ba9aed86f223f90be797d01aba02501f799ba",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.10",
+      "source_path": "recipes/qwen-image-edit-2511-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/tree/b6a0794717d3f5600f85c5edcdcd0c0eb93d7446",
+      "package_sha256": "c652e8afd6f467eff4d867a8d220a5bc0fe99cd946c48c5e61a9122c929b2a83"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-edit-2511-diffusers-single",
+      "recipe_content_sha256": "14f67a8dcf48c87695c14848a8839077a85b5bd7cbdbc4c5b9ea6b13f2924c82",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-edit-2511-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-edit-2511-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-edit-2511-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "14f67a8dcf48c87695c14848a8839077a85b5bd7cbdbc4c5b9ea6b13f2924c82",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.1.7",
+      "source_path": "recipes/qwen-image-edit-2511-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Qwen/Qwen-Image-Edit-2511/tree/6f3ccc0b56e431dc6a0c2b2039706d7d26f22cb9",
+      "package_sha256": "24495c2193a6f1e123e894f8164c3e0980a513ec5661be7fa7dc219ba9a7fd9d"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-edit-2511-fp8mixed-comfyui-single",
+      "recipe_content_sha256": "2dfaa93d75fb952dabd6753f57cc536ba967c54f01567e8dcb0236c068aae4a9",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-edit-2511-fp8mixed-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-edit-2511-fp8mixed-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-edit-2511-fp8mixed-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "2dfaa93d75fb952dabd6753f57cc536ba967c54f01567e8dcb0236c068aae4a9",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.7",
+      "source_path": "recipes/qwen-image-edit-2511-fp8mixed-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/tree/4c7c4ea236326cbae56d403d22a03c6cd86ad9a0",
+      "package_sha256": "e6fe92c702bc2c436a692f832ce6640eeda9851386a5d05cca78160f3fe8ad7e"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-edit-2511-int8-convrot-comfyui-single",
+      "recipe_content_sha256": "217bb48bca91f3451ac3da101457aadd6a1ecbdb47edd2873f7b76d03be8e2bd",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-edit-2511-int8-convrot-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-edit-2511-int8-convrot-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-edit-2511-int8-convrot-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "217bb48bca91f3451ac3da101457aadd6a1ecbdb47edd2873f7b76d03be8e2bd",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.6",
+      "source_path": "recipes/qwen-image-edit-2511-int8-convrot-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/tree/e9e85de74a8f48c1e3e2656617626348675a2f21",
+      "package_sha256": "22982962a3bb7cb008cb26e8fe88f284df4d5c93252db9fd011668b5c22e6190"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-edit-2511-lightning-diffusers-single",
+      "recipe_content_sha256": "58cf237f54ad2906bb04f1d259e72b6e4b9cd487847383d80f104e01e63c32b5",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-edit-2511-lightning-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-edit-2511-lightning-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-edit-2511-lightning-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "58cf237f54ad2906bb04f1d259e72b6e4b9cd487847383d80f104e01e63c32b5",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.2.8",
+      "source_path": "recipes/qwen-image-edit-2511-lightning-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/lightx2v/Qwen-Image-Edit-2511-Lightning/tree/d74eba145674fd7e31b949324e148e21e7118abd",
+      "package_sha256": "9bf341ca2e8bfd9eb8c6121cbbdaac6cb721d1d3dcd6e3ecfe9fda18e6e0fdff"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen-image-layered-diffusers-single",
+      "recipe_content_sha256": "b60de94f35a5fdb0c74bccbb973bb2459d6d6dd4f3403f06a84882c52f78a10a",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/qwen-image-layered-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/qwen-image-layered-diffusers-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/diffusers.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen-image-layered-diffusers-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "b60de94f35a5fdb0c74bccbb973bb2459d6d6dd4f3403f06a84882c52f78a10a",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.1.9",
+      "source_path": "recipes/qwen-image-layered-diffusers-single.json",
+      "engine": "diffusers",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Qwen/Qwen-Image-Layered/tree/8f0ca708dfff6ba1dd5f2d85d78f8c108a040bcf",
+      "package_sha256": "fef559d8d4dd3ad4c5e434dd9b3e073161770a924ae62c38764b78b1f1a4aee7"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen3-5-9b-vllm-single",
+      "recipe_content_sha256": "3458c1a62b34259a9a8efada3dc4861e0ee0e103819431201e3b1567b17ba23b",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/qwen3-5-9b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/qwen35-vllm/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen3-5-9b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 3458c1a62b34259a9a8efada3dc4861e0ee0e103819431201e3b1567b17ba23b; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.4",
+      "source_path": "recipes/qwen3-5-9b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Qwen/Qwen3.5-9B/tree/c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+      "package_sha256": "1f5b6283d05fc3495d42709ec387e650b3bea62d90b0c6e8a793f193f0ed363d"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen3-6-27b-vllm-single",
+      "recipe_content_sha256": "9d86fafea72f531da0a9811f68786936816972dbc1b9405aa57693563624a3bd",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/qwen3-6-27b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/vllm-openai-028/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen3-6-27b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 9d86fafea72f531da0a9811f68786936816972dbc1b9405aa57693563624a3bd; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.4",
+      "source_path": "recipes/qwen3-6-27b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Qwen/Qwen3.6-27B/tree/6a9e13bd6fc8f0983b9b99948120bc37f49c13e9",
+      "package_sha256": "62d602926719c160a920359320d9fb1bf62c6d61290dc996f7b42089fdcb70f6"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen3-6-35b-a3b-nvfp4-vllm-single",
+      "recipe_content_sha256": "2e241824d4ec73eb7a38e50d7028e64918c4d42e458f5a6f129e5762b486548e",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/qwen3-6-35b-a3b-nvfp4-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/nvidia/qwen36-35b-vllm/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen3-6-35b-a3b-nvfp4-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 2e241824d4ec73eb7a38e50d7028e64918c4d42e458f5a6f129e5762b486548e; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.5",
+      "source_path": "recipes/qwen3-6-35b-a3b-nvfp4-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/nvidia/Qwen3.6-35B-A3B-NVFP4/tree/1355db6a052410cfd62085d94b58866fd0f2c3c5",
+      "package_sha256": "bebf4077d417eaa53662200d7c612729b334b6d73cc8a726a77e5b732a848239"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen3-8-27b-fp8-vllm-single",
+      "recipe_content_sha256": "5c76bd4e2c88912372d1b9162cbceeeaa4d9c55e36d983859e6380c8864baeed",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/qwen3-8-27b-fp8-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/vllm-openai-028/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen3-8-27b-fp8-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 5c76bd4e2c88912372d1b9162cbceeeaa4d9c55e36d983859e6380c8864baeed; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.4",
+      "source_path": "recipes/qwen3-8-27b-fp8-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Qwen/Qwen3.8-27B-FP8/tree/017b9c7af6b5689d5dd426a76e0bc077eb5ca20a",
+      "package_sha256": "f34ed6c03e407890781ab0f75a33a086f1548705f65225f21277a288b6dbafbf"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen3-8-27b-nvfp4-dspark-sglang-single",
+      "recipe_content_sha256": "c9a73baf25f23af63f3d9558debb18c6b1278d2136795e2f4d1df5f32b4067db",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/qwen3-8-27b-nvfp4-dspark-sglang-single.structural.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/compile-binding-checks.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/sglang-wrapper-capture-v3.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/per-recipe-qa.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen3-8-27b-nvfp4-dspark-sglang-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "packaged SGLang wrapper captured exact child argv with ordered/repeated/empty/large values",
+        "actual SGLang parser unavailable in control venv and no runnable image was available"
+      ],
+      "baseline_recipe_content_sha256": "c9a73baf25f23af63f3d9558debb18c6b1278d2136795e2f4d1df5f32b4067db",
+      "baseline_source_commit": "9d21dcd331232792e7d39f4f84db7dd46635905d",
+      "recipe_version": "1.1.4",
+      "source_path": "recipes/qwen3-8-27b-nvfp4-dspark-sglang-single.json",
+      "engine": "sglang",
+      "node_count": 1,
+      "source_reference": "https://github.com/MiaAI-Lab/Qwen3.8-27B-SGLang-DGX-Spark/tree/9d21dcd331232792e7d39f4f84db7dd46635905d",
+      "package_sha256": "e2939a9fdba294bd72d30d277bb119eb4babd3d9345f1f9e3289bfa3a5f39e39"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen3-8-27b-vllm-single",
+      "recipe_content_sha256": "79dd365e2bfc97559a189b253e420fef545f0c5944e69f371a68de543644283d",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/qwen3-8-27b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/vllm-openai-028/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen3-8-27b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 79dd365e2bfc97559a189b253e420fef545f0c5944e69f371a68de543644283d; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.4",
+      "source_path": "recipes/qwen3-8-27b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Qwen/Qwen3.8-27B/tree/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+      "package_sha256": "e972a944a56b1a5507af7c0bd7cff740260d1c745d8a82fcb64456a4f02827b2"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen3-8-flash-next-nvfp4-sglang-dual",
+      "recipe_content_sha256": "2b5758027ac2747f18ae4057386a841d96b99349ec6d1a6ea500406699efe5c4",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/qwen3-8-flash-next-nvfp4-sglang-dual.structural.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/compile-binding-checks.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/sglang-wrapper-capture-v3.json",
+        "/private/tmp/vonk-qa-published-recipes-final-32b4/per-recipe-qa.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen3-8-flash-next-nvfp4-sglang-dual.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "packaged SGLang wrapper captured exact child argv with ordered/repeated/empty/large values",
+        "actual SGLang parser unavailable in control venv and no runnable image was available"
+      ],
+      "baseline_recipe_content_sha256": "2b5758027ac2747f18ae4057386a841d96b99349ec6d1a6ea500406699efe5c4",
+      "baseline_source_commit": "0f950012c8d8323acac9a08846a32ef7953f5f62",
+      "recipe_version": "1.3.4",
+      "source_path": "recipes/qwen3-8-flash-next-nvfp4-sglang-dual.json",
+      "engine": "sglang",
+      "node_count": 2,
+      "source_reference": "https://github.com/MiaAI-Lab/Qwen3.8-Flash-Next-Dual-DGX-Sparks/tree/0f950012c8d8323acac9a08846a32ef7953f5f62",
+      "package_sha256": "e7dfee30da9777809a527ef4ac88121c67eda3680f7ff65bf439a7eeb1fbd2ed"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "qwen3-8-flash-next-nvfp4-vllm-dual",
+      "recipe_content_sha256": "5869db23a9e6d8cb436f432520e59d7082a850effdb0c99b714f067f39ce5a49",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/qwen3-8-flash-next-nvfp4-vllm-dual.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/qwen/flash-next-vllm-dual/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/qwen3-8-flash-next-nvfp4-vllm-dual.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "Python adapter wrapper process capture stub recorded child argv after authored bindings",
+        "candidate recipe changed from baseline digest None to 5869db23a9e6d8cb436f432520e59d7082a850effdb0c99b714f067f39ce5a49; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.0",
+      "source_path": "recipes/qwen3-8-flash-next-nvfp4-vllm-dual.json",
+      "engine": "vllm",
+      "node_count": 2,
+      "source_reference": "https://github.com/MiaAI-Lab/Qwen3.8-Flash-Next-Dual-DGX-Sparks/tree/c2325b22602b51a5faf55fc2bebccc34f3f80b9f",
+      "package_sha256": "3e838838df981ac4614c6578fc3447484bc42cb5885fddf919b4e7eaea1fdac7"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "skintokens-pytorch-single",
+      "recipe_content_sha256": "6045b3b4372067513117053d03c3995e0c8af673bfbe7fc2597940d88c154f7b",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/skintokens-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/skintokens-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "parser capture unverified: packaged parser imports unavailable in the QA venv"
+      ],
+      "baseline_recipe_content_sha256": "6045b3b4372067513117053d03c3995e0c8af673bfbe7fc2597940d88c154f7b",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.9",
+      "source_path": "recipes/skintokens-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/VAST-AI/SkinTokens/tree/79736cad0fd84de384d5eede659b4ebd24effe33",
+      "package_sha256": "797768d9d4f7225dca9246c3ce29fb8fd17f31a8ddd95411083f30de38a8f35d"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "step1x-3d-geometry-pytorch-single",
+      "recipe_content_sha256": "5d474f77f806263aea71a3af12c1094fe7bd220f3f8e0dea9fec34375c026f55",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/step1x-3d-geometry-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/step1x-3d-geometry-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "parser capture unverified: adapter requires its signed mode entrypoint"
+      ],
+      "baseline_recipe_content_sha256": "5d474f77f806263aea71a3af12c1094fe7bd220f3f8e0dea9fec34375c026f55",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.2.8",
+      "source_path": "recipes/step1x-3d-geometry-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/stepfun-ai/Step1X-3D/tree/bf7084495b3a72222f36549b7942948aa4d9daa7",
+      "package_sha256": "e368f3d8652020d79bed9713917769f0c0fc88076952c7e8ba606c3fa4eab104"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "step1x-3d-label-geometry-pytorch-single",
+      "recipe_content_sha256": "8b31207b04c5f475597c24600d70d429c48fcddc5a23ac7adeb1ec6b1b9db05f",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/step1x-3d-label-geometry-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/step1x-3d-label-geometry-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "parser capture unverified: adapter requires its signed mode entrypoint"
+      ],
+      "baseline_recipe_content_sha256": "8b31207b04c5f475597c24600d70d429c48fcddc5a23ac7adeb1ec6b1b9db05f",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.2.8",
+      "source_path": "recipes/step1x-3d-label-geometry-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/stepfun-ai/Step1X-3D/tree/bf7084495b3a72222f36549b7942948aa4d9daa7",
+      "package_sha256": "3bb524d87222207fefd36d51814d709ebc32b88ef1f70102e92429bea2f2521e"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "step1x-3d-texture-pytorch-single",
+      "recipe_content_sha256": "f1c85a945a19c65d3501cc775f53e98f173358bd4755d8af7599f6e03fefcb09",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/step1x-3d-texture-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/step1x-3d-texture-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "parser capture unverified: adapter requires its signed mode entrypoint"
+      ],
+      "baseline_recipe_content_sha256": "f1c85a945a19c65d3501cc775f53e98f173358bd4755d8af7599f6e03fefcb09",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.2.8",
+      "source_path": "recipes/step1x-3d-texture-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/stepfun-ai/Step1X-3D/tree/bf7084495b3a72222f36549b7942948aa4d9daa7",
+      "package_sha256": "4d69176c74d5cdfaa874a9d879e81378a0de1c3a52395bb4fa86759f5058ce4b"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "trellis-2-4b-pytorch-single",
+      "recipe_content_sha256": "1a5a50d2d04c42026a6f627ecc45c123c6ac9beb8b95e4392aaa1616dabc4b25",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/trellis-2-4b-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/trellis-2-4b-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "parser capture unverified: archive has no conventional run.py/main.py/generate.py"
+      ],
+      "baseline_recipe_content_sha256": "1a5a50d2d04c42026a6f627ecc45c123c6ac9beb8b95e4392aaa1616dabc4b25",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.7",
+      "source_path": "recipes/trellis-2-4b-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://github.com/microsoft/TRELLIS.2/tree/75fbf0183001ed9876c8dbb35de6b68552ee08bd",
+      "package_sha256": "de077eaf2285ef5cc7cc9747e9f6dc5d27d3f1977373c82dfd33dc297188ec47"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "triposg-pytorch-single",
+      "recipe_content_sha256": "dc042d86390ad098fd519d2cc8c88f4aa269d2d1ad9521c6c46bf03632a692d9",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/triposg-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/triposg-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "parser capture unverified: packaged parser imports unavailable in the QA venv"
+      ],
+      "baseline_recipe_content_sha256": "dc042d86390ad098fd519d2cc8c88f4aa269d2d1ad9521c6c46bf03632a692d9",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "2.0.9",
+      "source_path": "recipes/triposg-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/VAST-AI/TripoSG/tree/2c1c516d22d58db486a058d98d31bb6177344e06",
+      "package_sha256": "4e398c5b080b9c5932eed1e467e8898e3c26f53b42662961fe0f30d20b6c8628"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "ui-mate-27b-vllm-single",
+      "recipe_content_sha256": "0abb280fb0d549cbbe01234490128474f375413942d862e709ef04de6ae0cf18",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.json",
+        "/private/tmp/vonk-vllm-qa-20260906/vllm-matrix.md",
+        "/private/tmp/vonk-forge-vllm-qa-e6e/control/tests/test_recipe_runtime_specs_canonical.py",
+        "/private/tmp/vonk-recipes-fcf/recipes/ui-mate-27b-vllm-single.json",
+        "/private/tmp/vonk-recipes-fcf/adapters/llm/ui-mate-vllm/Dockerfile",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/ui-mate-27b-vllm-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "canonical compile captured authored bindings and compiled argv/env/mount/topology for every declared role/rank",
+        "adapter wrapper child argv requires an OCI image process capture; this lane has no built adapter image",
+        "pinned vLLM parser/help/config and container start require the recipe image; no GPU or Spark execution was attempted",
+        "direct platform vLLM entrypoint; no recipe wrapper argv exists to capture",
+        "candidate recipe changed from baseline digest None to 0abb280fb0d549cbbe01234490128474f375413942d862e709ef04de6ae0cf18; status overlays below apply to candidate changes"
+      ],
+      "baseline_recipe_content_sha256": null,
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.1.4",
+      "source_path": "recipes/ui-mate-27b-vllm-single.json",
+      "engine": "vllm",
+      "node_count": 1,
+      "source_reference": "https://github.com/Tencent/UI-Mate/tree/d185dc9d74cfcab3a890d7ffb2bb011ecdd64c64",
+      "package_sha256": "4b7cdbbe7d13d780a2b61bd31f373457cdeb3baaf1d514d8dff69f23bd2164b4"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "wan-2-2-i2v-14b-comfyui-single",
+      "recipe_content_sha256": "85a10f38daf4ccc73e59bcc5a697b5c9cca582008de74ccb0585861a39f83a70",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/wan-2-2-i2v-14b-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/wan-2-2-i2v-14b-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/wan-2-2-i2v-14b-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "85a10f38daf4ccc73e59bcc5a697b5c9cca582008de74ccb0585861a39f83a70",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.10",
+      "source_path": "recipes/wan-2-2-i2v-14b-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/c4f60d30c55a624e35427060fdd217579a6c1d77",
+      "package_sha256": "47270953a72dae460af0d7bc299b93decb306a9b46cd72927cba5b2e2ca93263"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "wan-2-2-t2v-14b-comfyui-single",
+      "recipe_content_sha256": "03c4fd08ebfb05311c0ab3d284edf7cf0bd83091019d221500c0407da6c61b30",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/wan-2-2-t2v-14b-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/wan-2-2-t2v-14b-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/wan-2-2-t2v-14b-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "03c4fd08ebfb05311c0ab3d284edf7cf0bd83091019d221500c0407da6c61b30",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.10",
+      "source_path": "recipes/wan-2-2-t2v-14b-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/c4f60d30c55a624e35427060fdd217579a6c1d77",
+      "package_sha256": "da821c8e63990dccc8cc728f06f8116e9be74b99db675a4d8691395af431eceb"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "wan-2-2-ti2v-5b-comfyui-single",
+      "recipe_content_sha256": "4dcf6553be1bbc05af08c975fa03d986e36eda056577d91d59b13a0f3b04993f",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "model_package": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "unverified",
+        "container_start": "unverified",
+        "physical_spark": "unverified"
+      },
+      "evidence_paths": [
+        "/private/tmp/vonk-forge-recipe-qa-recipes/recipes/wan-2-2-ti2v-5b-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipe-qa-recipes/packages/wan-2-2-ti2v-5b-comfyui-single.tar.gz",
+        "/private/tmp/vonk-forge-recipe-qa-platform/config/execution-harnesses/comfyui.json",
+        "/private/tmp/recipe-qa-validate-final.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/argv-shape.json",
+        "/private/tmp/vonk-forge-recipe-qa-evidence/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/wan-2-2-ti2v-5b-comfyui-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [
+        "actual_engine_parser: engine Python modules are unavailable in this host",
+        "container_start: no pinned runtime container was started in this bounded QA lane",
+        "physical_spark: physical DGX Spark execution was not available"
+      ],
+      "baseline_recipe_content_sha256": "4dcf6553be1bbc05af08c975fa03d986e36eda056577d91d59b13a0f3b04993f",
+      "baseline_source_commit": "b20d383ff98f455fd18cbff6ecec87b31715a792",
+      "recipe_version": "1.0.10",
+      "source_path": "recipes/wan-2-2-ti2v-5b-comfyui-single.json",
+      "engine": "comfyui",
+      "node_count": 1,
+      "source_reference": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/c4f60d30c55a624e35427060fdd217579a6c1d77",
+      "package_sha256": "857ff149fcac6c4ef4e335177cb6265b2ad1bc48fc0b84cad8cd9ed735627ada"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "wan-dancer-14b-disk-offload-pytorch-single",
+      "recipe_content_sha256": "eeb23e42ccb58655fa5048f3e5633551f2349934dc59eda512a2b476eae8839a",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/wan-dancer-14b-disk-offload-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/wan-dancer-14b-disk-offload-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [],
+      "baseline_recipe_content_sha256": "eeb23e42ccb58655fa5048f3e5633551f2349934dc59eda512a2b476eae8839a",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.4",
+      "source_path": "recipes/wan-dancer-14b-disk-offload-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://github.com/modelscope/DiffSynth-Studio/tree/84f93fc4907b6c193be5501bab0b5c37f383033c",
+      "package_sha256": "233cb349da4cd5c0eab2dcdc7f55ccdf5d7a30e1942e094056cf4b888a23a002"
+    },
+    {
+      "publisher": "vonk-forge",
+      "slug": "wan-dancer-14b-pytorch-single",
+      "recipe_content_sha256": "bbca1bfac707e836e640bb4aac780cd7c21b4de86eba96f232fb60ae161de275",
+      "source_commit": "b7809672a8989b872f6dc005627c46c6b5287b6a",
+      "statuses": {
+        "contract": "pass",
+        "compile_each_role": "pass",
+        "wrapper_argv": "pass",
+        "actual_engine_parser": "pass",
+        "container_start": "unverified",
+        "physical_spark": "unverified",
+        "model_package": "pass"
+      },
+      "evidence_paths": [
+        "matrix.json",
+        "packages/wan-dancer-14b-pytorch-single",
+        "/private/tmp/recipe-pytorch-pipeline-qa-32b4c094/matrix.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/recipes/wan-dancer-14b-pytorch-single.json",
+        "/private/tmp/vonk-forge-recipes-v103-glm-ltx/catalog-index.json"
+      ],
+      "findings": [],
+      "baseline_recipe_content_sha256": "bbca1bfac707e836e640bb4aac780cd7c21b4de86eba96f232fb60ae161de275",
+      "baseline_source_commit": "32b4c094ba0bf6376d419cb06357fe76b160d944",
+      "recipe_version": "1.0.9",
+      "source_path": "recipes/wan-dancer-14b-pytorch-single.json",
+      "engine": "pytorch-pipeline",
+      "node_count": 1,
+      "source_reference": "https://github.com/Wan-Video/Wan-Dancer/tree/e6c87a94ec733230dac15b924c015f6e6501e618",
+      "package_sha256": "63c104be488bf74957a0de37d1479231ef248392463d59e7624cbaf8e3aa0384"
+    }
+  ]
+}
