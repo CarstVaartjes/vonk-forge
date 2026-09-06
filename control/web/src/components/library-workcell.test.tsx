@@ -33,3 +33,18 @@ test("keeps URL-selected Models in the paired right pane", () => {
   expect(screen.getByText("No Recipe linked")).toBeVisible();
   expect(screen.getByLabelText("Recipes matching selected Model")).toHaveTextContent("No Recipe linked");
 });
+
+test("keeps same-Model Recipe variants together and shows creator attribution", () => {
+  const model = librarySnapshot.models.find(entry => entry.model.publisher === "lightricks" && entry.model.slug === "ltx-2-gemma3-text-encoder-dfcc2108")!;
+  const modelKey = modelVersionKey(model.model);
+  const records = buildLibraryRecipeRecords(librarySnapshot).filter(record => record.modelKey === modelKey && record.recipe);
+  render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey}} snapshot={librarySnapshot}/>);
+
+  const pane = screen.getByLabelText("Recipes matching selected Model");
+  expect(records).toHaveLength(4);
+  expect(new Set(records.map(record => record.key)).size).toBe(records.length);
+  expect(pane.querySelectorAll(":scope > ul > li")).toHaveLength(records.length);
+  expect(pane).toHaveTextContent(records[0]!.recipe!.recipe_document.provenance.attribution[0]!);
+  expect(pane).toHaveTextContent(records[0]!.recipe!.recipe_document.runtime.engine);
+  expect(pane).toHaveTextContent(records[1]!.recipe!.recipe_document.runtime.engine);
+});
