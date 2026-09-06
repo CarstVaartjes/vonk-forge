@@ -504,6 +504,63 @@ def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path
     assert transport.calls == 1
 
 
+def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(tmp_path: Path) -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    failed = SimpleNamespace(
+        id="failed-model",
+        request_key="failed-request",
+        state="failed",
+        artifact_set_sha256="c" * 64,
+        plan_digest="d" * 64,
+        progress={"phase": "download", "completed_bytes": 4, "total_bytes": 10, "total_bytes_known": True},
+        failure={
+            "code": "access_denied",
+            "detail": "HF access denied",
+            "recovery_actions": ["open_model_access", "check_access_and_resume"],
+            "retryable": False,
+            "retry_time": None,
+            "retry_after_seconds": None,
+            "log_excerpt": "denied",
+            "required_bytes": None,
+            "free_bytes": None,
+            "shortfall_bytes": None,
+        },
+    )
+
+    class ModelCache:
+        def __init__(self) -> None:
+            self.called: dict[str, object] | None = None
+
+        def get_operation(self, _operation_id: str) -> SimpleNamespace:
+            return failed
+
+        def check_access_and_resume(self, operation_id: str, **kwargs: object) -> SimpleNamespace:
+            self.called = {"operation_id": operation_id, **kwargs}
+            return failed
+
+        def list_operations(self, **_: object) -> tuple[object, ...]:
+            return ()
+
+    cache = ModelCache()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id: (_recipe("recipe-image.json"), _runtime()),
+        model_cache=cache,
+        clock=lambda: datetime.now(UTC),
+    )
+    service._resume_model_child(
+        {"id": failed.id, "state": "failed", "failure": failed.failure},
+        actor="operator",
+        parent_request_key="p" * 36,
+    )
+    assert cache.called is not None
+    assert cache.called["artifact_set_sha256"] == "c" * 64
+    assert cache.called["plan_digest"] == "d" * 64
+
+
 def test_force_download_is_a_distinct_operation_for_same_revision(tmp_path: Path) -> None:
     recipe = _recipe("recipe-image.json")
     engine = create_engine("sqlite:///:memory:")
