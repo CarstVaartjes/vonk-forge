@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -15,11 +16,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "validate-recipe-library"
-CANDIDATE = Path(
-    os.environ.get(
-        "VONK_FORGE_RECIPE_LIBRARY",
-        "/private/tmp/vonk-forge-recipes-contract-conversion-final",
-    )
+_configured_library = os.environ.get("VONK_RECIPE_LIBRARY_ROOT")
+_sibling_library = ROOT.parent / "vonk-forge-recipes"
+CANDIDATE = (
+    Path(_configured_library)
+    if _configured_library
+    else _sibling_library if _sibling_library.is_dir() else None
 )
 
 
@@ -32,7 +34,7 @@ _VALIDATOR_SPEC.loader.exec_module(_VALIDATOR)
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(SCRIPT), *args],
+        [sys.executable, str(SCRIPT), *args],
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -41,7 +43,7 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _candidate_library_or_skip() -> Path:
-    if not CANDIDATE.is_dir():
+    if CANDIDATE is None or not CANDIDATE.is_dir():
         pytest.skip("central contract recipe-library fixture is unavailable")
     return CANDIDATE
 
@@ -80,6 +82,39 @@ def test_secret_scan_excludes_nested_platform_checkout(tmp_path: Path) -> None:
     _VALIDATOR._scan_secrets(library, platform)
 
 
+def test_selected_model_payload_requires_exact_path_digest_and_size() -> None:
+    body = b"model payload"
+    digest = hashlib.sha256(body).hexdigest()
+    identity = {("weights/model.pt", digest, len(body))}
+
+    assert _VALIDATOR._matches_selected_model_file(
+        "weights/model.pt",
+        body,
+        model_files=identity,
+    )
+    assert not _VALIDATOR._matches_selected_model_file(
+        "adapters/example/model.pt",
+        body,
+        model_files=identity,
+    )
+    assert not _VALIDATOR._matches_selected_model_file(
+        "weights/model.pt",
+        body + b" altered",
+        model_files=identity,
+    )
+
+
+def test_selected_model_payload_does_not_strip_context_prefix() -> None:
+    body = b"model payload"
+    identity = {("weights/model.pt", hashlib.sha256(body).hexdigest(), len(body))}
+
+    assert not _VALIDATOR._matches_selected_model_file(
+        "adapters/example/weights/model.pt",
+        body,
+        model_files=identity,
+    )
+
+
 def test_contract_recipe_library_snapshot_is_validated_end_to_end() -> None:
     candidate = _candidate_library_or_skip()
     result = _run(
@@ -111,9 +146,18 @@ def test_contract_recipe_library_rejects_an_archive_without_recipe_entrypoint(
     for source in (candidate / "packages").glob("*.tar.gz"):
         shutil.copy2(source, package_dir / source.name)
 
-    recipe_path = next((candidate / "recipes").glob("*.json"))
+    recipe_path = None
+    recipe_document = None
+    for path in sorted((candidate / "recipes").glob("*.json")):
+        document = json.loads(path.read_text())
+        package_path = candidate / "packages" / f"{path.stem}.tar.gz"
+        if document.get("execution", {}).get("mode") == "build" and package_path.is_file():
+            recipe_path = path
+            recipe_document = document
+            break
+    if recipe_path is None or recipe_document is None:
+        pytest.fail("current recipe library has no packaged build recipe fixture")
     recipe_slug = recipe_path.stem
-    recipe_document = json.loads(recipe_path.read_text())
     context_path = recipe_document["execution"]["build"]["context"]["path"]
     shutil.copytree(candidate / context_path, library / context_path)
     package_name = f"{recipe_slug}.tar.gz"

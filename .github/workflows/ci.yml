@@ -411,6 +411,8 @@ jobs:
     if: needs.changes.outputs.repository == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
     strategy:
       fail-fast: false
       matrix:
@@ -421,6 +423,31 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve exact canonical recipe library source
+        id: recipe-library-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision=$(cat tests/acceptance/recipe-library-revision.txt)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+      - name: Check out exact canonical recipe library
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: ${{ steps.recipe-library-source.outputs.revision }}
+          path: .recipe-library
+          persist-credentials: false
+      - name: Record canonical recipe library source
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ steps.recipe-library-source.outputs.revision }}
+        run: |
+          set -euo pipefail
+          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
+          test "$resolved" = "$EXPECTED_REVISION"
+          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
@@ -433,6 +460,7 @@ jobs:
           SHARD_INDEX: ${{ matrix.shard.index }}
           SHARD_TOTAL: 3
           TIMING_DATA: ${{ needs.changes.outputs.repository_timings }}
+          VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
         run: |
           set -euo pipefail
           timing_file="$RUNNER_TEMP/pytest-durations.json"
@@ -440,6 +468,7 @@ jobs:
           collection=$(mktemp)
           trap 'rm -f "$collection"' EXIT
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
+            --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
             pytest --collect-only -q > "$collection"
           mapfile -t shard_files < <(
             awk '
@@ -452,6 +481,7 @@ jobs:
           )
           ((${#shard_files[@]} > 0))
           uv run --python 3.12 --frozen --with pytest==9.1.1 \
+            --with-editable "$VONK_RECIPE_LIBRARY_ROOT/contracts" \
             pytest -q -o junit_family=xunit1 \
             --junitxml="$RUNNER_TEMP/repository-junit.xml" --basetemp="$RUNNER_TEMP/repository-pytest" \
             "${shard_files[@]}"
@@ -479,6 +509,8 @@ jobs:
     if: needs.changes.outputs.control == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
     strategy:
       fail-fast: false
       matrix:
@@ -489,6 +521,31 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Resolve exact canonical recipe library source
+        id: recipe-library-source
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision=$(cat tests/acceptance/recipe-library-revision.txt)
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          test "$(awk 'END { print NR }' tests/acceptance/recipe-library-revision.txt)" = 1
+          printf 'revision=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+      - name: Check out exact canonical recipe library
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CarstVaartjes/vonk-forge-recipes
+          ref: ${{ steps.recipe-library-source.outputs.revision }}
+          path: .recipe-library
+          persist-credentials: false
+      - name: Record canonical recipe library source
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ steps.recipe-library-source.outputs.revision }}
+        run: |
+          set -euo pipefail
+          resolved=$(git -C "$VONK_RECIPE_LIBRARY_ROOT" rev-parse --verify HEAD^{commit})
+          test "$resolved" = "$EXPECTED_REVISION"
+          printf 'Canonical recipe library source: CarstVaartjes/vonk-forge-recipes@%s\n' "$resolved"
       - name: Install uv and Python
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:

@@ -7,6 +7,8 @@ src/*
 !control/
 !control/Dockerfile
 !control/pyproject.toml
+!control/packaging/
+!control/packaging/**
 control/.venv
 !control/src/
 !control/src/**
@@ -31,6 +33,7 @@ config/*
 !inventory/
 !inventory/wheels/
 !inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl
+!inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl
 **/__pycache__/**
 **/*.py[cod]
 **/.dev

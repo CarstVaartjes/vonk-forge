@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from pathlib import Path
+from importlib.resources import files
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -11,20 +11,24 @@ from sqlalchemy.pool import StaticPool
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.fleet_profiles import FleetProfileService
+from vonk_control.fleet_profiles import (
+    FleetProfileService,
+    RunSwitchFleetProfileAdapter,
+)
 from vonk_control.models import (
     AgentNode,
     Base,
-    LocalRecipe,
-    LocalRecipeRevision,
+    CatalogDocument,
+    CatalogDocumentRevision,
 )
-from vonk_control.recipe_contract import recipe_content_sha256, validate_recipe
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
 PROFILE = "00000000-0000-4000-8000-000000000001"
 REVISION = "00000000-0000-4000-8000-000000000002"
+MODEL_DOCUMENT = "00000000-0000-4000-8000-000000000003"
+MODEL_REVISION = "00000000-0000-4000-8000-000000000004"
 NODE = "spk_" + "1" * 32
-FIXTURE = Path(__file__).parent / "fixtures" / "global" / "recipe-v1-minimal.json"
 
 
 class Jobs:
@@ -35,7 +39,9 @@ class Jobs:
         raise KeyError
 
 
-def _setup() -> tuple[TestClient, object, MemoryAuditStore]:
+def _setup(
+    *, composed_run_switch: bool = False
+) -> tuple[TestClient, object, MemoryAuditStore]:
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -43,53 +49,108 @@ def _setup() -> tuple[TestClient, object, MemoryAuditStore]:
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    document = json.loads(FIXTURE.read_text())
-    validate_recipe(document)
+    model = ModelDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "model-definition.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-image.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    document = recipe.model_dump(mode="json")
+    model_document = model.model_dump(mode="json")
     with sessions.begin() as session:
         session.add(
             AgentNode(
                 node_id=NODE,
                 state="active",
-                protocol_version=1,
+                protocol_version=2,
                 architecture="linux-arm64",
                 capabilities=[],
                 last_seen_at=NOW,
             )
         )
         session.add(
-            LocalRecipe(
+            CatalogDocument(
                 id=PROFILE,
-                slug="tiny-chat",
-                title="Tiny Chat",
-                description="A small illustrative chat recipe.",
-                source_kind="local",
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                title=recipe.metadata.title,
                 created_by="admin",
                 created_at=NOW,
                 updated_at=NOW,
-            )
-        )
-        session.add(
-            LocalRecipeRevision(
-                id=REVISION,
-                recipe_id=PROFILE,
-                revision_number=1,
-                lifecycle="resolved",
-                schema_version=1,
-                document=document,
-                content_sha256=recipe_content_sha256(document),
+            ),
+            CatalogDocument(
+                id=MODEL_DOCUMENT,
+                kind="model",
+                publisher=model.identity.publisher,
+                slug=model.identity.slug,
+                title=model.identity.model.title,
                 created_by="admin",
                 created_at=NOW,
-            )
+                updated_at=NOW,
+            ),
+        )
+        session.add_all(
+            [
+                CatalogDocumentRevision(
+                id=REVISION,
+                document_id=PROFILE,
+                kind="recipe",
+                publisher=recipe.identity.publisher,
+                slug=recipe.identity.slug,
+                revision_number=1,
+                state="active",
+                schema_version=2,
+                document=document,
+                content_digest=content_sha256(recipe),
+                execution_key="b" * 64,
+                created_by="admin",
+                created_at=NOW,
+            ),
+                CatalogDocumentRevision(
+                id=MODEL_REVISION,
+                document_id=MODEL_DOCUMENT,
+                kind="model",
+                publisher=model.identity.publisher,
+                slug=model.identity.slug,
+                revision_number=1,
+                state="active",
+                schema_version=2,
+                document=model_document,
+                content_digest=content_sha256(model),
+                artifact_key="a" * 64,
+                created_by="admin",
+                created_at=NOW,
+            ),
+            ]
         )
     codec = TokenCodec(b"p" * 32)
     audits = MemoryAuditStore()
+    profiles = FleetProfileService(sessions, clock=lambda: NOW)
+    if composed_run_switch:
+        from vonk_control.run_switch_operations import RunSwitchOperationService
+
+        run_switch = RunSwitchOperationService(sessions, clock=lambda: NOW)
+        profiles = FleetProfileService(
+            sessions,
+            clock=lambda: NOW,
+            switch_adapter=RunSwitchFleetProfileAdapter(sessions, run_switch),
+        )
     app = create_app(
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
         fleet=lambda: {"nodes": []},
         now=lambda: 10,
-        fleet_profiles=FleetProfileService(sessions, clock=lambda: NOW),
+        fleet_profiles=profiles,
     )
 
     def headers(role: str = "administrator") -> dict[str, str]:
@@ -106,6 +167,7 @@ def _body() -> dict[str, object]:
         "installation_policy": "keep-cached",
         "labels": {"purpose": "interactive"},
         "favorite": True,
+        "scope": {"node_ids": [NODE]},
         "assignments": [
             {
                 "recipe_revision_id": REVISION,
@@ -123,6 +185,26 @@ def _body() -> dict[str, object]:
             }
         ],
     }
+
+
+def test_profile_api_uses_the_composed_run_switch_service() -> None:
+    client, headers, _audits = _setup(composed_run_switch=True)
+
+    created = client.post(
+        "/api/v1/fleet-profiles",
+        headers=headers(),
+        json=_body(),
+    )
+    assert created.status_code == 201
+    profile_id = created.json()["id"]
+
+    preview = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/preview",
+        headers=headers(),
+        json={},
+    )
+    assert preview.status_code == 200
+    assert [step["kind"] for step in preview.json()["steps"]] == ["switch"]
 
 
 def test_profiles_are_authenticated_role_bound_and_audited() -> None:
@@ -196,3 +278,108 @@ def test_profile_routes_have_stable_openapi_operation_ids() -> None:
         ]
         == "applyFleetProfile"
     )
+    assert (
+        document["paths"][
+            "/api/v1/fleet-profiles/{profile_id}/prepare/preview"
+        ]["post"]["operationId"]
+        == "previewFleetProfilePreparation"
+    )
+
+
+def test_profile_contract_exposes_capture_duplicate_status_prepare_and_switch() -> None:
+    client, headers, _audits = _setup()
+    created = client.post("/api/v1/fleet-profiles", headers=headers(), json=_body())
+    profile_id = created.json()["id"]
+
+    duplicate = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/duplicate",
+        headers=headers(),
+        json={"name": "Studio copy"},
+    )
+    captured = client.post(
+        "/api/v1/fleet-profiles/capture-current",
+        headers=headers(),
+        json={"name": "Captured"},
+    )
+    profile_status = client.get(
+        f"/api/v1/fleet-profiles/{profile_id}/status", headers=headers("viewer")
+    )
+    preview = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/preview",
+        headers=headers(),
+        json={},
+    ).json()
+    preparation_preview = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/prepare/preview",
+        headers=headers(),
+        json={},
+    )
+    prepare = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/prepare",
+        headers=headers(),
+        json={
+            "plan_digest": preparation_preview.json()["plan_digest"],
+            "request_key": "40000000-0000-4000-8000-000000000001",
+        },
+    )
+    switched = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/switch",
+        headers=headers(),
+        json={
+            "plan_digest": preview["plan_digest"],
+            "request_key": "40000000-0000-4000-8000-000000000002",
+        },
+    )
+
+    assert duplicate.status_code == 201
+    assert duplicate.json()["scope"] == {"node_ids": [NODE]}
+    assert captured.status_code == 201
+    assert captured.json()["assignments"] == []
+    assert profile_status.status_code == 200
+    assert profile_status.json()["state"] == "needs-preparation"
+    assert preparation_preview.status_code == 200
+    assert preparation_preview.json()["summary"]["starts"] == 0
+    assert prepare.status_code == 202
+    assert prepare.json()["total_steps"] == 4
+    assert switched.status_code == 202
+
+
+def test_prepare_requires_the_reviewed_digest_and_replays_by_request_key() -> None:
+    client, headers, _audits = _setup()
+    created = client.post("/api/v1/fleet-profiles", headers=headers(), json=_body())
+    profile_id = created.json()["id"]
+    preview = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/prepare/preview",
+        headers=headers(),
+        json={},
+    )
+    stale = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/prepare",
+        headers=headers(),
+        json={
+            "plan_digest": "f" * 64,
+            "request_key": "50000000-0000-4000-8000-000000000001",
+        },
+    )
+    applied = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/prepare",
+        headers=headers(),
+        json={
+            "plan_digest": preview.json()["plan_digest"],
+            "request_key": "50000000-0000-4000-8000-000000000001",
+        },
+    )
+    replay = client.post(
+        f"/api/v1/fleet-profiles/{profile_id}/prepare",
+        headers=headers(),
+        json={
+            "plan_digest": preview.json()["plan_digest"],
+            "request_key": "50000000-0000-4000-8000-000000000001",
+        },
+    )
+
+    assert stale.status_code == 409
+    assert "stale" in stale.json()["detail"]
+    assert applied.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json()["id"] == applied.json()["id"]

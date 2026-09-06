@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -143,6 +144,9 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
         artifact_job_retention_seconds=7 * 24 * 60 * 60,
         artifact_job_reconcile_interval_seconds=3600,
         artifact_job_reconcile_batch_limit=1000,
+        model_cache=object(),
+        agent_artifact_root=tmp_path / "agent-artifacts",
+        recipe_image_artifact_root=tmp_path / "agent-artifacts",
     )
 
     assert not hasattr(worker, "_updates")
@@ -169,6 +173,13 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
     assert maintenance_state["last_success_at"] == current.isoformat()
     assert worker._recipes._fleet_profiles is not None
     assert worker._recipes._fleet_profiles._recipe_operations is not None
+    assert worker._recipes._run_switches._artifact_phase_executor is not None
+    assert len(worker._background_services) == 1
+    image_production = worker._background_closers[0].__self__
+    assert image_production.scheduler is not None
+    scheduler = image_production.scheduler
+    worker.close()
+    assert scheduler.executor._shutdown is True
 
 
 def test_production_worker_settings_load_only_worker_authority_secrets(
@@ -192,6 +203,7 @@ def test_production_worker_settings_load_only_worker_authority_secrets(
     assert settings.internal_api_token == b"w" * 32
     assert settings.internal_api_url == "http://control-api:8000"
     assert settings.state_path == tmp_path / "state"
+    assert settings.agent_artifact_root == Path("/state/agent-artifacts")
     assert settings.artifact_job_storage_max_bytes == 16 * 1024**3
     assert settings.artifact_job_retention_seconds == 7 * 24 * 60 * 60
     assert settings.artifact_job_reconcile_interval_seconds == 3600

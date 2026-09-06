@@ -26,14 +26,15 @@ from vonk_agent_protocol.host_helper import (
     host_helper_grant_signing_bytes,
     recipe_run_observation_receipt_signing_bytes,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .models import (
     AgentCertificate,
     AgentNode,
     AgentOperationAttempt,
+    CatalogDocumentRevision,
     ClusterMapping,
     Job,
-    LocalRecipeRevision,
     RecipeInstallation,
     RecipeRun,
     RecipeRunObservationGrant,
@@ -165,7 +166,9 @@ class HostRuntimeAuthorityService:
     """Bind a narrow host-runtime grant to one live agent attempt."""
 
     _ACTION_KINDS: ClassVar[dict[ContainerRuntimeAction, frozenset[str]]] = {
-        ContainerRuntimeAction.IMAGE_IMPORT: frozenset({"recipe.image.import.v1"}),
+        ContainerRuntimeAction.IMAGE_IMPORT: frozenset(
+            {"recipe.image.import.v1", "artifact.distribution.v1"}
+        ),
         ContainerRuntimeAction.IMAGE_INSPECT: frozenset({"recipe.install"}),
         ContainerRuntimeAction.RUN_INSPECT: frozenset({"recipe.start"}),
         ContainerRuntimeAction.START: frozenset({"recipe.start", "recipe.job.run.v1"}),
@@ -464,7 +467,9 @@ class HostRuntimeAuthorityService:
             raise HostHelperAuthorityError("recipe run observation identity is invalid")
         run = session.get(RecipeRun, identity.get("run_id"))
         installation = session.get(RecipeInstallation, identity.get("installation_id"))
-        revision = session.get(LocalRecipeRevision, identity.get("recipe_revision_id"))
+        revision = session.get(
+            CatalogDocumentRevision, identity.get("recipe_revision_id")
+        )
         mapping = session.get(ClusterMapping, identity.get("mapping_id"))
         run_node = session.scalar(
             select(RunNode).where(
@@ -486,7 +491,9 @@ class HostRuntimeAuthorityService:
             or run_node.state != "running"
             or run.plan.get("observation_schema_version") != 2
             or installation.state != "installed"
-            or revision.content_sha256 is None
+            or revision.kind != "recipe"
+            or revision.schema_version != 2
+            or revision.state != "active"
             or mapping.state != "ready"
             or "recipe.run.inspect.exact.v1" not in set(node.capabilities or ())
             or certificate.node_id != node_id
@@ -496,6 +503,14 @@ class HostRuntimeAuthorityService:
             or _aware(certificate.not_before) > now
             or _aware(certificate.not_after) <= now
         ):
+            raise HostHelperAuthorityError("recipe run observation authority is stale")
+        try:
+            recipe = RecipeDefinition.model_validate(revision.document)
+        except (TypeError, ValueError) as error:
+            raise HostHelperAuthorityError(
+                "recipe run observation authority is stale"
+            ) from error
+        if content_sha256(recipe) != revision.content_digest:
             raise HostHelperAuthorityError("recipe run observation authority is stale")
         jobs = session.scalars(
             select(Job)
@@ -524,7 +539,7 @@ class HostRuntimeAuthorityService:
             "run_id": run.id,
             "installation_id": installation.id,
             "recipe_revision_id": revision.id,
-            "recipe_content_sha256": revision.content_sha256,
+            "recipe_content_sha256": revision.content_digest,
             "mapping_id": mapping.id,
             "mapping_generation": run.mapping_generation,
             "run_generation": run.run_generation,

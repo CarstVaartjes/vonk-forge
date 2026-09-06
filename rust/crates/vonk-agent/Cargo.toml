@@ -33,6 +33,9 @@ x509-parser.workspace = true
 tempfile.workspace = true
 tar.workspace = true
 
+[dev-dependencies]
+vonk-agent-helper = { path = "../vonk-agent-helper" }
+
 [lib]
 name = "vonk_agent"
 path = "src/lib.rs"

@@ -124,9 +124,8 @@ def _validate_target_recipe_coverage(
     root: Path,
     recipe_slugs: set[str],
 ) -> None:
-    # The standalone public library owns the complete target ledger.  The
-    # platform checkout may contain a deliberately smaller imported snapshot;
-    # its config/model-targets files are not the publication authority.
+    # The standalone public library owns the complete target ledger. The
+    # platform checkout does not mirror that ledger and is never its authority.
     target_root = root / "model-targets"
     if not target_root.is_dir():
         return
@@ -190,6 +189,27 @@ def _dockerfile_build_inputs(payload: bytes, label: str) -> list[dict[str, str]]
     return inputs
 
 
+def _matches_selected_model_file(
+    name: str,
+    content: bytes,
+    *,
+    model_files: set[tuple[str, str, int]],
+) -> bool:
+    """Match a selected Model file by its exact path, digest, and size.
+
+    Recipe-owned source files may use formats also used by model payloads, so
+    suffixes and basenames are not security boundaries. The archive member
+    path is authoritative: a source-context prefix is not stripped because
+    that would turn a legitimate source file into a false payload match.
+    """
+    if not model_files:
+        return False
+    path = PurePosixPath(name).as_posix()
+    digest = hashlib.sha256(content).hexdigest()
+    size = len(content)
+    return (path, digest, size) in model_files
+
+
 def _validate_v2_package(
     package_bytes: bytes,
     recipe: Any,
@@ -222,7 +242,7 @@ def _validate_v2_package(
                 or any(part in {"", ".", ".."} for part in path.parts)
             ):
                 raise LibraryValidationError(f"{package_label}: archive contains unsafe member {name}")
-            if name.startswith(_ARCHIVE_PAYLOAD_PREFIXES) or name.endswith(_ARCHIVE_PAYLOAD_SUFFIXES):
+            if name.startswith(_ARCHIVE_PAYLOAD_PREFIXES):
                 raise LibraryValidationError(f"{package_label}: archive contains model or OCI payload {name}")
         if [name for name in names if PurePosixPath(name).name == "recipe.json"] != ["recipe.json"]:
             raise LibraryValidationError(
@@ -326,6 +346,53 @@ def _validate_v2_package(
             raise LibraryValidationError(f"{package_label}: Model snapshot closure is incomplete")
 
         execution = expected_recipe.execution
+        source_context = (
+            PurePosixPath(execution.build.context.path)
+            if execution.mode == "build"
+            else None
+        )
+        selected_model_files: set[tuple[str, str, int]] = set()
+        for model_key in seen_models:
+            catalog_model = models[model_key]
+            selected_model_files.update(
+                (PurePosixPath(item.path).as_posix(), item.sha256, item.size_bytes)
+                for item in catalog_model.files
+            )
+        expected_fixture_paths: set[str] = set()
+        for check in expected_recipe.validation.serving.checks:
+            request = check.request
+            if getattr(request, "transport", None) == "job":
+                expected_fixture_paths.add(request.fixture)
+                expected_fixture_paths.update(request.input_slots.values())
+
+        def is_source_member(name: str) -> bool:
+            if source_context is None:
+                return False
+            try:
+                PurePosixPath(name).relative_to(source_context)
+            except ValueError:
+                return False
+            return True
+
+        for name in names:
+            if name == "manifest.json" or name == "recipe.json" or name in expected_models:
+                continue
+            member = archive.extractfile(name)
+            content = member.read() if member is not None else b""
+            if _matches_selected_model_file(
+                name,
+                content,
+                model_files=selected_model_files,
+            ):
+                raise LibraryValidationError(
+                    f"{package_label}: selected Model payload is embedded in recipe package: {name}"
+                )
+            if is_source_member(name) or name in expected_fixture_paths:
+                continue
+            raise LibraryValidationError(
+                f"{package_label}: package member is outside declared namespaces: {name}"
+            )
+
         if execution.mode == "build":
             build = execution.build
             context = build.context.path

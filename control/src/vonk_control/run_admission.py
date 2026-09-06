@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
@@ -14,14 +14,13 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .install_admission import AdmissionReason
 from .inventory_repository import InventoryRepository
-from .legal_admission import operator_jurisdiction as validate_operator_jurisdiction
 from .legal_admission import territorial_admission
 from .models import (
     AgentNode,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
-    LocalRecipeRevision,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -39,6 +38,26 @@ _SIGNED_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.receipt.v1"
 
 class RunPlanConflict(RuntimeError):
     pass
+
+
+def _active_recipe_revision(
+    session: Session,
+    revision_id: str | None,
+    *,
+    for_update: bool = False,
+) -> CatalogDocumentRevision | None:
+    """Load only an active canonical Recipe revision for run admission."""
+
+    if not isinstance(revision_id, str) or not revision_id:
+        return None
+    statement = select(CatalogDocumentRevision).where(
+        CatalogDocumentRevision.id == revision_id,
+        CatalogDocumentRevision.kind == "recipe",
+        CatalogDocumentRevision.state == "active",
+    )
+    if for_update:
+        statement = statement.with_for_update(of=CatalogDocumentRevision)
+    return session.scalar(statement)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,15 +101,11 @@ class RunAdmissionService:
         *,
         inventory_max_age: int = 300,
         memory_floor_bytes: int = 4_000_000_000,
-        operator_jurisdiction: str | None = None,
     ) -> None:
         self._sessions = sessions
         self._inventory = InventoryRepository(sessions)
         self._max_age = inventory_max_age
         self._floor = memory_floor_bytes
-        self._operator_jurisdiction = validate_operator_jurisdiction(
-            operator_jurisdiction
-        )
 
     def plan_run(
         self,
@@ -117,14 +132,21 @@ class RunAdmissionService:
                 raise ValueError(
                     "cluster mapping generation changed after installation"
                 )
-            revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
-            if revision is None or revision.lifecycle != "resolved":
+            revision = _active_recipe_revision(session, installation.recipe_revision_id)
+            if revision is None or revision.state != "active":
                 raise ValueError("recipe revision is unavailable")
             try:
                 resolved_entities = resolve_recipe_entities(session, revision.document)
             except RecipeRuntimeSpecError as error:
                 raise ValueError("exact recipe dependencies are unavailable") from error
-            model_version = resolved_entities.get("model_version")
+            resolved_models = resolved_entities.get("models")
+            model_version = (
+                resolved_models[0]
+                if isinstance(resolved_models, Sequence)
+                and not isinstance(resolved_models, (str, bytes))
+                and resolved_models
+                else None
+            )
             model_document = getattr(model_version, "document", None)
             if not isinstance(model_document, Mapping):
                 raise ValueError(  # noqa: TRY004
@@ -132,7 +154,6 @@ class RunAdmissionService:
                 )
             legal_admission = territorial_admission(
                 model_document,
-                self._operator_jurisdiction,
                 operation="run",
             )
             mapping_nodes = tuple(
@@ -485,8 +506,8 @@ class RunAdmissionService:
         installation = session.get(
             RecipeInstallation, plan.installation_id, with_for_update=True
         )
-        revision = session.get(
-            LocalRecipeRevision, plan.recipe_revision_id, with_for_update=True
+        revision = _active_recipe_revision(
+            session, plan.recipe_revision_id, for_update=True
         )
         mapping_nodes = tuple(
             session.scalars(
@@ -529,7 +550,7 @@ class RunAdmissionService:
             or installation.mapping_id != plan.mapping_id
             or installation.mapping_generation != plan.mapping_generation
             or revision is None
-            or revision.lifecycle != "resolved"
+            or revision.state != "active"
             or tuple(
                 (node.node_id, node.rank, node.role, node.endpoint_owner)
                 for node in mapping_nodes

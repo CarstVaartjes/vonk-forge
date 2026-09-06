@@ -10,7 +10,7 @@ plane; the recipe repository owns the reviewed model and recipe material.
 | Concern | Authority |
 | --- | --- |
 | JSON schemas, harness compilers, admission, installation, and Spark acceptance | `vonk-forge` at an exact platform commit |
-| Model groups, model versions, artifacts, runtime distributions, patches, recipes, and target ledger | `vonk-forge-recipes` at an exact library commit |
+| Canonical `ModelDefinition` and `RecipeDefinition` documents, index, and independent recipe packages | `vonk-forge-recipes` at an exact library commit |
 | Installed state, active runs, routes, and local acceptance evidence | Local control-plane PostgreSQL |
 | Weights, OCI layers, secrets, and fleet state | Never stored in the recipe repository |
 
@@ -38,11 +38,10 @@ re-importing the same recipe digest is idempotent. The checkout is never mounted
 into a running workload.
 
 Managed synchronization only owns recipes whose source is
-`recipe_library`. Local drafts, WorkloadRun imports, forks, and other custom
-recipes are never overwritten. A slug collision is reported as a conflict for
-operator review. If a managed recipe disappears remotely, its immutable local
-history and any installation remain intact. It is surfaced as withdrawn only
-while it is installed or running; synchronization never stops or uninstalls it.
+`recipe_library`. A slug collision is reported as a conflict for operator
+review. If a managed recipe disappears remotely, its immutable local history
+and any installation remain intact. It is surfaced as withdrawn only while it
+is installed or running; synchronization never stops or uninstalls it.
 When a newer revision is imported, existing installations and runs remain bound
 to their old immutable revision and are reported as stale until the operator
 reviews an update.
@@ -80,66 +79,40 @@ To run structural qualification for one recipe from the external checkout:
   --level structural
 ```
 
-To preview the recipes that a fresh local control plane would receive:
+Structural qualification resolves the selected `RecipeDefinition` and its
+immutable package. It verifies the exact Model snapshots and selected files,
+package manifest and source/job closure, pinned direct-image or source-build
+inputs, and the current runtime compiler projection for engine arguments,
+topology, interface, serving checks, writable paths, and security. The
+independent library validator is run against the same checkout and reports
+dynamic catalog counts; no model weights or upstream sources are fetched.
+Structural output is repository evidence only. Container qualification remains
+an environment-dependent native `linux/arm64` gate, and Spark acceptance
+requires the designated physical lane.
 
-```bash
-./scripts/import-recipe-library \
-  --library-root ../vonk-forge-recipes \
-  --platform-root .
-```
-
-The preview imports only recipes whose target ledger status is `accepted`.
-Use `--include-candidates` or an explicit `--recipe` only when deliberately
-testing a candidate. Applying the plan additionally requires an administrator
-token file and the control-plane URL:
-
-```bash
-./scripts/import-recipe-library \
-  --library-root ../vonk-forge-recipes \
-  --platform-root . \
-  --control-url https://forge.example.test \
-  --token-file .dev/admin-token \
-  --apply
-```
+The Controller is the only import path. It resolves the configured library
+branch to one immutable commit, validates the package index and dependency
+closure, and records the durable result through
+`POST /api/v1/catalog/managed-recipes/sync`. Use the matching
+`GET /api/v1/catalog/managed-recipes/sync-status` response to inspect the
+commit, counts, conflicts, and withdrawn revisions. There is no platform-local
+Model or Recipe ledger to edit or import around the Controller.
 
 Container and Spark qualification still require the native ARM64/NVIDIA
 environment and exact artifact cache described in the acceptance runbook.
 
-## Runtime environment authority
+## Runtime argument authority
 
-Built-in harnesses retain a small compatibility allowlist. A runtime
-distribution can extend it for image-specific tunables by declaring the exact
-names it implements:
-
-```json
-{
-  "capabilities": {
-    "runtime_environment": {
-      "allowed_names": ["UPSTREAM_RUNTIME_TUNING"]
-    }
-  }
-}
-```
-
-The recipe can set only names admitted by the built-in harness or its exact
-runtime distribution. Because recipes bind the distribution by content digest,
-changing this authority also requires new distribution, patch-bundle, and
-recipe digests. The Spark agent already transports bounded environment entries,
-so adding a safe image-specific tuning variable does not require an agent or
-control-plane release.
+The canonical recipe owns the ordered engine arguments and settings. The
+platform compiler preserves those values, adds only platform-owned topology and
+interface arguments, and rejects attempts to control mounts, users, networks,
+capabilities, or other security-owned fields. Unknown engine options remain
+representable so the pinned runtime can report its own error.
 
 The controller still rejects reserved `VONK_*` names, dynamic-loader variables,
-interpreter injection hooks, and executable-path overrides even when a
-distribution declares them. Values remain ordinary bounded recipe scalars;
-this capability does not grant secret access or shell execution.
-
-The public Library API also fails closed when it projects qualification. It
-returns the existing `cataloged` wire value (shown as **Accepted** in the UI)
-only when the exact indexed recipe document explicitly carries the `accepted`
-metadata tag. An explicit `candidate` tag, a missing declaration, or conflicting
-`accepted` and `candidate` tags is shown as **Candidate**. This prevents missing
-metadata from silently becoming an acceptance claim while preserving existing
-API clients and filters.
+interpreter injection hooks, and executable-path overrides. Values remain
+bounded recipe scalars; this capability does not grant secret access or shell
+execution.
 
 In the production Compose topology the control API retains no general outbound
 network. Its GitHub client uses an internal Caddy listener that accepts only
@@ -150,6 +123,6 @@ needs ordinary outbound HTTPS and DNS access, but it never needs a GitHub token.
 ## Custom libraries
 
 Operators may maintain a private or forked recipe library. It must pass the
-same validator and use the same v1 schemas. A custom recipe can add a source
-bundle or patch bundle, but it cannot replace a harness implementation or
-weaken the runtime security and evidence contract.
+same independent validator and use schema-2 Model/Recipe documents with one
+self-contained package per recipe. A custom package cannot replace a harness
+implementation or weaken the runtime security and evidence contract.

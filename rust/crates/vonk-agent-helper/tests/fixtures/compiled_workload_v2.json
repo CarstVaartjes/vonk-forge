@@ -1,0 +1,169 @@
+{
+  "schema_version": 2,
+  "identity": {
+    "recipe_revision_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "execution_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "harness_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "build_input_sha256": null,
+    "model_artifact_set_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "model_artifact_bytes": 33
+  },
+  "runtime": {
+    "executable": "/opt/vonk/bin/vllm",
+    "argv": [
+      "serve",
+      "/models",
+      "value with spaces; {\"mode\": [\"$\", \"μ\"]}"
+    ],
+    "env": [
+      {"name": "HOME", "value": "/outputs/cache/home"},
+      {"name": "XDG_CACHE_HOME", "value": "/outputs/cache"},
+      {"name": "TMPDIR", "value": "/outputs/tmp"},
+      {"name": "VONK_RUNTIME_SPEC", "value": "/run/vonk/runtime.json"}
+    ],
+    "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "placement": {
+      "endpoint_address": null,
+      "rank": 0,
+      "role": "entrypoint",
+      "world_size": 1,
+      "local_address": null,
+      "master_address": null,
+      "master_port": null,
+      "port": 8000,
+      "reserved_memory_bytes": 68719476736
+    }
+  },
+  "artifacts": [
+    {
+      "selection_id": "primary",
+      "file_id": "config-primary",
+      "path": "config.json",
+      "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "size_bytes": 7,
+      "roles": ["entrypoint"],
+      "mount": {"target": "/models", "read_only": true},
+      "model": {
+        "publisher": "vonk-forge",
+        "slug": "primary-model",
+        "content_sha256": "1212121212121212121212121212121212121212121212121212121212121212"
+      },
+      "distribution_object": {
+        "name": "config.json",
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "bytes": 7,
+        "kind": "model"
+      }
+    },
+    {
+      "selection_id": "draft",
+      "file_id": "config-draft",
+      "path": "config.json",
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "size_bytes": 8,
+      "roles": ["entrypoint"],
+      "mount": {"target": "/models/draft", "read_only": true},
+      "model": {
+        "publisher": "vonk-forge",
+        "slug": "draft-model",
+        "content_sha256": "1313131313131313131313131313131313131313131313131313131313131313"
+      },
+      "distribution_object": {
+        "name": "config.json",
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "bytes": 8,
+        "kind": "model"
+      }
+    },
+    {
+      "selection_id": "primary",
+      "file_id": "deepseek-long-gguf",
+      "path": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+      "sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+      "size_bytes": 11,
+      "roles": ["model"],
+      "mount": {"target": "/models/primary", "read_only": true},
+      "model": {
+        "publisher": "vonk-forge",
+        "slug": "primary-model",
+        "content_sha256": "1212121212121212121212121212121212121212121212121212121212121212"
+      },
+      "distribution_object": {
+        "name": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
+        "sha256": "1212121212121212121212121212121212121212121212121212121212121212",
+        "bytes": 11,
+        "kind": "model"
+      }
+    },
+    {
+      "selection_id": "support",
+      "file_id": "license",
+      "path": "LICENSE",
+      "sha256": "1313131313131313131313131313131313131313131313131313131313131313",
+      "size_bytes": 7,
+      "roles": ["model"],
+      "mount": {"target": "/models/support", "read_only": true},
+      "model": {
+        "publisher": "vonk-forge",
+        "slug": "support-model",
+        "content_sha256": "1313131313131313131313131313131313131313131313131313131313131313"
+      },
+      "distribution_object": {
+        "name": "LICENSE",
+        "sha256": "1313131313131313131313131313131313131313131313131313131313131313",
+        "bytes": 7,
+        "kind": "model"
+      }
+    }
+  ],
+  "runtime_image": {
+    "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "oci_layout_sha256": "1414141414141414141414141414141414141414141414141414141414141414",
+    "image_bytes": 4096,
+    "architecture": "linux-arm64",
+    "runtime_interface": "vonk.runtime.v1",
+    "source": "published",
+    "build_id": null,
+    "distribution_object": {
+      "name": "image.oci.tar",
+      "sha256": "1414141414141414141414141414141414141414141414141414141414141414",
+      "bytes": 4096,
+      "kind": "oci-archive"
+    }
+  },
+  "security": {
+    "devices": [],
+    "capabilities": [],
+    "host_network": false,
+    "network_mode": "none",
+    "privileged": false,
+    "user": "10001:10001",
+    "mounts": [
+      {"source": "model", "target": "/models", "read_only": true},
+      {"source": "outputs", "target": "/outputs", "read_only": false}
+    ],
+    "read_only_root": true,
+    "no_new_privileges": true
+  },
+  "topology": {
+    "name": "solo",
+    "mode": "single",
+    "backend": "local",
+    "node_count": 1,
+    "world_size": 1,
+    "rank": 0,
+    "role": "entrypoint"
+  },
+  "lifecycle": {
+    "pre_start": [],
+    "post_stop": [],
+    "stop_timeout_seconds": 30
+  },
+  "endpoint": {
+    "protocol": "openai",
+    "port": 8000,
+    "model_aliases": ["primary"],
+    "health_path": "/v1/models"
+  },
+  "job": null
+}

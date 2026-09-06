@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 3 ]]; then
+  echo "usage: $0 CONTROLLER_IMAGE DIGEST_PINNED_SOURCE ARCHITECTURE" >&2
+  exit 2
+fi
+
+controller_image=$1
+source_reference=$2
+architecture=$3
+case "$architecture" in
+  linux/amd64) expected_child=sha256:9f6b762ce968b90b509c3bfa58f3d7abdbd1e0789340989db1572a1156fef116 ;;
+  linux/arm64) expected_child=sha256:75ab1f75f046d1597502a1ef838000d8462bfdf32976f2966658728a76853a49 ;;
+  *) echo "unsupported architecture: $architecture" >&2; exit 2 ;;
+esac
+if [[ "$source_reference" != *@sha256:* ]]; then
+  echo "source must be digest pinned" >&2
+  exit 2
+fi
+test "$source_reference" = "quay.io/skopeo/stable@sha256:8d25aabcf965e267b6a6ad02ff8da5512f77de1490063625093ff564797e88bc"
+
+labels=$(docker image inspect --format '{{index .Config.Labels "io.vonk.skopeo.index-digest"}} {{index .Config.Labels "io.vonk.skopeo.'"${architecture#linux/}"'-digest"}}' "$controller_image")
+read -r index_label child_label <<<"$labels"
+test "$index_label" = sha256:8d25aabcf965e267b6a6ad02ff8da5512f77de1490063625093ff564797e88bc
+test "$child_label" = "$expected_child"
+test "$(docker image inspect --format '{{.Architecture}}' "$controller_image")" = "${architecture#linux/}"
+source_child=$(skopeo inspect --tls-verify=true \
+  --override-os linux --override-arch "${architecture#linux/}" \
+  --format '{{.Digest}}' "docker://${source_reference}")
+test "$source_child" = "$expected_child"
+
+docker run --rm \
+  --read-only \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m \
+  --tmpfs /var/tmp:rw,nosuid,nodev,noexec,size=256m \
+  --user 10001:10001 \
+  --env SOURCE_REFERENCE="$source_reference" \
+  --env EXPECTED_ARCHITECTURE="$architecture" \
+  --entrypoint /bin/sh \
+  "$controller_image" \
+  -ec '
+    test "$(id -u)" = 10001
+    test -w /tmp
+    test -w /var/tmp
+    /usr/bin/skopeo --version
+    /usr/bin/skopeo inspect --tls-verify=true \
+      --override-os linux --override-arch "${EXPECTED_ARCHITECTURE#linux/}" \
+      "docker://${SOURCE_REFERENCE}"
+    /usr/bin/skopeo copy --tls-verify=true \
+      --override-os linux --override-arch "${EXPECTED_ARCHITECTURE#linux/}" \
+      "docker://${SOURCE_REFERENCE}" oci-archive:/tmp/controller-skopeo.oci
+    test -s /tmp/controller-skopeo.oci
+    /usr/bin/skopeo inspect --tls-verify=true \
+      --override-os linux --override-arch "${EXPECTED_ARCHITECTURE#linux/}" \
+      oci-archive:/tmp/controller-skopeo.oci
+  '

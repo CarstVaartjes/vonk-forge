@@ -183,8 +183,20 @@ def _tls_request(
     context = ssl.create_default_context(cafile=str(root))
     if client_certificate is not None and client_key is not None:
         context.load_cert_chain(client_certificate, client_key)
+    # Container-local health can become ready before the published host socket.
+    # Retry only connection refusal; TLS identity/authentication failures remain
+    # immediate test failures once the socket accepts a connection.
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            connection = socket.create_connection(("127.0.0.1", port), timeout=5)
+            break
+        except ConnectionRefusedError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
     with (
-        socket.create_connection(("127.0.0.1", port), timeout=5) as connection,
+        connection,
         context.wrap_socket(connection, server_hostname=hostname) as tls,
     ):
         peer = tls.getpeercert(binary_form=True)

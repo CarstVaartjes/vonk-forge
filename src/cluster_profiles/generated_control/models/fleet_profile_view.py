@@ -15,6 +15,7 @@ from typing import Literal, Union, cast
 import datetime
 
 if TYPE_CHECKING:
+  from ..models.fleet_profile_scope import FleetProfileScope
   from ..models.fleet_profile_view_labels import FleetProfileViewLabels
   from ..models.fleet_profile_assignment import FleetProfileAssignment
 
@@ -40,8 +41,12 @@ class FleetProfileView:
             labels (FleetProfileViewLabels):
             name (str):
             profile_digest (str):
+            scope (FleetProfileScope): The complete set of Sparks reconciled by a profile.
+
+                Scope is deliberately independent from assignments.  A member with no
+                assignment is an intentional idle outcome when the profile is applied.
             updated_at (datetime.datetime):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
     assignments: list['FleetProfileAssignment']
@@ -54,14 +59,16 @@ class FleetProfileView:
     labels: 'FleetProfileViewLabels'
     name: str
     profile_digest: str
+    scope: 'FleetProfileScope'
     updated_at: datetime.datetime
-    schema_version: Union[Literal[1], Unset] = 1
+    schema_version: Union[Literal[2], Unset] = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_profile_scope import FleetProfileScope
         from ..models.fleet_profile_view_labels import FleetProfileViewLabels
         from ..models.fleet_profile_assignment import FleetProfileAssignment
         assignments = []
@@ -89,6 +96,8 @@ class FleetProfileView:
 
         profile_digest = self.profile_digest
 
+        scope = self.scope.to_dict()
+
         updated_at = self.updated_at.isoformat()
 
         schema_version = self.schema_version
@@ -107,6 +116,7 @@ class FleetProfileView:
             "labels": labels,
             "name": name,
             "profile_digest": profile_digest,
+            "scope": scope,
             "updated_at": updated_at,
         })
         if schema_version is not UNSET:
@@ -118,6 +128,7 @@ class FleetProfileView:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_profile_scope import FleetProfileScope
         from ..models.fleet_profile_view_labels import FleetProfileViewLabels
         from ..models.fleet_profile_assignment import FleetProfileAssignment
         d = dict(src_dict)
@@ -158,14 +169,19 @@ class FleetProfileView:
 
         profile_digest = d.pop("profile_digest")
 
+        scope = FleetProfileScope.from_dict(d.pop("scope"))
+
+
+
+
         updated_at = isoparse(d.pop("updated_at"))
 
 
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
+        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        if schema_version != 2 and not isinstance(schema_version, Unset):
+            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
         fleet_profile_view = cls(
             assignments=assignments,
@@ -178,6 +194,7 @@ class FleetProfileView:
             labels=labels,
             name=name,
             profile_digest=profile_digest,
+            scope=scope,
             updated_at=updated_at,
             schema_version=schema_version,
         )

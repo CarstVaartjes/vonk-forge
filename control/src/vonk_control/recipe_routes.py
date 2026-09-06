@@ -16,15 +16,16 @@ from urllib.parse import urlsplit
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .distributed_lifecycle import DistributedLifecycleError
 from .distributed_recovery import enforce_recovery_deadline
 from .interface_adapters import InterfaceAdapterError, interface_adapter
 from .litellm import LiteLlmGeneration, LiteLlmPolicy, LiteLlmPublisher
 from .models import (
+    CatalogDocumentRevision,
     ClusterMapping,
     Job,
-    LocalRecipeRevision,
     RecipeInstallation,
     RecipeRun,
     Reconciliation,
@@ -1033,11 +1034,24 @@ class RecipeRouteService:
 def _primary_model_alias(session: Session, run: RecipeRun) -> str:
     installation = session.get(RecipeInstallation, run.installation_id)
     revision = (
-        session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         if installation is not None
         else None
     )
-    interfaces = revision.document.get("interfaces") if revision is not None else None
+    if (
+        revision is None
+        or revision.kind != "recipe"
+        or revision.schema_version != 2
+        or revision.state != "active"
+    ):
+        raise RecipeRouteError("recipe runtime interface authority is stale", run_id=run.id)
+    try:
+        recipe = RecipeDefinition.model_validate(revision.document)
+    except (TypeError, ValueError) as error:
+        raise RecipeRouteError("recipe runtime interface authority is invalid", run_id=run.id) from error
+    if content_sha256(recipe) != revision.content_digest:
+        raise RecipeRouteError("recipe runtime interface authority is stale", run_id=run.id)
+    interfaces = recipe.model_dump(mode="json").get("interfaces")
     interface = None
     if isinstance(interfaces, list):
         for value in interfaces:

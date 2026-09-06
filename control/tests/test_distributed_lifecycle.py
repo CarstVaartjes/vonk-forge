@@ -5,6 +5,7 @@ from collections.abc import Callable
 import pytest
 from vonk_control.distributed_lifecycle import (
     DistributedLifecycleError,
+    canonical_distributed_readiness,
     recover_distributed_runtime,
 )
 
@@ -12,15 +13,32 @@ from vonk_control.distributed_lifecycle import (
 def _policy() -> dict[str, object]:
     return {
         "stop_timeout_seconds": 30,
-        "readiness": {
-            "strategy": "endpoint-owner-after-all-ranks",
-            "path": "/v1/models",
-            "timeout_seconds": 20,
-        },
         "failure": {
             "rank_loss": "withdraw-endpoint",
             "recovery": "restart-worker-then-entrypoint",
         },
+    }
+
+
+def _topology() -> dict[str, object]:
+    return {
+        "mode": "distributed",
+        "roles": [
+            {"name": "entrypoint", "count": 1, "endpoint_owner": True},
+            {"name": "worker", "count": 1, "endpoint_owner": False},
+        ],
+    }
+
+
+def _interfaces() -> list[dict[str, object]]:
+    return [{"adapter": "openai", "health_path": "/v1/models"}]
+
+
+def _authority() -> dict[str, object]:
+    return {
+        "lifecycle": _policy(),
+        "topology": _topology(),
+        "interfaces": _interfaces(),
     }
 
 
@@ -38,7 +56,7 @@ def test_rank_loss_withdraws_then_recovers_worker_before_endpoint_owner() -> Non
         ready[rank] = False
 
     evidence = recover_distributed_runtime(
-        lifecycle=_policy(),
+        **_authority(),
         roles={0: "entrypoint", 1: "worker"},
         failed_rank=1,
         withdraw=lambda: events.append("withdraw"),
@@ -78,7 +96,7 @@ def test_recovery_never_republishes_when_full_topology_does_not_recover() -> Non
 
     with pytest.raises(DistributedLifecycleError, match="readiness deadline"):
         recover_distributed_runtime(
-            lifecycle=_policy(),
+            **_authority(),
             roles={0: "entrypoint", 1: "worker"},
             failed_rank=1,
             withdraw=lambda: events.append("withdraw"),
@@ -103,7 +121,7 @@ def test_recovery_stops_failed_endpoint_owner_only_once() -> None:
         ready[rank] = True
 
     recover_distributed_runtime(
-        lifecycle=_policy(),
+        **_authority(),
         roles={0: "entrypoint", 1: "worker"},
         failed_rank=0,
         withdraw=lambda: events.append("withdraw"),
@@ -129,28 +147,40 @@ def test_recovery_stops_failed_endpoint_owner_only_once() -> None:
     ("mutation", "message"),
     [
         (
-            lambda policy: policy["failure"].update(rank_loss="ignore"),
+            lambda authority: authority["lifecycle"]["failure"].update(
+                rank_loss="ignore"
+            ),
             "rank-loss policy",
         ),
         (
-            lambda policy: policy["failure"].update(recovery="restart-entrypoint"),
+            lambda authority: authority["lifecycle"]["failure"].update(
+                recovery="restart-entrypoint"
+            ),
             "recovery policy",
         ),
         (
-            lambda policy: policy["readiness"].update(strategy="endpoint-owner"),
-            "readiness policy",
+            lambda authority: authority["topology"]["roles"][0].update(
+                endpoint_owner=False
+            ),
+            "endpoint topology",
+        ),
+        (
+            lambda authority: authority["interfaces"][0].update(
+                health_path="models"
+            ),
+            "readiness path",
         ),
     ],
 )
 def test_recovery_refuses_unbound_lifecycle_metadata(
     mutation: Callable[[dict[str, object]], None], message: str
 ) -> None:
-    policy = _policy()
-    mutation(policy)
+    authority = _authority()
+    mutation(authority)
 
     with pytest.raises(DistributedLifecycleError, match=message):
         recover_distributed_runtime(
-            lifecycle=policy,
+            **authority,
             roles={0: "entrypoint", 1: "worker"},
             failed_rank=1,
             withdraw=lambda: None,
@@ -161,3 +191,29 @@ def test_recovery_refuses_unbound_lifecycle_metadata(
             monotonic=lambda: 0.0,
             sleep=lambda _seconds: None,
         )
+
+
+def test_readiness_selects_openai_interface_with_job_companion() -> None:
+    interfaces = [
+        {"adapter": "image-job", "path": "/outputs"},
+        {"adapter": "openai", "health_path": "/v1/models"},
+    ]
+
+    assert canonical_distributed_readiness(
+        topology=_topology(), interfaces=interfaces, lifecycle=_policy()
+    ) == {
+        "strategy": "endpoint-owner-after-all-ranks",
+        "path": "/v1/models",
+        "timeout_seconds": 60,
+    }
+
+
+def test_job_only_interface_has_no_http_readiness() -> None:
+    assert (
+        canonical_distributed_readiness(
+            topology=_topology(),
+            interfaces=[{"adapter": "image-job", "path": "/outputs"}],
+            lifecycle=_policy(),
+        )
+        is None
+    )

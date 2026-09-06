@@ -219,7 +219,6 @@ def nas_responses(
             "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ",
             "",
         ),
-        ("Operator jurisdiction (uppercase country code, or EU): ", "NL"),
         *((f"{label}: ", value) for label, value in hostnames.items()),
         ("Vonk Forge administrator password (leave blank to generate): ", ""),
         ("Tailscale OAuth client ID: ", oauth_client_id),

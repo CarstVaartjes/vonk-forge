@@ -1,4 +1,7 @@
-# Vonk Forge Program Implementation Plan
+# Retired: Vonk Forge Program Implementation Plan
+
+> Historical roadmap retained for provenance. WorkloadRun authoring/import
+> milestones in this document are no longer active.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

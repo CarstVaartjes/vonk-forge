@@ -421,15 +421,13 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
               ? `Partial · ${summary.unifiedReportingNodes} of ${summary.live} live nodes reporting`
               : "No live node reports both host and GPU free memory"}</small>
         </div>
-        <div className="fleet-command-fact"><span>Loaded</span><strong>{summary.loadedRecipes}</strong><small className="sr-only">{countLabel(summary.loadedRecipes, "loaded recipe")}</small></div>
-        <div className="fleet-command-fact"><span>Installed</span><strong>{summary.installedRecipes}</strong><small className="sr-only">{countLabel(summary.installedRecipes, "installed recipe")}</small></div>
         <button type="button" className="fleet-command-warning" aria-label={countLabel(summary.warnings, "active warning")} aria-pressed={warningsOnly} onClick={() => setWarningsOnly(value => !value)}><span>Warnings</span><strong>{summary.warnings}</strong></button>
       </section>}
 
       <div className="fleet-command-actions">
-        <a className="button" href="/library">Install model</a>
-        {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <button type="button" className="button secondary" onClick={event => { upgradeTrigger.current = event.currentTarget; setUpgradeTarget("fleet"); }}>Upgrade agents</button>}
-        {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <details className="fleet-controls-menu">
+        <a className="button" href="/library">Run model</a>
+        <a className="button secondary" href="/library/profiles">Switch profile</a>
+        {fleet.snapshot && <details className="fleet-controls-menu">
           <summary>Controls{filtersActive ? <span aria-label="Filters active">•</span> : null}</summary>
           <div className="fleet-controls-popover">
             <div className="fleet-controls-popover-heading">
@@ -442,6 +440,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
             </div>
             <section className="fleet-controls-basic" aria-label="Secondary Fleet controls">
               <label className="fleet-sort"><span>Sort</span><select value={sort} onChange={event => setSort(event.currentTarget.value as FleetSort)}><option value="attention">Attention first</option><option value="name">Name A–Z</option></select></label>
+              <div className="fleet-secondary-actions"><button type="button" className="button secondary" onClick={event => { upgradeTrigger.current = event.currentTarget; setUpgradeTarget("fleet"); }}>Upgrade agents</button><button type="button" className="button secondary" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboardingMode("re-enroll"); setOnboarding(true); }}>Re-enroll Spark</button></div>
             </section>
             <div className="fleet-view-toolbar">
               <div><strong>Fleet view</strong><span>Change density or inspect topology.</span></div>
@@ -454,7 +453,6 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
             </div>
           </div>
         </details>}
-        <button type="button" className="button secondary fleet-reenroll-button" aria-label="Re-enroll Spark" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboardingMode("re-enroll"); setOnboarding(true); }}>Re-enroll</button>
         <button type="button" className="button fleet-add-button" aria-label="Add Spark" onClick={event => { onboardingTrigger.current = event.currentTarget; setOnboardingMode("new-node"); setOnboarding(true); }}>+ Spark</button>
       </div>
     </header>
@@ -474,7 +472,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
 
     {fleet.loading && !fleet.snapshot && <section className="fleet-loading" aria-label="Loading Fleet" role="status">
       <span className="loading-orb" aria-hidden="true"/>
-      <div><h3>Joining the Fleet stream</h3><p>Loading the latest registered Fleet projection and node telemetry…</p></div>
+      <div><h3>Joining the Fleet stream</h3><p>Loading the latest Fleet state and node telemetry…</p></div>
     </section>}
 
     {fleet.error && !fleet.snapshot && <section className="fleet-error" role="alert">
@@ -490,7 +488,6 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
     </section>}
 
     {fleet.snapshot && fleet.snapshot.nodes.length > 0 && <>
-      <FleetOperatingBoard api={api} nodes={fleet.snapshot.nodes} now={fleet.now} onManageNode={selectNode}/>
       <div className="fleet-roster-heading">
         <div><h2>Spark roster</h2><p>Inspect capacity, telemetry, and workload evidence for each managed Spark.</p></div>
         <span>{visibleNodes.length} of {fleet.snapshot.nodes.length}</span>
@@ -529,6 +526,7 @@ export function FleetPage({api, onBusyChange}: {api: ControlApi; onBusyChange?(b
           onUpgrade={event => { upgradeTrigger.current = event.currentTarget; setUpgradeTarget({id: selectedNode.id, name: nodeDisplayName(selectedNode)}); }}
         />}
       </div>
+      <FleetOperatingBoard api={api}/>
     </>}
   </div>;
 }

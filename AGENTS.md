@@ -27,6 +27,7 @@ or Spark lane.
 Use a writable, task-specific uv cache. From `/opt/vonk-forge`:
 
 ```bash
+export VONK_RECIPE_LIBRARY_ROOT=/opt/vonk-forge-recipes
 UV_CACHE_DIR=/private/tmp/vonk-forge-uv-cache \
   uv run --frozen pytest -q
 UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \

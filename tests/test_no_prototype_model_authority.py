@@ -65,7 +65,7 @@ def test_prototype_model_authority_is_absent() -> None:
     assert [str(path.relative_to(ROOT)) for path in forbidden if path.exists()] == []
 
 
-def test_only_native_v1_model_adapter_roots_remain() -> None:
+def test_recipe_owned_model_adapters_are_externalized() -> None:
     files = {
         path.relative_to(ROOT).as_posix()
         for path in (ROOT / "adapters").rglob("*")
@@ -73,13 +73,8 @@ def test_only_native_v1_model_adapter_roots_remain() -> None:
         and path.name != "__init__.py"
         and "__pycache__" not in path.parts
     }
-    assert files
-    assert all(
-        path.startswith(
-            ("adapters/deepseek/ds4/", "adapters/deepseek/mia-vllm/")
-        )
-        for path in files
-    )
+    assert files == set()
+    assert not (ROOT / "adapters/deepseek").exists()
 
 
 def test_retired_profile_controller_modules_are_absent() -> None:

@@ -12,6 +12,7 @@ import pytest
 
 from cluster_profiles.control_client import (
     ControlClient,
+    ControlForbidden,
     ControlMalformedResponse,
     ControlUnauthorized,
 )
@@ -120,6 +121,45 @@ def test_raw_request_preserves_typed_bounded_api_errors(tmp_path: Path) -> None:
 
     assert raised.value.detail == "bad token <redacted>"
     assert raised.value.retry_after_seconds == 7
+
+
+def test_raw_request_preserves_shared_availability_error_metadata(tmp_path: Path) -> None:
+    headers = Message()
+    headers["Content-Type"] = "application/json"
+    body = io.BytesIO(json.dumps({
+        "code": "model_cache.auth_required",
+        "detail": "Hugging Face access is required",
+        "recovery_actions": ["open_model_access", "check_access_and_resume"],
+        "required_bytes": 200,
+        "free_bytes": 100,
+        "shortfall_bytes": 100,
+        "retry_time": "2026-09-06T13:05:00Z",
+        "preserved": "12 MiB of verified bytes",
+    }).encode())
+
+    def opener(*_args, **_kwargs):
+        raise urllib.error.HTTPError(
+            "https://forge.example.test/api/v1/model-cache/download",
+            403,
+            "Forbidden",
+            headers,
+            body,
+        )
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+
+    with pytest.raises(ControlForbidden) as raised:
+        client.request("POST", "/api/v1/model-cache/download", {})
+
+    assert raised.value.code == "model_cache.auth_required"
+    assert raised.value.recovery == ("open_model_access", "check_access_and_resume")
+    assert raised.value.retry_time == "2026-09-06T13:05:00Z"
+    assert raised.value.preserved == "12 MiB of verified bytes"
+    assert raised.value.required_bytes == 200
+    assert raised.value.free_bytes == 100
+    assert raised.value.shortfall_bytes == 100
 
 
 def test_artifact_input_upload_streams_the_reverified_local_file(

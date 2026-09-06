@@ -16,33 +16,51 @@ import type {
   FleetNodeIdentity,
   FleetProfile,
   FleetProfileApplication,
+  FleetProfileApplyInput,
+  FleetProfileCaptureInput,
+  FleetProfileDuplicateInput,
   FleetProfileInput,
   FleetProfileList,
   FleetProfilePreview,
+  FleetProfileStatus,
+  RunSwitchApplyRequest,
+  RunSwitchOperation,
+  RunSwitchPlan,
+  RunSwitchPreviewRequest,
+  CacheEntryResponse,
+  ModelCacheDownloadInput,
+  ModelCacheDownloadPreviewInput,
+  ModelCacheDownloadPreviewResponse,
+  ModelCacheEvictInput,
+  ModelCacheEvictionPreviewInput,
+  ModelCacheEvictionPreviewResponse,
+  ModelCacheInventoryResponse,
+  ModelCacheOperationResponse,
+  ModelCacheOperationsResponse,
+  ModelCacheRepairInput,
+  ModelCacheRepairPreviewInput,
+  ModelCacheRepairPreviewResponse,
+  ModelCacheUpdatesResponse,
+  ModelCacheRetryInput,
+  ModelCacheAccessResumeInput,
+  ModelCacheAccessResumeResponse,
+  RecipeImageAvailabilityInput,
+  RecipeImageAvailabilityList,
+  RecipeImageAvailabilityOperation,
+  RecipeImageAvailabilityRetryInput,
+  RunSwitchRetryInput,
   JobDetail,
   JobResumeResponse,
   JobsResponse,
   ProposalInput,
   ProposalPreview,
-  CatalogRecipeDocument,
-  CatalogRecipeList,
-  CatalogRecipeRevision,
-  GlobalRecipeRevision,
-  PublicRecipeList,
-  PublicRecipePreview,
-  ManagedCatalogSyncSummary,
-  ManagedCatalogSyncInput,
-  WorkloadRunApplied,
-  WorkloadRunPreview,
   TelemetryHistory,
+  TelemetryCurrentResponse,
+  TelemetryCapabilitiesResponse,
+  TelemetryWorkloadsResponse,
   TelemetryResolution,
   VisualFleetSnapshot,
   NodeProfileUpdate,
-  SourceBundleReceipt,
-  SourcePolicyReport,
-  RecipeBuildPlan,
-  RecipeMappingPlan,
-  RecipeOperation,
   LibraryBuildApplyInput,
   LibraryBuildPreviewInput,
   LibraryImageDistributionApplyInput,
@@ -202,111 +220,6 @@ export class ApiClient implements ControlApi {
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`);
   }
 
-  async catalogRecipes(cursor?: string): Promise<CatalogRecipeList> {
-    return resultData(await this.generated.GET("/api/v1/catalog/recipes", {params: {query: {cursor, limit: 20}}}));
-  }
-
-  async catalogRecipe(recipeId: string): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.GET("/api/v1/catalog/recipes/{recipe_id}", {params: {path: {recipe_id: recipeId}}}));
-  }
-
-  async createCatalogRecipe(input: {slug: string; document: CatalogRecipeDocument}): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.POST("/api/v1/catalog/recipes", {body: input}));
-  }
-
-  async updateCatalogRecipe(recipeId: string, expectedRevision: number, document: CatalogRecipeDocument): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.PUT("/api/v1/catalog/recipes/{recipe_id}/draft", {params: {path: {recipe_id: recipeId}}, body: {expected_revision: expectedRevision, document}}));
-  }
-
-  async resolveCatalogRecipe(recipeId: string, expectedRevision: number): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.POST("/api/v1/catalog/recipes/{recipe_id}/resolve", {params: {path: {recipe_id: recipeId}}, body: {expected_revision: expectedRevision}}));
-  }
-
-  async forkCatalogRecipe(recipeId: string, revision: number, slug: string): Promise<CatalogRecipeRevision> {
-    return resultData(await this.generated.POST("/api/v1/catalog/recipes/{recipe_id}/fork", {params: {path: {recipe_id: recipeId}}, body: {revision, slug}}));
-  }
-
-  previewGlobalRecipe(uri: string): Promise<GlobalRecipeRevision> {
-    return this.request("/api/v1/catalog/imports/global/preview", {method: "POST", body: JSON.stringify({uri})});
-  }
-
-  importGlobalRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision> {
-    return this.request("/api/v1/catalog/imports/global", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256})});
-  }
-
-  listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList> {
-    return this.request("/api/v1/catalog/public-recipes", {signal});
-  }
-
-  previewPublicRecipe(uri: string, signal?: AbortSignal): Promise<PublicRecipePreview> {
-    return this.request("/api/v1/catalog/imports/public/preview", {method: "POST", body: JSON.stringify({uri}), signal});
-  }
-
-  importPublicRecipe(uri: string, expectedContentSha256: string, signal?: AbortSignal): Promise<CatalogRecipeRevision> {
-    return this.request("/api/v1/catalog/imports/public", {method: "POST", body: JSON.stringify({uri, expected_content_sha256: expectedContentSha256}), signal});
-  }
-
-  syncManagedRecipeCatalog(input?: ManagedCatalogSyncInput, signal?: AbortSignal): Promise<ManagedCatalogSyncSummary> {
-    return this.request("/api/v1/catalog/managed-recipes/sync", {
-      method: "POST",
-      body: JSON.stringify({request_key: crypto.randomUUID(), ...input}),
-      signal,
-    });
-  }
-
-  managedRecipeCatalogSyncStatus(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary> {
-    return this.request("/api/v1/catalog/managed-recipes/sync-status", {signal});
-  }
-
-  async attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void> {
-    await this.request(`/api/v1/catalog/recipes/${encodeURIComponent(recipeId)}/publication-report`, {method: "PUT", body: JSON.stringify({report})});
-  }
-
-  publicationExport(recipeId: string, publisher: string): Promise<Record<string, unknown>> {
-    return this.request(`/api/v1/catalog/recipes/${encodeURIComponent(recipeId)}/publication-export`, {method: "POST", body: JSON.stringify({publisher})});
-  }
-
-  async uploadSourceBundle(sha256: string, archive: Uint8Array): Promise<SourceBundleReceipt> {
-    if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error("Invalid source bundle digest");
-    const headers = new Headers({Accept: "application/json", "Content-Type": "application/vnd.vonk-forge.source-bundle.v1+tar"});
-    const csrf = csrfToken();
-    if (csrf) headers.set("X-CSRF-Token", csrf);
-    const response = await fetch(`/api/v1/catalog/source-bundles/${sha256}`, {
-      method: "PUT", body: archive as BodyInit, headers, credentials: "same-origin",
-    });
-    this.requireAuthentication(response);
-    if (!response.ok) throw new Error(`Source upload returned ${response.status}: ${(await response.text()).slice(0, 256)}`);
-    return response.json() as Promise<SourceBundleReceipt>;
-  }
-
-  checkRecipeSource(recipeRevisionId: string): Promise<SourcePolicyReport> {
-    return this.request("/api/v1/recipes/source-checks", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId})});
-  }
-
-  previewRecipeBuild(recipeRevisionId: string, builderNodeId: string): Promise<RecipeBuildPlan> {
-    return this.request("/api/v1/recipes/build-plans/preview", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId, builder_node_id: builderNodeId})});
-  }
-
-  buildRecipe(plan: RecipeBuildPlan): Promise<RecipeOperation> {
-    return this.request("/api/v1/recipes/builds", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, builder_node_id: plan.builder_node_id, build_input_sha256: plan.build_input_sha256, request_key: crypto.randomUUID()})});
-  }
-
-  previewRecipeMapping(recipeRevisionId: string, nodeIds: string[]): Promise<RecipeMappingPlan> {
-    return this.request("/api/v1/recipes/mapping-plans/preview", {method: "POST", body: JSON.stringify({recipe_revision_id: recipeRevisionId, node_ids: nodeIds, parameters: {}})});
-  }
-
-  createRecipeMapping(plan: RecipeMappingPlan): Promise<{mapping_id: string; generation: number; placement_digest: string}> {
-    return this.request("/api/v1/recipes/mappings", {method: "POST", body: JSON.stringify({recipe_revision_id: plan.recipe_revision_id, node_ids: plan.nodes.map(node => node.node_id), parameters: plan.parameters, placement_digest: plan.placement_digest, request_key: crypto.randomUUID()})});
-  }
-
-  previewWorkloadRun(sourceYaml: string): Promise<WorkloadRunPreview> {
-    return this.request("/api/v1/catalog/imports/workload_run/preview", {method: "POST", body: JSON.stringify({source_yaml: sourceYaml})});
-  }
-
-  applyWorkloadRun(sourceYaml: string, sourceSha256: string, reportDigest: string): Promise<WorkloadRunApplied> {
-    return this.request("/api/v1/catalog/imports/workload_run", {method: "POST", body: JSON.stringify({source_yaml: sourceYaml, source_sha256: sourceSha256, report_digest: reportDigest})});
-  }
-
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {
     return resultData(await this.generated.GET("/api/v1/fleet", {signal}));
   }
@@ -350,10 +263,29 @@ export class ApiClient implements ControlApi {
     }));
   }
 
-  async applyFleetProfile(profileId: string, planDigest: string, signal?: AbortSignal): Promise<FleetProfileApplication> {
+  async captureCurrentFleetProfile(input: FleetProfileCaptureInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profiles/capture-current", {body: input, signal}));
+  }
+
+  async duplicateFleetProfile(profileId: string, input: FleetProfileDuplicateInput, signal?: AbortSignal): Promise<FleetProfile> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/duplicate", {
+      params: {path: {profile_id: profileId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async fleetProfileStatus(profileId: string, signal?: AbortSignal): Promise<FleetProfileStatus> {
+    return resultData(await this.generated.GET("/api/v1/fleet-profiles/{profile_id}/status", {
+      params: {path: {profile_id: profileId}},
+      signal,
+    }));
+  }
+
+  async applyFleetProfile(profileId: string, input: FleetProfileApplyInput, signal?: AbortSignal): Promise<FleetProfileApplication> {
     return resultData(await this.generated.POST("/api/v1/fleet-profiles/{profile_id}/apply", {
       params: {path: {profile_id: profileId}},
-      body: {plan_digest: planDigest, request_key: crypto.randomUUID()},
+      body: input,
       signal,
     }));
   }
@@ -361,6 +293,121 @@ export class ApiClient implements ControlApi {
   async fleetProfileApplication(applicationId: string, signal?: AbortSignal): Promise<FleetProfileApplication> {
     return resultData(await this.generated.GET("/api/v1/fleet-profile-applications/{application_id}", {
       params: {path: {application_id: applicationId}},
+      signal,
+    }));
+  }
+
+  async previewRecipeRunSwitch(input: RunSwitchPreviewRequest, signal?: AbortSignal): Promise<RunSwitchPlan> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switch-plans/preview", {body: input, signal}));
+  }
+
+  async applyRecipeRunSwitch(input: RunSwitchApplyRequest, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switches", {body: input, signal}));
+  }
+
+  async getRecipeRunSwitchOperation(operationId: string, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.GET("/api/v1/recipes/run-switches/{operation_id}", {
+      params: {path: {operation_id: operationId}},
+      signal,
+    }));
+  }
+
+  async retryRecipeRunSwitch(operationId: string, input: RunSwitchRetryInput, signal?: AbortSignal): Promise<RunSwitchOperation> {
+    return resultData(await this.generated.POST("/api/v1/recipes/run-switches/{operation_id}/retry", {
+      params: {path: {operation_id: operationId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async modelCacheInventory(cursor?: string, signal?: AbortSignal): Promise<ModelCacheInventoryResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache", {params: {query: {limit: 100, cursor}}, signal}));
+  }
+
+  async modelCacheEntry(artifactSetSha256: string, signal?: AbortSignal): Promise<CacheEntryResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/entries/{artifact_set_sha256}", {
+      params: {path: {artifact_set_sha256: artifactSetSha256}},
+      signal,
+    }));
+  }
+
+  async previewModelCacheDownload(input: ModelCacheDownloadPreviewInput, signal?: AbortSignal): Promise<ModelCacheDownloadPreviewResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/download-preview", {body: input, signal}));
+  }
+
+  async downloadModelCache(input: ModelCacheDownloadInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/download", {body: input, signal}));
+  }
+
+  async previewModelCacheRepair(input: ModelCacheRepairPreviewInput, signal?: AbortSignal): Promise<ModelCacheRepairPreviewResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/repair-preview", {body: input, signal}));
+  }
+
+  async repairModelCache(input: ModelCacheRepairInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/repair", {body: input, signal}));
+  }
+
+  async previewModelCacheEviction(input: ModelCacheEvictionPreviewInput, signal?: AbortSignal): Promise<ModelCacheEvictionPreviewResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/eviction-preview", {body: input, signal}));
+  }
+
+  async evictModelCache(input: ModelCacheEvictInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/evict", {body: input, signal}));
+  }
+
+  async modelCacheUpdates(signal?: AbortSignal): Promise<ModelCacheUpdatesResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/updates", {params: {query: {limit: 100}}, signal}));
+  }
+
+  async modelCacheOperations(cursor?: string, signal?: AbortSignal): Promise<ModelCacheOperationsResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/operations", {params: {query: {limit: 100, cursor}}, signal}));
+  }
+
+  async modelCacheOperation(operationId: string, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.GET("/api/v1/model-cache/operations/{operation_id}", {
+      params: {path: {operation_id: operationId}},
+      signal,
+    }));
+  }
+
+  async retryModelCacheOperation(operationId: string, input: ModelCacheRetryInput, signal?: AbortSignal): Promise<ModelCacheOperationResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/operations/{operation_id}/retry", {
+      params: {path: {operation_id: operationId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async checkModelCacheAccessAndResume(operationId: string, input: ModelCacheAccessResumeInput, signal?: AbortSignal): Promise<ModelCacheAccessResumeResponse> {
+    return resultData(await this.generated.POST("/api/v1/model-cache/operations/{operation_id}/check-access-and-resume", {
+      params: {path: {operation_id: operationId}},
+      body: input,
+      signal,
+    }));
+  }
+
+  async recipeAvailabilityStart(input: RecipeImageAvailabilityInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
+    return resultData(await this.generated.POST("/api/v1/library/recipe-image-availability", {body: input, signal}));
+  }
+
+  async recipeAvailabilityList(recipeRevisionId?: string, state?: RecipeImageAvailabilityOperation["state"], cursor?: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityList> {
+    return resultData(await this.generated.GET("/api/v1/library/recipe-image-availability", {
+      params: {query: {recipe_revision_id: recipeRevisionId, state, cursor, limit: 100}},
+      signal,
+    }));
+  }
+
+  async recipeAvailabilityOperation(operationId: string, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
+    return resultData(await this.generated.GET("/api/v1/library/recipe-image-availability/{operation_id}", {
+      params: {path: {operation_id: operationId}},
+      signal,
+    }));
+  }
+
+  async retryRecipeAvailability(operationId: string, input: RecipeImageAvailabilityRetryInput, signal?: AbortSignal): Promise<RecipeImageAvailabilityOperation> {
+    return resultData(await this.generated.POST("/api/v1/library/recipe-image-availability/{operation_id}/retry", {
+      params: {path: {operation_id: operationId}},
+      body: input,
       signal,
     }));
   }
@@ -622,6 +669,27 @@ export class ApiClient implements ControlApi {
         path: {node_id: nodeId},
         query: {start, end, resolution, maximum_points: maximumPoints},
       },
+      signal,
+    }));
+  }
+
+  async nodeTelemetryCurrent(nodeId: string, signal?: AbortSignal): Promise<TelemetryCurrentResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/current", {
+      params: {path: {node_id: nodeId}},
+      signal,
+    }));
+  }
+
+  async nodeTelemetryCapabilities(nodeId: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/capabilities", {
+      params: {path: {node_id: nodeId}},
+      signal,
+    }));
+  }
+
+  async nodeTelemetryWorkloads(nodeId: string, runId?: string, state?: string, signal?: AbortSignal): Promise<TelemetryWorkloadsResponse> {
+    return resultData(await this.generated.GET("/api/v1/nodes/{node_id}/telemetry/workloads", {
+      params: {path: {node_id: nodeId}, query: {run_id: runId, state}},
       signal,
     }));
   }

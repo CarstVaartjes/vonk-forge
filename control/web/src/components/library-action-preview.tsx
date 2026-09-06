@@ -187,7 +187,7 @@ export function UninstallPreview({plan}: {plan: LibraryUninstallPlan}) {
     </li>)}</ol>
     {plan.active_runs.length > 0 && <section aria-label="Active runs"><h4>{plan.active_run_count} active run{plan.active_run_count === 1 ? "" : "s"}</h4><ul>{plan.active_runs.map((run, index) => <li key={run.run_id}><span>Run {index + 1} · {humanizeIdentifier(run.state)} · route {humanizeIdentifier(run.route_state)}</span><TechnicalDetails compact items={[{label: "Run ID", value: run.run_id}]}/></li>)}</ul></section>}
     {!plan.consequences.automatic_stop && <p className="authority-copy">Forge will not stop active runs automatically.</p>}
-    {plan.consequences.catalog_retained && <p>The local catalog recipe is retained.</p>}
+    {plan.consequences.catalog_retained && <p>The exact Recipe metadata remains available.</p>}
     {plan.consequences.reinstall_required && <p>Reinstall is required to restore removed content.</p>}
     <LibraryPlanReasons heading="Remove blockers" reasons={plan.blockers}/>
     <LibraryPlanReasons heading="Remove warnings" reasons={plan.warnings}/>

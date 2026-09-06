@@ -79,11 +79,10 @@ def test_retired_runtime_modules_are_absent() -> None:
 
 def test_production_images_have_no_git_or_ssh_transport_tools() -> None:
     dockerfile = (ROOT / "control/Dockerfile").read_text().lower()
-    runtime = dockerfile.split(" as runtime-root", 1)[1].split(" as api-root", 1)[0]
-    worker = dockerfile.split(" as worker", 1)[1].split(" as api", 1)[0]
-    api_root = dockerfile.split(" as api-root", 1)[1].split(" as worker", 1)[0]
+    worker = dockerfile.split(" as worker\n", 1)[1].split(" as api\n", 1)[0]
+    api = dockerfile.split(" as api\n", 1)[1]
 
-    for stage in (runtime, worker, api_root):
+    for stage in (worker, api):
         assert "apt-get install" not in stage
         assert "openssh" not in stage
         assert " git" not in stage

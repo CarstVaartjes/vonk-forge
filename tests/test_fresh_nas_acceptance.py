@@ -110,7 +110,7 @@ def test_nas_responses_accept_explicit_spark_service_hostnames() -> None:
         registry_hostname="registry.spark.localhost",
     )
 
-    assert [answer for _, answer in responses[5:8]] == [
+    assert [answer for _, answer in responses[4:7]] == [
         "enroll.spark.localhost",
         "agents.spark.localhost",
         "registry.spark.localhost",
@@ -164,10 +164,6 @@ def test_nas_responses_match_canonical_required_prompt_order(tmp_path: Path) -> 
     assert responses[2] == (
         "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: ",
         "",
-    )
-    assert responses[3] == (
-        "Operator jurisdiction (uppercase country code, or EU): ",
-        "NL",
     )
 
 

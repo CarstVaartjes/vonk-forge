@@ -1,5 +1,5 @@
 import {AuthenticationRequired} from "../auth";
-import type {AgentRepairManifest, AgentUpgradePlan} from "./types";
+import type {AgentRepairManifest, AgentUpgradePlan, RunSwitchPreviewRequest} from "./types";
 import {ApiClient} from "./client";
 
 const REPAIR_NODE = `spk_${"a".repeat(32)}`;
@@ -139,7 +139,7 @@ it("uses distinct digest-bound Library action operations", async () => {
     requests.push(request);
     const path = new URL(request.url).pathname;
     if (path === "/api/v1/library") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20}, models: [], unlinked_recipes: [], next_cursor: null}), {status: 200});
-    if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 1, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", slug: "one", title: "One", description: "", source_kind: "local"}, selected_revision: null, visual_recipe: null, topology: null, operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: []}), {status: 200});
+    if (path === "/api/v1/library/recipes/recipe%2Fone") return new Response(JSON.stringify({schema_version: 2, generated_at: "2026-08-15T12:00:00Z", recipe: {recipe_id: "recipe/one", publisher: "vonk-forge", slug: "one", title: "One", description: "", content_sha256: "a".repeat(64)}, definition: {}, model_documents: [], operational_state: {builds: [], mappings: [], installations: [], runs: []}, placement: [], reasons: [], topology: null}), {status: 200});
     if (path.startsWith("/api/v1/jobs/")) return new Response(JSON.stringify({id: "job-1", kind: "recipe.install", state: "running", authority_revision: "a".repeat(64), current_attempt: 1, operations: [], operation_total: 0, targets: [], target_total: 0, progress: {completed: 0, failed: 0, running: 1, total: 1}}), {status: 200});
     return new Response(JSON.stringify({
       id: "operation-1", kind: "recipe.install", owner_id: "owner-1", state: "queued",
@@ -237,6 +237,114 @@ it("requests bounded node telemetry history through the generated operation", as
     resolution: "raw",
     start: "2026-08-15T11:00:00.000Z",
   });
+});
+
+it("binds the one-click run switch, NAS cache, and rich telemetry routes", async () => {
+  // Break caught: a primary Run action falls back to the retired lifecycle
+  // routes, cache actions lose their digest/key contract, or telemetry reads
+  // silently use the old aggregate endpoint.
+  const requests: Request[] = [];
+  const modelDigest = "a".repeat(64);
+  const artifactDigest = "b".repeat(64);
+  const requestKey = "00000000-0000-4000-8000-000000000401";
+  const runInput: RunSwitchPreviewRequest = {
+    schema_version: 2,
+    model_version_sha256: modelDigest,
+    recipe_revision_id: "revision-run",
+    spark_group: {nodes: [{node_id: "spark-a", rank: 0, role: "leader", endpoint_owner: true}, {node_id: "spark-b", rank: 1, role: "worker", endpoint_owner: false}]},
+    alias: "chat",
+    action: "run",
+    retention: "retain-cached",
+    invocation: {origin: "web.library"},
+  };
+  const response = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request.clone());
+    return new Response(JSON.stringify({}), {headers: {"Content-Type": "application/json"}, status: request.method === "POST" ? 202 : 200});
+  };
+  vi.stubGlobal("fetch", response);
+
+  const api = new ApiClient();
+  await api.previewRecipeRunSwitch(runInput);
+  await api.applyRecipeRunSwitch({...runInput, plan_digest: "run-plan", request_key: requestKey});
+  await api.getRecipeRunSwitchOperation("run-operation");
+  await api.modelCacheInventory("cache-cursor");
+  await api.modelCacheEntry(artifactDigest);
+  await api.previewModelCacheDownload({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first"});
+  await api.downloadModelCache({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first", plan_digest: "cache-download-plan", request_key: requestKey});
+  await api.previewModelCacheRepair({schema_version: 2, artifact_set_sha256: artifactDigest});
+  await api.repairModelCache({schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "cache-repair-plan", request_key: requestKey, source_policy: "nas-first"});
+  await api.previewModelCacheEviction({schema_version: 2, target_bytes: 1024});
+  await api.evictModelCache({schema_version: 2, target_bytes: 1024, plan_digest: "cache-eviction-plan", request_key: requestKey});
+  await api.modelCacheUpdates();
+  await api.modelCacheOperations("operations-cursor");
+  await api.modelCacheOperation("cache-operation");
+  await api.checkModelCacheAccessAndResume("cache-operation", {schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "access-plan", request_key: requestKey});
+  await api.recipeAvailabilityStart({recipe_revision_id: "recipe-revision-1", request_key: requestKey, force: false});
+  await api.recipeAvailabilityList("recipe-revision-1", "running", "recipe-cursor");
+  await api.recipeAvailabilityOperation("recipe-operation");
+  await api.retryRecipeAvailability("recipe-operation", {request_key: requestKey});
+  await api.nodeTelemetryCurrent("spark-a");
+  await api.nodeTelemetryCapabilities("spark-a");
+  await api.nodeTelemetryWorkloads("spark-a", "run-operation", "running");
+
+  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
+    ["POST", "/api/v1/recipes/run-switch-plans/preview"],
+    ["POST", "/api/v1/recipes/run-switches"],
+    ["GET", "/api/v1/recipes/run-switches/run-operation"],
+    ["GET", "/api/v1/model-cache"],
+    ["GET", `/api/v1/model-cache/entries/${artifactDigest}`],
+    ["POST", "/api/v1/model-cache/download-preview"],
+    ["POST", "/api/v1/model-cache/download"],
+    ["POST", "/api/v1/model-cache/repair-preview"],
+    ["POST", "/api/v1/model-cache/repair"],
+    ["POST", "/api/v1/model-cache/eviction-preview"],
+    ["POST", "/api/v1/model-cache/evict"],
+    ["GET", "/api/v1/model-cache/updates"],
+    ["GET", "/api/v1/model-cache/operations"],
+    ["GET", "/api/v1/model-cache/operations/cache-operation"],
+    ["POST", "/api/v1/model-cache/operations/cache-operation/check-access-and-resume"],
+    ["POST", "/api/v1/library/recipe-image-availability"],
+    ["GET", "/api/v1/library/recipe-image-availability"],
+    ["GET", "/api/v1/library/recipe-image-availability/recipe-operation"],
+    ["POST", "/api/v1/library/recipe-image-availability/recipe-operation/retry"],
+    ["GET", "/api/v1/nodes/spark-a/telemetry/current"],
+    ["GET", "/api/v1/nodes/spark-a/telemetry/capabilities"],
+    ["GET", "/api/v1/nodes/spark-a/telemetry/workloads"],
+  ]);
+  expect(Object.fromEntries(new URL(requests[3]!.url).searchParams)).toEqual({cursor: "cache-cursor", limit: "100"});
+  expect(Object.fromEntries(new URL(requests[12]!.url).searchParams)).toEqual({cursor: "operations-cursor", limit: "100"});
+  expect(Object.fromEntries(new URL(requests[21]!.url).searchParams)).toEqual({run_id: "run-operation", state: "running"});
+  expect(await requests[0]!.clone().json()).toEqual(runInput);
+  expect(await requests[1]!.clone().json()).toEqual({...runInput, plan_digest: "run-plan", request_key: requestKey});
+  expect(await requests[6]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first", plan_digest: "cache-download-plan", request_key: requestKey});
+  expect(await requests[8]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "cache-repair-plan", request_key: requestKey, source_policy: "nas-first"});
+  expect(Object.fromEntries(new URL(requests[16]!.url).searchParams)).toEqual({cursor: "recipe-cursor", limit: "100", recipe_revision_id: "recipe-revision-1", state: "running"});
+  expect(requests.slice(0, 2).every(request => request.headers.get("Content-Type"))).toBe(true);
+});
+
+it("uses the durable retry endpoints for Run and NAS cache operations", async () => {
+  const requests: Request[] = [];
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), location.origin), init);
+    requests.push(request.clone());
+    return new Response(JSON.stringify({}), {headers: {"Content-Type": "application/json"}, status: 202});
+  });
+  const api = new ApiClient();
+  const runKey = "00000000-0000-4000-8000-000000000402";
+  const cacheKey = "00000000-0000-4000-8000-000000000403";
+
+  await api.retryRecipeRunSwitch("run-operation", {schema_version: 2, request_key: runKey});
+  await api.retryModelCacheOperation("cache-operation", {schema_version: 2, request_key: cacheKey});
+  await api.retryRecipeAvailability("recipe-operation", {request_key: cacheKey});
+
+  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
+    ["POST", "/api/v1/recipes/run-switches/run-operation/retry"],
+    ["POST", "/api/v1/model-cache/operations/cache-operation/retry"],
+    ["POST", "/api/v1/library/recipe-image-availability/recipe-operation/retry"],
+  ]);
+  expect(await requests[0]!.clone().json()).toEqual({schema_version: 2, request_key: runKey});
+  expect(await requests[1]!.clone().json()).toEqual({schema_version: 2, request_key: cacheKey});
 });
 
 it("uses the durable artifact-job routes and preserves raw upload authority", async () => {
@@ -432,18 +540,6 @@ it("sends an explicit node-bound re-enrollment grant request", async () => {
   });
 });
 
-it("surfaces bounded stable API guidance for local catalog workflows", async () => {
-  vi.stubGlobal("fetch", async () => new Response(JSON.stringify({
-    code: "global.revision_changed",
-    detail: "The immutable revision no longer matches; review it again.",
-    request_id: "10000000-0000-4000-8000-000000000001",
-  }), {headers: {"Content-Type": "application/problem+json"}, status: 409}));
-
-  await expect(new ApiClient().previewGlobalRecipe(
-    `vonk://catalog/vonk/qwen@sha256:${"a".repeat(64)}`,
-  )).rejects.toThrow("global.revision_changed: The immutable revision no longer matches; review it again.");
-});
-
 it.each(["nonce=", "nonce==", "nonce=middle=="]) (
   "preserves the complete padded CSRF cookie value %s among multiple cookies",
   async csrfValue => {
@@ -500,31 +596,6 @@ it("does not expose orphaned package and deployment helpers after the Fleet/Libr
   ]) {
     expect(name in api).toBe(false);
   }
-});
-
-it("starts managed recipe synchronization with a fresh idempotency key", async () => {
-  document.cookie = "vonk_csrf=catalog-csrf; path=/";
-  let capturedPath = "";
-  let capturedInit: RequestInit | undefined;
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-    capturedPath = String(input);
-    capturedInit = init;
-    return new Response(JSON.stringify({state: "current"}), {
-      headers: {"Content-Type": "application/json"},
-      status: 200,
-    });
-  });
-
-  const result = await new ApiClient().syncManagedRecipeCatalog();
-
-  expect(result.state).toBe("current");
-  expect(capturedPath).toBe("/api/v1/catalog/managed-recipes/sync");
-  expect(capturedInit?.method).toBe("POST");
-  expect(new Headers(capturedInit?.headers).get("X-CSRF-Token")).toBe("catalog-csrf");
-  const body = JSON.parse(String(capturedInit?.body)) as {request_key: string};
-  expect(body.request_key).toMatch(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-  );
 });
 
 it("previews, applies, and reads one durable atomic Library placement", async () => {

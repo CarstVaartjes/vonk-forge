@@ -16,6 +16,7 @@ from vonk_control.agent_upgrade_status import operator_agent_upgrade_reason
 from vonk_control.api import AdminServices, create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.fleet_projection import (
     FleetNodeIdentity,
     FleetSnapshot,
@@ -28,12 +29,22 @@ from vonk_control.models import (
     AgentOperationAttempt,
     AgentPresence,
     Base,
+    FleetProfile,
+    FleetProfileApplication,
     Job,
     Reconciliation,
     RoutePublication,
     RoutePublicationOwner,
 )
-from vonk_control.operation_api import JobProgress, OperationApiServices, OperationPage
+from vonk_control.operation_api import (
+    JobProgress,
+    OperationApiServices,
+    OperationListPage,
+    OperationPage,
+    OperationProvider,
+    OperationQuery,
+    durable_operation_services,
+)
 
 COMMIT = "a" * 64
 DIGEST = "d" * 64
@@ -181,6 +192,293 @@ def test_job_activity_summaries_include_their_authoritative_creation_time() -> N
             "created_at": "2026-08-15T11:45:00Z",
         }
     ]
+
+
+def test_generic_operation_read_contract_projects_bounded_durable_state() -> None:
+    item = {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "parent_id": "11111111-1111-4111-8111-111111111111",
+        "node_ids": [NODE_ID],
+        "kind": "recipe-transfer",
+        "state": "uncertain",
+        "attempt": 2,
+        "progress": {
+            "phase": "transfer",
+            "completed_bytes": 25,
+            "total_bytes": None,
+            "total_bytes_known": False,
+            "members": [
+                {
+                    "member_id": NODE_ID,
+                    "phase": "transfer",
+                    "completed_bytes": 25,
+                    "state": "uncertain",
+                }
+            ],
+        },
+        "result": {
+            "uncertain": True,
+            "failure": {
+                "error_code": "member_lost",
+                "summary": "member did not report completion",
+            },
+        },
+        "supported_actions": ["retry"],
+        "created_at": "2026-08-15T11:59:00Z",
+        "updated_at": "2026-08-15T12:00:00Z",
+    }
+    services = OperationApiServices(
+        endpoint=lambda _alias: {},
+        agents=lambda: (),
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        ),
+        resume_job=lambda _job_id: None,
+        list_operations=lambda _cursor, _limit, _state, _node_id: (
+            operation_api.OperationListPage((item,), None, 1)
+        ),
+        get_operation=lambda _operation_id: item,
+    )
+    client, operator, *_ = _client(operations=services)
+
+    listed = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"state": "uncertain", "node_id": NODE_ID},
+    )
+    detail = client.get(f"/api/v1/operations/{item['id']}", headers=operator)
+
+    assert listed.status_code == 200
+    assert listed.json()["schema_version"] == 2
+    assert listed.json()["total"] == 1
+    assert listed.json()["operations"][0]["parent_id"] == item["parent_id"]
+    assert listed.json()["operations"][0]["node_ids"] == [NODE_ID]
+    assert listed.json()["operations"][0]["schema_version"] == 2
+    assert listed.json()["operations"][0]["recovery"] == {
+        "uncertain": True,
+        "actions": ["inspect"],
+        "explanation": "Inspect the durable outcome before taking recovery action.",
+    }
+    assert listed.json()["operations"][0]["progress"]["total_bytes_known"] is False
+    assert detail.status_code == 200
+    assert detail.json() == listed.json()["operations"][0]
+
+
+def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
+    client, operator, *_ = _client()
+
+    assert client.get("/api/v1/operations", headers=operator).status_code == 503
+    assert (
+        client.get(
+            "/api/v1/operations/33333333-3333-4333-8333-333333333333",
+            headers=operator,
+        ).status_code
+        == 503
+    )
+
+
+def test_global_operation_projection_merges_typed_provider_families() -> None:
+    rows = {
+        "cache-1": {
+            "id": "cache-1",
+            "parent_id": "job-cache",
+            "node_ids": [],
+            "kind": "cache-download",
+            "state": "running",
+            "attempt": 1,
+            "progress": {"phase": "download", "total_unknown": True},
+            "updated_at": "2026-08-15T12:01:00Z",
+            "created_at": "2026-08-15T12:01:00Z",
+            "supported_actions": [],
+        },
+        "run-1": {
+            "id": "run-1",
+            "parent_id": "job-run",
+            "node_ids": [NODE_ID, "spk_" + "2" * 32],
+            "kind": "run",
+            "state": "succeeded",
+            "attempt": 1,
+            "progress": {"phase": "final_verify"},
+            "updated_at": "2026-08-15T12:00:00Z",
+            "created_at": "2026-08-15T12:00:00Z",
+            "supported_actions": [],
+        },
+    }
+
+    def provider_for(ids: tuple[str, ...]) -> OperationProvider:
+        def list_rows(query: OperationQuery) -> OperationListPage:
+            selected = [rows[row_id] for row_id in ids]
+            if query.node_id is not None:
+                selected = [
+                    row for row in selected if query.node_id in row["node_ids"]
+                ]
+            total = len(selected)
+            if query.after is not None:
+                selected = [
+                    row
+                    for row in selected
+                    if operation_api._operation_boundary(row) < query.after
+                ]
+            selected.sort(key=operation_api._operation_boundary, reverse=True)
+            return OperationListPage(selected[: query.limit], None, total)
+
+        def get_row(operation_id: str) -> dict[str, object]:
+            for row_id in ids:
+                if row_id == operation_id:
+                    return rows[row_id]
+            raise KeyError(operation_id)
+
+        return OperationProvider(
+            family=ids[0].split("-", 1)[0],
+            list_operations=list_rows,
+            get_operation=get_row,
+        )
+
+    services = OperationApiServices(
+        endpoint=lambda _alias: {},
+        agents=lambda: (),
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        ),
+        resume_job=lambda _job_id: None,
+        operation_providers=(provider_for(("cache-1",)), provider_for(("run-1",))),
+        cursor_codec=TokenCodec(b"p" * 32).cursor_codec(),
+    )
+    client, operator, *_ = _client(operations=services)
+
+    first = client.get("/api/v1/operations", headers=operator, params={"limit": "1"})
+    second = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"limit": "1", "cursor": first.json()["next_cursor"]},
+    )
+    detail = client.get("/api/v1/operations/run-1", headers=operator)
+    filtered = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"node_id": "spk_" + "2" * 32},
+    )
+
+    assert first.status_code == 200
+    assert first.json()["schema_version"] == 2
+    assert first.json()["total"] == 2
+    assert first.json()["operations"][0]["id"] == "cache-1"
+    assert first.json()["operations"][0]["node_ids"] == []
+    assert second.status_code == 200
+    assert second.json()["operations"][0]["id"] == "run-1"
+    assert second.json()["operations"][0]["node_ids"] == [
+        NODE_ID,
+        "spk_" + "2" * 32,
+    ]
+    assert detail.status_code == 200
+    assert detail.json()["kind"] == "run"
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["operations"][0]["id"] == "run-1"
+
+
+def test_profile_operation_provider_is_registered_through_the_global_api(
+    tmp_path,
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'profile-operations.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    profile_id = "44444444-4444-4444-8444-444444444444"
+    newest_id = "55555555-5555-4555-8555-555555555555"
+    older_id = "66666666-6666-4666-8666-666666666666"
+    second_node = "spk_" + "2" * 32
+    now = datetime(2026, 8, 15, 12, tzinfo=UTC)
+    with sessions.begin() as session:
+        session.add(
+            FleetProfile(
+                id=profile_id,
+                name="Studio",
+                description="",
+                installation_policy="keep-cached",
+                assignments=[],
+                scope=[NODE_ID, second_node],
+                labels={},
+                favorite=False,
+                created_by="admin",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        for operation_id, request_key, plan_digest, created_at, node_ids in (
+            (
+                newest_id,
+                "77777777-7777-4777-8777-777777777777",
+                "7" * 64,
+                now,
+                [NODE_ID, second_node],
+            ),
+            (
+                older_id,
+                "88888888-8888-4888-8888-888888888888",
+                "8" * 64,
+                now - timedelta(minutes=1),
+                [NODE_ID],
+            ),
+        ):
+            session.add(
+                FleetProfileApplication(
+                    id=operation_id,
+                    request_key=request_key,
+                    profile_id=profile_id,
+                    profile_digest="9" * 64,
+                    plan_digest=plan_digest,
+                    state="running",
+                    plan={"scope": {"node_ids": node_ids}, "steps": [{"kind": "start"}]},
+                    current_step=0,
+                    current_operation_id=None,
+                    progress={"operation_kind": "fleet-profile.apply"},
+                    result=None,
+                    status_reason=None,
+                    actor="admin",
+                    created_at=created_at,
+                    updated_at=created_at,
+                )
+            )
+
+    profiles = FleetProfileService(sessions, clock=lambda: now)
+    services = durable_operation_services(
+        sessions,
+        tmp_path / "routes",
+        clock=lambda: now,
+        cursors=TokenCodec(b"q" * 32).cursor_codec(),
+        operation_providers=(profiles.operation_provider(),),
+    )
+    client, operator, *_ = _client(operations=services)
+
+    first = client.get(
+        "/api/v1/operations", headers=operator, params={"limit": 1}
+    )
+    detail = client.get(f"/api/v1/operations/{newest_id}", headers=operator)
+    second = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"limit": 1, "cursor": first.json()["next_cursor"]},
+    )
+    filtered = client.get(
+        "/api/v1/operations",
+        headers=operator,
+        params={"node_id": second_node},
+    )
+
+    assert first.status_code == 200
+    assert first.json()["total"] == 2
+    assert first.json()["operations"][0]["id"] == newest_id
+    assert first.json()["operations"][0]["node_ids"] == [NODE_ID, second_node]
+    assert first.json()["next_cursor"] is not None
+    assert detail.status_code == 200
+    assert detail.json()["kind"] == "fleet-profile.apply"
+    assert detail.json()["progress"] == {"phase": "start"}
+    assert second.status_code == 200
+    assert second.json()["total"] == 2
+    assert second.json()["operations"][0]["id"] == older_id
+    assert filtered.status_code == 200
+    assert filtered.json()["total"] == 1
+    assert filtered.json()["operations"][0]["id"] == newest_id
 
 
 def test_fleet_exposes_visual_state_and_node_evidence() -> None:

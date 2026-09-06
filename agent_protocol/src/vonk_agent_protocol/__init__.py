@@ -9,6 +9,10 @@ from .contracts import (
     schema_validator,
     validate_schema_message,
 )
+from .distribution import (
+    DistributionAssignment,
+    DistributionObject,
+)
 from .host_helper import (
     ContainerRuntimeAction,
     HostHelperGrantClaims,
@@ -39,6 +43,7 @@ from .recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
 from .recipe_operations import RECIPE_OPERATIONS, RecipeOperationRequest
+from .telemetry import TelemetryReport
 from .workload_packages import (
     ComponentDescriptor,
     OciBundleMetadata,
@@ -64,6 +69,8 @@ __all__ = [
     "AgentResult",
     "ComponentDescriptor",
     "ContainerRuntimeAction",
+    "DistributionAssignment",
+    "DistributionObject",
     "HostHelperGrantClaims",
     "HostHelperOperation",
     "HostHelperSignature",
@@ -89,6 +96,7 @@ __all__ = [
     "SignedPackageHelperGrant",
     "SignedPackageObjectReceipt",
     "SignedRecipeRunObservationReceipt",
+    "TelemetryReport",
     "canonical_message",
     "host_artifact_signing_bytes",
     "host_helper_grant_signing_bytes",

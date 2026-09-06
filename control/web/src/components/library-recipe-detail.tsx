@@ -1,227 +1,55 @@
-import {useCallback, useEffect, useRef, useState} from "react";
-import type {LibraryRecipeDetail, LibrarySnapshot, PublicRecipe} from "../api/types";
-import type {LibraryApi, LibraryOperation} from "../api/types";
+import {useState} from "react";
+import type {ControlApi, LibraryRecipeDetail as RecipeDetail, LibrarySnapshot, RunSwitchOperation, RunSwitchPlan, RunSwitchPreviewRequest} from "../api/types";
 import {formatBytes} from "../lib/fleet";
-import {StatusPill} from "./status-pill";
-import {LibraryPlacement, primaryPlacementRecommendation} from "./library-placement";
-import {LibraryReasons} from "./library-reasons";
-import {LibraryActionDialog} from "./library-action-dialog";
-import {actionName} from "./library-action-types";
-import type {LibraryActionName, LibraryActionReview, LibraryActionTarget, LibraryPlacementGroup} from "./library-action-types";
-import {LibraryOperationProgress, operationSettled} from "./library-operation-progress";
-import {LibraryProfileComposer} from "./library-profile-composer";
-import {LibraryRecipeAdvanced} from "./library-recipe-advanced";
-import {LibraryRecipeVisual} from "./library-recipe-visual";
 import {ArtifactJobWorkspace} from "./artifact-job-workspace";
+import {LibraryProfileComposer} from "./library-profile-composer";
+import {LibraryPlacement} from "./library-placement";
+import {LibraryRunSwitchProgress} from "./library-run-switch-progress";
+import type {LibraryPlacementGroup} from "./library-action-types";
+import {useLibraryNodeName} from "./library-node-names";
 import {LibraryRecipeFit} from "./library-recipe-fit";
-import {humanizeIdentifier, TechnicalDetails} from "./library-technical-details";
+import {LibraryRecipeVisual} from "./library-recipe-visual";
+import {LibraryRecipeAvailability} from "./library-recipe-availability";
+import {recipeAttribution} from "./library-workcell";
 import "./library-recipe-detail.css";
 
-type Topology = NonNullable<LibraryRecipeDetail["topology"]>;
-
-const diskFields = ["image_bytes", "artifact_bytes", "staging_bytes", "cache_bytes", "rollback_bytes", "safety_margin_bytes"] as const;
-
-function topologyRanks(topology: Topology) {
-  let rank = 0;
-  return topology.roles.flatMap(role => Array.from({length: role.count}, () => ({...role, rank: rank++})));
-}
-
-function topologyDisk(topology: Topology): number {
-  return topology.roles.reduce((total, role) => total + role.count * diskFields.reduce((subtotal, field) => subtotal + role.disk[field], 0), 0);
-}
-
-function topologyMemory(topology: Topology): number {
-  return topology.roles.reduce((total, role) => total + role.count * role.memory.startup_peak_bytes, 0);
-}
-
-function operationTone(state: string) {
-  if (["succeeded", "installed", "ready", "running", "published"].includes(state)) return "healthy" as const;
-  if (["failed", "lost", "partial", "stale"].includes(state)) return "danger" as const;
-  return "warning" as const;
-}
-
-function operationLabel(kind: string, state: string): string {
-  return `${kind} ${state}`.replace(/^./, letter => letter.toUpperCase());
-}
-
-function lifecycleStage(label: string, items: Array<{state: string}>, completeStates: readonly string[], reachedLabel = "Complete") {
-  const states = [...new Set(items.map(item => item.state))];
-  if (states.length === 0) return {label, state: "Not started", detail: "No authority record", tone: "idle"};
-  if (states.some(state => ["failed", "lost", "partial", "stale"].includes(state))) {
-    return {label, state: "Attention", detail: states.map(humanizeIdentifier).join(" · "), tone: "danger"};
+export function LibraryRecipeAuthority({api, detail, snapshot, onRefresh: _onRefresh, onBusyChange}: {api: ControlApi; detail: RecipeDetail; snapshot?: LibrarySnapshot; onRefresh?: (signal: AbortSignal) => Promise<void>; onBusyChange?(busy: boolean): void}) {
+  const documents = detail.model_documents;
+  const files = documents.flatMap(model => model.model_document.files);
+  const [runOperation, setRunOperation] = useState<RunSwitchOperation>();
+  const [runPlan, setRunPlan] = useState<RunSwitchPlan>();
+  const [runError, setRunError] = useState("");
+  const [runStarting, setRunStarting] = useState(false);
+  const nodeName = useLibraryNodeName();
+  const modelVersionSha256 = documents[0]?.selection.model.content_sha256;
+  const alias = detail.definition.interfaces.find(item => item.adapter === "openai")?.model_aliases?.[0] ?? detail.recipe.slug;
+  const nodeNames = Object.fromEntries(detail.placement.flatMap(placement => placement.recommendations.flatMap(group => group.nodes.map(node => [node.node_id, nodeName(node.node_id)] as const))));
+  async function run(group: LibraryPlacementGroup) {
+    if (runStarting || !modelVersionSha256) return;
+    setRunStarting(true); setRunError(""); setRunPlan(undefined);
+    const requestKey = crypto.randomUUID();
+    const nodes = group.nodes.map(node => ({node_id: node.node_id, rank: node.rank, role: node.role, endpoint_owner: node.endpoint_owner}));
+    const input: RunSwitchPreviewRequest = {schema_version: 2, model_version_sha256: modelVersionSha256, recipe_revision_id: detail.recipe.recipe_revision_id, spark_group: {nodes}, alias, action: "run", retention: "retain-cached", invocation: {origin: "web.library", context: {recipe_id: detail.recipe.recipe_id, node_ids: nodes.map(node => node.node_id).join(",")}}};
+    try {
+      const plan = await api.previewRecipeRunSwitch(input); setRunPlan(plan);
+      if (!plan.allowed || plan.blockers.length) { setRunError("The Controller needs attention before this Recipe can run."); return; }
+      setRunOperation(await api.applyRecipeRunSwitch({...input, plan_digest: plan.plan_digest, request_key: requestKey}));
+    } catch (value) { setRunError(value instanceof Error ? value.message.slice(0, 256) : "The Controller could not start this Recipe."); } finally { setRunStarting(false); }
   }
-  if (states.every(state => completeStates.includes(state))) {
-    return {label, state: reachedLabel, detail: states.map(humanizeIdentifier).join(" · "), tone: "healthy"};
-  }
-  return {label, state: "In progress", detail: states.map(humanizeIdentifier).join(" · "), tone: "warning"};
-}
-
-function nextActionCopy(name: LibraryActionName): {description: string; title: string} {
-  if (name === "Build") return {title: "Build the recipe image", description: "Create the immutable runtime image before installation. The server preview will verify the builder, source bundle, and exact build digest."};
-  if (name === "Mapping") return {title: "Map the complete Spark group", description: "Bind every declared rank to a compatible Spark group before distributing or installing the recipe."};
-  if (name === "Distribute") return {title: "Distribute the exact image", description: "Copy the verified image to every mapped Spark before installation."};
-  if (name === "Install") return {title: "Install on the selected Sparks", description: "Review disk admission and install this immutable revision on every rank in the group."};
-  if (name === "Load") return {title: "Load and publish the model", description: "Review live memory admission, then start every rank and publish the endpoint."};
-  return {title: `Review ${name.toLocaleLowerCase()}`, description: "Review the current server-authoritative plan before changing lifecycle state."};
-}
-
-function useNarrowViewport(query: string): boolean {
-  const [matches, setMatches] = useState(() => typeof window !== "undefined" && window.matchMedia?.(query).matches === true);
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const media = window.matchMedia(query);
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [query]);
-  return matches;
-}
-
-export function LibraryRecipeAuthority({api, catalogRecipe, detail, onBusyChange, onRefresh, policy, preferredNodeId}: {
-  api: LibraryApi;
-  catalogRecipe?: PublicRecipe;
-  detail: LibraryRecipeDetail;
-  onBusyChange?(busy: boolean): void;
-  onRefresh(signal: AbortSignal): Promise<void>;
-  policy: LibrarySnapshot["freshness_policy"];
-  preferredNodeId?: string;
-}) {
-  const [review, setReview] = useState<LibraryActionReview>();
-  const [operation, setOperation] = useState<LibraryOperation>();
-  const [operationName, setOperationName] = useState<LibraryActionName>("Load");
-  const narrowViewport = useNarrowViewport("(max-width: 520px)");
-  const [mobileQualificationOpen, setMobileQualificationOpen] = useState(false);
-  const canonicalPreviewKey = [
-    detail.recipe.recipe_id,
-    detail.selected_revision?.id ?? "",
-    detail.selected_revision?.content_sha256 ?? "",
-    JSON.stringify(detail.visual_recipe),
-  ].join(":");
-  const [preview, setPreview] = useState({document: detail.visual_recipe, canonicalKey: canonicalPreviewKey, local: false});
-  const trigger = useRef<HTMLButtonElement | null>(null);
-  const visual = preview.canonicalKey === canonicalPreviewKey ? preview.document : detail.visual_recipe;
-  const localPreview = visual !== null && preview.canonicalKey === canonicalPreviewKey && preview.local;
-  const revision = detail.selected_revision;
-  const alias = detail.visual_recipe?.interfaces.find(item => item.adapter === "openai")?.model_aliases?.[0] ?? detail.recipe.slug;
-  useEffect(() => {
-    setPreview(current => current.canonicalKey === canonicalPreviewKey
-      ? current
-      : {document: detail.visual_recipe, canonicalKey: canonicalPreviewKey, local: false});
-  }, [canonicalPreviewKey, detail.visual_recipe]);
-  const closeReview = useCallback(() => {
-    setReview(undefined);
-    const returnTo = trigger.current;
-    queueMicrotask(() => returnTo?.focus());
-  }, []);
-  const openReview = useCallback((target: LibraryActionTarget, returnTo: HTMLButtonElement, evidence?: LibraryPlacementGroup) => {
-    trigger.current = returnTo;
-    setReview({evidence, target});
-  }, []);
-  const onApplied = useCallback((next: LibraryOperation, name: LibraryActionName) => {
-    setOperationName(name);
-    setOperation(next);
-  }, []);
-  const actionBlocked = operation !== undefined && (!operationSettled(operation.state) || ["partial", "failed", "cancelled", "canceled", "lost"].includes(operation.state));
-  const lifecycleStages = [
-    lifecycleStage("Build", detail.operational_state.builds, ["succeeded"]),
-    lifecycleStage("Map", detail.operational_state.mappings, ["ready"]),
-    lifecycleStage("Install", detail.operational_state.installations, ["installed"]),
-    lifecycleStage("Run", detail.operational_state.runs, ["running", "published"], "Active"),
-  ];
-  const activeRun = detail.operational_state.runs.some(run => ["running", "published"].includes(run.state));
-  const placementRecommendation = activeRun ? undefined : primaryPlacementRecommendation(detail);
-  const recommendedName = placementRecommendation ? actionName(placementRecommendation.target) : undefined;
-  const recommendationCopy = recommendedName ? nextActionCopy(recommendedName) : undefined;
-  return <div className="recipe-authority" role="region" aria-label={`${detail.recipe.title} recipe authority`}>
-    <header className="recipe-authority-hero">
-      <div>
-        <p className="fleet-kicker">{visual ? humanizeIdentifier(visual.identity.publisher) : humanizeIdentifier(detail.recipe.source_kind)} recipe</p>
-        <strong className="recipe-authority-title">{visual?.metadata.title ?? detail.recipe.title}</strong>
-        <p>{visual?.metadata.description ?? detail.recipe.description}</p>
-        {visual && <p className="recipe-metadata-tags">{visual.metadata.tags.length > 0 ? visual.metadata.tags.join(" · ") : "No tags declared"}</p>}
-        <TechnicalDetails compact items={[
-          {label: "Recipe ID", value: detail.recipe.recipe_id},
-          {label: "Recipe slug", value: detail.recipe.slug},
-          {label: "Revision ID", value: revision?.id ?? ""},
-          {label: "Content digest", value: revision?.content_sha256 ?? ""},
-        ]}/>
-      </div>
-      <div className="recipe-authority-statuses">
-        {localPreview && <StatusPill tone="warning">Local preview · not saved</StatusPill>}
-        <StatusPill tone={revision?.lifecycle === "resolved" ? "healthy" : "warning"}>{revision ? `${revision.lifecycle === "resolved" ? "Immutable" : revision.lifecycle} revision ${revision.revision_number}` : "No valid revision"}</StatusPill>
-      </div>
-    </header>
-    <LibraryRecipeFit catalogRecipe={catalogRecipe} detail={detail}/>
-    <section className={`recipe-next-action${activeRun ? " is-running" : placementRecommendation ? "" : " is-blocked"}`} aria-label="Recommended next action">
-      <div>
-        <p className="fleet-kicker">Recommended next step</p>
-        <h4>{activeRun ? "Model is running" : recommendationCopy?.title ?? "Resolve placement readiness"}</h4>
-        <p>{activeRun
-          ? "No lifecycle change is required. Use Fleet for live node, route, and workload health."
-          : recommendationCopy?.description ?? "No complete Spark group currently exposes an authorized lifecycle action. Review placement blockers and evidence below."}</p>
-      </div>
-      {activeRun
-        ? <a className="button secondary" href="/fleet">Open Fleet</a>
-        : placementRecommendation && recommendedName && placementRecommendation.groupCount === 1
-          ? <button type="button" className="button" disabled={actionBlocked} onClick={event => openReview(placementRecommendation.target, event.currentTarget, placementRecommendation.group)}>Review {recommendedName}</button>
-          : <button type="button" className="button secondary" onClick={() => document.getElementById("recipe-placement")?.scrollIntoView({block: "start"})}>{placementRecommendation ? "Choose a Spark group" : "Review placement"}</button>}
-    </section>
-    <ArtifactJobWorkspace api={api} detail={detail} onBusyChange={onBusyChange}/>
-    <LibraryProfileComposer api={api} detail={detail} preferredNodeId={preferredNodeId}/>
-    <details className="recipe-qualification-disclosure" open={!narrowViewport || mobileQualificationOpen} onToggle={event => {
-      if (narrowViewport && event.currentTarget.open !== mobileQualificationOpen) setMobileQualificationOpen(event.currentTarget.open);
-    }}>
-      <summary><span><strong>Technical qualification</strong><small>Lifecycle, placement, runtime and topology</small></span><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" strokeLinecap="round" strokeLinejoin="round"/></svg></summary>
-      <div className="recipe-qualification-body">
-    <section className="library-section library-primary-control" aria-label="Lifecycle overview">
-      <div className="section-heading"><div><p className="fleet-kicker">Current authority</p><h4>Lifecycle overview</h4></div><span className="identity-note">Build · map · install · run</span></div>
-      <ol className="lifecycle-track" aria-label="Recipe lifecycle stages">
-        {lifecycleStages.map(stage => <li className={`lifecycle-stage lifecycle-stage-${stage.tone}`} key={stage.label} aria-label={`${stage.label}: ${stage.state}. ${stage.detail}`}>
-          <span className="lifecycle-marker" aria-hidden="true"/><div><strong>{stage.label}</strong><span>{stage.state}</span><small>{stage.detail}</small></div>
-        </li>)}
-      </ol>
-      <div className="operation-summary" aria-label="Available lifecycle actions">
-        {detail.operational_state.installations.map((installation, index) => <div className="operation-item" key={installation.installation_id}>
-          <StatusPill tone={operationTone(installation.state)}>{operationLabel(`installation ${index + 1}`, installation.state)}</StatusPill>
-          {installation.state !== "uninstalled" && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "uninstall", installationId: installation.installation_id}, event.currentTarget)}>Review removal of installation {index + 1}</button>}
-          <TechnicalDetails compact items={[{label: "Installation ID", value: installation.installation_id}]}/>
-        </div>)}
-        {detail.operational_state.runs.map((run, index) => <div className="operation-item" key={run.run_id}>
-          <StatusPill tone={operationTone(run.state)}>{operationLabel(`run ${index + 1}`, run.state)}</StatusPill>
-          {!['stopped'].includes(run.state) && <button type="button" disabled={actionBlocked} onClick={event => openReview({kind: "stop", runId: run.run_id}, event.currentTarget)}>Review stop of run {index + 1}</button>}
-          <TechnicalDetails compact items={[{label: "Run ID", value: run.run_id}, {label: "Installation ID", value: run.installation_id}]}/>
-        </div>)}
-        {Object.values(detail.operational_state).every(items => items.length === 0) && <p>No operation history for this revision.</p>}
-      </div>
-    </section>
-    {operation && <LibraryOperationProgress api={api} name={operationName} onChange={setOperation} onRefresh={onRefresh} operation={operation}/>}
-    <LibraryPlacement actionsDisabled={actionBlocked} detail={detail} onReview={openReview} policy={policy} preferredNodeId={preferredNodeId}/>
-    {visual && <>
-      <LibraryRecipeVisual document={visual}/>
-      <section className="library-section" aria-label="Topology and resources">
-        <div className="section-heading"><div><p className="fleet-kicker">Declared topology</p><h4>Topology and ranks</h4></div></div>
-        {detail.topology && <article className="topology-card">
-          <h5>{humanizeIdentifier(detail.topology.name)}</h5><p>{detail.topology.node_count} Sparks · {humanizeIdentifier(detail.topology.mode)}</p>
-          <div className="resource-totals"><strong>{formatBytes(topologyMemory(detail.topology))} startup memory total</strong><strong>{formatBytes(topologyDisk(detail.topology))} disk envelope total</strong></div>
-          <figure className="topology-diagram" aria-label={`${detail.topology.node_count}-Spark ${humanizeIdentifier(detail.topology.mode)} topology over ${humanizeIdentifier(detail.topology.fabric.connectivity)} fabric`}>
-            <figcaption><span className="topology-fabric-badge">{humanizeIdentifier(detail.topology.fabric.connectivity)} fabric</span><span>{detail.topology.fabric.minimum_bandwidth_mbps.toLocaleString()} Mbps minimum · {humanizeIdentifier(detail.topology.parallelism.backend)}</span></figcaption>
-            <ol className="topology-rank-diagram" aria-label="Topology ranks" tabIndex={0}>{topologyRanks(detail.topology).map(role => <li key={`${role.rank}:${role.name}`}>
-              <span className="topology-rank-node" aria-hidden="true">{role.rank}</span><div><strong>Rank {role.rank} · {humanizeIdentifier(role.name)}{role.endpoint_owner ? " · endpoint owner" : ""}</strong><span>{formatBytes(role.memory.startup_peak_bytes)} startup memory · {formatBytes(diskFields.reduce((total, field) => total + role.disk[field], 0))} disk envelope</span></div>
-            </li>)}</ol>
-          </figure>
-          <p className="topology-fabric">Start: {detail.topology.start_order.map(humanizeIdentifier).join(" → ")} · Stop: {detail.topology.stop_order.map(humanizeIdentifier).join(" → ")}</p>
-        </article>}
-      </section>
-    </>}
-    <LibraryReasons reasons={detail.reasons}/>
-    {detail.visual_recipe && <LibraryRecipeAdvanced
-      document={detail.visual_recipe}
-      onValidDocument={document => setPreview({document, canonicalKey: canonicalPreviewKey, local: true})}
-      resetToken={canonicalPreviewKey}
-    />}
-      </div>
-    </details>
-    {review && <LibraryActionDialog alias={alias} api={api} evidence={review.evidence} onApplied={onApplied} onBusyChange={onBusyChange} onClose={closeReview} onRefresh={onRefresh} policy={policy} target={review.target}/>}
-  </div>;
+  const policy = snapshot?.freshness_policy ?? {inventory_fresh_seconds: 300, telemetry_delayed_seconds: 20, telemetry_live_seconds: 6};
+  const runPlacementDetail: RecipeDetail = {
+    ...detail,
+    placement: detail.placement.map(placement => ({
+      ...placement,
+      recommendations: placement.recommendations.map(group => ({
+        ...group,
+        preview_targets: group.preview_targets.filter(target => target.kind === "run"),
+      })),
+      rejected_groups: placement.rejected_groups.map(group => ({
+        ...group,
+        preview_targets: group.preview_targets.filter(target => target.kind === "run"),
+      })),
+    })),
+  };
+  return <article className="library-recipe-detail" aria-labelledby="recipe-detail-heading"><header className="library-detail-heading"><div><span>Exact Recipe</span><h2 id="recipe-detail-heading">{detail.recipe.title}</h2><p>{detail.recipe.description}</p><small>{recipeAttribution(detail.definition)}</small></div><span className="library-schema-badge">Schema {detail.schema_version}</span></header><LibraryRecipeFit detail={detail}/><section className="library-section" aria-label="Models used by Recipe"><header><h3>Ordered Model inputs</h3><span>{documents.length} Model{documents.length === 1 ? "" : "s"} · {files.length} files</span></header><ol className="library-model-detail-list">{documents.map((item, index) => <li key={`${item.model_document.identity.publisher}/${item.model_document.identity.slug}`}><span className="library-order">{index + 1}</span><div><strong>{item.model_document.identity.model.title}</strong><small>{item.model_document.identity.publisher}/{item.model_document.identity.slug} · {item.selection.files.length} Recipe mount{item.selection.files.length === 1 ? "" : "s"}</small><ul>{item.model_document.files.map(file => <li key={file.id}>{file.path} · {formatBytes(file.size_bytes)} · sha256:{file.sha256.slice(0, 12)}…</li>)}</ul></div></li>)}</ol></section><LibraryRecipeAvailability api={api} detail={detail} onBusyChange={onBusyChange}/><ArtifactJobWorkspace api={api} detail={detail} onBusyChange={onBusyChange}/><LibraryProfileComposer api={api} detail={detail}/><LibraryPlacement detail={runPlacementDetail} policy={policy} actionsDisabled={runStarting || Boolean(runOperation)} onRun={run}/>{runStarting && <p role="status">Preparing the exact Model and Recipe on the selected Sparks…</p>}{runError && <p role="alert">{runError}</p>}{runPlan && runPlan.blockers.length > 0 && <ul aria-label="Run blockers">{runPlan.blockers.map(blocker => <li key={`${blocker.code}:${blocker.detail}`}>{blocker.detail}</li>)}</ul>}{runOperation && <LibraryRunSwitchProgress api={api} nodeNames={nodeNames} onChange={setRunOperation} operation={runOperation} title={detail.recipe.title}/>}<LibraryRecipeVisual document={detail.definition} modelDocuments={documents}/><section className="library-section" aria-label="Operational state"><header><h3>Controller state</h3><span>{detail.operational_state.installations.length} installations · {detail.operational_state.runs.length} runs</span></header><p>{detail.operational_state.runs.length ? "This Recipe has observed runs on the fleet." : "No active run is reported for this Recipe."}</p></section></article>;
 }

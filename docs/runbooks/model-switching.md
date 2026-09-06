@@ -16,20 +16,18 @@ version and shows the accepted revision, cluster placement, node freshness,
 runtime state, and available actions. A model-family label is for navigation;
 the content-addressed model-version and recipe revision remain authoritative.
 
-## Create or import a recipe
+## Select a reviewed recipe
 
-Use `Library` to create a local draft or import a WorkloadRun. The visual
-editor captures the model version, execution harness, runtime distribution,
-topology, artifact identities, endpoint aliases, and resource envelope. Use
-the advanced canonical JSON section only for custom fields or debugging.
+Use `Library` to select an immutable recipe revision from the managed catalog.
+The library shows the model version, execution harness, runtime distribution,
+topology, artifact identities, endpoint aliases, and resource envelope.
 
 The lifecycle is deliberately explicit:
 
-1. Save a draft.
-2. Resolve the draft into an immutable revision.
-3. Run the source security/build gate and attach evidence from the actual test.
-4. Map the revision to one or more compatible Spark nodes.
-5. Stay in Library and preview the install/load action before applying it.
+1. Review the immutable recipe and its provenance.
+2. Confirm the source security/build evidence supplied by the catalog.
+3. Map the revision to one or more compatible Spark nodes.
+4. Stay in Library and preview the install/load action before applying it.
 
 The control API performs identity, capacity, placement, evidence, and route
 checks. The browser never invents a digest or bypasses those checks.

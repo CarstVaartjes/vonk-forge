@@ -42,6 +42,7 @@ SECRET_FILES = {
     "hermes-api-key": "hermes-api-key",
     "hermes-litellm-key": "hermes-litellm-key",
     "database-url": "database-url",
+    "hf-token": "hf-token",
     "postgres-password": "postgres-password",
     "litellm-database-password": "litellm-database-password",
     "token-signing-key": "token-signing-key",
@@ -271,11 +272,6 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 validation="optional_cidr_list",
             ),
             _required_value(
-                "VONK_OPERATOR_JURISDICTION",
-                "Operator jurisdiction (uppercase country code, or EU)",
-                validation="jurisdiction",
-            ),
-            _required_value(
                 "VONK_CONTROL_HOSTNAME",
                 "Control hostname (vonk-forge.<tailnet>.ts.net)",
                 validation="hostname",
@@ -316,6 +312,12 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 "file": "litellm-upstream-key",
                 "prompt": "LiteLLM upstream provider API key",
                 "generate_bytes": None,
+            },
+            {
+                "file": "hf-token",
+                "prompt": "Hugging Face access token (optional; leave blank for public models)",
+                "generate_bytes": None,
+                "optional": True,
             },
         ],
         "generated_secrets": {

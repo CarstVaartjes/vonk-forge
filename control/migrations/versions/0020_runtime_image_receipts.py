@@ -1,0 +1,172 @@
+"""Persist Controller verified runtime image identity and provenance."""
+
+from __future__ import annotations
+
+import sqlalchemy as sa
+from alembic import op
+
+revision = "0020_runtime_image_receipts"
+down_revision = "0019_recipe_builds_revision_fk"
+branch_labels = None
+depends_on = None
+
+
+def _lower_hex(column: str, length: int) -> str:
+    remainder = column
+    for character in "0123456789abcdef":
+        remainder = f"replace({remainder}, '{character}', '')"
+    return (
+        f"length({column}) = {length} AND {column} = lower({column}) "
+        f"AND length({remainder}) = 0"
+    )
+
+
+def _prefixed_digest(column: str) -> str:
+    return (
+        f"length({column}) = 71 AND substr({column}, 1, 7) = 'sha256:' "
+        f"AND ({_lower_hex(f'substr({column}, 8)', 64)})"
+    )
+
+
+def upgrade() -> None:
+    op.create_table(
+        "runtime_image_receipts",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("recipe_revision_id", sa.String(36), nullable=False),
+        sa.Column("source", sa.String(16), nullable=False),
+        sa.Column("original_content_digest", sa.String(64), nullable=False),
+        sa.Column("effective_execution_key", sa.String(64), nullable=False),
+        sa.Column("registry_manifest_digest", sa.String(71)),
+        sa.Column("platform_manifest_digest", sa.String(71), nullable=False),
+        sa.Column("local_image_config_id", sa.String(71), nullable=False),
+        sa.Column("oci_archive_sha256", sa.String(64)),
+        sa.Column("image_bytes", sa.BigInteger),
+        sa.Column("architecture", sa.String(32), nullable=False),
+        sa.Column("runtime_interface", sa.String(64), nullable=False),
+        sa.Column("runtime_interface_label", sa.String(128), nullable=False),
+        sa.Column("build_id", sa.String(36)),
+        sa.Column("verified_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("state", sa.String(16), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["recipe_revision_id"],
+            ["catalog_document_revisions.id"],
+            name="fk_runtime_image_receipts_recipe_revision",
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["build_id"],
+            ["recipe_builds.id"],
+            name="fk_runtime_image_receipts_build",
+            ondelete="RESTRICT",
+        ),
+        sa.UniqueConstraint(
+            "recipe_revision_id",
+            "source",
+            "original_content_digest",
+            "effective_execution_key",
+            "platform_manifest_digest",
+            "local_image_config_id",
+            name="uq_runtime_image_receipt_identity",
+        ),
+        sa.CheckConstraint(
+            "source IN ('published','controller-build')",
+            name="ck_runtime_image_receipts_source",
+        ),
+        sa.CheckConstraint(
+            _lower_hex("original_content_digest", 64),
+            name="ck_runtime_image_receipts_original_digest",
+        ),
+        sa.CheckConstraint(
+            _lower_hex("effective_execution_key", 64),
+            name="ck_runtime_image_receipts_execution_key",
+        ),
+        sa.CheckConstraint(
+            _prefixed_digest("platform_manifest_digest"),
+            name="ck_runtime_image_receipts_platform_digest",
+        ),
+        sa.CheckConstraint(
+            "registry_manifest_digest IS NULL OR "
+            f"({_prefixed_digest('registry_manifest_digest')})",
+            name="ck_runtime_image_receipts_registry_digest",
+        ),
+        sa.CheckConstraint(
+            _prefixed_digest("local_image_config_id"),
+            name="ck_runtime_image_receipts_config_digest",
+        ),
+        sa.CheckConstraint(
+            f"({_lower_hex('oci_archive_sha256', 64)})",
+            name="ck_runtime_image_receipts_archive_digest",
+        ),
+        sa.CheckConstraint(
+            "image_bytes IS NULL OR image_bytes > 0",
+            name="ck_runtime_image_receipts_image_bytes",
+        ),
+        sa.CheckConstraint(
+            "oci_archive_sha256 IS NOT NULL AND image_bytes IS NOT NULL",
+            name="ck_runtime_image_receipts_archive_pair",
+        ),
+        sa.CheckConstraint(
+            "(source = 'published' AND registry_manifest_digest IS NOT NULL AND build_id IS NULL) OR "
+            "(source = 'controller-build' AND registry_manifest_digest IS NULL AND build_id IS NOT NULL)",
+            name="ck_runtime_image_receipts_source_build",
+        ),
+        sa.CheckConstraint(
+            "architecture = 'linux-arm64' AND runtime_interface = 'vonk.runtime.v1' AND runtime_interface_label = 'v1'",
+            name="ck_runtime_image_receipts_runtime_identity",
+        ),
+        sa.CheckConstraint(
+            "state IN ('verified','revoked')",
+            name="ck_runtime_image_receipts_state",
+        ),
+    )
+    for column in (
+        "recipe_revision_id",
+        "source",
+        "original_content_digest",
+        "effective_execution_key",
+        "platform_manifest_digest",
+        "local_image_config_id",
+        "registry_manifest_digest",
+        "oci_archive_sha256",
+        "build_id",
+        "state",
+    ):
+        op.create_index(
+            f"ix_runtime_image_receipts_{column}",
+            "runtime_image_receipts",
+            [column],
+        )
+    op.create_index(
+        "ix_runtime_image_receipt_effective_identity",
+        "runtime_image_receipts",
+        [
+            "effective_execution_key",
+            "platform_manifest_digest",
+            "local_image_config_id",
+            "oci_archive_sha256",
+        ],
+    )
+
+
+def downgrade() -> None:
+    for column in (
+        "state",
+        "build_id",
+        "oci_archive_sha256",
+        "registry_manifest_digest",
+        "local_image_config_id",
+        "platform_manifest_digest",
+        "effective_execution_key",
+        "original_content_digest",
+        "source",
+        "recipe_revision_id",
+    ):
+        op.drop_index(
+            f"ix_runtime_image_receipts_{column}",
+            table_name="runtime_image_receipts",
+        )
+    op.drop_index(
+        "ix_runtime_image_receipt_effective_identity",
+        table_name="runtime_image_receipts",
+    )
+    op.drop_table("runtime_image_receipts")

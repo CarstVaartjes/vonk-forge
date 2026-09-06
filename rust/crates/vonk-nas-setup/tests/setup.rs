@@ -135,6 +135,56 @@ fn install_creates_only_the_secure_drag_and_drop_bundle() {
 }
 
 #[test]
+fn optional_secret_is_materialized_without_a_first_install_prompt() {
+    let payload = CanonicalTemplatePayload::from_json(
+        br#"{
+          "schema_version": 2,
+          "docker_compose_yaml": "services: {}\n",
+          "required_values": [],
+          "secrets": [
+            {
+              "file": "hf-token",
+              "prompt": "Hugging Face access token (optional; leave blank for public models)",
+              "generate_bytes": null,
+              "optional": true
+            }
+          ]
+        }"#,
+    )
+    .expect("valid optional-secret payload");
+    let temporary = tempdir().expect("temporary directory");
+    let mut output = Vec::new();
+    let mut prompt = PromptIo::new(Cursor::new(Vec::<u8>::new()), &mut output);
+
+    let result = prepare(
+        &payload,
+        SetupRequest::install(temporary.path()),
+        &mut prompt,
+        &FixedSecretGenerator,
+    )
+    .expect("bundle prepared without an HF token");
+
+    assert!(output.is_empty(), "optional credentials must not prompt");
+    assert_eq!(
+        std::fs::read(result.root.join("secrets/hf-token")).expect("HF token file"),
+        b"\n"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        assert_eq!(
+            std::fs::metadata(result.root.join("secrets/hf-token"))
+                .expect("HF token metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+}
+
+#[test]
 fn fresh_install_prints_preflight_before_the_first_prompt() {
     let payload = CanonicalTemplatePayload::from_json(
         br#"{

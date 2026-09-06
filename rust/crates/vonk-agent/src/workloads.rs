@@ -2,6 +2,7 @@ use std::{collections::BTreeSet, net::IpAddr, path::Path};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use vonk_agent_protocol::DistributionObject;
 
 #[derive(Debug, Error)]
 pub enum WorkloadError {
@@ -9,36 +10,160 @@ pub enum WorkloadError {
     Invalid(&'static str),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+// These bounds carry the compiler's structured argv without treating engine
+// arguments as container-engine options.  Keep the first item non-empty (it
+// is the executable), while subsequent items are opaque values and may be
+// empty.  The total bound prevents a large number of individually valid
+// values from creating an unbounded launch request.
+const MAX_ARGV_ITEMS: usize = 512;
+const MAX_ARGV_ITEM_BYTES: usize = 65_536;
+const MAX_ARGV_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct WorkloadSpec {
-    pub identity: WorkloadIdentitySpec,
-    pub model_dependencies: Vec<ModelDependencySpec>,
-    pub runtime: RuntimeSpec,
-    pub artifacts: Vec<ArtifactSpec>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub endpoint: Option<EndpointSpec>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub job: Option<JobSpec>,
-    pub security: SecuritySpec,
-    pub lifecycle: LifecycleSpec,
-    pub topology: TopologySpec,
+pub struct CompiledExecutionPlan {
+    pub schema_version: u8,
+    pub identity: CompiledWorkloadIdentity,
+    pub runtime: CompiledRuntime,
+    pub artifacts: Vec<CompiledModelArtifact>,
+    pub runtime_image: CompiledRuntimeImage,
+    pub security: CompiledSecurity,
+    pub topology: CompiledTopology,
+    pub lifecycle: CompiledLifecycle,
+    pub endpoint: Option<CompiledEndpoint>,
+    pub job: Option<CompiledJob>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompiledExecutionPlanWire {
+    schema_version: u8,
+    identity: CompiledWorkloadIdentity,
+    runtime: CompiledRuntime,
+    artifacts: Vec<CompiledModelArtifact>,
+    runtime_image: CompiledRuntimeImage,
+    security: CompiledSecurity,
+    topology: CompiledTopology,
+    lifecycle: CompiledLifecycle,
+    endpoint: RequiredOption<CompiledEndpoint>,
+    job: RequiredOption<CompiledJob>,
+}
+
+#[derive(Debug)]
+struct RequiredOption<T>(Option<T>);
+
+impl<'de, T> Deserialize<'de> for RequiredOption<T>
+where
+    T: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self(Option::<T>::deserialize(deserializer)?))
+    }
+}
+
+impl<'de> Deserialize<'de> for CompiledExecutionPlan {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let object = value.as_object().ok_or_else(|| {
+            <D::Error as serde::de::Error>::custom("compiled plan is not an object")
+        })?;
+        if !object.contains_key("endpoint") {
+            return Err(<D::Error as serde::de::Error>::missing_field("endpoint"));
+        }
+        if !object.contains_key("job") {
+            return Err(<D::Error as serde::de::Error>::missing_field("job"));
+        }
+        let wire: CompiledExecutionPlanWire =
+            serde_json::from_value(value).map_err(<D::Error as serde::de::Error>::custom)?;
+        Ok(Self {
+            schema_version: wire.schema_version,
+            identity: wire.identity,
+            runtime: wire.runtime,
+            artifacts: wire.artifacts,
+            runtime_image: wire.runtime_image,
+            security: wire.security,
+            topology: wire.topology,
+            lifecycle: wire.lifecycle,
+            endpoint: wire.endpoint.0,
+            job: wire.job.0,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct WorkloadIdentitySpec {
+pub struct CompiledWorkloadIdentity {
     pub recipe_revision_sha256: String,
-    pub model_version_sha256: String,
+    pub execution_sha256: String,
     pub harness_sha256: String,
-    pub runtime_distribution_sha256: String,
-    pub patch_bundle_sha256: Option<String>,
+    pub build_input_sha256: Option<String>,
+    pub model_artifact_set_sha256: String,
+    pub model_artifact_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct ModelDependencySpec {
-    pub kind: String,
+pub struct CompiledRuntime {
+    pub executable: String,
+    pub argv: Vec<String>,
+    pub env: Vec<CompiledEnvironmentEntry>,
+    pub image_digest: String,
+    pub placement: CompiledRuntimePlacement,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledEnvironmentEntry {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledRuntimePlacement {
+    pub endpoint_address: Option<IpAddr>,
+    pub rank: u32,
+    pub role: String,
+    pub world_size: u32,
+    pub local_address: Option<IpAddr>,
+    pub master_address: Option<IpAddr>,
+    pub master_port: Option<u16>,
+    pub port: u16,
+    pub reserved_memory_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledModelArtifact {
+    pub selection_id: String,
+    pub file_id: String,
+    pub path: String,
+    pub sha256: String,
+    pub size_bytes: u64,
+    pub roles: Vec<String>,
+    pub mount: CompiledArtifactMount,
+    pub model: ModelArtifactIdentity,
+    pub distribution_object: DistributionObject,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledArtifactMount {
+    pub target: String,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelArtifactIdentity {
     pub publisher: String,
     pub slug: String,
     pub content_sha256: String,
@@ -46,84 +171,59 @@ pub struct ModelDependencySpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct TopologySpec {
+pub struct CompiledRuntimeImage {
+    pub image_digest: String,
+    pub registry_manifest_digest: Option<String>,
+    pub platform_manifest_digest: String,
+    pub local_image_config_id: String,
+    pub local_image_reference: String,
+    pub runtime_interface_label: String,
+    pub oci_layout_sha256: String,
+    pub image_bytes: u64,
+    pub architecture: String,
+    pub runtime_interface: String,
+    pub source: String,
+    pub build_id: Option<String>,
+    pub distribution_object: DistributionObject,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledSecurity {
+    pub devices: Vec<String>,
+    pub capabilities: Vec<String>,
+    pub host_network: bool,
+    pub network_mode: String,
+    pub privileged: bool,
+    pub user: String,
+    pub mounts: Vec<MountSpec>,
+    pub read_only_root: bool,
+    pub no_new_privileges: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledTopology {
     pub name: String,
+    pub mode: String,
+    pub backend: String,
     pub node_count: u32,
+    pub world_size: u32,
     pub rank: u32,
     pub role: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct RuntimeSpec {
-    pub interface: String,
-    pub adapter: String,
-    pub adapter_version: u32,
-    pub image: String,
-    pub architecture: String,
-    pub entrypoint: Vec<String>,
-    pub arguments: Vec<RuntimeArgument>,
-    pub environment: Vec<RuntimeEnvironment>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub placement_environment: Option<PlacementEnvironmentSpec>,
+pub struct CompiledLifecycle {
+    pub pre_start: Vec<Vec<String>>,
+    pub post_stop: Vec<Vec<String>>,
+    pub stop_timeout_seconds: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct PlacementEnvironmentSpec {
-    pub local_address: String,
-    pub master_address: String,
-    pub master_port: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimeEnvironment {
-    pub name: String,
-    pub value: Option<ArgumentValue>,
-    pub secret: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RuntimeArgument {
-    pub name: String,
-    pub value: ArgumentValue,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum ArgumentValue {
-    Boolean(bool),
-    Integer(i64),
-    String(String),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ArtifactSpec {
-    pub id: String,
-    pub kind: String,
-    pub repository: String,
-    pub revision: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub include_paths: Vec<String>,
-    pub download_bytes: u64,
-    pub installed_bytes: u64,
-    pub mount: ArtifactMountSpec,
-    pub roles: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct ArtifactMountSpec {
-    pub target: String,
-    pub read_only: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct EndpointSpec {
+pub struct CompiledEndpoint {
     pub protocol: String,
     pub port: u16,
     pub model_aliases: Vec<String>,
@@ -132,30 +232,11 @@ pub struct EndpointSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct JobSpec {
+pub struct CompiledJob {
     pub interface: String,
     pub input: Option<serde_json::Value>,
     pub output_path: String,
     pub timeout_seconds: u16,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct SecuritySpec {
-    pub devices: Vec<String>,
-    pub capabilities: Vec<String>,
-    pub host_network: bool,
-    pub privileged: bool,
-    pub user: String,
-    pub mounts: Vec<MountSpec>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct LifecycleSpec {
-    pub pre_start: Vec<Vec<String>>,
-    pub post_stop: Vec<Vec<String>>,
-    pub stop_timeout_seconds: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -181,207 +262,321 @@ pub struct Placement {
     pub reserved_memory_bytes: u64,
 }
 
-impl WorkloadSpec {
+impl CompiledExecutionPlan {
     pub fn validate(&self) -> Result<(), WorkloadError> {
-        if !lower_hex(&self.identity.recipe_revision_sha256, 64)
-            || !lower_hex(&self.identity.model_version_sha256, 64)
+        if self.schema_version != 2
+            || !lower_hex(&self.identity.recipe_revision_sha256, 64)
             || !lower_hex(&self.identity.harness_sha256, 64)
-            || !lower_hex(&self.identity.runtime_distribution_sha256, 64)
+            || !lower_hex(&self.identity.execution_sha256, 64)
             || self
                 .identity
-                .patch_bundle_sha256
+                .build_input_sha256
                 .as_ref()
                 .is_some_and(|value| !lower_hex(value, 64))
-            || self.model_dependencies.len() > 16
-            || self.model_dependencies.iter().any(|dependency| {
-                dependency.kind != "model-version"
-                    || !valid_name(&dependency.publisher)
-                    || !valid_name(&dependency.slug)
-                    || !lower_hex(&dependency.content_sha256, 64)
-            })
-            || !valid_name(&self.topology.name)
-            || !(1..=128).contains(&self.topology.node_count)
-            || self.topology.rank >= self.topology.node_count
-            || !valid_role(&self.topology.role)
+            || !lower_hex(&self.identity.model_artifact_set_sha256, 64)
+            || self.artifacts.is_empty()
+            || self.artifacts.len() > 4096
+            || self.runtime.image_digest != self.runtime_image.image_digest
+            || self.runtime.placement.rank != self.topology.rank
+            || self.runtime.placement.role != self.topology.role
+            || self.runtime.placement.world_size != self.topology.world_size
+            || self.topology.world_size == 0
+            || self.topology.rank >= self.topology.world_size
+            || self.topology.node_count == 0
+            || self.topology.world_size < self.topology.node_count
+            || self.endpoint.is_some() == self.job.is_some()
         {
-            return Err(WorkloadError::Invalid("authority binding"));
+            return Err(WorkloadError::Invalid("compiled execution identity"));
         }
-        self.runtime.validate()?;
-        if self.artifacts.is_empty() || self.artifacts.len() > 16 {
-            return Err(WorkloadError::Invalid("artifacts"));
-        }
-        let mut artifact_ids = BTreeSet::new();
-        let mut artifact_targets = BTreeSet::new();
+        let mut selected = BTreeSet::new();
+        let mut materialized = BTreeSet::new();
+        let mut by_digest = std::collections::BTreeMap::new();
         for artifact in &self.artifacts {
             artifact.validate()?;
-            if !artifact_ids.insert(artifact.id.as_str())
-                || !artifact_targets.insert(artifact.mount.target.as_str())
+            if !selected.insert((artifact.selection_id.as_str(), artifact.file_id.as_str()))
+                || !materialized.insert((artifact.selection_id.as_str(), artifact.path.as_str()))
             {
-                return Err(WorkloadError::Invalid("artifact mounts"));
+                return Err(WorkloadError::Invalid("compiled model artifact identity"));
+            }
+            if let Some(previous) = by_digest.insert(artifact.sha256.as_str(), artifact.size_bytes)
+                && previous != artifact.size_bytes
+            {
+                return Err(WorkloadError::Invalid("compiled model artifact bytes"));
             }
         }
-        if self.artifacts.len() > 1
-            && self
-                .artifacts
-                .iter()
-                .any(|artifact| artifact.mount.target != format!("/models/{}", artifact.id))
-        {
-            return Err(WorkloadError::Invalid("artifact mounts"));
+        let total = by_digest
+            .values()
+            .copied()
+            .try_fold(0_u64, |sum, value| sum.checked_add(value))
+            .ok_or(WorkloadError::Invalid("compiled model artifact bytes"))?;
+        if total != self.identity.model_artifact_bytes {
+            return Err(WorkloadError::Invalid("compiled model artifact-set bytes"));
         }
+        self.runtime.validate()?;
+        self.runtime_image.validate()?;
+        self.security.validate(&self.runtime.placement)?;
+        self.topology.validate()?;
+        self.lifecycle.validate()?;
         match (&self.endpoint, &self.job) {
-            (Some(endpoint), None)
-                if endpoint.protocol == "openai"
-                    && endpoint.port >= 1024
-                    && !endpoint.model_aliases.is_empty()
-                    && endpoint.health_path.len() <= 256
-                    && endpoint.health_path.starts_with('/')
-                    && !endpoint.health_path.contains("..") => {}
-            (None, Some(job))
-                if matches!(
-                    job.interface.as_str(),
-                    "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job"
-                ) && job.input.as_ref().is_none_or(|input| {
-                    input.is_object()
-                        && input.get("path").and_then(serde_json::Value::as_str) == Some("/inputs")
-                }) && job.output_path == "/outputs"
-                    && (1..=3600).contains(&job.timeout_seconds)
-                    && self.lifecycle.pre_start.is_empty()
-                    && self.lifecycle.post_stop.is_empty() => {}
-            _ => return Err(WorkloadError::Invalid("workload interface")),
-        }
-        if self.security.privileged
-            || !self.security.capabilities.is_empty()
-            || !canonical_runtime_mounts(&self.security.mounts, self.job.is_some())
-            || self.job.is_some() && self.security.host_network
-            || self
-                .security
-                .devices
-                .iter()
-                .any(|value| value != "nvidia.com/gpu=all")
-            || !numeric_non_root_user(&self.security.user)
-            || self.lifecycle.pre_start.len() > 16
-            || self.lifecycle.post_stop.len() > 16
-            || !(1..=600).contains(&self.lifecycle.stop_timeout_seconds)
-            || self
-                .lifecycle
-                .pre_start
-                .iter()
-                .chain(&self.lifecycle.post_stop)
-                .any(|argv| !valid_argv(argv))
-        {
-            return Err(WorkloadError::Invalid("security"));
+            (Some(endpoint), None) => endpoint.validate()?,
+            (None, Some(job)) => job.validate()?,
+            _ => unreachable!("validated endpoint/job discriminator"),
         }
         Ok(())
     }
 }
 
-impl RuntimeSpec {
+impl CompiledModelArtifact {
     fn validate(&self) -> Result<(), WorkloadError> {
-        if self.interface != "vonk.runtime.v1"
-            || !valid_name(&self.adapter)
-            || self.adapter_version == 0
-            || self.architecture != "linux/arm64"
-            || image_digest(&self.image).is_none()
-            || !valid_argv(&self.entrypoint)
-            || self.arguments.len() > 128
-            || self.environment.len() > 128
+        if !valid_name(&self.selection_id)
+            || !valid_name(&self.file_id)
+            || !valid_model_path(&self.path)
+            || !lower_hex(&self.sha256, 64)
+            || (self.size_bytes == 0 && self.sha256 != EMPTY_SHA256)
+            || !self.roles.is_empty()
+                && (self.roles.windows(2).any(|pair| pair[0] >= pair[1])
+                    || self.roles.iter().any(|role| !valid_role(role)))
+            || !valid_name(&self.model.publisher)
+            || !valid_name(&self.model.slug)
+            || !lower_hex(&self.model.content_sha256, 64)
+            || self.distribution_object.kind != "model"
+            || self.distribution_object.name != self.path
+            || self.distribution_object.sha256 != self.sha256
+            || self.distribution_object.bytes != self.size_bytes
+            || !(self.mount.target == "/models" || self.mount.target.starts_with("/models/"))
+            || !self.mount.read_only
+            || (self.size_bytes == 0
+                && self
+                    .roles
+                    .iter()
+                    .any(|role| matches!(role.as_str(), "model" | "weight" | "weights")))
         {
-            return Err(WorkloadError::Invalid("runtime"));
+            return Err(WorkloadError::Invalid("compiled model artifact"));
         }
-        for argument in &self.arguments {
-            if argument.name.is_empty()
-                || argument.name.len() > 64
-                || !argument.name.bytes().enumerate().all(|(index, byte)| {
-                    if index == 0 {
-                        byte.is_ascii_lowercase()
-                    } else {
-                        byte.is_ascii_lowercase()
-                            || byte.is_ascii_digit()
-                            || matches!(byte, b'_' | b'-')
-                    }
-                })
-                || matches!(&argument.value, ArgumentValue::String(value) if value.len() > 1024 || value.contains('\0'))
-            {
-                return Err(WorkloadError::Invalid("runtime argument"));
-            }
+        if self.roles.is_empty() {
+            return Err(WorkloadError::Invalid("compiled model artifact roles"));
         }
-        for environment in &self.environment {
-            if environment.name.is_empty()
-                || environment.name.len() > 128
-                || !environment.name.bytes().enumerate().all(|(index, byte)| {
+        if self.size_bytes > 0 {
+            self.distribution_object
+                .validate()
+                .map_err(|_| WorkloadError::Invalid("compiled model distribution object"))?;
+        }
+        Ok(())
+    }
+}
+
+impl CompiledRuntime {
+    fn validate(&self) -> Result<(), WorkloadError> {
+        if self.executable.is_empty()
+            || !self.executable.starts_with('/')
+            || self.executable.len() > MAX_ARGV_ITEM_BYTES
+            || self.executable.contains(['\0', '\r', '\n'])
+            || !valid_opaque_argv(&self.argv)
+            || self.env.len() > 128
+        {
+            return Err(WorkloadError::Invalid("compiled runtime"));
+        }
+        for entry in &self.env {
+            if entry.name.is_empty()
+                || entry.name.len() > 128
+                || !entry.name.bytes().enumerate().all(|(index, byte)| {
                     if index == 0 {
                         byte.is_ascii_uppercase()
                     } else {
                         byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
                     }
                 })
-                || (environment.value.is_some() == environment.secret.is_some())
-                || environment
-                    .secret
-                    .as_ref()
-                    .is_some_and(|name| !valid_name(name))
+                || entry.value.len() > MAX_ARGV_ITEM_BYTES
+                || entry.value.contains('\0')
             {
-                return Err(WorkloadError::Invalid("runtime environment"));
+                return Err(WorkloadError::Invalid("compiled runtime environment"));
             }
         }
-        if self.placement_environment.as_ref().is_some_and(|binding| {
-            binding.local_address != "VONK_LOCAL_ADDR"
-                || binding.master_address != "VONK_MASTER_ADDR"
-                || binding.master_port != "VONK_MASTER_PORT"
-        }) {
-            return Err(WorkloadError::Invalid("runtime placement environment"));
-        }
-        Ok(())
-    }
-}
-
-impl ArtifactSpec {
-    fn validate(&self) -> Result<(), WorkloadError> {
-        if self.repository.is_empty()
-            || self.repository.len() > 512
-            || self.repository.contains('\0')
-            || self.download_bytes == 0
-            || self.installed_bytes == 0
-            || !valid_name(&self.id)
-            || matches!(self.id.as_str(), "." | "..")
-            || self.roles.is_empty()
-            || self.roles.iter().any(|role| !valid_role(role))
-            || self.include_paths.len() > 256
-            || self.include_paths.iter().enumerate().any(|(index, path)| {
-                !valid_snapshot_selector(path)
-                    || self.include_paths[..index].iter().any(|seen| seen >= path)
-            })
-            || self.kind != "huggingface.snapshot" && !self.include_paths.is_empty()
-            || !self.mount.read_only
-            || (self.mount.target != "/models"
-                && self.mount.target != format!("/models/{}", self.id))
+        if self.placement.world_size == 0
+            || self.placement.rank >= self.placement.world_size
+            || !valid_role(&self.placement.role)
+            || self.placement.port == 0
+            || self.placement.reserved_memory_bytes == 0
         {
-            return Err(WorkloadError::Invalid("artifact"));
-        }
-        let immutable = match self.kind.as_str() {
-            "huggingface.snapshot" => {
-                lower_hex(&self.revision, 40) || lower_hex(&self.revision, 64)
-            }
-            "http.file" | "oci.artifact" => self
-                .revision
-                .strip_prefix("sha256:")
-                .is_some_and(|value| lower_hex(value, 64)),
-            _ => false,
-        };
-        if !immutable {
-            return Err(WorkloadError::Invalid("artifact revision"));
+            return Err(WorkloadError::Invalid("compiled runtime placement"));
         }
         Ok(())
     }
 }
 
-fn valid_snapshot_selector(value: &str) -> bool {
-    let path = value.strip_suffix('/').unwrap_or(value);
-    !path.is_empty()
-        && path.len() <= 512
-        && !path.contains(['\\', '\0', '*', '?', '[', ']'])
-        && path.split('/').count() <= 32
-        && path.split('/').all(|part| {
+impl CompiledSecurity {
+    fn validate(&self, placement: &CompiledRuntimePlacement) -> Result<(), WorkloadError> {
+        let bridge_required =
+            placement.endpoint_address.is_some() || placement.master_port.is_some();
+        let expected_network_mode = if bridge_required { "bridge" } else { "none" };
+        if self.privileged
+            || !self.no_new_privileges
+            || !self.read_only_root
+            || self.network_mode != expected_network_mode
+            || !self.capabilities.is_empty()
+            || self.devices.len() > 1
+            || self
+                .devices
+                .iter()
+                .any(|value| value != "nvidia.com/gpu=all")
+            || !numeric_non_root_user(&self.user)
+            || self.mounts.len() > 4
+            || self.mounts.iter().any(|mount| {
+                !mount.read_only && mount.target != "/outputs"
+                    || mount.read_only
+                        && !(mount.target == "/inputs"
+                            || mount.target == "/models"
+                            || mount.target.starts_with("/models/"))
+                    || !matches!(mount.source.as_str(), "model" | "inputs" | "outputs")
+            })
+        {
+            return Err(WorkloadError::Invalid("compiled security"));
+        }
+        Ok(())
+    }
+}
+
+impl CompiledTopology {
+    fn validate(&self) -> Result<(), WorkloadError> {
+        if !valid_name(&self.name)
+            || !matches!(self.mode.as_str(), "single" | "distributed")
+            || !matches!(self.backend.as_str(), "local" | "nccl" | "gloo")
+            || self.node_count == 0
+            || self.world_size == 0
+            || self.rank >= self.world_size
+            || !valid_role(&self.role)
+        {
+            return Err(WorkloadError::Invalid("compiled topology"));
+        }
+        Ok(())
+    }
+}
+
+impl CompiledLifecycle {
+    fn validate(&self) -> Result<(), WorkloadError> {
+        if self.pre_start.len() > 16
+            || self.post_stop.len() > 16
+            || !(1..=600).contains(&self.stop_timeout_seconds)
+            || self
+                .pre_start
+                .iter()
+                .chain(&self.post_stop)
+                .any(|argv| !valid_argv(argv))
+        {
+            return Err(WorkloadError::Invalid("compiled lifecycle"));
+        }
+        Ok(())
+    }
+}
+
+impl CompiledEndpoint {
+    fn validate(&self) -> Result<(), WorkloadError> {
+        if self.protocol != "openai"
+            || self.port < 1024
+            || self.model_aliases.is_empty()
+            || self.health_path.len() > 256
+            || !self.health_path.starts_with('/')
+            || self.health_path.contains("..")
+        {
+            return Err(WorkloadError::Invalid("compiled endpoint"));
+        }
+        Ok(())
+    }
+}
+
+impl CompiledJob {
+    fn validate(&self) -> Result<(), WorkloadError> {
+        if !matches!(
+            self.interface.as_str(),
+            "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job"
+        ) || self.output_path != "/outputs"
+            || !(1..=3600).contains(&self.timeout_seconds)
+            || self.input.as_ref().is_some_and(|input| {
+                !input.is_object()
+                    || input.get("path").and_then(serde_json::Value::as_str) != Some("/inputs")
+            })
+        {
+            return Err(WorkloadError::Invalid("compiled job"));
+        }
+        Ok(())
+    }
+}
+
+impl CompiledRuntimeImage {
+    /// Derive the local imported reference from the immutable archive and
+    /// registry/platform identity. Controller transport paths never become
+    /// container-engine image arguments.
+    pub fn local_image_reference(&self) -> String {
+        self.local_image_reference.clone()
+    }
+
+    fn validate(&self) -> Result<(), WorkloadError> {
+        if !self.image_digest.starts_with("sha256:")
+            || !lower_hex(&self.image_digest[7..], 64)
+            || self
+                .registry_manifest_digest
+                .as_ref()
+                .is_some_and(|value| !valid_sha256_prefixed(value))
+            || !valid_sha256_prefixed(&self.platform_manifest_digest)
+            || !valid_sha256_prefixed(&self.local_image_config_id)
+            || self.local_image_reference != self.expected_local_image_reference()
+            || self.platform_manifest_digest != self.image_digest
+            || self.runtime_interface_label.is_empty()
+            || self.runtime_interface_label.len() > 128
+            || !lower_hex(&self.oci_layout_sha256, 64)
+            || self.image_bytes == 0
+            || self.architecture != "linux-arm64"
+            || self.runtime_interface != "vonk.runtime.v1"
+            || !matches!(self.source.as_str(), "published" | "controller-build")
+            || (self.source == "published" && self.build_id.is_some())
+            || (self.source == "published" && self.registry_manifest_digest.is_none())
+            || (self.source == "controller-build"
+                && self.build_id.as_deref().is_none_or(str::is_empty))
+            || (self.source == "controller-build" && self.registry_manifest_digest.is_some())
+            || self.distribution_object.kind != "oci-archive"
+            || self.distribution_object.name != "image.oci.tar"
+            || self.distribution_object.sha256 != self.oci_layout_sha256
+            || self.distribution_object.bytes != self.image_bytes
+        {
+            return Err(WorkloadError::Invalid("compiled runtime image"));
+        }
+        self.distribution_object
+            .validate()
+            .map_err(|_| WorkloadError::Invalid("compiled image distribution object"))
+    }
+
+    fn expected_local_image_reference(&self) -> String {
+        let parent = &self.platform_manifest_digest;
+        format!(
+            "localhost/vonk/compiled-runtime-{}@{}",
+            self.oci_layout_sha256, parent
+        )
+    }
+}
+
+pub fn materialized_model_path(
+    root: &Path,
+    artifact: &CompiledModelArtifact,
+) -> Result<std::path::PathBuf, WorkloadError> {
+    if !root.is_absolute() {
+        return Err(WorkloadError::Invalid("compiled model root"));
+    }
+    artifact.validate()?;
+    let relative = Path::new(&artifact.selection_id).join(&artifact.path);
+    if relative
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(WorkloadError::Invalid("compiled model path"));
+    }
+    Ok(root.join(relative))
+}
+
+fn valid_model_path(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && !value.contains(['\\', '\0'])
+        && value.split('/').all(|part| {
             !part.is_empty()
                 && !matches!(part, "." | "..")
                 && part
@@ -414,20 +609,6 @@ impl Placement {
     }
 }
 
-pub fn image_digest(image: &str) -> Option<&str> {
-    let (name, digest) = image.rsplit_once("@sha256:")?;
-    if name.is_empty()
-        || name.len() > 512
-        || name
-            .bytes()
-            .any(|byte| byte.is_ascii_whitespace() || byte == 0)
-        || !lower_hex(digest, 64)
-    {
-        return None;
-    }
-    Some(digest)
-}
-
 pub fn managed_path(
     root: &Path,
     category: &str,
@@ -450,6 +631,10 @@ fn lower_hex(value: &str, length: usize) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn valid_sha256_prefixed(value: &str) -> bool {
+    value.starts_with("sha256:") && lower_hex(&value[7..], 64)
 }
 
 fn valid_role(value: &str) -> bool {
@@ -477,10 +662,26 @@ fn valid_name(value: &str) -> bool {
 
 fn valid_argv(value: &[String]) -> bool {
     !value.is_empty()
-        && value.len() <= 64
+        && value.len() <= MAX_ARGV_ITEMS
+        && !value[0].is_empty()
         && value
             .iter()
-            .all(|item| !item.is_empty() && item.len() <= 512 && !item.contains('\0'))
+            .all(|item| item.len() <= MAX_ARGV_ITEM_BYTES && !item.contains('\0'))
+        && value
+            .iter()
+            .try_fold(0_usize, |total, item| total.checked_add(item.len()))
+            .is_some_and(|bytes| bytes <= MAX_ARGV_BYTES)
+}
+
+fn valid_opaque_argv(value: &[String]) -> bool {
+    value.len() <= MAX_ARGV_ITEMS
+        && value
+            .iter()
+            .all(|item| item.len() <= MAX_ARGV_ITEM_BYTES && !item.contains('\0'))
+        && value
+            .iter()
+            .try_fold(0_usize, |total, item| total.checked_add(item.len()))
+            .is_some_and(|bytes| bytes <= MAX_ARGV_BYTES)
 }
 
 fn numeric_non_root_user(value: &str) -> bool {
@@ -491,18 +692,4 @@ fn numeric_non_root_user(value: &str) -> bool {
     valid(parts.next().unwrap_or_default())
         && parts.next().is_none_or(valid)
         && parts.next().is_none()
-}
-
-fn canonical_runtime_mounts(mounts: &[MountSpec], job: bool) -> bool {
-    mounts.len() == if job { 3 } else { 2 }
-        && mounts
-            .iter()
-            .any(|mount| mount.source == "model" && mount.target == "/models" && mount.read_only)
-        && (!job
-            || mounts.iter().any(|mount| {
-                mount.source == "inputs" && mount.target == "/inputs" && mount.read_only
-            }))
-        && mounts.iter().any(|mount| {
-            mount.source == "outputs" && mount.target == "/outputs" && !mount.read_only
-        })
 }
