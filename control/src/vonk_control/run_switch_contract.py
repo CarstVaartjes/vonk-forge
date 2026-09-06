@@ -431,6 +431,11 @@ class RunSwitchOperation(_StrictModel):
     result: dict[str, object] | None = None
 
 
+class RunSwitchRetryRequest(_StrictModel):
+    schema_version: Literal[2] = 2
+    request_key: UuidId
+
+
 __all__ = [
     "Alias",
     "ArtifactStorageImpact",
@@ -451,6 +456,7 @@ __all__ = [
     "RunSwitchPreviewRequest",
     "RunSwitchProgress",
     "RunSwitchReason",
+    "RunSwitchRetryRequest",
     "RunSwitchStopApplyRequest",
     "RunSwitchStopPreviewRequest",
     "RuntimeImageStorageImpact",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import uuid
 from dataclasses import replace
@@ -7,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from sqlalchemy import select
 from vonk_control.auth import CursorCodec
@@ -18,9 +20,9 @@ from vonk_control.inventory_repository import (
 )
 from vonk_control.models import (
     AgentNode,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
-    CatalogDocumentRevision,
     Job,
     NodeArtifact,
     NodeInventorySnapshot,
@@ -32,11 +34,9 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.recipe_builds import RecipeBuildPlan
-from vonk_control.recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    PulledImageEvidence,
-    prepare_runtime_image,
+from vonk_control.recipe_runtime_specs import (
+    compile_runtime_spec,
+    resolve_recipe_entities,
 )
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
@@ -51,7 +51,13 @@ from vonk_control.run_switch_operations import (
     RecipeLifecyclePhaseExecutor,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
+    _transient_distribution_exception,
     effective_build_receipt,
+)
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    PulledImageEvidence,
+    prepare_runtime_image,
 )
 
 from .test_recipe_operations import (
@@ -1460,6 +1466,158 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert restarted.tick() is True
     verified = restarted.get(operation.operation_id)
     assert "verify" in verified.result.get("completed_phases", [])
+
+
+def test_transient_distribution_failure_requeues_exact_plan_and_progress(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    artifact_executor = RecordingArtifactExecutor(child_transfer=True)
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        artifact_executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert service.tick() is True
+    child_id = service.get(operation.operation_id).result["child_operation_id"]
+    artifact_executor.children[child_id].state = "failed"
+    artifact_executor.children[child_id].result = {
+        "error_code": "agent.copy.timeout",
+        "uncertain": True,
+        "progress": {
+            "completed_bytes": 512,
+            "total_bytes": 1024,
+            "members": [{
+                "node_id": nodes[0],
+                "state": "unknown",
+                "completed_bytes": 512,
+                "total_bytes": 1024,
+            }],
+        },
+    }
+    assert service.tick() is True
+    queued = service.get(operation.operation_id)
+    assert queued.state == "queued"
+    assert queued.plan_digest == plan.plan_digest
+    assert queued.progress.completed_bytes == 512
+    with sessions() as session:
+        row = session.get(Job, operation.operation_id)
+        assert row is not None
+        assert row.current_attempt == 2
+        assert row.result["child_operation_id"] is None
+
+    assert service.tick() is True
+    retried = service.get(operation.operation_id)
+    assert retried.state == "running"
+    assert retried.plan_digest == plan.plan_digest
+    assert retried.result["child_operation_id"] != child_id
+
+
+def test_exhausted_transient_distribution_allows_bounded_operator_retry(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    artifact_executor = RecordingArtifactExecutor(child_transfer=True)
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        artifact_executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+
+    assert service.tick() is True
+    for attempt in range(3):
+        child_id = service.get(operation.operation_id).result["child_operation_id"]
+        artifact_executor.children[child_id].state = "failed"
+        artifact_executor.children[child_id].result = {
+            "error_code": "agent.copy.timeout",
+            "uncertain": True,
+        }
+        assert service.tick() is True
+        if attempt < 2:
+            assert service.tick() is True
+    exhausted = service.get(operation.operation_id)
+    assert exhausted.state == "failed"
+    retry = service.retry(
+        exhausted.operation_id,
+        actor="operator",
+        request_key=str(uuid.uuid4()),
+    )
+    assert retry.state == "queued"
+    assert retry.plan_digest == plan.plan_digest
+    with sessions() as session:
+        row = session.get(Job, retry.operation_id)
+        assert row is not None
+        assert row.current_attempt == 1
+        assert row.payload["retry"]["operator_retries"] == 1
+
+    assert service.tick() is True
+    retried_child = service.get(retry.operation_id).result["child_operation_id"]
+    artifact_executor.children[retried_child].state = "succeeded"
+    artifact_executor.children[retried_child].result = {
+        "copied_bytes": 1024,
+        "evidence": [{
+            "node_id": nodes[0],
+            "verified": True,
+            "verified_digests": [MODEL_ARTIFACT],
+            "verified_image_digest": "sha256:" + "1" * 64,
+            "imported_image_digest": "sha256:" + "1" * 64,
+            "verified_oci_layout_sha256": plan.preparation.runtime_image.oci_layout_sha256,
+        }],
+    }
+    assert service.tick() is True
+
+
+def test_run_switch_retry_classification_rejects_terminal_http_and_storage_errors() -> None:
+    request = httpx.Request("GET", "https://example.invalid/artifact")
+    for status in (401, 403, 404):
+        response = httpx.Response(status, request=request)
+        error = httpx.HTTPStatusError("request failed", request=request, response=response)
+        assert _transient_distribution_exception(error) is False
+    for status in (429, 500, 503):
+        response = httpx.Response(status, request=request)
+        error = httpx.HTTPStatusError("request failed", request=request, response=response)
+        assert _transient_distribution_exception(error) is True
+    assert _transient_distribution_exception(OSError(errno.EPERM, "permission denied")) is False
+    assert _transient_distribution_exception(OSError(errno.ENOSPC, "no space left")) is False
+    assert _transient_distribution_exception(OSError(errno.ECONNRESET, "reset")) is True
 
 
 def test_cleanup_adapter_cannot_evict_nas_or_return_noop(tmp_path: Path) -> None:

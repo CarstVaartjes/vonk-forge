@@ -9,6 +9,7 @@ cache payload itself.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import uuid
 from collections.abc import Mapping, Sequence
@@ -16,6 +17,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -228,6 +230,17 @@ class _BuildSelection:
 _ACTIVE_RUN_STATES = frozenset({"planned", "starting", "running", "stopping"})
 _TERMINAL_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _OPERATION_KINDS = frozenset({"recipe.run-switch.v2", "recipe.stop.v2"})
+_MAX_RETRY_ATTEMPTS = 3
+_TERMINAL_RETRY_MARKERS = (
+    "digest",
+    "integrity",
+    "auth",
+    "credential",
+    "permission",
+    "denied",
+    "revoked",
+    "receipt",
+)
 _PHASES: tuple[RunSwitchPhaseKind, ...] = (
     "transfer",
     "verify",
@@ -1600,6 +1613,76 @@ class RunSwitchOperationService:
             job = session.get(Job, operation_id)
             if job is None or job.kind not in _OPERATION_KINDS:
                 raise KeyError(operation_id)
+            return self._operation_view(job)
+
+    def retry(
+        self,
+        operation_id: str,
+        *,
+        actor: str,
+        request_key: str,
+    ) -> RunSwitchOperation:
+        """Queue one bounded retry from the persisted Run/Switch plan."""
+
+        try:
+            uuid.UUID(request_key)
+        except (TypeError, ValueError, AttributeError) as error:
+            raise RunSwitchOperationConflict("run-switch retry request key is invalid") from error
+        with self._sessions.begin() as session:
+            previous = session.get(Job, operation_id, with_for_update=True)
+            if previous is None or previous.kind not in _OPERATION_KINDS:
+                raise RunSwitchOperationConflict("run-switch operation is not retryable")
+            existing = session.scalar(select(Job).where(Job.request_id == request_key))
+            if existing is not None:
+                if (
+                    existing.kind != previous.kind
+                    or existing.payload.get("plan_digest")
+                    != previous.payload.get("plan_digest")
+                ):
+                    raise RunSwitchOperationConflict("run-switch request key was already used")
+                return self._operation_view(existing)
+            progress = dict(previous.result) if isinstance(previous.result, Mapping) else {}
+            raw_retry = previous.payload.get("retry", {})
+            retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
+            operator_retries = retry.get("operator_retries")
+            operator_retries = (
+                operator_retries
+                if type(operator_retries) is int and operator_retries >= 0
+                else 0
+            )
+            if (
+                previous.state != "failed"
+                or progress.get("retryable") is not True
+                or operator_retries >= _MAX_RETRY_ATTEMPTS
+            ):
+                raise RunSwitchOperationConflict("run-switch operation is not retryable")
+            payload = dict(previous.payload)
+            payload["progress"] = progress
+            payload["retry_of"] = previous.id
+            payload["retry"] = {
+                "automatic_attempts": 1,
+                "operator_retries": operator_retries + 1,
+            }
+            progress["child_operation_id"] = None
+            progress["retryable"] = False
+            now = _now(self._clock)
+            job = Job(
+                id=str(uuid.uuid4()),
+                request_id=request_key,
+                kind=previous.kind,
+                state="queued",
+                actor=actor,
+                authority_revision=previous.authority_revision,
+                targets=list(previous.targets),
+                payload_digest=_digest(payload),
+                payload=payload,
+                result=progress,
+                current_attempt=1,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(job)
+            session.flush()
             return self._operation_view(job)
 
     def activity_provider(self) -> RunSwitchOperationProvider:
@@ -3807,6 +3890,7 @@ class RunSwitchOperationService:
                     for node in plan.spark_group.nodes
                 ],
             },
+            "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
         with self._sessions.begin() as session:
             existing = session.scalar(select(Job).where(Job.request_id == request_key))
@@ -3937,7 +4021,16 @@ class RunSwitchOperationService:
                     job.updated_at = now
                 return True
             if child.state not in _TERMINAL_STATES or child.state != "succeeded":
-                self._fail(operation_id, f"run-switch phase operation failed: {child.state if child else 'unknown'}")
+                reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
+                if _transient_distribution_failure(child) and self._queue_transient_retry(
+                    operation_id, child, phase_index=phase_index
+                ):
+                    return True
+                self._fail(
+                    operation_id,
+                    reason,
+                    retryable=_transient_distribution_failure(child),
+                )
                 return True
             with self._sessions.begin() as session:
                 job = session.get(Job, operation_id, with_for_update=True)
@@ -4066,8 +4159,12 @@ class RunSwitchOperationService:
             except RunSwitchOperationConflict as error:
                 self._fail(operation_id, str(error))
                 return True
-            except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
-                self._fail(operation_id, f"{type(error).__name__}: {error}")
+            except (OSError, httpx.HTTPError, RuntimeError, TypeError, ValueError, KeyError) as error:
+                self._fail(
+                    operation_id,
+                    f"{type(error).__name__}: {error}",
+                    retryable=_transient_distribution_exception(error),
+                )
                 return True
         if execution.waiting and execution.operation_id is None:
             self._fail(operation_id, f"run-switch.{phase.kind}-waiting-without-child")
@@ -4168,7 +4265,48 @@ class RunSwitchOperationService:
             return self._lifecycle.get(operation_id)
         return None
 
-    def _fail(self, operation_id: str, reason: str) -> None:
+    def _queue_transient_retry(
+        self,
+        operation_id: str,
+        child: object,
+        *,
+        phase_index: int,
+    ) -> bool:
+        """Requeue one parent attempt while preserving child progress receipts."""
+
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None:
+                return False
+            attempt = max(1, int(job.current_attempt or 0))
+            progress = dict(job.result) if isinstance(job.result, Mapping) else {}
+            plan = _load_plan(job.payload["plan"])
+            raw_retry = job.payload.get("retry", {})
+            retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
+            automatic_attempts = retry.get("automatic_attempts")
+            automatic_attempts = (
+                automatic_attempts
+                if type(automatic_attempts) is int and automatic_attempts >= 1
+                else attempt
+            )
+            if phase_index >= len(plan.phases) or automatic_attempts >= _MAX_RETRY_ATTEMPTS:
+                return False
+            phase = plan.phases[phase_index]
+            _merge_progress_evidence(progress, plan, phase, _child_progress_payload(child))
+            progress["child_operation_id"] = None
+            progress["retryable"] = True
+            progress["retry_attempt"] = attempt + 1
+            progress["retry_reason"] = "transient distribution failure"
+            retry["automatic_attempts"] = automatic_attempts + 1
+            job.payload = dict(job.payload) | {"retry": retry}
+            job.current_attempt = attempt + 1
+            job.state = "queued"
+            job.status_reason = None
+            job.result = progress
+            job.updated_at = _now(self._clock)
+            return True
+
+    def _fail(self, operation_id: str, reason: str, *, retryable: bool = False) -> None:
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None:
@@ -4177,6 +4315,7 @@ class RunSwitchOperationService:
             job.status_reason = reason[:512]
             progress = dict(job.result) if isinstance(job.result, Mapping) else {}
             progress["failed_phase"] = progress.get("phase")
+            progress["retryable"] = retryable
             job.result = progress
             job.updated_at = _now(self._clock)
 
@@ -4312,9 +4451,13 @@ class RunSwitchOperationProvider:
             "progress": _activity_progress(operation),
             "created_at": _aware(job.created_at).isoformat(),
             "updated_at": _aware(job.updated_at).isoformat(),
-            # No retry/cancel action is exposed until a callable high-level
-            # operation exists; inspect/poll are reads, not mutation actions.
-            "supported_actions": [],
+            "supported_actions": (
+                ["retry"]
+                if operation.state == "failed"
+                and isinstance(operation.result, Mapping)
+                and operation.result.get("retryable") is True
+                else []
+            ),
             "result": _activity_result(operation),
             "detail": operation.status_reason,
         }
@@ -4368,12 +4511,13 @@ def _activity_result(operation: RunSwitchOperation) -> dict[str, object] | None:
 
     result = dict(operation.result) if operation.result is not None else {}
     if operation.state == "failed":
+        retryable = bool(result.get("retryable") is True)
         result.update(
             {
                 "error_code": "run_switch_failed",
                 "summary": operation.status_reason or "Run/Switch operation failed",
                 "detail": operation.status_reason,
-                "retryable": False,
+                "retryable": retryable,
                 "uncertain": False,
             }
         )
@@ -4589,7 +4733,67 @@ def _child_progress_payload(child: object) -> Mapping[str, object]:
     child_state = getattr(child, "state", None)
     if isinstance(child_state, str):
         payload["child_state"] = child_state
+    child_reason = getattr(child, "status_reason", None)
+    if isinstance(child_reason, str) and child_reason:
+        payload["status_reason"] = child_reason[:512]
     return payload
+
+
+def _transient_distribution_failure(child: object) -> bool:
+    """Retry transport uncertainty while keeping receipt failures terminal."""
+
+    payload = _child_progress_payload(child)
+    if getattr(child, "state", None) in {"waiting-for-operator", "uncertain"}:
+        return True
+    raw_uncertain = payload.get("uncertain")
+    text = " ".join(
+        str(payload.get(key, ""))
+        for key in ("error_code", "code", "reason", "detail", "summary", "error")
+    ).casefold()
+    if any(marker in text for marker in _TERMINAL_RETRY_MARKERS):
+        return False
+    if raw_uncertain is True:
+        return True
+    return any(
+        marker in text
+        for marker in (
+            "http",
+            "timeout",
+            "timed out",
+            "connection",
+            "network",
+            "transport",
+            "copy",
+            "unavailable",
+            "temporary",
+            "oserror",
+        )
+    )
+
+
+def _transient_distribution_exception(error: BaseException) -> bool:
+    text = str(error).casefold()
+    if any(
+        marker in text
+        for marker in _TERMINAL_RETRY_MARKERS
+    ):
+        return False
+    if isinstance(error, httpx.HTTPError):
+        response = getattr(error, "response", None)
+        status = getattr(response, "status_code", None)
+        if type(status) is int:
+            return status == 429 or status >= 500
+        return isinstance(error, (httpx.TimeoutException, httpx.ConnectError))
+    if isinstance(error, OSError):
+        return getattr(error, "errno", None) in {
+            errno.ECONNRESET,
+            errno.ECONNREFUSED,
+            errno.EHOSTUNREACH,
+            errno.ENETUNREACH,
+            errno.ETIMEDOUT,
+            errno.EPIPE,
+        }
+    return False
 
 
 def _progress_member_entries(value: object) -> list[Mapping[str, object]]:

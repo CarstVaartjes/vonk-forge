@@ -438,6 +438,12 @@ def add_controller_commands(
     _add_json(operation_show)
     operation_retry = operation_commands.add_parser("retry")
     operation_retry.add_argument("operation_id")
+    operation_retry.add_argument(
+        "--family",
+        choices=("recipe", "model-cache", "run-switch"),
+        default="recipe",
+        help="operation family owning the durable retry",
+    )
     _request_key(operation_retry)
     _apply(operation_retry)
     _add_json(operation_retry)
@@ -1967,7 +1973,13 @@ def _run_library(
             "compared_count": len(recipe_ids),
         }
     if command == "operation":
-        path = f"/api/v1/recipes/operations/{_quoted(args.operation_id)}"
+        family = getattr(args, "family", "recipe")
+        if family == "model-cache":
+            path = f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}"
+        elif family == "run-switch":
+            path = f"/api/v1/recipes/run-switches/{_quoted(args.operation_id)}"
+        else:
+            path = f"/api/v1/recipes/operations/{_quoted(args.operation_id)}"
         if args.operation_command == "show":
             return client.request("GET", path)
         return _plan_or_request(

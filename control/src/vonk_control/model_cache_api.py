@@ -30,6 +30,7 @@ from .model_cache_contract import (
     ModelCacheRepairPreviewRequest,
     ModelCacheRepairPreviewResponse,
     ModelCacheRepairRequest,
+    ModelCacheRetryRequest,
     ModelCacheUpdatesResponse,
 )
 from .operation_api import bounded_error_responses
@@ -50,6 +51,8 @@ MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/v1/model-cache/operations"): "listModelCacheOperations",
     ("get", "/api/v1/model-cache/operations/{operation_id}"):
         "getModelCacheOperation",
+    ("post", "/api/v1/model-cache/operations/{operation_id}/retry"):
+        "retryModelCacheOperation",
 }
 
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -476,6 +479,33 @@ def install_model_cache_routes(
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             raise error(exc, "model cache operation unavailable") from None
 
+    @app.post(
+        "/api/v1/model-cache/operations/{operation_id}/retry",
+        response_model=ModelCacheOperationResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="retryModelCacheOperation",
+    )
+    def retry_operation(
+        body: ModelCacheRetryRequest,
+        request: Request,
+        operation_id: Annotated[str, Path(pattern=_UUID)],
+        actor: Actor = authenticated,
+    ) -> ModelCacheOperationResponse:
+        require_mutation(actor, "POST", "/api/v1/model-cache/operations/{operation_id}/retry")
+        try:
+            result = cache().retry(
+                operation_id,
+                actor=actor.subject,
+                request_key=body.request_key,
+            )
+        except HTTPException:
+            raise
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise error(exc, "model cache operation retry unavailable") from None
+        audit(request, actor, "model-cache.retry", operation_id, result.id)
+        return operation_response(result)
+
 class ModelCacheOperationProvider:
     """Duck-typed Activity provider for the Controller-owned cache family."""
 
@@ -550,6 +580,7 @@ class ModelCacheOperationProvider:
         result = (
             None if operation.result is None else dict(operation.result)
         )
+        retryable = operation.state == "failed" and operation.retryable
         if operation.state == "failed" and result is None:
             result = {
                 "error_code": "model_cache_operation_failed",
@@ -559,9 +590,12 @@ class ModelCacheOperationProvider:
                     if operation.last_error is None
                     else operation.last_error[:256]
                 ),
-                "retryable": operation.kind in {"download", "repair"},
+                "retryable": retryable,
                 "uncertain": False,
             }
+        elif operation.state == "failed" and result is not None:
+            result.setdefault("retryable", retryable)
+            result.setdefault("uncertain", False)
         return {
             "id": operation.id,
             "parent_id": None,
@@ -572,7 +606,7 @@ class ModelCacheOperationProvider:
             "progress": self._progress(progress),
             "created_at": operation.created_at,
             "updated_at": operation.updated_at,
-            "supported_actions": [],
+            "supported_actions": ["retry"] if retryable else [],
             "result": result,
         }
 
