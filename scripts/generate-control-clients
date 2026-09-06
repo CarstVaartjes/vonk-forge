@@ -85,8 +85,10 @@ def _write_openapi(document: dict[str, object], *, path: Path = OPENAPI) -> None
     )
 
 
-def _generated_client_schema(document: dict[str, object]) -> dict[str, object]:
-    """Exclude byte streams that require the handwritten streaming transports."""
+def _generated_client_schema(
+    document: dict[str, object], *, python_compatibility: bool = False
+) -> dict[str, object]:
+    """Prepare a client schema without changing the tracked server contract."""
 
     schema = deepcopy(document)
     paths = schema.get("paths", {})
@@ -96,6 +98,18 @@ def _generated_client_schema(document: dict[str, object]) -> dict[str, object]:
                 del path_item[method]
         if not path_item:
             del paths[path]
+    if python_compatibility:
+        # openapi-python-client 0.26.2 cannot parse recursive anyOf unions.
+        # Keep the server and TypeScript schemas exact while representing these
+        # JSON-shaped values as mappings in the generated Python client.
+        components = schema.get("components", {})
+        schemas = components.get("schemas", {})
+        for name in ("JsonValue", "RuntimeArgumentValue"):
+            if name in schemas:
+                schemas[name] = {
+                    "type": "object",
+                    "additionalProperties": True,
+                }
     return schema
 
 
@@ -151,7 +165,10 @@ def main() -> None:
 
         admin_schema = _schema(include_browser_auth=False)
         _write_openapi(admin_schema)
-        _write_openapi(_generated_client_schema(admin_schema), path=client_openapi)
+        _write_openapi(
+            _generated_client_schema(admin_schema, python_compatibility=True),
+            path=client_openapi,
+        )
         _run(
             [
                 "openapi-python-client",

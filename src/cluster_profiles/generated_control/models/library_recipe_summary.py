@@ -6,18 +6,16 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.library_recipe_summary_source_kind import check_library_recipe_summary_source_kind
-from ..models.library_recipe_summary_source_kind import LibraryRecipeSummarySourceKind
 from ..types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.recipe_revision_summary import RecipeRevisionSummary
   from ..models.library_capability_inventory import LibraryCapabilityInventory
   from ..models.library_run_summary import LibraryRunSummary
   from ..models.library_installation_summary import LibraryInstallationSummary
+  from ..models.recipe_definition import RecipeDefinition
   from ..models.library_projection_reason import LibraryProjectionReason
 
 
@@ -33,20 +31,21 @@ class LibraryRecipeSummary:
     """
         Attributes:
             capabilities (list[str]):
+            content_sha256 (str):
             description (str):
             installation_returned_count (int):
             installation_total_count (int):
             installations (list['LibraryInstallationSummary']):
             installations_truncated (bool):
+            publisher (str):
             reasons (list['LibraryProjectionReason']):
+            recipe_document (RecipeDefinition): The sole public recipe authoring contract.
             recipe_id (str):
             run_returned_count (int):
             run_total_count (int):
             runs (list['LibraryRunSummary']):
             runs_truncated (bool):
-            selected_revision (Union['RecipeRevisionSummary', None]):
             slug (str):
-            source_kind (LibraryRecipeSummarySourceKind):
             title (str):
             topology_name (Union[None, str]):
             recipe_capabilities (Union[Unset, LibraryCapabilityInventory]): Compare-friendly model or recipe capability
@@ -54,20 +53,21 @@ class LibraryRecipeSummary:
      """
 
     capabilities: list[str]
+    content_sha256: str
     description: str
     installation_returned_count: int
     installation_total_count: int
     installations: list['LibraryInstallationSummary']
     installations_truncated: bool
+    publisher: str
     reasons: list['LibraryProjectionReason']
+    recipe_document: 'RecipeDefinition'
     recipe_id: str
     run_returned_count: int
     run_total_count: int
     runs: list['LibraryRunSummary']
     runs_truncated: bool
-    selected_revision: Union['RecipeRevisionSummary', None]
     slug: str
-    source_kind: LibraryRecipeSummarySourceKind
     title: str
     topology_name: Union[None, str]
     recipe_capabilities: Union[Unset, 'LibraryCapabilityInventory'] = UNSET
@@ -77,14 +77,16 @@ class LibraryRecipeSummary:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.recipe_revision_summary import RecipeRevisionSummary
         from ..models.library_capability_inventory import LibraryCapabilityInventory
         from ..models.library_run_summary import LibraryRunSummary
         from ..models.library_installation_summary import LibraryInstallationSummary
+        from ..models.recipe_definition import RecipeDefinition
         from ..models.library_projection_reason import LibraryProjectionReason
         capabilities = self.capabilities
 
 
+
+        content_sha256 = self.content_sha256
 
         description = self.description
 
@@ -101,12 +103,16 @@ class LibraryRecipeSummary:
 
         installations_truncated = self.installations_truncated
 
+        publisher = self.publisher
+
         reasons = []
         for reasons_item_data in self.reasons:
             reasons_item = reasons_item_data.to_dict()
             reasons.append(reasons_item)
 
 
+
+        recipe_document = self.recipe_document.to_dict()
 
         recipe_id = self.recipe_id
 
@@ -123,15 +129,7 @@ class LibraryRecipeSummary:
 
         runs_truncated = self.runs_truncated
 
-        selected_revision: Union[None, dict[str, Any]]
-        if isinstance(self.selected_revision, RecipeRevisionSummary):
-            selected_revision = self.selected_revision.to_dict()
-        else:
-            selected_revision = self.selected_revision
-
         slug = self.slug
-
-        source_kind: str = self.source_kind
 
         title = self.title
 
@@ -147,20 +145,21 @@ class LibraryRecipeSummary:
 
         field_dict.update({
             "capabilities": capabilities,
+            "content_sha256": content_sha256,
             "description": description,
             "installation_returned_count": installation_returned_count,
             "installation_total_count": installation_total_count,
             "installations": installations,
             "installations_truncated": installations_truncated,
+            "publisher": publisher,
             "reasons": reasons,
+            "recipe_document": recipe_document,
             "recipe_id": recipe_id,
             "run_returned_count": run_returned_count,
             "run_total_count": run_total_count,
             "runs": runs,
             "runs_truncated": runs_truncated,
-            "selected_revision": selected_revision,
             "slug": slug,
-            "source_kind": source_kind,
             "title": title,
             "topology_name": topology_name,
         })
@@ -173,14 +172,16 @@ class LibraryRecipeSummary:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.recipe_revision_summary import RecipeRevisionSummary
         from ..models.library_capability_inventory import LibraryCapabilityInventory
         from ..models.library_run_summary import LibraryRunSummary
         from ..models.library_installation_summary import LibraryInstallationSummary
+        from ..models.recipe_definition import RecipeDefinition
         from ..models.library_projection_reason import LibraryProjectionReason
         d = dict(src_dict)
         capabilities = cast(list[str], d.pop("capabilities"))
 
+
+        content_sha256 = d.pop("content_sha256")
 
         description = d.pop("description")
 
@@ -200,6 +201,8 @@ class LibraryRecipeSummary:
 
         installations_truncated = d.pop("installations_truncated")
 
+        publisher = d.pop("publisher")
+
         reasons = []
         _reasons = d.pop("reasons")
         for reasons_item_data in (_reasons):
@@ -208,6 +211,11 @@ class LibraryRecipeSummary:
 
 
             reasons.append(reasons_item)
+
+
+        recipe_document = RecipeDefinition.from_dict(d.pop("recipe_document"))
+
+
 
 
         recipe_id = d.pop("recipe_id")
@@ -228,30 +236,7 @@ class LibraryRecipeSummary:
 
         runs_truncated = d.pop("runs_truncated")
 
-        def _parse_selected_revision(data: object) -> Union['RecipeRevisionSummary', None]:
-            if data is None:
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                selected_revision_type_0 = RecipeRevisionSummary.from_dict(data)
-
-
-
-                return selected_revision_type_0
-            except: # noqa: E722
-                pass
-            return cast(Union['RecipeRevisionSummary', None], data)
-
-        selected_revision = _parse_selected_revision(d.pop("selected_revision"))
-
-
         slug = d.pop("slug")
-
-        source_kind = check_library_recipe_summary_source_kind(d.pop("source_kind"))
-
-
-
 
         title = d.pop("title")
 
@@ -275,20 +260,21 @@ class LibraryRecipeSummary:
 
         library_recipe_summary = cls(
             capabilities=capabilities,
+            content_sha256=content_sha256,
             description=description,
             installation_returned_count=installation_returned_count,
             installation_total_count=installation_total_count,
             installations=installations,
             installations_truncated=installations_truncated,
+            publisher=publisher,
             reasons=reasons,
+            recipe_document=recipe_document,
             recipe_id=recipe_id,
             run_returned_count=run_returned_count,
             run_total_count=run_total_count,
             runs=runs,
             runs_truncated=runs_truncated,
-            selected_revision=selected_revision,
             slug=slug,
-            source_kind=source_kind,
             title=title,
             topology_name=topology_name,
             recipe_capabilities=recipe_capabilities,

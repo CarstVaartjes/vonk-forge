@@ -310,160 +310,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/catalog/entities": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Entities */
-        get: operations["listCatalogEntities"];
-        put?: never;
-        /** Create Entity */
-        post: operations["createCatalogEntityDraft"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/entities/{entity_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Entity */
-        get: operations["getCatalogEntity"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/entities/{entity_id}/draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Revise Entity */
-        put: operations["reviseCatalogEntity"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/entities/{entity_id}/resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resolve Entity */
-        post: operations["resolveCatalogEntity"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/imports/global": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Import Global Recipe */
-        post: operations["importGlobalRecipe"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/imports/global/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Preview Global Import */
-        post: operations["previewGlobalRecipeImport"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/imports/public": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Import Public Recipe */
-        post: operations["importPublicRecipe"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/imports/public/preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Preview Public Import */
-        post: operations["previewPublicRecipeImport"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/imports/recipe-library": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Import Recipe Library */
-        post: operations["importRecipeLibrary"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/catalog/imports/workload_run": {
         parameters: {
             query?: never;
@@ -532,143 +378,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/catalog/public-recipes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Public Recipes */
-        get: operations["listPublicRecipes"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/recipes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Recipes */
-        get: operations["listLocalRecipes"];
-        put?: never;
-        /** Create Recipe */
-        post: operations["createLocalRecipe"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/recipes/{recipe_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Recipe */
-        get: operations["getLocalRecipe"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/recipes/{recipe_id}/draft": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Update Draft */
-        put: operations["updateLocalRecipeDraft"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/recipes/{recipe_id}/fork": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Fork Recipe */
-        post: operations["forkLocalRecipe"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/recipes/{recipe_id}/publication-export": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Export For Publication */
-        post: operations["exportRecipeForPublication"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/recipes/{recipe_id}/publication-report": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Attach Publication Report */
-        put: operations["attachRecipePublicationReport"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/catalog/recipes/{recipe_id}/resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resolve Recipe */
-        post: operations["resolveLocalRecipe"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/catalog/recipes/{recipe_id}/resolve-import": {
         parameters: {
             query?: never;
@@ -694,9 +403,9 @@ export interface paths {
             cookie?: never;
         };
         /** Download Source Bundle */
-        get: operations["downloadLocalRecipeSourceBundle"];
+        get: operations["downloadRecipeSourceBundle"];
         /** Upload Source Bundle */
-        put: operations["uploadLocalRecipeSourceBundle"];
+        put: operations["uploadRecipeSourceBundle"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1158,6 +867,23 @@ export interface paths {
         };
         /** Get Placement */
         get: operations["getLibraryPlacement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Library Recipes */
+        get: operations["listLibraryRecipes"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2211,6 +1937,13 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** BuildArgument */
+        BuildArgument: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string | number | boolean;
+        };
         /** BuildCompatibilityEvidence */
         BuildCompatibilityEvidence: {
             /** Detail */
@@ -2226,6 +1959,26 @@ export interface components {
              * @enum {string}
              */
             state: "compatible" | "incompatible" | "unknown";
+        };
+        /** BuildContext */
+        BuildContext: {
+            /** Path */
+            path: string;
+        };
+        /** BuildNetwork */
+        BuildNetwork: {
+            /** Hosts */
+            hosts: string[];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "none" | "public";
+        };
+        /** BuildPatch */
+        BuildPatch: {
+            /** Path */
+            path: string;
         };
         /** BuildPlanResponse */
         BuildPlanResponse: {
@@ -2434,53 +2187,6 @@ export interface components {
             /** Unified Memory Bytes */
             unified_memory_bytes: number;
         };
-        /** CatalogEntityListResponse */
-        CatalogEntityListResponse: {
-            /** Entities */
-            entities: components["schemas"]["CatalogEntityRevisionResponse"][];
-            /** Next Cursor */
-            next_cursor?: string | null;
-        };
-        /** CatalogEntityRevisionResponse */
-        CatalogEntityRevisionResponse: {
-            /** Content Sha256 */
-            content_sha256?: string | null;
-            /** Created At */
-            created_at: string;
-            /** Created By */
-            created_by: string;
-            /** Document */
-            document: {
-                [key: string]: unknown;
-            };
-            /** Entity Id */
-            entity_id: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "model-group" | "model" | "model-version" | "execution-harness" | "runtime-distribution" | "patch-bundle";
-            /**
-             * Lifecycle
-             * @enum {string}
-             */
-            lifecycle: "draft" | "blocked" | "resolved" | "deprecated";
-            /** Publisher */
-            publisher: string;
-            /** Revision Id */
-            revision_id: string;
-            /** Revision Number */
-            revision_number: number;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            /** Slug */
-            slug: string;
-            /** Title */
-            title: string;
-        };
         /** CatalogProblem */
         CatalogProblem: {
             /** Code */
@@ -2576,22 +2282,6 @@ export interface components {
             verified_bytes: number;
             /** Verified Sha256 */
             verified_sha256?: string | null;
-        };
-        /** CreateCatalogEntityRequest */
-        CreateCatalogEntityRequest: {
-            /** Document */
-            document: {
-                [key: string]: unknown;
-            };
-        };
-        /** CreateRecipeRequest */
-        CreateRecipeRequest: {
-            /** Document */
-            document: {
-                [key: string]: unknown;
-            };
-            /** Slug */
-            slug: string;
         };
         /** EndpointResponse */
         EndpointResponse: {
@@ -3151,13 +2841,6 @@ export interface components {
             /** Nodes */
             nodes: components["schemas"]["NodeStatus"][];
         };
-        /** ForkRecipeRequest */
-        ForkRecipeRequest: {
-            /** Revision */
-            revision: number;
-            /** Slug */
-            slug: string;
-        };
         /** FreshnessEvidence */
         FreshnessEvidence: {
             /** Age Seconds */
@@ -3193,39 +2876,6 @@ export interface components {
              * @default 6
              */
             telemetry_live_seconds: number;
-        };
-        /** GlobalImportPreviewRequest */
-        GlobalImportPreviewRequest: {
-            /** Uri */
-            uri: string;
-        };
-        /** GlobalImportRequest */
-        GlobalImportRequest: {
-            /** Expected Content Sha256 */
-            expected_content_sha256: string;
-            /** Uri */
-            uri: string;
-        };
-        /** GlobalRevisionResponse */
-        GlobalRevisionResponse: {
-            /** Content Sha256 */
-            content_sha256: string;
-            /** Document */
-            document: {
-                [key: string]: unknown;
-            };
-            /** Published At */
-            published_at: string;
-            /** Publisher */
-            publisher: string;
-            /** Recipe Id */
-            recipe_id: string;
-            /** Revision Id */
-            revision_id: string;
-            /** Revision Number */
-            revision_number: number;
-            /** Slug */
-            slug: string;
         };
         /** GrantRequest */
         GrantRequest: {
@@ -3335,6 +2985,12 @@ export interface components {
         InstallPlanResponse: {
             /** Allowed */
             allowed: boolean;
+            /** Compiled Execution Plans */
+            compiled_execution_plans?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                };
+            };
             /** Image Digest */
             image_digest: string;
             /** Mapping Generation */
@@ -3346,7 +3002,7 @@ export interface components {
             /** Plan Digest */
             plan_digest: string;
             /** Recipe Build Id */
-            recipe_build_id: string;
+            recipe_build_id: string | null;
             /** Recipe Content Sha256 */
             recipe_content_sha256: string;
             /** Recipe Revision Id */
@@ -3364,7 +3020,7 @@ export interface components {
             /** Mapping Id */
             mapping_id: string;
             /** Recipe Build Id */
-            recipe_build_id: string;
+            recipe_build_id?: string | null;
         };
         /** InstallPreviewTarget */
         InstallPreviewTarget: {
@@ -3382,7 +3038,7 @@ export interface components {
             /** Plan Digest */
             plan_digest: string;
             /** Recipe Build Id */
-            recipe_build_id: string;
+            recipe_build_id?: string | null;
             /** Request Key */
             request_key: string;
         };
@@ -3573,6 +3229,9 @@ export interface components {
             /** Total */
             total: number;
         };
+        JsonValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
+            [key: string]: components["schemas"]["JsonValue"];
+        } | null;
         /**
          * LibraryCapabilityFact
          * @description One explicit capability assertion; absence is never represented as support.
@@ -3638,28 +3297,11 @@ export interface components {
              * Source Kind
              * @enum {string}
              */
-            source_kind: "model-version" | "recipe-revision" | "model-capability-evidence";
+            source_kind: "model" | "recipe" | "model-capability-evidence";
             /** Source Revision */
             source_revision?: string | null;
             /** Source Url */
             source_url?: string | null;
-        };
-        /**
-         * LibraryCatalogReference
-         * @description A content addressed catalog identity retained in a Library response.
-         */
-        LibraryCatalogReference: {
-            /** Content Sha256 */
-            content_sha256: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "model-group" | "model" | "model-version";
-            /** Publisher */
-            publisher: string;
-            /** Slug */
-            slug: string;
         };
         /** LibraryInstallationSummary */
         LibraryInstallationSummary: {
@@ -3681,9 +3323,9 @@ export interface components {
         };
         /** LibraryModel */
         LibraryModel: {
-            model: components["schemas"]["ModelVersionIdentity"];
+            model: components["schemas"]["LibraryModelIdentity"];
             model_capabilities?: components["schemas"]["LibraryCapabilityInventory"];
-            model_version?: components["schemas"]["LibraryModelVersionFacts"] | null;
+            model_document: components["schemas"]["ModelDefinition"];
             /**
              * Page Local
              * @default true
@@ -3693,148 +3335,23 @@ export interface components {
             /** Recipes */
             recipes: components["schemas"]["LibraryRecipeSummary"][];
         };
-        /** LibraryModelArtifact */
-        LibraryModelArtifact: {
-            /** Download Bytes */
-            download_bytes: number;
-            /** Id */
-            id: string;
-            /** Installed Bytes */
-            installed_bytes: number;
+        /**
+         * LibraryModelIdentity
+         * @description Content-addressed identity for a canonical Model document.
+         */
+        LibraryModelIdentity: {
+            /** Content Sha256 */
+            content_sha256: string;
             /**
              * Kind
-             * @enum {string}
-             */
-            kind: "huggingface.file" | "http.file" | "oci.artifact";
-            /** Path */
-            path: string;
-            /** Repository */
-            repository: string;
-            /** Revision */
-            revision: string;
-            /** Roles */
-            roles: string[];
-            /** Sha256 */
-            sha256: string;
-        };
-        /** LibraryModelDefinition */
-        LibraryModelDefinition: {
-            /** Architecture */
-            architecture: string;
-            identity: components["schemas"]["LibraryCatalogReference"];
-            metadata: components["schemas"]["LibraryModelMetadata"];
-            model_group: components["schemas"]["LibraryCatalogReference"];
-        };
-        /** LibraryModelFamily */
-        LibraryModelFamily: {
-            /** Family */
-            family: string;
-            identity: components["schemas"]["LibraryCatalogReference"];
-            metadata: components["schemas"]["LibraryModelMetadata"];
-        };
-        /** LibraryModelFormat */
-        LibraryModelFormat: {
-            /**
-             * Container
-             * @enum {string}
-             */
-            container: "gguf" | "safetensors";
-            /** Precision */
-            precision: string;
-            /** Quantization */
-            quantization: string;
-        };
-        /** LibraryModelLimits */
-        LibraryModelLimits: {
-            /** Context Tokens */
-            context_tokens?: number | null;
-            /** Frames */
-            frames?: number | null;
-            /** Resolution Pixels */
-            resolution_pixels?: number | null;
-            /** Sample Rate Hz */
-            sample_rate_hz?: number | null;
-        };
-        /** LibraryModelLineage */
-        LibraryModelLineage: {
-            /** Derivation */
-            derivation: string;
-            /** Publisher */
-            publisher: string;
-            /**
-             * Relation
-             * @enum {string}
-             */
-            relation: "official" | "derived" | "quantized";
-            source_model: components["schemas"]["LibraryCatalogReference"];
-        };
-        /** LibraryModelMetadata */
-        LibraryModelMetadata: {
-            /** Description */
-            description: string;
-            /** Tags */
-            tags: string[];
-            /** Title */
-            title: string;
-        };
-        /** LibraryModelParameters */
-        LibraryModelParameters: {
-            /** Active */
-            active?: number | null;
-            /** Total */
-            total?: number | null;
-        };
-        /** LibraryModelSizes */
-        LibraryModelSizes: {
-            /** Download Bytes */
-            download_bytes: number;
-            /** Installed Bytes */
-            installed_bytes: number;
-        };
-        /** LibraryModelSource */
-        LibraryModelSource: {
-            /** Repository */
-            repository: string;
-            /** Revision */
-            revision: string;
-        };
-        /**
-         * LibraryModelVersionFacts
-         * @description Exact schema-valid model-version facts, with unknown fields fail-closed.
-         */
-        LibraryModelVersionFacts: {
-            /** Artifacts */
-            artifacts: components["schemas"]["LibraryModelArtifact"][];
-            /** Availability */
-            availability?: ("active" | "withdrawn" | "superseded") | null;
-            /** Dependencies */
-            dependencies: components["schemas"]["LibraryCatalogReference"][];
-            family?: components["schemas"]["LibraryModelFamily"] | null;
-            format?: components["schemas"]["LibraryModelFormat"] | null;
-            identity: components["schemas"]["ModelVersionIdentity"];
-            limits?: components["schemas"]["LibraryModelLimits"] | null;
-            lineage?: components["schemas"]["LibraryModelLineage"] | null;
-            metadata?: components["schemas"]["LibraryModelMetadata"] | null;
-            model?: components["schemas"]["LibraryCatalogReference"] | null;
-            model_definition?: components["schemas"]["LibraryModelDefinition"] | null;
-            parameters?: components["schemas"]["LibraryModelParameters"] | null;
-            /** Reasons */
-            reasons?: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
-            /**
-             * Schema Version
-             * @default 2
+             * @default model
              * @constant
              */
-            schema_version: 2;
-            sizes?: components["schemas"]["LibraryModelSizes"] | null;
-            source?: components["schemas"]["LibraryModelSource"] | null;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "resolved" | "unknown";
-            /** Version */
-            version?: string | null;
+            kind: "model";
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
         };
         /** LibraryPlacementApplication */
         LibraryPlacementApplication: {
@@ -4049,14 +3566,15 @@ export interface components {
         };
         /** LibraryRecipeDetail */
         LibraryRecipeDetail: {
+            definition: components["schemas"]["RecipeDefinition"];
             /**
              * Generated At
              * Format: date-time
              */
             generated_at: string;
-            model?: components["schemas"]["ModelVersionIdentity"] | null;
             model_capabilities?: components["schemas"]["LibraryCapabilityInventory"];
-            model_version?: components["schemas"]["LibraryModelVersionFacts"] | null;
+            /** Model Documents */
+            model_documents: components["schemas"]["LibraryRecipeModel"][];
             operational_state: components["schemas"]["OperationalState"];
             /** Placement */
             placement: components["schemas"]["TopologyPlacement"][];
@@ -4066,34 +3584,60 @@ export interface components {
             recipe_capabilities?: components["schemas"]["LibraryCapabilityInventory"];
             /**
              * Schema Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            schema_version: 1;
-            selected_revision: components["schemas"]["RecipeRevisionSummary"] | null;
+            schema_version: 2;
             topology: components["schemas"]["RecipeTopology"] | null;
-            visual_recipe: components["schemas"]["VisualRecipeDocument"] | null;
         };
         /** LibraryRecipeIdentity */
         LibraryRecipeIdentity: {
+            /** Content Sha256 */
+            content_sha256: string;
             /** Description */
             description: string;
+            /** Publisher */
+            publisher: string;
             /** Recipe Id */
             recipe_id: string;
             /** Slug */
             slug: string;
-            /**
-             * Source Kind
-             * @enum {string}
-             */
-            source_kind: "local" | "workload_run" | "global" | "recipe_library";
             /** Title */
             title: string;
+        };
+        /**
+         * LibraryRecipeList
+         * @description Read-only overview of active canonical Recipe revisions.
+         */
+        LibraryRecipeList: {
+            freshness_policy: components["schemas"]["FreshnessPolicy"];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Recipes */
+            recipes: components["schemas"]["LibraryRecipeSummary"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /** LibraryRecipeModel */
+        LibraryRecipeModel: {
+            model_document: components["schemas"]["ModelDefinition"];
+            selection: components["schemas"]["RecipeModelSelection"];
         };
         /** LibraryRecipeSummary */
         LibraryRecipeSummary: {
             /** Capabilities */
             capabilities: string[];
+            /** Content Sha256 */
+            content_sha256: string;
             /** Description */
             description: string;
             /** Installation Returned Count */
@@ -4104,9 +3648,12 @@ export interface components {
             installations: components["schemas"]["LibraryInstallationSummary"][];
             /** Installations Truncated */
             installations_truncated: boolean;
+            /** Publisher */
+            publisher: string;
             /** Reasons */
             reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
             recipe_capabilities?: components["schemas"]["LibraryCapabilityInventory"];
+            recipe_document: components["schemas"]["RecipeDefinition"];
             /** Recipe Id */
             recipe_id: string;
             /** Run Returned Count */
@@ -4117,14 +3664,8 @@ export interface components {
             runs: components["schemas"]["LibraryRunSummary"][];
             /** Runs Truncated */
             runs_truncated: boolean;
-            selected_revision: components["schemas"]["RecipeRevisionSummary"] | null;
             /** Slug */
             slug: string;
-            /**
-             * Source Kind
-             * @enum {string}
-             */
-            source_kind: "local" | "workload_run" | "global" | "recipe_library";
             /** Title */
             title: string;
             /** Topology Name */
@@ -4169,10 +3710,10 @@ export interface components {
             next_cursor: string | null;
             /**
              * Schema Version
-             * @default 1
+             * @default 2
              * @constant
              */
-            schema_version: 1;
+            schema_version: 2;
             /** Unlinked Recipes */
             unlinked_recipes: components["schemas"]["LibraryRecipeSummary"][];
         };
@@ -4391,6 +3932,21 @@ export interface components {
             placement_digest: string;
             /** Topology Name */
             topology_name: string;
+        };
+        /** ModelAccess */
+        ModelAccess: {
+            /**
+             * Authentication
+             * @enum {string}
+             */
+            authentication: "none" | "token";
+            /** Gated */
+            gated: boolean;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "restricted";
         };
         /**
          * ModelArtifactPreparation
@@ -4780,6 +4336,83 @@ export interface components {
             /** Updates */
             updates: components["schemas"]["ModelCacheUpdateResponse"][];
         };
+        /** ModelCapabilities */
+        ModelCapabilities: {
+            /** Facts */
+            facts: components["schemas"]["ModelCapabilityFact"][];
+            provenance: components["schemas"]["ModelCapabilityProvenance"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /** ModelCapabilityFact */
+        ModelCapabilityFact: {
+            /**
+             * Capability
+             * @enum {string}
+             */
+            capability: "chat" | "text-generation" | "text-understanding" | "reasoning" | "tool-use" | "code-generation" | "ocr" | "image-generation" | "image-understanding" | "image-editing" | "video-generation" | "video-understanding" | "audio-generation" | "audio-understanding" | "embeddings" | "3d-generation";
+            /** Evidence Digest */
+            evidence_digest: string | null;
+            /**
+             * Evidence Status
+             * @enum {string}
+             */
+            evidence_status: "declared" | "tested" | "contradicted" | "unknown";
+            /**
+             * Support
+             * @enum {string}
+             */
+            support: "supported" | "unsupported" | "unknown";
+        };
+        /** ModelCapabilityProvenance */
+        ModelCapabilityProvenance: {
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Source Revision */
+            source_revision: string;
+            /** Source Url */
+            source_url: string;
+        };
+        /**
+         * ModelDefinition
+         * @description One exact model version and variant, including its complete manifest.
+         */
+        ModelDefinition: {
+            access: components["schemas"]["ModelAccess"];
+            capabilities: components["schemas"]["ModelCapabilities"];
+            /** Dependencies */
+            dependencies: components["schemas"]["ModelReference"][];
+            /** Files */
+            files: components["schemas"]["ModelFile"][];
+            format: components["schemas"]["ModelFormat"];
+            identity: components["schemas"]["ModelIdentity"];
+            /**
+             * Kind
+             * @default model
+             * @constant
+             */
+            kind: "model";
+            license: components["schemas"]["ModelLicense"];
+            limits: components["schemas"]["ModelLimits"];
+            lineage: components["schemas"]["ModelLineage"];
+            metadata: components["schemas"]["ModelMetadata"];
+            /** Modalities */
+            modalities: ("text" | "image" | "audio" | "video" | "3d" | "embeddings")[];
+            parameters: components["schemas"]["ModelParameters"];
+            provenance: components["schemas"]["ModelProvenance"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            source: components["schemas"]["ModelSource"];
+            supersedes?: components["schemas"]["ModelReference"] | null;
+        };
         /** ModelDeletionInstallationImpactResponse */
         ModelDeletionInstallationImpactResponse: {
             /** Installation Id */
@@ -4838,19 +4471,172 @@ export interface components {
             /** Model Version Sha256 */
             model_version_sha256: string;
         };
-        /** ModelVersionIdentity */
-        ModelVersionIdentity: {
-            /** Content Sha256 */
-            content_sha256: string;
-            /**
-             * Kind
-             * @constant
-             */
-            kind: "model-version";
+        /** ModelFamily */
+        ModelFamily: {
             /** Publisher */
             publisher: string;
             /** Slug */
             slug: string;
+            /** Title */
+            title: string;
+        };
+        /**
+         * ModelFile
+         * @description One entry in the complete immutable model file manifest.
+         */
+        ModelFile: {
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
+            /** Roles */
+            roles: string[];
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+        };
+        /** ModelFormat */
+        ModelFormat: {
+            /**
+             * Container
+             * @enum {string}
+             */
+            container: "gguf" | "safetensors" | "onnx" | "other";
+            /** Precision */
+            precision: string;
+            /** Quantization */
+            quantization: string;
+        };
+        /**
+         * ModelIdentity
+         * @description The family, logical model, exact version, and selected variant.
+         */
+        ModelIdentity: {
+            family: components["schemas"]["ModelFamily"];
+            model: components["schemas"]["ModelRecord"];
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+            /** Variant */
+            variant: string;
+            /** Version */
+            version: string;
+        };
+        /** ModelLicense */
+        ModelLicense: {
+            /** Attribution */
+            attribution: string[];
+            /** Operator Acceptance Required */
+            operator_acceptance_required: boolean;
+            /** Spdx */
+            spdx: string;
+            territorial_restrictions?: components["schemas"]["ModelTerritorialRestrictions"] | null;
+            /** Url */
+            url: string;
+        };
+        /** ModelLimits */
+        ModelLimits: {
+            /** Context Tokens */
+            context_tokens?: number | null;
+            /** Frames */
+            frames?: number | null;
+            /** Resolution Pixels */
+            resolution_pixels?: number | null;
+            /** Sample Rate Hz */
+            sample_rate_hz?: number | null;
+        };
+        /** ModelLineage */
+        ModelLineage: {
+            /** Derivation */
+            derivation: string;
+            /** Publisher */
+            publisher: string;
+            /**
+             * Relation
+             * @enum {string}
+             */
+            relation: "official" | "derived" | "quantized";
+            source_model: components["schemas"]["ModelLineageSource"];
+        };
+        /** ModelLineageSource */
+        ModelLineageSource: {
+            /**
+             * Kind
+             * @default model
+             * @constant
+             */
+            kind: "model";
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+        };
+        /** ModelMetadata */
+        ModelMetadata: {
+            /** Description */
+            description: string;
+            /** Tags */
+            tags: string[];
+        };
+        /** ModelParameters */
+        ModelParameters: {
+            /** Active */
+            active?: number | null;
+            /** Total */
+            total?: number | null;
+        };
+        /** ModelProvenance */
+        ModelProvenance: {
+            /** Attribution */
+            attribution: string[];
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Source Revision */
+            source_revision: string;
+            /** Source Url */
+            source_url: string;
+        };
+        /** ModelRecord */
+        ModelRecord: {
+            /** Architecture */
+            architecture: string;
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+        };
+        /** ModelReference */
+        ModelReference: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /**
+             * Kind
+             * @default model
+             * @constant
+             */
+            kind: "model";
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+        };
+        /** ModelSource */
+        ModelSource: {
+            /** Repository */
+            repository: string;
+            /** Revision */
+            revision: string;
+        };
+        /** ModelTerritorialRestrictions */
+        ModelTerritorialRestrictions: {
+            /** Denied Jurisdictions */
+            denied_jurisdictions: string[];
+            /** Notice */
+            notice: string;
         };
         /** NodeConnection */
         NodeConnection: {
@@ -5453,327 +5239,30 @@ export interface components {
             /** Changes */
             changes: components["schemas"]["ProposalChangeRequest"][];
         };
-        /** PublicImportRequest */
-        PublicImportRequest: {
-            /** Expected Content Sha256 */
-            expected_content_sha256: string;
-            /** Uri */
-            uri: string;
-        };
-        /** PublicRecipeArtifactIdentity */
-        PublicRecipeArtifactIdentity: {
-            /** Artifact Id */
-            artifact_id: string;
-            /** Download Bytes */
-            download_bytes: number;
-            /** Identity Sha256 */
-            identity_sha256: string;
-            /** Installed Bytes */
-            installed_bytes: number;
-            /** Roles */
-            roles: string[];
-        };
-        /** PublicRecipeChange */
-        PublicRecipeChange: {
-            /** Details */
-            details?: string | null;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "initial" | "model" | "runtime" | "performance" | "fix" | "security" | "compatibility" | "breaking" | "metadata";
-            /** References */
-            references: string[];
-            /** Summary */
-            summary: string;
-        };
-        /** PublicRecipeDiskRequirements */
-        PublicRecipeDiskRequirements: {
-            /** Artifact Bytes */
-            artifact_bytes: number;
-            /** Cache Bytes */
-            cache_bytes: number;
-            /** Image Bytes */
-            image_bytes: number;
-            /** Rollback Bytes */
-            rollback_bytes: number;
-            /** Safety Margin Bytes */
-            safety_margin_bytes: number;
-            /** Staging Bytes */
-            staging_bytes: number;
-        };
-        /** PublicRecipeFabric */
-        PublicRecipeFabric: {
-            /**
-             * Connectivity
-             * @enum {string}
-             */
-            connectivity: "none" | "connected" | "full_mesh" | "switch";
-            /** Minimum Bandwidth Mbps */
-            minimum_bandwidth_mbps: number;
-        };
-        /** PublicRecipeListItem */
-        PublicRecipeListItem: {
-            /**
-             * Alignment
-             * @enum {string}
-             */
-            alignment: "standard" | "abliterated" | "derisked" | "other-modified" | "unspecified";
-            /** Artifact Count */
-            artifact_count: number;
-            /** Artifact Identities */
-            artifact_identities: components["schemas"]["PublicRecipeArtifactIdentity"][];
-            /** Capabilities */
-            capabilities: ("chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d")[];
-            /** Content Sha256 */
-            content_sha256: string;
-            /** Description */
-            description: string;
-            /** Execution Harness */
-            execution_harness: string;
-            /**
-             * Execution Readiness
-             * @enum {string}
-             */
-            execution_readiness: "executable" | "not-executable" | "integration-required" | "not-declared";
-            /**
-             * Execution Readiness Basis
-             * @enum {string}
-             */
-            execution_readiness_basis: "explicit-executable-metadata" | "explicit-non-executable-metadata" | "explicit-integration-required-metadata" | "missing-readiness-metadata" | "conflicting-readiness-metadata";
-            /** Execution Readiness Detail */
-            execution_readiness_detail: string;
-            /** Expected Download Bytes */
-            expected_download_bytes: number;
-            fabric: components["schemas"]["PublicRecipeFabric"];
-            local: components["schemas"]["PublicRecipeLocalState"];
-            /** Maximum Installed Bytes Per Node */
-            maximum_installed_bytes_per_node: number;
-            /** Maximum Runtime Memory Bytes Per Node */
-            maximum_runtime_memory_bytes_per_node: number;
-            /** Model Publisher */
-            model_publisher: string;
-            /** Model Slug */
-            model_slug: string;
-            /** Model Title */
-            model_title: string;
-            /** Model Version Publisher */
-            model_version_publisher: string;
-            /** Model Version Slug */
-            model_version_slug: string;
-            /** Model Version Title */
-            model_version_title: string;
-            /** Node Count */
-            node_count: number;
-            /** Precision */
-            precision?: string | null;
-            /** Publisher */
-            publisher: string;
-            /**
-             * Qualification
-             * @enum {string}
-             */
-            qualification: "candidate" | "cataloged";
-            /**
-             * Qualification Basis
-             * @enum {string}
-             */
-            qualification_basis: "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
-            /** Qualification Detail */
-            qualification_detail: string;
-            /** Quantizations */
-            quantizations: string[];
-            /** Release Released At */
-            release_released_at?: string | null;
-            /** Release Version */
-            release_version?: string | null;
-            /** Runtime Distribution */
-            runtime_distribution: string;
-            /** Slug */
-            slug: string;
-            /** Source Bundle Sha256 */
-            source_bundle_sha256: string;
-            /** Source Owner */
-            source_owner?: string | null;
-            /** Source Repository */
-            source_repository?: string | null;
-            /** Tags */
-            tags: string[];
-            /** Temporary Build Bytes Per Node */
-            temporary_build_bytes_per_node: number;
-            /** Title */
-            title: string;
-            /** Topology Mode */
-            topology_mode: string;
-            /** Topology Name */
-            topology_name: string;
-            /** Topology Roles */
-            topology_roles: components["schemas"]["PublicRecipeTopologyRole"][];
-            /** Uri */
-            uri: string;
-        };
-        /** PublicRecipeListResponse */
-        PublicRecipeListResponse: {
-            /** Commit */
-            commit: string;
-            /** Recipes */
-            recipes: components["schemas"]["PublicRecipeListItem"][];
-            /** Repository */
-            repository: string;
-        };
-        /** PublicRecipeLocalState */
-        PublicRecipeLocalState: {
-            /** Content Sha256 */
-            content_sha256?: string | null;
-            /** Recipe Id */
-            recipe_id?: string | null;
-            /** Release Version */
-            release_version?: string | null;
-            /** Revision Number */
-            revision_number?: number | null;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "not-imported" | "current" | "update-available" | "local-ahead" | "different-revision" | "conflict";
-        };
-        /** PublicRecipePreviewResponse */
-        PublicRecipePreviewResponse: {
-            /**
-             * Alignment
-             * @enum {string}
-             */
-            alignment: "standard" | "abliterated" | "derisked" | "other-modified" | "unspecified";
-            /** Artifact Count */
-            artifact_count: number;
-            /** Artifact Identities */
-            artifact_identities: components["schemas"]["PublicRecipeArtifactIdentity"][];
-            /** Capabilities */
-            capabilities: ("chat" | "reasoning" | "vision" | "image-generation" | "image-editing" | "video" | "audio" | "3d")[];
-            /** Changes Since Local */
-            changes_since_local: components["schemas"]["PublicRecipeRelease"][];
-            /** Content Sha256 */
-            content_sha256: string;
-            /** Description */
-            description: string;
-            /** Execution Harness */
-            execution_harness: string;
-            /**
-             * Execution Readiness
-             * @enum {string}
-             */
-            execution_readiness: "executable" | "not-executable" | "integration-required" | "not-declared";
-            /**
-             * Execution Readiness Basis
-             * @enum {string}
-             */
-            execution_readiness_basis: "explicit-executable-metadata" | "explicit-non-executable-metadata" | "explicit-integration-required-metadata" | "missing-readiness-metadata" | "conflicting-readiness-metadata";
-            /** Execution Readiness Detail */
-            execution_readiness_detail: string;
-            /** Expected Download Bytes */
-            expected_download_bytes: number;
-            fabric: components["schemas"]["PublicRecipeFabric"];
-            local: components["schemas"]["PublicRecipeLocalState"];
-            /** Maximum Installed Bytes Per Node */
-            maximum_installed_bytes_per_node: number;
-            /** Maximum Runtime Memory Bytes Per Node */
-            maximum_runtime_memory_bytes_per_node: number;
-            /** Model Publisher */
-            model_publisher: string;
-            /** Model Slug */
-            model_slug: string;
-            /** Model Title */
-            model_title: string;
-            /** Model Version Publisher */
-            model_version_publisher: string;
-            /** Model Version Slug */
-            model_version_slug: string;
-            /** Model Version Title */
-            model_version_title: string;
-            /** Node Count */
-            node_count: number;
-            /** Precision */
-            precision?: string | null;
-            /** Publisher */
-            publisher: string;
-            /**
-             * Qualification
-             * @enum {string}
-             */
-            qualification: "candidate" | "cataloged";
-            /**
-             * Qualification Basis
-             * @enum {string}
-             */
-            qualification_basis: "explicit-accepted-metadata" | "explicit-candidate-metadata" | "missing-accepted-metadata" | "conflicting-metadata";
-            /** Qualification Detail */
-            qualification_detail: string;
-            /** Quantizations */
-            quantizations: string[];
-            /** Release Released At */
-            release_released_at?: string | null;
-            /** Release Version */
-            release_version?: string | null;
-            /** Runtime Distribution */
-            runtime_distribution: string;
-            /** Slug */
-            slug: string;
-            /**
-             * Source
-             * @enum {string}
-             */
-            source: "global" | "recipe_library";
-            /** Source Bundle Sha256 */
-            source_bundle_sha256: string;
-            /** Source Owner */
-            source_owner?: string | null;
-            /** Source Repository */
-            source_repository?: string | null;
-            /** Tags */
-            tags: string[];
-            /** Temporary Build Bytes Per Node */
-            temporary_build_bytes_per_node: number;
-            /** Title */
-            title: string;
-            /** Topology Mode */
-            topology_mode: string;
-            /** Topology Name */
-            topology_name: string;
-            /** Topology Roles */
-            topology_roles: components["schemas"]["PublicRecipeTopologyRole"][];
-            /** Uri */
-            uri: string;
-        };
-        /** PublicRecipeRelease */
-        PublicRecipeRelease: {
-            /** Changes */
-            changes: components["schemas"]["PublicRecipeChange"][];
-            /** Content Sha256 */
-            content_sha256: string;
-            /** Released At */
-            released_at: string;
-            /**
-             * Upgrade Effect
-             * @enum {string}
-             */
-            upgrade_effect: "metadata-only" | "restart" | "reinstall" | "rebuild";
-            /** Version */
-            version: string;
-        };
-        /** PublicRecipeTopologyRole */
-        PublicRecipeTopologyRole: {
-            /** Count */
-            count: number;
-            disk: components["schemas"]["PublicRecipeDiskRequirements"];
-            /** Endpoint Owner */
-            endpoint_owner: boolean;
+        /** RecipeBenchmark */
+        RecipeBenchmark: {
+            /** Configuration */
+            configuration: {
+                [key: string]: string | number | boolean;
+            };
+            /** Framework */
+            framework: string;
             /** Name */
             name: string;
         };
-        /** PublicationExportRequest */
-        PublicationExportRequest: {
-            /** Publisher */
-            publisher: string;
+        /** RecipeBuildDefinition */
+        RecipeBuildDefinition: {
+            /** Arguments */
+            arguments: components["schemas"]["BuildArgument"][];
+            base_image: components["schemas"]["RecipeImage"];
+            context: components["schemas"]["BuildContext"];
+            /** Dockerfile */
+            dockerfile: string;
+            network: components["schemas"]["BuildNetwork"];
+            /** Patches */
+            patches: components["schemas"]["BuildPatch"][];
+            /** Target */
+            target?: string | null;
         };
         /** RecipeBuildEvidence */
         RecipeBuildEvidence: {
@@ -5800,8 +5289,50 @@ export interface components {
              */
             state: "available" | "planned" | "building" | "failed" | "missing" | "incompatible" | "unknown";
         };
-        /** RecipeDiskRequirements */
-        RecipeDiskRequirements: {
+        /** RecipeBuildExecution */
+        RecipeBuildExecution: {
+            build: components["schemas"]["RecipeBuildDefinition"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "build";
+        };
+        /**
+         * RecipeDefinition
+         * @description The sole public recipe authoring contract.
+         */
+        RecipeDefinition: {
+            /** Execution */
+            execution: components["schemas"]["RecipeImageExecution"] | components["schemas"]["RecipeBuildExecution"];
+            identity: components["schemas"]["RecipeIdentity"];
+            /** Interfaces */
+            interfaces: (components["schemas"]["RecipeOpenAIInterface"] | components["schemas"]["RecipeJobInterface"])[];
+            /**
+             * Kind
+             * @default recipe
+             * @constant
+             */
+            kind: "recipe";
+            metadata: components["schemas"]["RecipeMetadata"];
+            /** Models */
+            models: components["schemas"]["RecipeModelSelection"][];
+            provenance: components["schemas"]["RecipeProvenance"];
+            release: components["schemas"]["RecipeRelease"];
+            runtime: components["schemas"]["RecipeRuntime"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Settings */
+            settings: components["schemas"]["RecipeGenerationSettings"] | components["schemas"]["RecipeEmbeddingSettings"] | components["schemas"]["RecipeJobSettings"];
+            topology: components["schemas"]["RecipeTopology"];
+            validation: components["schemas"]["RecipeValidation"];
+        };
+        /** RecipeDiskResources */
+        RecipeDiskResources: {
             /** Artifact Bytes */
             artifact_bytes: number;
             /** Cache Bytes */
@@ -5815,6 +5346,20 @@ export interface components {
             /** Staging Bytes */
             staging_bytes: number;
         };
+        /** RecipeEmbeddingSettings */
+        RecipeEmbeddingSettings: {
+            concurrency?: components["schemas"]["RecipeIntegerSetting"] | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "embedding";
+            /** Knobs */
+            knobs?: {
+                [key: string]: components["schemas"]["RecipeSetting"];
+            };
+            max_batch_tokens?: components["schemas"]["RecipeIntegerSetting"] | null;
+        };
         /** RecipeFabric */
         RecipeFabric: {
             /**
@@ -5825,28 +5370,203 @@ export interface components {
             /** Minimum Bandwidth Mbps */
             minimum_bandwidth_mbps: number;
         };
-        /** RecipeLibraryImportRequest */
-        RecipeLibraryImportRequest: {
-            /** Document */
-            document: {
-                [key: string]: unknown;
+        /** RecipeFailurePolicy */
+        RecipeFailurePolicy: {
+            /**
+             * Rank Loss
+             * @enum {string}
+             */
+            rank_loss: "not-applicable" | "withdraw-endpoint";
+            /**
+             * Recovery
+             * @enum {string}
+             */
+            recovery: "restart-entrypoint" | "restart-worker-then-entrypoint";
+        };
+        /** RecipeGenerationSettings */
+        RecipeGenerationSettings: {
+            concurrency?: components["schemas"]["RecipeIntegerSetting"] | null;
+            context_tokens: components["schemas"]["RecipeIntegerSetting"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "generation";
+            /** Knobs */
+            knobs?: {
+                [key: string]: components["schemas"]["RecipeSetting"];
             };
-            /** Expected Content Sha256 */
-            expected_content_sha256: string;
-            /** Library Commit */
-            library_commit: string;
-            /** Source Path */
-            source_path: string;
+            max_batch_tokens?: components["schemas"]["RecipeIntegerSetting"] | null;
         };
-        /** RecipeListResponse */
-        RecipeListResponse: {
-            /** Next Cursor */
-            next_cursor?: string | null;
-            /** Recipes */
-            recipes: components["schemas"]["RecipeSummaryResponse"][];
+        /** RecipeHttpServingRequest */
+        RecipeHttpServingRequest: {
+            /** Body */
+            body?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "GET" | "POST";
+            /** Path */
+            path: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            transport: "http";
         };
-        /** RecipeMemoryRequirements */
-        RecipeMemoryRequirements: {
+        /** RecipeIdentity */
+        RecipeIdentity: {
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
+        };
+        /** RecipeImage */
+        RecipeImage: {
+            /** Digest */
+            digest: string;
+            /**
+             * Platform
+             * @constant
+             */
+            platform: "linux/arm64";
+            /** Repository */
+            repository: string;
+        };
+        /** RecipeImageExecution */
+        RecipeImageExecution: {
+            image: components["schemas"]["RecipeImage"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            mode: "image";
+        };
+        /** RecipeInputSlot */
+        RecipeInputSlot: {
+            /** Description */
+            description: string;
+            /** Extensions */
+            extensions: string[];
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /** Min Files */
+            min_files: number;
+        };
+        /** RecipeIntegerSetting */
+        RecipeIntegerSetting: {
+            /**
+             * Change Effect
+             * @enum {string}
+             */
+            change_effect: "none" | "restart" | "reprepare" | "rebuild";
+            /** Value */
+            value: number;
+        };
+        /** RecipeJobInput */
+        RecipeJobInput: {
+            /** Max Bytes */
+            max_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /**
+             * Path
+             * @constant
+             */
+            path: "/inputs";
+            /** Required */
+            required: boolean;
+            /** Slots */
+            slots?: components["schemas"]["RecipeInputSlot"][] | null;
+        };
+        /** RecipeJobInterface */
+        RecipeJobInterface: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            adapter: "artifact-job" | "audio-job" | "image-job" | "mesh-job" | "video-job";
+            input?: components["schemas"]["RecipeJobInput"] | null;
+            output: components["schemas"]["RecipeJobOutput"];
+            /**
+             * Path
+             * @constant
+             */
+            path: "/outputs";
+        };
+        /** RecipeJobOutput */
+        RecipeJobOutput: {
+            /** Max Total Bytes */
+            max_total_bytes: number;
+            /**
+             * Path
+             * @constant
+             */
+            path: "/outputs";
+            /** Slots */
+            slots: components["schemas"]["RecipeOutputSlot"][];
+        };
+        /** RecipeJobServingRequest */
+        RecipeJobServingRequest: {
+            /** Fixture */
+            fixture: string;
+            /** Input Path */
+            input_path?: "/inputs" | null;
+            /** Input Slots */
+            input_slots?: {
+                [key: string]: string;
+            };
+            /**
+             * Output Path
+             * @constant
+             */
+            output_path: "/outputs";
+            /** Output Slot */
+            output_slot: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            transport: "job";
+        };
+        /** RecipeJobSettings */
+        RecipeJobSettings: {
+            concurrency?: components["schemas"]["RecipeIntegerSetting"] | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "job";
+            /** Knobs */
+            knobs?: {
+                [key: string]: components["schemas"]["RecipeSetting"];
+            };
+        };
+        /** RecipeLifecycle */
+        RecipeLifecycle: {
+            failure?: components["schemas"]["RecipeFailurePolicy"] | null;
+            /** Post Stop */
+            post_stop: string[][];
+            /** Pre Start */
+            pre_start: string[][];
+            /** Stop Timeout Seconds */
+            stop_timeout_seconds: number;
+        };
+        /** RecipeMemoryResources */
+        RecipeMemoryResources: {
             /**
              * Kind
              * @enum {string}
@@ -5861,6 +5581,80 @@ export interface components {
             /** System Reserve Bytes */
             system_reserve_bytes: number;
         };
+        /** RecipeMetadata */
+        RecipeMetadata: {
+            /** Alignment */
+            alignment?: ("standard" | "abliterated" | "derisked" | "other-modified" | "unspecified") | null;
+            /** Description */
+            description: string;
+            /** Tags */
+            tags: string[];
+            /** Title */
+            title: string;
+        };
+        /** RecipeModelFile */
+        RecipeModelFile: {
+            /** File Id */
+            file_id: string;
+            /** Id */
+            id: string;
+            mount: components["schemas"]["RecipeMount"];
+            /** Roles */
+            roles: string[];
+        };
+        /** RecipeModelSelection */
+        RecipeModelSelection: {
+            /** Files */
+            files: components["schemas"]["RecipeModelFile"][];
+            /** Id */
+            id: string;
+            model: components["schemas"]["ModelReference"];
+        };
+        /** RecipeMount */
+        RecipeMount: {
+            /**
+             * Read Only
+             * @constant
+             */
+            read_only: true;
+            /** Target */
+            target: string;
+        };
+        /** RecipeOpenAIInterface */
+        RecipeOpenAIInterface: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            adapter: "openai";
+            /** Health Path */
+            health_path: string;
+            /** Model Aliases */
+            model_aliases: string[];
+            /** Port */
+            port: number;
+        };
+        /** RecipeOutputSlot */
+        RecipeOutputSlot: {
+            /** Description */
+            description: string;
+            /** Extensions */
+            extensions: string[];
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /** Min Files */
+            min_files: number;
+        };
         /** RecipeParallelism */
         RecipeParallelism: {
             /** Backend */
@@ -5871,6 +5665,8 @@ export interface components {
             pipeline: number;
             /** Tensor */
             tensor: number;
+            /** World Size */
+            world_size: number;
         };
         /** RecipePresence */
         RecipePresence: {
@@ -5909,163 +5705,161 @@ export interface components {
             /** Topology Name */
             topology_name: string;
         };
-        /** RecipeRevisionResponse */
-        RecipeRevisionResponse: {
-            /** Artifact Count */
-            artifact_count: number;
-            /** Content Sha256 */
-            content_sha256?: string | null;
-            /** Created At */
-            created_at: string;
-            /** Created By */
-            created_by: string;
-            /** Description */
-            description: string;
-            /** Document */
-            document: {
-                [key: string]: unknown;
-            };
-            /** Execution Harness */
-            execution_harness: string;
-            /** Expected Download Bytes */
-            expected_download_bytes: number;
-            /** Id */
-            id: string;
+        /** RecipeProvenance */
+        RecipeProvenance: {
+            /** Attribution */
+            attribution: string[];
             /**
-             * Lifecycle
+             * Source Kind
              * @enum {string}
              */
-            lifecycle: "draft" | "blocked" | "resolved" | "deprecated";
-            /** Maximum Installed Bytes Per Node */
-            maximum_installed_bytes_per_node: number;
-            /** Maximum Runtime Memory Bytes Per Node */
-            maximum_runtime_memory_bytes_per_node: number;
-            /** Node Count */
-            node_count: number;
-            /**
-             * Origin
-             * @enum {string}
-             */
-            origin: "local" | "workload_run" | "global" | "recipe_library";
-            /** Recipe Id */
-            recipe_id: string;
-            /** Revision Number */
-            revision_number: number;
-            /** Runtime Distribution */
-            runtime_distribution: string;
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            /** Slug */
-            slug: string;
-            /** Source Bundle Sha256 */
-            source_bundle_sha256: string;
-            /** Title */
-            title: string;
-            /** Topology Mode */
-            topology_mode: string;
-            /** Topology Name */
-            topology_name: string;
+            source_kind: "local" | "workload_run" | "global" | "fork";
+            /** Source Reference */
+            source_reference?: string | null;
         };
-        /** RecipeRevisionSummary */
-        RecipeRevisionSummary: {
-            /** Content Sha256 */
-            content_sha256: string | null;
+        /** RecipeRelease */
+        RecipeRelease: {
+            /** History */
+            history: components["schemas"]["RecipeReleaseHistoryEntry"][];
+            /** Released At */
+            released_at: string;
+            /** Version */
+            version: string;
+        };
+        /** RecipeReleaseChange */
+        RecipeReleaseChange: {
+            /** Details */
+            details?: string | null;
             /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Id */
-            id: string;
-            /**
-             * Lifecycle
+             * Kind
              * @enum {string}
              */
-            lifecycle: "draft" | "blocked" | "resolved" | "deprecated";
-            /** Revision Number */
-            revision_number: number;
-            /**
-             * Schema Version
-             * @default 1
-             * @constant
-             */
-            schema_version: 1;
+            kind: "initial" | "model" | "runtime" | "performance" | "fix" | "security" | "compatibility" | "breaking" | "metadata";
+            /** References */
+            references?: string[];
+            /** Summary */
+            summary: string;
         };
-        /** RecipeRole */
-        RecipeRole: {
-            /** Artifacts */
-            artifacts: string[];
-            /** Count */
-            count: number;
-            disk: components["schemas"]["RecipeDiskRequirements"];
-            /** Endpoint Owner */
-            endpoint_owner: boolean;
-            memory: components["schemas"]["RecipeMemoryRequirements"];
+        /** RecipeReleaseHistoryEntry */
+        RecipeReleaseHistoryEntry: {
+            /** Changes */
+            changes: components["schemas"]["RecipeReleaseChange"][];
+            /** Prior Recipe Content Sha256 */
+            prior_recipe_content_sha256?: string | null;
+            /** Released At */
+            released_at: string;
+            /**
+             * Upgrade Effect
+             * @enum {string}
+             */
+            upgrade_effect: "none" | "restart" | "reprepare" | "rebuild";
+            /** Version */
+            version: string;
+        };
+        /** RecipeRoleResources */
+        RecipeRoleResources: {
+            disk: components["schemas"]["RecipeDiskResources"];
+            memory: components["schemas"]["RecipeMemoryResources"];
+        };
+        /** RecipeRuntime */
+        RecipeRuntime: {
+            /** Arguments */
+            arguments: components["schemas"]["RecipeRuntimeArgument"][];
+            /** Engine */
+            engine: string;
+            /** Entrypoint */
+            entrypoint: string[];
+            /** Environment */
+            environment: components["schemas"]["RecipeRuntimeEnvironment"][];
+            lifecycle: components["schemas"]["RecipeLifecycle"];
+        };
+        /** RecipeRuntimeArgument */
+        RecipeRuntimeArgument: {
             /** Name */
             name: string;
+            /** Setting */
+            setting?: string | null;
+            /** @description A literal process value; null is reserved for the setting-bound placeholder. */
+            value?: components["schemas"]["RuntimeArgumentValue"] | null;
         };
-        /** RecipeSummaryResponse */
-        RecipeSummaryResponse: {
-            /** Artifact Count */
-            artifact_count: number;
-            /** Content Sha256 */
-            content_sha256?: string | null;
-            /** Execution Harness */
-            execution_harness: string;
-            /** Expected Download Bytes */
-            expected_download_bytes: number;
+        /** RecipeRuntimeEnvironment */
+        RecipeRuntimeEnvironment: {
+            /** Name */
+            name: string;
+            /** Secret */
+            secret?: string | null;
+            /** Value */
+            value?: string | number | boolean | null;
+        };
+        /** RecipeServingValidation */
+        RecipeServingValidation: {
+            /** Checks */
+            checks: components["schemas"]["RecipeValidationCheck"][];
             /**
-             * Lifecycle
+             * Interface
              * @enum {string}
              */
-            lifecycle: "draft" | "blocked" | "resolved" | "deprecated";
-            /** Maximum Installed Bytes Per Node */
-            maximum_installed_bytes_per_node: number;
-            /** Maximum Runtime Memory Bytes Per Node */
-            maximum_runtime_memory_bytes_per_node: number;
-            /** Node Count */
-            node_count: number;
+            interface: "openai" | "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job";
+        };
+        /** RecipeSetting */
+        RecipeSetting: {
             /**
-             * Origin
+             * Change Effect
              * @enum {string}
              */
-            origin: "local" | "workload_run" | "global" | "recipe_library";
-            /** Recipe Id */
-            recipe_id: string;
-            /** Revision Number */
-            revision_number: number;
-            /** Runtime Distribution */
-            runtime_distribution: string;
-            /** Slug */
-            slug: string;
-            /** Source Bundle Sha256 */
-            source_bundle_sha256: string;
-            /** Title */
-            title: string;
-            /** Topology Mode */
-            topology_mode: string;
-            /** Topology Name */
-            topology_name: string;
+            change_effect: "none" | "restart" | "reprepare" | "rebuild";
+            /** Value */
+            value: string | number | boolean;
         };
         /** RecipeTopology */
         RecipeTopology: {
             fabric: components["schemas"]["RecipeFabric"];
-            /** Mode */
-            mode: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "single" | "distributed" | "tensor_parallel" | "pipeline_parallel" | "data_parallel" | "hybrid" | "ray" | "mpi";
             /** Name */
             name: string;
             /** Node Count */
             node_count: number;
             parallelism: components["schemas"]["RecipeParallelism"];
             /** Roles */
-            roles: components["schemas"]["RecipeRole"][];
+            roles: components["schemas"]["RecipeTopologyRole"][];
             /** Start Order */
             start_order: string[];
             /** Stop Order */
             stop_order: string[];
+        };
+        /** RecipeTopologyRole */
+        RecipeTopologyRole: {
+            /** Count */
+            count: number;
+            /** Endpoint Owner */
+            endpoint_owner: boolean;
+            /** Name */
+            name: string;
+            resources: components["schemas"]["RecipeRoleResources"];
+        };
+        /** RecipeValidation */
+        RecipeValidation: {
+            /** Benchmarks */
+            benchmarks: components["schemas"]["RecipeBenchmark"][];
+            serving: components["schemas"]["RecipeServingValidation"];
+        };
+        /** RecipeValidationCheck */
+        RecipeValidationCheck: {
+            /** Assertions */
+            assertions: ("endpoint.healthy" | "chat.nonempty" | "chat.output-cap" | "tools.called" | "completion.nonempty" | "completion.output-cap" | "embedding.nonempty" | "inference.completed" | "artifact.output")[];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "openai.health" | "openai.chat" | "openai.vision" | "openai.tools" | "openai.completion" | "openai.embedding" | "image-job.output" | "audio-job.output" | "video-job.output" | "mesh-job.output" | "artifact-job.output";
+            /** Name */
+            name: string;
+            /** Request */
+            request: components["schemas"]["RecipeHttpServingRequest"] | components["schemas"]["RecipeJobServingRequest"];
         };
         /** RejectedNode */
         RejectedNode: {
@@ -6079,11 +5873,6 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
-        /** ResolveCatalogEntityRequest */
-        ResolveCatalogEntityRequest: {
-            /** Expected Revision */
-            expected_revision: number;
-        };
         /** ResolveImportRequest */
         ResolveImportRequest: {
             /** Expected Revision */
@@ -6092,20 +5881,6 @@ export interface components {
             overlays: {
                 [key: string]: unknown;
             };
-        };
-        /** ResolveRecipeRequest */
-        ResolveRecipeRequest: {
-            /** Expected Revision */
-            expected_revision: number;
-        };
-        /** ReviseCatalogEntityRequest */
-        ReviseCatalogEntityRequest: {
-            /** Document */
-            document: {
-                [key: string]: unknown;
-            };
-            /** Expected Revision */
-            expected_revision: number;
         };
         /**
          * RolloutPreparation
@@ -6426,7 +6201,7 @@ export interface components {
              */
             state: "planned" | "retained" | "skipped" | "blocked";
             /** Subphase */
-            subphase?: ("container-build" | "model-download" | "target-copy" | "runtime-install") | null;
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
         };
         /** RunSwitchPlan */
         RunSwitchPlan: {
@@ -6559,7 +6334,7 @@ export interface components {
              */
             state: "queued" | "running" | "succeeded" | "failed" | "unknown";
             /** Subphase */
-            subphase?: ("container-build" | "model-download" | "target-copy" | "runtime-install") | null;
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
             /** Total Bytes */
             total_bytes?: number | null;
             /** Total Bytes Known */
@@ -6617,6 +6392,9 @@ export interface components {
              */
             schema_version: 2;
         };
+        RuntimeArgumentValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
+            [key: string]: components["schemas"]["JsonValue"];
+        };
         /**
          * RuntimeImagePreparation
          * @description Exact executable OCI image kept separate from model payloads.
@@ -6665,6 +6443,8 @@ export interface components {
              * @enum {string}
              */
             nas_coverage: "complete" | "partial" | "unknown";
+            /** Oci Layout Sha256 */
+            oci_layout_sha256?: string | null;
             /**
              * Reclaimable Bytes
              * @default 0
@@ -7429,13 +7209,6 @@ export interface components {
             /** Workloads */
             workloads: components["schemas"]["TelemetryWorkload"][];
         };
-        /** TestReportRequest */
-        TestReportRequest: {
-            /** Report */
-            report: {
-                [key: string]: unknown;
-            };
-        };
         /** TopologyPlacement */
         TopologyPlacement: {
             /** Candidate Node Ids */
@@ -7562,15 +7335,6 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
-        /** UpdateRecipeDraftRequest */
-        UpdateRecipeDraftRequest: {
-            /** Document */
-            document: {
-                [key: string]: unknown;
-            };
-            /** Expected Revision */
-            expected_revision: number;
-        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -7579,347 +7343,6 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
-        };
-        /** VisualArtifact */
-        VisualArtifact: {
-            /** Download Bytes */
-            download_bytes: number;
-            /** Id */
-            id: string;
-            /** Include Paths */
-            include_paths: string[];
-            /** Installed Bytes */
-            installed_bytes: number;
-            /** Kind */
-            kind: string;
-            /** Repository */
-            repository: string;
-            /** Revision */
-            revision: string;
-            /** Roles */
-            roles: string[];
-        };
-        /** VisualBuild */
-        VisualBuild: {
-            /** Capabilities */
-            capabilities: string[];
-            context: components["schemas"]["VisualBuildContext"];
-            /** Cpu Cores */
-            cpu_cores: number;
-            /** Dockerfile */
-            dockerfile: string;
-            /** Download Bytes */
-            download_bytes: number;
-            /** Memory Bytes */
-            memory_bytes: number;
-            /** Network Hosts */
-            network_hosts: string[];
-            /** Network Mode */
-            network_mode: string;
-            options: components["schemas"]["VisualBuildOptions"];
-            /** Platform */
-            platform: string;
-            /** Processes */
-            processes: number;
-            /** Target */
-            target: string | null;
-            /** Temporary Bytes */
-            temporary_bytes: number;
-            /** Timeout Seconds */
-            timeout_seconds: number;
-        };
-        /** VisualBuildAdditionalContext */
-        VisualBuildAdditionalContext: {
-            /** Name */
-            name: string;
-            /** Path */
-            path: string;
-        };
-        /** VisualBuildContext */
-        VisualBuildContext: {
-            /** Expected Bytes */
-            expected_bytes: number;
-            /** Media Type */
-            media_type: string;
-            /** Sha256 */
-            sha256: string;
-        };
-        /** VisualBuildOptionValue */
-        VisualBuildOptionValue: {
-            /** Name */
-            name: string;
-            /** Value */
-            value: string;
-        };
-        /** VisualBuildOptions */
-        VisualBuildOptions: {
-            /** Additional Contexts */
-            additional_contexts: components["schemas"]["VisualBuildAdditionalContext"][];
-            /** Annotations */
-            annotations: components["schemas"]["VisualBuildOptionValue"][];
-            /** Environment */
-            environment: components["schemas"]["VisualBuildOptionValue"][];
-            /**
-             * Format
-             * @enum {string}
-             */
-            format: "oci" | "docker";
-            /** Identity Label */
-            identity_label: boolean;
-            /** Ignorefile */
-            ignorefile: string | null;
-            /** Jobs */
-            jobs: number;
-            /** Labels */
-            labels: components["schemas"]["VisualBuildOptionValue"][];
-            /**
-             * Layer Compression
-             * @enum {string}
-             */
-            layer_compression: "disabled" | "gzip";
-            /** Layer Labels */
-            layer_labels: components["schemas"]["VisualBuildOptionValue"][];
-            /** Layers */
-            layers: boolean;
-            /** No Hostname */
-            no_hostname: boolean;
-            /** No Hosts */
-            no_hosts: boolean;
-            /** Omit History */
-            omit_history: boolean;
-            /** Os Features */
-            os_features: string[];
-            /** Os Version */
-            os_version: string | null;
-            /** Shm Bytes */
-            shm_bytes: number;
-            /** Skip Unused Stages */
-            skip_unused_stages: boolean;
-            /**
-             * Squash
-             * @enum {string}
-             */
-            squash: "none" | "new" | "all";
-            /** Timestamp */
-            timestamp?: number | null;
-            /** Unset Environment */
-            unset_environment: string[];
-            /** Unset Labels */
-            unset_labels: string[];
-        };
-        /** VisualCatalogIdentity */
-        VisualCatalogIdentity: {
-            /** Content Sha256 */
-            content_sha256: string;
-            /**
-             * Kind
-             * @enum {string}
-             */
-            kind: "model-version" | "execution-harness" | "runtime-distribution" | "patch-bundle";
-            /** Publisher */
-            publisher: string;
-            /** Slug */
-            slug: string;
-        };
-        /** VisualExecution */
-        VisualExecution: {
-            harness: components["schemas"]["VisualCatalogIdentity"];
-            patch_bundle: components["schemas"]["VisualCatalogIdentity"] | null;
-        };
-        /** VisualIdentity */
-        VisualIdentity: {
-            /** Publisher */
-            publisher: string;
-            /** Slug */
-            slug: string;
-        };
-        /** VisualInputSlot */
-        VisualInputSlot: {
-            /** Description */
-            description: string;
-            /** Extensions */
-            extensions: string[];
-            /** Id */
-            id: string;
-            /** Label */
-            label: string;
-            /** Max File Bytes */
-            max_file_bytes: number;
-            /** Max Files */
-            max_files: number;
-            /** Max Total Bytes */
-            max_total_bytes: number;
-            /** Media Types */
-            media_types: string[];
-            /** Min Files */
-            min_files: number;
-        };
-        /** VisualInterface */
-        VisualInterface: {
-            /** Adapter */
-            adapter: string;
-            /** Health Path */
-            health_path?: string | null;
-            input?: components["schemas"]["VisualInterfaceInput"] | null;
-            /** Model Aliases */
-            model_aliases?: string[];
-            output?: components["schemas"]["VisualInterfaceOutput"] | null;
-            /** Path */
-            path?: string | null;
-            /** Port */
-            port?: number | null;
-            /** Timeout Seconds */
-            timeout_seconds?: number | null;
-        };
-        /** VisualInterfaceInput */
-        VisualInterfaceInput: {
-            /** Max Bytes */
-            max_bytes: number;
-            /** Max Files */
-            max_files: number;
-            /** Media Types */
-            media_types: string[];
-            /** Min Files */
-            min_files: number;
-            /** Path */
-            path: string;
-            /** Required */
-            required: boolean;
-            /** Slots */
-            slots?: components["schemas"]["VisualInputSlot"][];
-        };
-        /** VisualInterfaceOutput */
-        VisualInterfaceOutput: {
-            /** Allowed Media Types */
-            allowed_media_types: string[];
-            /** Max Total Bytes */
-            max_total_bytes?: number | null;
-            /** Path */
-            path: string;
-            /** Slots */
-            slots?: components["schemas"]["VisualOutputSlot"][];
-        };
-        /** VisualMetadata */
-        VisualMetadata: {
-            /** Description */
-            description: string;
-            /** Tags */
-            tags: string[];
-            /** Title */
-            title: string;
-        };
-        /** VisualModelLicense */
-        VisualModelLicense: {
-            territorial_restrictions?: components["schemas"]["VisualTerritorialRestrictions"] | null;
-        };
-        /** VisualOutputSlot */
-        VisualOutputSlot: {
-            /** Description */
-            description: string;
-            /** Extensions */
-            extensions: string[];
-            /** Id */
-            id: string;
-            /** Label */
-            label: string;
-            /** Max File Bytes */
-            max_file_bytes: number;
-            /** Max Files */
-            max_files: number;
-            /** Max Total Bytes */
-            max_total_bytes: number;
-            /** Media Types */
-            media_types: string[];
-            /** Min Files */
-            min_files: number;
-        };
-        /** VisualProvenance */
-        VisualProvenance: {
-            /** Attribution */
-            attribution: string[];
-            /**
-             * Source Kind
-             * @enum {string}
-             */
-            source_kind: "local" | "workload_run" | "global" | "fork";
-            /** Source Reference */
-            source_reference: string | null;
-        };
-        /** VisualRecipeDocument */
-        VisualRecipeDocument: {
-            /** Artifacts */
-            artifacts: components["schemas"]["VisualArtifact"][];
-            build: components["schemas"]["VisualBuild"];
-            execution: components["schemas"]["VisualExecution"];
-            identity: components["schemas"]["VisualIdentity"];
-            /** Interfaces */
-            interfaces: components["schemas"]["VisualInterface"][];
-            metadata: components["schemas"]["VisualMetadata"];
-            model: components["schemas"]["VisualCatalogIdentity"];
-            model_license: components["schemas"]["VisualModelLicense"] | null;
-            /** Parameters */
-            parameters: components["schemas"]["VisualRecipeParameter"][];
-            provenance: components["schemas"]["VisualProvenance"];
-            runtime: components["schemas"]["VisualRuntime"];
-            /**
-             * Schema Version
-             * @constant
-             */
-            schema_version: 1;
-            validation: components["schemas"]["VisualValidation"];
-        };
-        /** VisualRecipeParameter */
-        VisualRecipeParameter: {
-            /** Allowed Values */
-            allowed_values?: (string | number | boolean | null)[];
-            /**
-             * Change Effect
-             * @enum {string}
-             */
-            change_effect: "rebuild" | "reinstall" | "restart";
-            /** Default */
-            default: string | number | boolean | null;
-            /** Description */
-            description: string;
-            /** Maximum */
-            maximum?: number | null;
-            /** Minimum */
-            minimum?: number | null;
-            /** Name */
-            name: string;
-            /** Pattern */
-            pattern?: string | null;
-            /**
-             * Type
-             * @enum {string}
-             */
-            type: "string" | "integer" | "boolean" | "enum";
-        };
-        /** VisualRuntime */
-        VisualRuntime: {
-            distribution: components["schemas"]["VisualCatalogIdentity"];
-            /** Entrypoint */
-            entrypoint: string[];
-            /** Lifecycle Post Stop Count */
-            lifecycle_post_stop_count: number;
-            /** Lifecycle Pre Start Count */
-            lifecycle_pre_start_count: number;
-            /** Stop Timeout Seconds */
-            stop_timeout_seconds: number;
-        };
-        /** VisualTerritorialRestrictions */
-        VisualTerritorialRestrictions: {
-            /** Denied Jurisdictions */
-            denied_jurisdictions: string[];
-            /** Notice */
-            notice: string;
-        };
-        /** VisualValidation */
-        VisualValidation: {
-            /** Benchmark Count */
-            benchmark_count: number;
-            /** Checks */
-            checks: string[];
         };
         /** ProjectionReason */
         vonk_control__fleet_projection__ProjectionReason: {
@@ -8589,465 +8012,6 @@ export interface operations {
             };
         };
     };
-    listCatalogEntities: {
-        parameters: {
-            query?: {
-                kind?: string | null;
-                publisher?: string | null;
-                limit?: number;
-                cursor?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogEntityListResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    createCatalogEntityDraft: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateCatalogEntityRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogEntityRevisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    getCatalogEntity: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                entity_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogEntityRevisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reviseCatalogEntity: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                entity_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReviseCatalogEntityRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogEntityRevisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    resolveCatalogEntity: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                entity_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResolveCatalogEntityRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogEntityRevisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    importGlobalRecipe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GlobalImportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeRevisionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    previewGlobalRecipeImport: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GlobalImportPreviewRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["GlobalRevisionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    importPublicRecipe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PublicImportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeRevisionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    previewPublicRecipeImport: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["GlobalImportPreviewRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PublicRecipePreviewResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    importRecipeLibrary: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RecipeLibraryImportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeRevisionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     applyWorkloadRunImport: {
         parameters: {
             query?: never;
@@ -9239,459 +8203,6 @@ export interface operations {
             };
         };
     };
-    listPublicRecipes: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PublicRecipeListResponse"];
-                };
-            };
-        };
-    };
-    listLocalRecipes: {
-        parameters: {
-            query?: {
-                cursor?: string | null;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeListResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    createLocalRecipe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateRecipeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeRevisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    getLocalRecipe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipe_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeRevisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    updateLocalRecipeDraft: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipe_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateRecipeDraftRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeRevisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    forkLocalRecipe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipe_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ForkRecipeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeRevisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    exportRecipeForPublication: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipe_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PublicationExportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    attachRecipePublicationReport: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipe_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TestReportRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    resolveLocalRecipe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                recipe_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ResolveRecipeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RecipeRevisionResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Conflict */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
     resolveWorkloadRunImport: {
         parameters: {
             query?: never;
@@ -9727,7 +8238,7 @@ export interface operations {
             };
         };
     };
-    downloadLocalRecipeSourceBundle: {
+    downloadRecipeSourceBundle: {
         parameters: {
             query?: never;
             header?: never;
@@ -9777,7 +8288,7 @@ export interface operations {
             };
         };
     };
-    uploadLocalRecipeSourceBundle: {
+    uploadRecipeSourceBundle: {
         parameters: {
             query?: never;
             header?: never;
@@ -11647,6 +10158,56 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    listLibraryRecipes: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryRecipeList"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

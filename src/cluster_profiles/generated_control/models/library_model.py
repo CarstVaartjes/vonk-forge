@@ -8,14 +8,13 @@ from ..types import UNSET, Unset
 
 from ..types import UNSET, Unset
 from typing import cast
-from typing import cast, Union
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.library_model_version_facts import LibraryModelVersionFacts
+  from ..models.library_model_identity import LibraryModelIdentity
   from ..models.library_capability_inventory import LibraryCapabilityInventory
   from ..models.library_recipe_summary import LibraryRecipeSummary
-  from ..models.model_version_identity import ModelVersionIdentity
+  from ..models.model_definition import ModelDefinition
 
 
 
@@ -29,18 +28,18 @@ T = TypeVar("T", bound="LibraryModel")
 class LibraryModel:
     """
         Attributes:
-            model (ModelVersionIdentity):
+            model (LibraryModelIdentity): Content-addressed identity for a canonical Model document.
+            model_document (ModelDefinition): One exact model version and variant, including its complete manifest.
             recipes (list['LibraryRecipeSummary']):
             model_capabilities (Union[Unset, LibraryCapabilityInventory]): Compare-friendly model or recipe capability
                 assertions with evidence state.
-            model_version (Union['LibraryModelVersionFacts', None, Unset]):
             page_local (Union[Unset, bool]):  Default: True.
      """
 
-    model: 'ModelVersionIdentity'
+    model: 'LibraryModelIdentity'
+    model_document: 'ModelDefinition'
     recipes: list['LibraryRecipeSummary']
     model_capabilities: Union[Unset, 'LibraryCapabilityInventory'] = UNSET
-    model_version: Union['LibraryModelVersionFacts', None, Unset] = UNSET
     page_local: Union[Unset, bool] = True
 
 
@@ -48,11 +47,13 @@ class LibraryModel:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.library_model_version_facts import LibraryModelVersionFacts
+        from ..models.library_model_identity import LibraryModelIdentity
         from ..models.library_capability_inventory import LibraryCapabilityInventory
         from ..models.library_recipe_summary import LibraryRecipeSummary
-        from ..models.model_version_identity import ModelVersionIdentity
+        from ..models.model_definition import ModelDefinition
         model = self.model.to_dict()
+
+        model_document = self.model_document.to_dict()
 
         recipes = []
         for recipes_item_data in self.recipes:
@@ -65,14 +66,6 @@ class LibraryModel:
         if not isinstance(self.model_capabilities, Unset):
             model_capabilities = self.model_capabilities.to_dict()
 
-        model_version: Union[None, Unset, dict[str, Any]]
-        if isinstance(self.model_version, Unset):
-            model_version = UNSET
-        elif isinstance(self.model_version, LibraryModelVersionFacts):
-            model_version = self.model_version.to_dict()
-        else:
-            model_version = self.model_version
-
         page_local = self.page_local
 
 
@@ -80,12 +73,11 @@ class LibraryModel:
 
         field_dict.update({
             "model": model,
+            "model_document": model_document,
             "recipes": recipes,
         })
         if model_capabilities is not UNSET:
             field_dict["model_capabilities"] = model_capabilities
-        if model_version is not UNSET:
-            field_dict["model_version"] = model_version
         if page_local is not UNSET:
             field_dict["page_local"] = page_local
 
@@ -95,12 +87,17 @@ class LibraryModel:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.library_model_version_facts import LibraryModelVersionFacts
+        from ..models.library_model_identity import LibraryModelIdentity
         from ..models.library_capability_inventory import LibraryCapabilityInventory
         from ..models.library_recipe_summary import LibraryRecipeSummary
-        from ..models.model_version_identity import ModelVersionIdentity
+        from ..models.model_definition import ModelDefinition
         d = dict(src_dict)
-        model = ModelVersionIdentity.from_dict(d.pop("model"))
+        model = LibraryModelIdentity.from_dict(d.pop("model"))
+
+
+
+
+        model_document = ModelDefinition.from_dict(d.pop("model_document"))
 
 
 
@@ -125,33 +122,13 @@ class LibraryModel:
 
 
 
-        def _parse_model_version(data: object) -> Union['LibraryModelVersionFacts', None, Unset]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                model_version_type_0 = LibraryModelVersionFacts.from_dict(data)
-
-
-
-                return model_version_type_0
-            except: # noqa: E722
-                pass
-            return cast(Union['LibraryModelVersionFacts', None, Unset], data)
-
-        model_version = _parse_model_version(d.pop("model_version", UNSET))
-
-
         page_local = d.pop("page_local", UNSET)
 
         library_model = cls(
             model=model,
+            model_document=model_document,
             recipes=recipes,
             model_capabilities=model_capabilities,
-            model_version=model_version,
             page_local=page_local,
         )
 
