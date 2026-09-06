@@ -424,7 +424,22 @@ def _control_error(
         message = "control API unavailable"
     else:
         message = _sanitize_text(error)
-    result: dict[str, object] = {"error": message, "error_type": "control_api"}
+    result: dict[str, object] = {
+        "error": message,
+        "error_type": "control_api",
+        "code": getattr(error, "code", None) or "control.api_error",
+        "detail": getattr(error, "detail", message),
+        "recovery_actions": list(getattr(error, "recovery", ()) or ()),
+        "retryable": getattr(error, "retryable", False) is True,
+        "retry_time": getattr(error, "retry_time", None),
+        "retry_after_seconds": getattr(error, "retry_after_seconds", None),
+        "preserved": getattr(error, "preserved", None),
+        "required_bytes": getattr(error, "required_bytes", None),
+        "free_bytes": getattr(error, "free_bytes", None),
+        "shortfall_bytes": getattr(error, "shortfall_bytes", None),
+        "log_excerpt": getattr(error, "log_excerpt", None),
+    }
+    result = {key: value for key, value in result.items() if value is not None}
     request_key = getattr(args, "request_key", None) if args is not None else None
     operation_id = getattr(args, "operation_id", None) if args is not None else None
     if isinstance(request_key, str) and request_key:

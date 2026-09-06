@@ -11,6 +11,7 @@ import stat
 import sys
 import time
 import urllib.parse
+import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -447,6 +448,17 @@ def add_controller_commands(
     _request_key(operation_retry)
     _apply(operation_retry)
     _add_json(operation_retry)
+    operation_check_access = operation_commands.add_parser(
+        "check-access",
+        aliases=["check-access-and-resume"],
+        help="Recheck Model access and resume its exact cache operation",
+    )
+    operation_check_access.add_argument("operation_id")
+    operation_check_access.add_argument("--artifact-set-sha256", required=True)
+    operation_check_access.add_argument("--plan-digest", required=True)
+    _request_key(operation_check_access)
+    _apply(operation_check_access)
+    _add_json(operation_check_access)
     run = library_commands.add_parser("run", help="Show a recipe run")
     run.add_argument("run_id")
     _add_json(run)
@@ -635,6 +647,7 @@ def add_controller_commands(
     model_download.add_argument("--recipe-revision-id")
     model_download.add_argument("--recipe-revision-sha256")
     model_download.add_argument("--request-key")
+    model_download.add_argument("--force", action="store_true", help="Fetch fresh bytes for the exact selected Model")
     model_download.add_argument("--dry-run", action="store_true")
     model_download.add_argument("--detach", action="store_true")
     model_download.add_argument("--timeout-seconds", type=int, default=30)
@@ -650,6 +663,26 @@ def add_controller_commands(
     recipe_show = recipe_commands.add_parser("show")
     recipe_show.add_argument("recipe_id")
     _add_json(recipe_show)
+    availability = recipe_commands.add_parser(
+        "available", aliases=["availability"], help="Make one exact Recipe image available"
+    )
+    availability_commands = _subcommands(availability, "recipe_availability_command")
+    availability_start = availability_commands.add_parser("start")
+    availability_start.add_argument("recipe_revision_id")
+    availability_start.add_argument("--force", action="store_true", help="Re-download a published image or rebuild the exact source Recipe")
+    availability_start.add_argument("--request-key")
+    availability_start.add_argument("--detach", action="store_true")
+    availability_start.add_argument("--timeout-seconds", type=int, default=30)
+    availability_start.add_argument("--interval-seconds", type=float, default=1.0)
+    _add_json(availability_start)
+    availability_status = availability_commands.add_parser("status")
+    availability_status.add_argument("operation_id")
+    _add_json(availability_status)
+    availability_retry = availability_commands.add_parser("retry")
+    availability_retry.add_argument("operation_id")
+    availability_retry.add_argument("--request-key")
+    _apply(availability_retry)
+    _add_json(availability_retry)
 
     model_run = model_commands.add_parser("run", help="Preview or start a model run")
     _structured_input(model_run, required=False, prefix="run")
@@ -1973,6 +2006,16 @@ def _run_library(
             "compared_count": len(recipe_ids),
         }
     if command == "operation":
+        if args.operation_command == "check-access":
+            if _LOWER_SHA256.fullmatch(args.plan_digest) is None:
+                raise ValueError("plan digest must be a lowercase SHA-256 digest")
+            payload = {
+                "request_key": _request_key_value(args, request_id_factory),
+                "artifact_set_sha256": _artifact_set_sha256(args.artifact_set_sha256),
+                "plan_digest": args.plan_digest,
+            }
+            path = f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}/check-access-and-resume"
+            return _plan_or_request(args, client, "POST", path, payload)
         family = getattr(args, "family", "recipe")
         if family == "model-cache":
             path = f"/api/v1/model-cache/operations/{_quoted(args.operation_id)}"
@@ -2417,7 +2460,60 @@ def _run_models(
     }
 
 
-def _run_recipes(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
+def _run_recipe_availability(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
+    command = args.recipe_availability_command
+    base = "/api/v1/library/recipe-image-availability"
+    if command == "status":
+        return client.request("GET", f"{base}/{_quoted(args.operation_id)}")
+    if command == "retry":
+        if not args.apply:
+            return {
+                "mode": "plan",
+                "apply": False,
+                "method": "POST",
+                "path": f"{base}/{_quoted(args.operation_id)}/retry",
+                "body": {"request_key": args.request_key or request_id_factory()},
+            }
+        request_key = args.request_key or request_id_factory()
+        submitted = client.request(
+            "POST",
+            f"{base}/{_quoted(args.operation_id)}/retry",
+            {"request_key": request_key},
+        )
+        return _follow_submitted_operation(
+            args,
+            client,
+            submitted,
+            status_path=f"{base}/{{operation_id}}",
+        )
+    if command != "start":
+        raise ValueError(f"unsupported recipe availability command: {command}")
+    request_key = args.request_key or request_id_factory()
+    payload = {
+        "request_key": request_key,
+        "recipe_revision_id": args.recipe_revision_id,
+        "force": bool(args.force),
+    }
+    submitted = client.request("POST", base, payload)
+    if args.detach:
+        return submitted
+    return _follow_submitted_operation(
+        args,
+        client,
+        submitted,
+        status_path=f"{base}/{{operation_id}}",
+    )
+
+
+def _run_recipes(
+    args: argparse.Namespace,
+    client: ControllerClient,
+    request_id_factory: Callable[[], str],
+) -> dict[str, object]:
     """Read canonical Recipes independently from the Model projection."""
     if args.recipes_command == "list":
         result = _load_recipe_list(client, args)
@@ -2437,6 +2533,8 @@ def _run_recipes(args: argparse.Namespace, client: ControllerClient) -> dict[str
         return client.request(
             "GET", f"/api/v1/library/recipes/{_quoted(args.recipe_id)}"
         )
+    if args.recipes_command in {"available", "availability"}:
+        return _run_recipe_availability(args, client, request_id_factory)
     raise ValueError("unsupported recipe command")
 
 
@@ -2554,8 +2652,10 @@ def _follow_submitted_operation(
     args: argparse.Namespace,
     client: ControllerClient,
     submission: dict[str, object],
+    *,
+    status_path: str = "/api/v1/operations/{operation_id}",
 ) -> dict[str, object]:
-    operation_id = submission.get("operation_id")
+    operation_id = submission.get("operation_id", submission.get("id"))
     if not isinstance(operation_id, str) or not operation_id or args.detach:
         return submission
     args.operation_id = operation_id
@@ -2565,7 +2665,10 @@ def _follow_submitted_operation(
     last_progress: str | None = None
     human_output = not (args.global_json or getattr(args, "json", False))
     while True:
-        observed = client.request("GET", f"/api/v1/operations/{_quoted(operation_id)}")
+        observed = client.request(
+            "GET",
+            status_path.format(operation_id=_quoted(operation_id)),
+        )
         if human_output:
             progress = _operation_progress_line(observed)
             if progress is not None and progress != last_progress:
@@ -2630,11 +2733,37 @@ def _run_cache_download_flow(
     preview = client.request(
         "POST", "/api/v1/model-cache/download-preview", dict(payload)
     )
-    if args.dry_run:
+    if args.dry_run and not getattr(args, "force", False):
         return preview
     plan_digest = preview.get("plan_digest")
     if not isinstance(plan_digest, str) or not plan_digest:
         raise ValueError("automatic cache download preview did not return plan_digest")
+    if getattr(args, "force", False):
+        artifact_set_sha256 = preview.get("artifact_set_sha256")
+        if not isinstance(artifact_set_sha256, str):
+            raise ValueError("forced cache download preview did not return artifact_set_sha256")
+        repair_preview = client.request(
+            "POST",
+            "/api/v1/model-cache/repair-preview",
+            {"artifact_set_sha256": _artifact_set_sha256(artifact_set_sha256)},
+        )
+        if args.dry_run:
+            return {"download_preview": preview, "repair_preview": repair_preview}
+        repair_digest = repair_preview.get("plan_digest")
+        if not isinstance(repair_digest, str) or not repair_digest:
+            raise ValueError("forced cache repair preview did not return plan_digest")
+        request_key = _explicit_request_key(args.request_key or request_id_factory())
+        args.request_key = request_key
+        result = _follow_submitted_operation(
+            args,
+            client,
+            client.request(
+                "POST",
+                "/api/v1/model-cache/repair",
+                {"artifact_set_sha256": artifact_set_sha256, "plan_digest": repair_digest, "request_key": request_key},
+            ),
+        )
+        return {"download_preview": preview, "plan": repair_preview, "result": result, "plan_digest": repair_digest, "request_key": request_key, "force": True}
     request_key = _explicit_request_key(args.request_key or request_id_factory())
     args.request_key = request_key
     apply_payload = dict(payload)
@@ -2897,7 +3026,7 @@ def run_controller(
             return _run_model_run(args, client, request_id_factory)
         return _run_models(args, client, request_id_factory)
     if args.command == "recipes":
-        return _run_recipes(args, client)
+        return _run_recipes(args, client, request_id_factory)
     if args.command == "cache":
         return _run_cache(args, client, request_id_factory)
     if args.command == "profiles":

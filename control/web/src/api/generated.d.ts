@@ -824,6 +824,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/recipe-image-availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Operations */
+        get: operations["listRecipeImageAvailability"];
+        put?: never;
+        /** Start */
+        post: operations["startRecipeImageAvailability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/recipe-image-availability/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get */
+        get: operations["getRecipeImageAvailability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/recipe-image-availability/{operation_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry */
+        post: operations["retryRecipeImageAvailability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/recipes": {
         parameters: {
             query?: never;
@@ -988,6 +1040,23 @@ export interface paths {
         get: operations["getModelCacheOperation"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Access And Resume */
+        post: operations["checkModelCacheAccessAndResume"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1906,6 +1975,40 @@ export interface components {
             /** Subject */
             subject: string;
         };
+        /**
+         * AvailabilityOperationFailure
+         * @description Shared failure wire contract for model and image availability.
+         */
+        AvailabilityOperationFailure: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Free Bytes */
+            free_bytes?: number | null;
+            /** Log Excerpt */
+            log_excerpt?: string | null;
+            /** Recovery Actions */
+            recovery_actions?: components["schemas"]["AvailabilityRecoveryAction"][];
+            /** Required Bytes */
+            required_bytes?: number | null;
+            /** Retry After Seconds */
+            retry_after_seconds?: number | null;
+            /** Retry Time */
+            retry_time?: string | null;
+            /**
+             * Retryable
+             * @default false
+             */
+            retryable: boolean;
+            /** Shortfall Bytes */
+            shortfall_bytes?: number | null;
+        };
+        /**
+         * AvailabilityRecoveryAction
+         * @enum {string}
+         */
+        AvailabilityRecoveryAction: "retry" | "resume" | "download_again" | "force_rebuild" | "open_model_access" | "configure_hf_token" | "check_access_and_resume" | "free_space" | "inspect";
         /** BoundedErrorResponse */
         BoundedErrorResponse: {
             /** Detail */
@@ -3996,6 +4099,21 @@ export interface components {
             /** Targets */
             targets: components["schemas"]["TargetAssetState"][];
         };
+        /** ModelCacheAccessResumeRequest */
+        ModelCacheAccessResumeRequest: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /** Request Key */
+            request_key: string;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
         /** ModelCacheDownloadPreviewRequest */
         ModelCacheDownloadPreviewRequest: {
             /** Artifact Set Sha256 */
@@ -4171,14 +4289,20 @@ export interface components {
         };
         /** ModelCacheOperationProgress */
         ModelCacheOperationProgress: {
+            /** Bytes Per Second */
+            bytes_per_second?: number | null;
             /** Completed Artifacts */
             completed_artifacts: number;
             /** Current Artifact Key */
             current_artifact_key?: string | null;
             /** Downloaded Bytes */
             downloaded_bytes: number;
+            /** Eta Seconds */
+            eta_seconds?: number | null;
             /** Expected Bytes */
             expected_bytes?: number | null;
+            /** Members */
+            members?: components["schemas"]["OperationMemberProgress"][];
             /**
              * Phase
              * @enum {string}
@@ -4192,6 +4316,11 @@ export interface components {
             schema_version: 2;
             /** Total Artifacts */
             total_artifacts: number;
+            /**
+             * Total Bytes Known
+             * @default true
+             */
+            total_bytes_known: boolean;
         };
         /** ModelCacheOperationResponse */
         ModelCacheOperationResponse: {
@@ -4203,6 +4332,7 @@ export interface components {
             completed_at: string | null;
             /** Created At */
             created_at: string;
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
             /** Id */
             id: string;
             /**
@@ -4210,8 +4340,6 @@ export interface components {
              * @enum {string}
              */
             kind: "download" | "repair" | "evict";
-            /** Last Error */
-            last_error?: string | null;
             /** Plan Digest */
             plan_digest: string | null;
             progress: components["schemas"]["ModelCacheOperationProgress"];
@@ -4331,8 +4459,25 @@ export interface components {
             latest_model_version_sha256: string | null;
             /** Latest Recipe Revision Sha256 */
             latest_recipe_revision_sha256: string | null;
+            /**
+             * Model Update Ambiguous
+             * @default false
+             */
+            model_update_ambiguous: boolean;
             /** Model Update Available */
             model_update_available: boolean;
+            /** Model Update Candidates */
+            model_update_candidates?: {
+                [key: string]: unknown;
+            }[];
+            /** Model Update From */
+            model_update_from?: {
+                [key: string]: unknown;
+            } | null;
+            /** Model Update To */
+            model_update_to?: {
+                [key: string]: unknown;
+            } | null;
             /** Model Version Sha256 */
             model_version_sha256: string | null;
             /** Recipe Revision Sha256 */
@@ -4784,6 +4929,20 @@ export interface components {
              */
             stale: boolean;
         };
+        /**
+         * OperationCheckpoint
+         * @description A restart-safe cursor identifying the last completed durable unit.
+         */
+        OperationCheckpoint: {
+            /** Cursor */
+            cursor?: string | null;
+            /** Digest */
+            digest?: string | null;
+            /** Key */
+            key: string;
+            /** Sequence */
+            sequence: number;
+        };
         /** OperationDetailResponse */
         OperationDetailResponse: {
             /** Attempt */
@@ -4883,6 +5042,33 @@ export interface components {
             state: string;
             /** Total Bytes */
             total_bytes?: number | null;
+        };
+        /**
+         * OperationProgress
+         * @description Canonical progress payload persisted on the current operation attempt.
+         */
+        OperationProgress: {
+            /** Bytes Per Second */
+            bytes_per_second?: number | null;
+            checkpoint?: components["schemas"]["OperationCheckpoint"] | null;
+            /**
+             * Completed Bytes
+             * @default 0
+             */
+            completed_bytes: number;
+            /** Eta Seconds */
+            eta_seconds?: number | null;
+            /** Members */
+            members?: components["schemas"]["OperationMemberProgress"][];
+            /** Phase */
+            phase: string;
+            /** Total Bytes */
+            total_bytes?: number | null;
+            /**
+             * Total Bytes Known
+             * @default false
+             */
+            total_bytes_known: boolean;
         };
         /** OperationRecovery */
         OperationRecovery: {
@@ -5463,6 +5649,181 @@ export interface components {
             platform: "linux/arm64";
             /** Repository */
             repository: string;
+        };
+        /** RecipeImageAvailabilityAction */
+        RecipeImageAvailabilityAction: {
+            key: components["schemas"]["AvailabilityRecoveryAction"];
+        };
+        /** RecipeImageAvailabilityArtifact */
+        RecipeImageAvailabilityArtifact: {
+            /** Download Bytes */
+            download_bytes: number;
+            /** Id */
+            id: string;
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /** Model Version Sha256 */
+            model_version_sha256?: string | null;
+            /** Path */
+            path: string;
+            /** Repository */
+            repository?: string | null;
+            /** Revision */
+            revision?: string | null;
+            /** Roles */
+            roles: string[];
+            /** Sha256 */
+            sha256: string;
+            /** Source */
+            source: string;
+        };
+        /** RecipeImageAvailabilityChild */
+        RecipeImageAvailabilityChild: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256?: string | null;
+            /** Artifacts */
+            artifacts?: components["schemas"]["RecipeImageAvailabilityArtifact"][];
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "model-cache" | "runtime-image";
+            /** Model Versions */
+            model_versions?: string[];
+            /** Plan Digest */
+            plan_digest?: string | null;
+            progress: components["schemas"]["OperationProgress"];
+            /** Request Key */
+            request_key?: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "partial" | "succeeded" | "failed";
+        };
+        /** RecipeImageAvailabilityErrorResponse */
+        RecipeImageAvailabilityErrorResponse: {
+            failure: components["schemas"]["AvailabilityOperationFailure"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /** RecipeImageAvailabilityListResponse */
+        RecipeImageAvailabilityListResponse: {
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Operations */
+            operations: components["schemas"]["RecipeImageAvailabilityResponse"][];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Total */
+            total: number;
+        };
+        /** RecipeImageAvailabilityResponse */
+        RecipeImageAvailabilityResponse: {
+            /** Actions */
+            actions?: components["schemas"]["RecipeImageAvailabilityAction"][];
+            /** Attempt */
+            attempt: number;
+            /** Children */
+            children?: components["schemas"]["RecipeImageAvailabilityChild"][];
+            /** Created At */
+            created_at: string;
+            failure?: components["schemas"]["AvailabilityOperationFailure"] | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "recipe.image.availability.v2";
+            progress: components["schemas"]["OperationProgress"];
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Request Id */
+            request_id: string;
+            result?: components["schemas"]["RecipeImageAvailabilityResult"] | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "partial" | "succeeded" | "failed";
+            /** Updated At */
+            updated_at: string;
+        };
+        /** RecipeImageAvailabilityResult */
+        RecipeImageAvailabilityResult: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256?: string | null;
+            /** Build Id */
+            build_id?: string | null;
+            /** Build Input Sha256 */
+            build_input_sha256?: string | null;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Image Config Id */
+            local_image_config_id?: string | null;
+            /** Model Child Id */
+            model_child_id?: string | null;
+            /** Model Digest */
+            model_digest?: string | null;
+            /** Model Versions */
+            model_versions?: string[];
+            /** Oci Archive Sha256 */
+            oci_archive_sha256: string;
+            /** Platform Manifest Digest */
+            platform_manifest_digest: string;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /** Registry Manifest Digest */
+            registry_manifest_digest?: string | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Source */
+            source: string;
+        };
+        /** RecipeImageAvailabilityRetry */
+        RecipeImageAvailabilityRetry: {
+            /** Request Key */
+            request_key: string;
+        };
+        /** RecipeImageAvailabilityStart */
+        RecipeImageAvailabilityStart: {
+            /**
+             * Force
+             * @default false
+             */
+            force: boolean;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Request Key */
+            request_key: string;
         };
         /** RecipeImageExecution */
         RecipeImageExecution: {
@@ -10141,6 +10502,166 @@ export interface operations {
             };
         };
     };
+    listRecipeImageAvailability: {
+        parameters: {
+            query?: {
+                recipe_revision_id?: string | null;
+                state?: ("queued" | "running" | "partial" | "succeeded" | "failed") | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeImageAvailabilityListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    startRecipeImageAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeImageAvailabilityStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeImageAvailabilityErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    getRecipeImageAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeImageAvailabilityErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retryRecipeImageAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeImageAvailabilityRetry"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeImageAvailabilityResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeImageAvailabilityErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     listLibraryRecipes: {
         parameters: {
             query?: {
@@ -10741,6 +11262,86 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    checkModelCacheAccessAndResume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelCacheAccessResumeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCacheOperationResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

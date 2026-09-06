@@ -279,6 +279,11 @@ it("binds the one-click run switch, NAS cache, and rich telemetry routes", async
   await api.modelCacheUpdates();
   await api.modelCacheOperations("operations-cursor");
   await api.modelCacheOperation("cache-operation");
+  await api.checkModelCacheAccessAndResume("cache-operation", {schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "access-plan", request_key: requestKey});
+  await api.recipeAvailabilityStart({recipe_revision_id: "recipe-revision-1", request_key: requestKey, force: false});
+  await api.recipeAvailabilityList("recipe-revision-1", "running", "recipe-cursor");
+  await api.recipeAvailabilityOperation("recipe-operation");
+  await api.retryRecipeAvailability("recipe-operation", {request_key: requestKey});
   await api.nodeTelemetryCurrent("spark-a");
   await api.nodeTelemetryCapabilities("spark-a");
   await api.nodeTelemetryWorkloads("spark-a", "run-operation", "running");
@@ -298,17 +303,23 @@ it("binds the one-click run switch, NAS cache, and rich telemetry routes", async
     ["GET", "/api/v1/model-cache/updates"],
     ["GET", "/api/v1/model-cache/operations"],
     ["GET", "/api/v1/model-cache/operations/cache-operation"],
+    ["POST", "/api/v1/model-cache/operations/cache-operation/check-access-and-resume"],
+    ["POST", "/api/v1/library/recipe-image-availability"],
+    ["GET", "/api/v1/library/recipe-image-availability"],
+    ["GET", "/api/v1/library/recipe-image-availability/recipe-operation"],
+    ["POST", "/api/v1/library/recipe-image-availability/recipe-operation/retry"],
     ["GET", "/api/v1/nodes/spark-a/telemetry/current"],
     ["GET", "/api/v1/nodes/spark-a/telemetry/capabilities"],
     ["GET", "/api/v1/nodes/spark-a/telemetry/workloads"],
   ]);
   expect(Object.fromEntries(new URL(requests[3]!.url).searchParams)).toEqual({cursor: "cache-cursor", limit: "100"});
   expect(Object.fromEntries(new URL(requests[12]!.url).searchParams)).toEqual({cursor: "operations-cursor", limit: "100"});
-  expect(Object.fromEntries(new URL(requests[16]!.url).searchParams)).toEqual({run_id: "run-operation", state: "running"});
+  expect(Object.fromEntries(new URL(requests[21]!.url).searchParams)).toEqual({run_id: "run-operation", state: "running"});
   expect(await requests[0]!.clone().json()).toEqual(runInput);
   expect(await requests[1]!.clone().json()).toEqual({...runInput, plan_digest: "run-plan", request_key: requestKey});
   expect(await requests[6]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, source_policy: "nas-first", plan_digest: "cache-download-plan", request_key: requestKey});
   expect(await requests[8]!.clone().json()).toEqual({schema_version: 2, artifact_set_sha256: artifactDigest, plan_digest: "cache-repair-plan", request_key: requestKey, source_policy: "nas-first"});
+  expect(Object.fromEntries(new URL(requests[16]!.url).searchParams)).toEqual({cursor: "recipe-cursor", limit: "100", recipe_revision_id: "recipe-revision-1", state: "running"});
   expect(requests.slice(0, 2).every(request => request.headers.get("Content-Type"))).toBe(true);
 });
 
@@ -325,10 +336,12 @@ it("uses the durable retry endpoints for Run and NAS cache operations", async ()
 
   await api.retryRecipeRunSwitch("run-operation", {schema_version: 2, request_key: runKey});
   await api.retryModelCacheOperation("cache-operation", {schema_version: 2, request_key: cacheKey});
+  await api.retryRecipeAvailability("recipe-operation", {request_key: cacheKey});
 
   expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
     ["POST", "/api/v1/recipes/run-switches/run-operation/retry"],
     ["POST", "/api/v1/model-cache/operations/cache-operation/retry"],
+    ["POST", "/api/v1/library/recipe-image-availability/recipe-operation/retry"],
   ]);
   expect(await requests[0]!.clone().json()).toEqual({schema_version: 2, request_key: runKey});
   expect(await requests[1]!.clone().json()).toEqual({schema_version: 2, request_key: cacheKey});

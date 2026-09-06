@@ -163,15 +163,30 @@ loader. Actual ARM64 and AMD64 images passed non-root version, TLS inspect,
 archive copy/inspect, and security checks in OrbStack; root independently
 rechecked both images as UID10001. Updated supply-chain verification passed.
 
-Native ARM64 CI proved signed image import through the real helper, but Start
-remains incomplete. Review found mismatched probe identity/installation paths
-and a production filename check that incorrectly reused lowercase, 64-character
-identity rules. A lexical comparison of all 85 compiled Recipe projections
-found 717 selected paths across 57 Recipes that fail that rule, including
-legitimate DeepSeek filenames. This comparison used a synthetic image receipt
-solely to inspect paths; it does not establish builds or execution. The helper
-owner is correcting these issues and running a composed OrbStack proof before
-integration. No live Controller-to-Spark distribution is claimed.
+Native ARM64 proof now passes at root `d2f3e24d`: signed image import, first
+helper start, container removal and second start preserve UID10001 and cache
+contents while resetting temporary files. The actual helper and production
+Docker runner enforce the hardened argv and custody paths. The proof records
+the registry index, platform manifest, actual OCI config and archive identities
+separately. Docker's local image ID may be the manifest digest on containerd
+stores. Archive parsing selects the exact config named by `manifest.json`,
+handles classic root/config-blob layouts and seeks past layer payloads.
+
+This fixes the installation-path, exact writable-ACL and legitimate uppercase/
+long-filename failures found during review. All 28 helper library tests and
+Clippy pass. The canonical corpus path audit remains lexical evidence only;
+the native proof uses a tiny GPU-free image. No live Controller-to-Spark
+distribution or physical inference is claimed.
+
+The availability backend at `f57908cc` is integrated: immutable requests queue
+while builders are unavailable; Model transfers and image preparations proceed
+independently; PostgreSQL locks reserve builders before dispatch. Independent
+PostgreSQL checks cover claims, restart fencing and the canonical compiler plus
+real ModelCache child. Root `3a964a43` additionally preserves completed image
+state/bytes while a Model is pending or failed, maps actual ModelCache byte
+counters, retains unknown totals and avoids unsupported aggregate ETA claims.
+The final UI bindings/browser journeys and terminal integrity-repair linkage
+remain under verification before publication.
 
 ## Remaining runtime and deployment checks
 
@@ -183,7 +198,7 @@ excluded. Authorization is not evidence that the implementation works.
 
 The composed check must carry one real image through Controller inspect/copy/
 export, immutable storage, local distribution, import and helper start.
-Registry index, platform manifest, local config ID, imported reference and
+Registry index, platform manifest, actual OCI config, local Docker ID, imported reference and
 archive SHA/size must each be verified at their own boundary. Test nonempty
 ENTRYPOINT, writable UID10001 HOME/temp/cache, retained cache, reset temporary
 output, restart and tamper failures.
