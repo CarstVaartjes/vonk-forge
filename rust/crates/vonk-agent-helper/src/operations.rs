@@ -1698,6 +1698,7 @@ impl ValidatedDockerRun {
     }
 }
 
+#[cfg(test)]
 fn validate_docker_run(
     arguments: &[String],
     roots: &ManagedRoots,
@@ -2564,19 +2565,13 @@ fn parse_numeric_user(value: &str) -> Result<(u32, Option<u32>), OperationError>
 
 fn parse_publication(value: &str) -> Option<(std::net::Ipv4Addr, u16, u16)> {
     let (address, ports) = if let Some(value) = value.strip_prefix('[') {
-        let Some((address, ports)) = value.split_once("]:") else {
-            return None;
-        };
+        let (address, ports) = value.split_once("]:")?;
         (address, ports)
     } else {
-        let Some((address, ports)) = value.split_once(':') else {
-            return None;
-        };
+        let (address, ports) = value.split_once(':')?;
         (address, ports)
     };
-    let Ok(address) = address.parse::<std::net::Ipv4Addr>() else {
-        return None;
-    };
+    let address = address.parse::<std::net::Ipv4Addr>().ok()?;
     if address.is_unspecified()
         || address.is_loopback()
         || address.is_multicast()
@@ -2584,9 +2579,7 @@ fn parse_publication(value: &str) -> Option<(std::net::Ipv4Addr, u16, u16)> {
     {
         return None;
     }
-    let Some((host, container)) = ports.split_once(':') else {
-        return None;
-    };
+    let (host, container) = ports.split_once(':')?;
     if container.contains(':') {
         return None;
     }

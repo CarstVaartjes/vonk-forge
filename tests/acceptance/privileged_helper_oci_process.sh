@@ -42,6 +42,12 @@ install -d -o root -g root -m 0700 /var/lib/vonk-forge/oci-archives
 install -d -o root -g root -m 0755 /run/vonk-forge-agent /run/vonk-forge-package-helper
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge-agent /run/vonk-forge-agent/runtime-requests
 install -d -o vonk-agent -g vonk-agent -m 0700 /var/lib/vonk-forge/models
+runtime_probe=/run/vonk-forge-agent/privileged_oci_process_probe
+runtime_fixture=/run/vonk-forge-agent/compiled_workload_v2.json
+install -o root -g vonk-agent -m 0750 "$probe_binary" "$runtime_probe"
+install -o root -g vonk-agent -m 0640 "$fixture" "$runtime_fixture"
+probe_binary=$runtime_probe
+fixture=$runtime_fixture
 
 cat > "$fixture_dir/Dockerfile" <<'DOCKERFILE'
 FROM --platform=linux/arm64 busybox:1.36.1
