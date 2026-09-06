@@ -68,6 +68,37 @@ def _start() -> dict[str, object]:
     }
 
 
+def _distributed_start() -> dict[str, object]:
+    plan = copy.deepcopy(PLAN)
+    plan["topology"].update(
+        world_size=2, node_count=2, rank=1, role="worker", mode="distributed"
+    )
+    plan["runtime"]["placement"].update(
+        world_size=2,
+        rank=1,
+        role="worker",
+        endpoint_address=None,
+        local_address="100.100.20.31",
+        master_address="100.100.20.30",
+        master_port=29500,
+    )
+    plan["security"]["network_mode"] = "bridge"
+    return {
+        **_start(),
+        "phase": "rank-launch",
+        "start_deadline": "2026-09-07T12:05:00+00:00",
+        "run_generation": 1,
+        "rank": 1,
+        "role": "worker",
+        "world_size": 2,
+        "endpoint_address": "100.100.20.31",
+        "local_address": "100.100.20.31",
+        "master_address": "100.100.20.30",
+        "master_port": 29500,
+        "compiled_execution_plan": plan,
+    }
+
+
 def test_sanitized_compiled_plan_and_current_outer_payloads_round_trip() -> None:
     assert CompiledExecutionPlan.parse(PLAN).endpoint is not None
     install = RecipeOperationRequest.parse(AgentOperation.RECIPE_INSTALL, _install())
@@ -117,6 +148,29 @@ def test_schema_version_is_an_integer_discriminator() -> None:
     value["schema_version"] = 2.0
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
+
+
+def test_start_phase_shape_matches_single_and_distributed_controller_modes() -> None:
+    phased_single = _start()
+    phased_single.update(
+        phase="rank-launch",
+        start_deadline="2026-09-07T12:05:00+00:00",
+        run_generation=1,
+    )
+    with pytest.raises(AgentProtocolError):
+        RecipeOperationRequest.parse(AgentOperation.RECIPE_START, phased_single)
+
+    unphased_distributed = _distributed_start()
+    for key in ("phase", "start_deadline", "run_generation"):
+        del unphased_distributed[key]
+    with pytest.raises(AgentProtocolError):
+        RecipeOperationRequest.parse(
+            AgentOperation.RECIPE_START, unphased_distributed
+        )
+
+    assert RecipeOperationRequest.parse(
+        AgentOperation.RECIPE_START, _distributed_start()
+    ).phase == "rank-launch"
 
 
 def test_schema2_rejects_legacy_flat_install_and_missing_required_options() -> None:
