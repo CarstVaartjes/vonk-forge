@@ -220,6 +220,9 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(image_prepared:
             calls.append({"start": kwargs})
             return cache_view
 
+        def manifest_for_artifact_set(self, _digest):
+            raise AssertionError("first download has no persisted cache set")
+
         def get_operation(self, operation_id):
             if operation_id != cache_view.id:
                 from vonk_control.model_cache import ModelCacheNotFound

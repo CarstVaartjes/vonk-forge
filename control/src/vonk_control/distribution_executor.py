@@ -848,12 +848,13 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             or preview.get("expected_bytes") != artifact_set_bytes
         ):
             raise RuntimeError("model-cache download preview is not exact")
-        manifest_getter = getattr(self._model_cache, "manifest_for_artifact_set", None)
-        manifest = (
-            manifest_getter(artifact_set_sha256)
-            if callable(manifest_getter)
-            else preview.get("_manifest")
-        )
+        # A first download has no cache-set row yet: preview resolves the
+        # immutable catalog manifest without mutating storage. start_download
+        # persists that same manifest with the durable child operation.
+        manifest = preview.get("_manifest")
+        if manifest is None:
+            manifest_getter = getattr(self._model_cache, "manifest_for_artifact_set", None)
+            manifest = manifest_getter(artifact_set_sha256) if callable(manifest_getter) else None
         if (
             getattr(manifest, "digest", None) != artifact_set_sha256
             or getattr(manifest, "recipe_revision_sha256", None)
