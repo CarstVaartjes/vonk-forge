@@ -129,6 +129,16 @@ class RecipeImageAvailabilityErrorResponse(BaseModel):
     failure: AvailabilityOperationFailure
 
 
+RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS = {
+    ("post", "/api/v1/library/recipe-image-availability"): "startRecipeImageAvailability",
+    ("get", "/api/v1/library/recipe-image-availability"): "listRecipeImageAvailability",
+    ("get", "/api/v1/library/recipe-image-availability/{operation_id}"):
+        "getRecipeImageAvailability",
+    ("post", "/api/v1/library/recipe-image-availability/{operation_id}/retry"):
+        "retryRecipeImageAvailability",
+}
+
+
 def _failure_document(error: RecipeImageAvailabilityError) -> dict[str, object]:
     retry_time = None
     if isinstance(error.retry_time, str):
@@ -251,6 +261,10 @@ def install_recipe_image_availability_routes(
 ) -> None:
     """Install the typed schema-2 Recipe Make available API."""
 
+    from .operation_api import _ADMIN_OPERATION_IDS
+
+    _ADMIN_OPERATION_IDS.update(RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS)
+
     @app.post(
         "/api/v1/library/recipe-image-availability",
         status_code=status.HTTP_202_ACCEPTED,
@@ -314,6 +328,7 @@ def install_recipe_image_availability_routes(
         "/api/v1/library/recipe-image-availability/{operation_id}/retry",
         status_code=status.HTTP_202_ACCEPTED,
         response_model=RecipeImageAvailabilityResponse,
+        responses={409: {"model": RecipeImageAvailabilityErrorResponse}},
         operation_id="retryRecipeImageAvailability",
     )
     def retry(body: RecipeImageAvailabilityRetry, _request: Request, operation_id: str = Path(min_length=1, max_length=64), actor: Any = actor_dependency):
@@ -330,5 +345,6 @@ __all__ = [
     "RecipeImageAvailabilityResponse",
     "RecipeImageAvailabilityRetry",
     "RecipeImageAvailabilityStart",
+    "RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS",
     "install_recipe_image_availability_routes",
 ]

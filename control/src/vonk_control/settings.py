@@ -311,7 +311,7 @@ class Settings:
                 os.environ.get("VONK_RECIPE_IMAGE_PARALLEL_PREPARATIONS", "4")
             )
             recipe_build_parallel_preparations = int(
-                os.environ.get("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "1")
+                os.environ.get("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "2")
             )
         except ValueError as error:
             raise SettingsError(
@@ -695,7 +695,7 @@ class WorkerSettings:
                 os.environ.get("VONK_RECIPE_IMAGE_PARALLEL_PREPARATIONS", "4")
             )
             recipe_build_parallel_preparations = int(
-                os.environ.get("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "1")
+                os.environ.get("VONK_RECIPE_BUILD_PARALLEL_PREPARATIONS", "2")
             )
         except ValueError as error:
             raise SettingsError(
