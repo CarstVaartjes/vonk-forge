@@ -616,7 +616,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         {
             return Err(OciError::Runtime);
         }
-        reset_runtime_tmp(&managed_path(self.data_root, "runs", run_id)?.join("outputs"))?;
+        // Retained reconstruction is inspection/collective-readiness only.
+        // Reset writable state only in prepare_start_internal for a real start.
         Ok(RuntimeStartPlan {
             image_digest: spec.runtime_image.image_digest.clone(),
             registry_index_digest: spec
