@@ -813,6 +813,17 @@ def test_stop_and_uninstall_contracts_are_admin_only_strict_and_digest_bound() -
     assert extra.status_code == 422
     assert stop_unbound.status_code == uninstall_unbound.status_code == 422
 
+    malformed = client.post(
+        "/api/v1/recipes/mapping-plans/preview",
+        headers=headers(),
+        json={
+            "recipe_revision_id": 1,
+            "node_ids": [NODE],
+            "parameters": {},
+        },
+    )
+    assert malformed.status_code == 422
+
 
 def test_administrator_run_status_is_typed_rank_health_without_secrets() -> None:
     client, headers, _recipes, _audits = setup()
