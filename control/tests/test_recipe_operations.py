@@ -2359,7 +2359,7 @@ def test_partial_multinode_stop_retains_every_active_capacity_reservation(
 
 
 def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
-    _sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2
     )
     plan = service.preview_install(mapping_id, build_id)
@@ -2378,6 +2378,21 @@ def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
     retry = service.retry(first.id, actor="admin", request_id="3" * 36)
     assert retry.id != first.id
     assert retry.owner_id == first.owner_id
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, retry.owner_id)
+        assert installation is not None
+        persisted_plans = installation.plan["compiled_execution_plans"]
+        children = tuple(
+            session.scalars(
+                select(AgentOperation)
+                .where(AgentOperation.parent_job_id == retry.id)
+                .order_by(AgentOperation.node_id)
+            )
+        )
+        assert {child.node_id for child in children} == set(nodes)
+        for child in children:
+            parsed = RecipeInstallPayload.model_validate(child.payload)
+            assert parsed.compiled_execution_plan.to_mapping() == persisted_plans[child.node_id]
     with pytest.raises(RecipeOperationConflict, match="not retryable"):
         service.retry(first.id, actor="admin", request_id="3" * 35 + "4")
 

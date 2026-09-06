@@ -1642,7 +1642,6 @@ class RecipeOperationService:
         installation = session.get(RecipeInstallation, owner_id, with_for_update=True)
         if installation is None or installation.state not in {"partial", "failed"}:
             raise RecipeOperationConflict("recipe installation is not retryable")
-        recipe_revision_id = installation.recipe_revision_id
         nodes = tuple(
             session.scalars(
                 select(InstallationNode)
@@ -1653,6 +1652,18 @@ class RecipeOperationService:
         revision = _active_recipe_revision(session, installation.recipe_revision_id)
         assert revision is not None and revision.content_digest is not None
         recipe_digest = revision.content_digest
+        compiled_plans = (
+            installation.plan.get("compiled_execution_plans")
+            if isinstance(installation.plan, Mapping)
+            else None
+        )
+        if not isinstance(compiled_plans, Mapping) or not nodes or any(
+            not isinstance(compiled_plans.get(node.node_id), Mapping)
+            for node in nodes
+        ):
+            raise RecipeOperationConflict(
+                "stored compiled execution plan is missing for install retry"
+            )
         installation.state = "installing"
         installation.updated_at = now
         for node in nodes:
@@ -1669,18 +1680,13 @@ class RecipeOperationService:
                 (
                     node.node_id,
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "installation_id": owner_id,
-                        "recipe_revision_id": recipe_revision_id,
-                        "recipe_content_sha256": recipe_digest,
-                        "mapping_id": installation.mapping_id,
-                        "mapping_generation": installation.mapping_generation,
-                        "recipe_build_id": installation.recipe_build_id,
-                        "image_digest": installation.image_digest,
                         "plan_digest": previous_plan_digest,
                         "rank": node.rank,
                         "role": node.role,
                         "expected_bytes": node.required_bytes,
+                        "compiled_execution_plan": compiled_plans[node.node_id],
                     },
                 )
                 for node in nodes
