@@ -36,7 +36,7 @@ RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
 def _canonical_catalog_documents(
-    *, denied_jurisdictions: tuple[str, ...] = ()
+    *, denied_jurisdictions: tuple[str, ...] = (), recipe_mode: str = "build"
 ) -> tuple[ModelDefinition, RecipeDefinition]:
     raw_model = json.loads(
         files("vonk_forge_contracts")
@@ -49,9 +49,12 @@ def _canonical_catalog_documents(
             "notice": "Synthetic test restrictions.",
         }
     model = ModelDefinition.model_validate(raw_model)
+    recipe_filename = (
+        "recipe-source-build.json" if recipe_mode == "build" else "recipe-image.json"
+    )
     raw_recipe = json.loads(
         files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
+        .joinpath("examples", recipe_filename)
         .read_text(encoding="utf-8")
     )
     raw_recipe["identity"]["slug"] = "qwen3-vllm"
@@ -78,9 +81,10 @@ def _seed_canonical_catalog(
     now: datetime,
     *,
     denied_jurisdictions: tuple[str, ...] = (),
+    recipe_mode: str = "build",
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents(
-        denied_jurisdictions=denied_jurisdictions
+        denied_jurisdictions=denied_jurisdictions, recipe_mode=recipe_mode
     )
     model_digest = content_sha256(model)
     recipe_digest = content_sha256(recipe)
@@ -219,10 +223,16 @@ def _seed_canonical_catalog(
 
 
 def _compiled_plan(
-    *, role: str, rank: int, model_digest: str, recipe_digest: str, build_input: str
+    *,
+    role: str,
+    rank: int,
+    model_digest: str,
+    recipe_digest: str,
+    build_input: str,
+    image_digest: str | None = None,
 ) -> dict[str, object]:
     artifact_digest = "3" * 64
-    image_digest = "sha256:" + "1" * 64
+    image_digest = image_digest or "sha256:" + "1" * 64
     layout_digest = "2" * 64
     return {
         "schema_version": 2,
@@ -333,13 +343,22 @@ def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
     build = kwargs["build"]
     resolved_entities = kwargs["resolved_entities"]
     model_revision = resolved_entities["models"][0]
+    build_input = build.build_input_sha256 if build is not None else "b" * 64
+    execution = revision.document.get("execution", {})
+    image = execution.get("image") if isinstance(execution, dict) else None
+    image_digest = (
+        f"sha256:{image['digest']}"
+        if isinstance(image, dict) and isinstance(image.get("digest"), str)
+        else None
+    )
     return {
         node.node_id: _compiled_plan(
             role=node.role,
             rank=node.rank,
             model_digest=model_revision.content_digest,
             recipe_digest=revision.content_digest,
-            build_input=build.build_input_sha256,
+            build_input=build_input,
+            image_digest=image_digest,
         )
         for node in mapping_nodes
     }
@@ -361,6 +380,7 @@ def setup(
     read_only=False,
     observed_age=0,
     denied_jurisdictions=(),
+    recipe_mode="build",
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'install.sqlite'}")
@@ -393,7 +413,10 @@ def setup(
         )
     )
     resolved = _seed_canonical_catalog(
-        sessions, now, denied_jurisdictions=tuple(denied_jurisdictions)
+        sessions,
+        now,
+        denied_jurisdictions=tuple(denied_jurisdictions),
+        recipe_mode=recipe_mode,
     )
     mappings = ClusterMappingService(sessions)
     mapping_plan = mappings.preview(resolved.id, (node_id,), {}, "admin")
@@ -413,14 +436,17 @@ def setup(
             created_at=now,
             updated_at=now,
         )
-        session.add(build)
-        session.flush()
-        build_id = build.id
+        build_id = None
+        if recipe_mode == "build":
+            session.add(build)
+            session.flush()
+            build_id = build.id
+        image_digest = "1" * 64 if recipe_mode == "build" else "d" * 64
         session.add(
             NodeArtifact(
                 node_id=node_id,
                 kind="image",
-                digest="1" * 64,
+                digest=image_digest,
                 source="docker-archive:" + "2" * 64,
                 size_bytes=30,
                 state="verified",
@@ -434,11 +460,13 @@ def setup(
 
 
 def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
-    sessions, now, _node, mapping, build, sizes = setup(tmp_path, free=100)
+    sessions, now, _node, mapping, _build, sizes = setup(
+        tmp_path, free=100, recipe_mode="image"
+    )
     service = _service(
         sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
     )
-    plan = service.plan_install(mapping, build, now=now)
+    plan = service.plan_install(mapping, None, now=now)
     assert plan.allowed is True
     assert plan.nodes[0].required_bytes == 90
     assert plan.nodes[0].free_after_bytes == 10
@@ -446,20 +474,21 @@ def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
     service = _service(
         sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=11
     )
-    blocked = service.plan_install(mapping, build, now=now)
+    blocked = service.plan_install(mapping, None, now=now)
     assert blocked.allowed is False
     assert blocked.nodes[0].blockers[0].code == "install.insufficient_disk"
 
 
 def test_territorial_license_install_admission_is_informational(tmp_path) -> None:
-    sessions, now, _node, mapping, build, sizes = setup(
+    sessions, now, _node, mapping, _build, sizes = setup(
         tmp_path,
         denied_jurisdictions=("EU", "GB", "KR"),
+        recipe_mode="image",
     )
 
     unconfigured = _service(
         sessions, sizes=sizes, inventory_max_age=300, disk_floor_bytes=10
-    ).plan_install(mapping, build, now=now)
+    ).plan_install(mapping, None, now=now)
     assert unconfigured.allowed is True
     assert not any(
         blocker.code.startswith("install.license.")
