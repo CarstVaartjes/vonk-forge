@@ -548,6 +548,29 @@
         "title": "ArtifactFileDeclaration",
         "type": "object"
       },
+      "ArtifactJobCapabilitiesResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/ArtifactJobStorageCapabilities"
+          },
+          "transport": {
+            "$ref": "#/components/schemas/ArtifactJobTransportCapabilities"
+          }
+        },
+        "required": [
+          "transport",
+          "storage"
+        ],
+        "title": "ArtifactJobCapabilitiesResponse",
+        "type": "object"
+      },
       "ArtifactJobCreate": {
         "additionalProperties": false,
         "properties": {
@@ -585,6 +608,363 @@
           "timeout_seconds"
         ],
         "title": "ArtifactJobCreate",
+        "type": "object"
+      },
+      "ArtifactJobListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactJobResponse"
+            },
+            "maxItems": 100,
+            "title": "Jobs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "title": "ArtifactJobListResponse",
+        "type": "object"
+      },
+      "ArtifactJobResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "compiled_contract": {
+            "additionalProperties": true,
+            "title": "Compiled Contract",
+            "type": "object"
+          },
+          "contract_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contract Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_declarations": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactFileDeclaration"
+            },
+            "title": "Input Declarations",
+            "type": "array"
+          },
+          "input_files": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactFileDeclaration"
+            },
+            "title": "Input Files",
+            "type": "array"
+          },
+          "input_manifest_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Input Manifest Sha256",
+            "type": "string"
+          },
+          "input_total_bytes": {
+            "minimum": 0.0,
+            "title": "Input Total Bytes",
+            "type": "integer"
+          },
+          "interface": {
+            "enum": [
+              "audio-job",
+              "video-job",
+              "image-job",
+              "mesh-job",
+              "artifact-job"
+            ],
+            "title": "Interface",
+            "type": "string"
+          },
+          "operation_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation Id"
+          },
+          "output_files": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactOutputFile"
+            },
+            "title": "Output Files",
+            "type": "array"
+          },
+          "output_limits": {
+            "$ref": "#/components/schemas/OutputLimits"
+          },
+          "output_manifest_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Manifest Sha256"
+          },
+          "result_evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactJobResultEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "draft",
+              "ready",
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelling",
+              "cancelled",
+              "waiting-for-operator"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
+          },
+          "timeout_seconds": {
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "interface",
+          "state",
+          "contract_sha256",
+          "compiled_contract",
+          "input_manifest_sha256",
+          "input_total_bytes",
+          "input_declarations",
+          "input_files",
+          "output_limits",
+          "output_files",
+          "timeout_seconds",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ArtifactJobResponse",
+        "type": "object"
+      },
+      "ArtifactJobResultEvidence": {
+        "additionalProperties": true,
+        "description": "Known evidence fields with room for engine-specific evidence keys.",
+        "properties": {
+          "elapsed_milliseconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Milliseconds"
+          },
+          "peak_memory_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Memory Bytes"
+          }
+        },
+        "title": "ArtifactJobResultEvidence",
+        "type": "object"
+      },
+      "ArtifactJobStorageCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "in_flight_uploads": {
+            "minimum": 0.0,
+            "title": "In Flight Uploads",
+            "type": "integer"
+          },
+          "max_stored_bytes": {
+            "minimum": 1.0,
+            "title": "Max Stored Bytes",
+            "type": "integer"
+          },
+          "remaining_bytes": {
+            "minimum": 0.0,
+            "title": "Remaining Bytes",
+            "type": "integer"
+          },
+          "reserved_bytes": {
+            "minimum": 0.0,
+            "title": "Reserved Bytes",
+            "type": "integer"
+          },
+          "used_bytes": {
+            "minimum": 0.0,
+            "title": "Used Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_stored_bytes",
+          "used_bytes",
+          "reserved_bytes",
+          "in_flight_uploads",
+          "remaining_bytes"
+        ],
+        "title": "ArtifactJobStorageCapabilities",
+        "type": "object"
+      },
+      "ArtifactJobTransportCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "max_input_file_bytes": {
+            "maximum": 536870912.0,
+            "minimum": 1.0,
+            "title": "Max Input File Bytes",
+            "type": "integer"
+          },
+          "max_input_files": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Input Files",
+            "type": "integer"
+          },
+          "max_input_total_bytes": {
+            "maximum": 1073741824.0,
+            "minimum": 1.0,
+            "title": "Max Input Total Bytes",
+            "type": "integer"
+          },
+          "max_output_file_bytes": {
+            "maximum": 1073741824.0,
+            "minimum": 1.0,
+            "title": "Max Output File Bytes",
+            "type": "integer"
+          },
+          "max_output_files": {
+            "maximum": 32.0,
+            "minimum": 1.0,
+            "title": "Max Output Files",
+            "type": "integer"
+          },
+          "max_output_total_bytes": {
+            "maximum": 2147483648.0,
+            "minimum": 1.0,
+            "title": "Max Output Total Bytes",
+            "type": "integer"
+          },
+          "max_timeout_seconds": {
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Max Timeout Seconds",
+            "type": "integer"
+          },
+          "reserved_input_names": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Reserved Input Names",
+            "type": "array"
+          }
+        },
+        "required": [
+          "max_input_files",
+          "max_input_file_bytes",
+          "max_input_total_bytes",
+          "max_output_files",
+          "max_output_file_bytes",
+          "max_output_total_bytes",
+          "max_timeout_seconds",
+          "reserved_input_names"
+        ],
+        "title": "ArtifactJobTransportCapabilities",
+        "type": "object"
+      },
+      "ArtifactOutputFile": {
+        "additionalProperties": false,
+        "properties": {
+          "media_type": {
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+            "title": "Media Type",
+            "type": "string"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "maximum": 1073741824.0,
+            "minimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "media_type",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "ArtifactOutputFile",
         "type": "object"
       },
       "ArtifactStorageImpact": {
@@ -19617,13 +19997,31 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Getartifactjobcapabilities",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactJobCapabilitiesResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -19654,23 +20052,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Getartifactjobstatus",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactJobResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -19711,23 +20137,71 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Cancelartifactjob",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactJobResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -19758,23 +20232,71 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Finalizeartifactjob",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactJobResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -19860,23 +20382,71 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Uploadartifactjobinput",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactJobResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -19908,23 +20478,61 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Getartifactjobresult",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactJobResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -20012,23 +20620,71 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Submitartifactjob",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactJobResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -26770,23 +27426,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Listartifactjobsforrun",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactJobListResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -26825,23 +27509,71 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Createartifactjob",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactJobResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

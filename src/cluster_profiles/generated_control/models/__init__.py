@@ -13,8 +13,18 @@ from .agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnos
 from .agents_response import AgentsResponse
 from .apply_agent_upgrade_response_apply_agent_upgrade_api_v1_agents_upgrades_post import ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost
 from .artifact_file_declaration import ArtifactFileDeclaration
+from .artifact_job_capabilities_response import ArtifactJobCapabilitiesResponse
 from .artifact_job_create import ArtifactJobCreate
 from .artifact_job_create_parameters import ArtifactJobCreateParameters
+from .artifact_job_list_response import ArtifactJobListResponse
+from .artifact_job_response import ArtifactJobResponse
+from .artifact_job_response_compiled_contract import ArtifactJobResponseCompiledContract
+from .artifact_job_response_interface import ArtifactJobResponseInterface
+from .artifact_job_response_state import ArtifactJobResponseState
+from .artifact_job_result_evidence import ArtifactJobResultEvidence
+from .artifact_job_storage_capabilities import ArtifactJobStorageCapabilities
+from .artifact_job_transport_capabilities import ArtifactJobTransportCapabilities
+from .artifact_output_file import ArtifactOutputFile
 from .artifact_storage_impact import ArtifactStorageImpact
 from .artifact_storage_impact_nas_coverage import ArtifactStorageImpactNasCoverage
 from .artifact_storage_impact_retention import ArtifactStorageImpactRetention
@@ -43,7 +53,6 @@ from .cache_entry_response import CacheEntryResponse
 from .cache_entry_response_coverage import CacheEntryResponseCoverage
 from .cache_entry_response_state import CacheEntryResponseState
 from .cache_storage_response import CacheStorageResponse
-from .cancel_artifact_job_response_cancelartifactjob import CancelArtifactJobResponseCancelartifactjob
 from .cancel_request import CancelRequest
 from .capability_evidence import CapabilityEvidence
 from .capability_evidence_evidence import CapabilityEvidenceEvidence
@@ -59,7 +68,6 @@ from .compatibility_preparation_state import CompatibilityPreparationState
 from .controller_asset_state import ControllerAssetState
 from .controller_asset_state_source import ControllerAssetStateSource
 from .controller_asset_state_state import ControllerAssetStateState
-from .create_artifact_job_response_createartifactjob import CreateArtifactJobResponseCreateartifactjob
 from .effective_parallelism import EffectiveParallelism
 from .effective_settings_selection import EffectiveSettingsSelection
 from .effective_settings_selection_change_effects import EffectiveSettingsSelectionChangeEffects
@@ -72,7 +80,6 @@ from .enrollment_grant_response_installer_url import EnrollmentGrantResponseInst
 from .enrollment_grant_response_purpose import EnrollmentGrantResponsePurpose
 from .enrollment_list_response import EnrollmentListResponse
 from .enrollment_summary import EnrollmentSummary
-from .finalize_artifact_job_response_finalizeartifactjob import FinalizeArtifactJobResponseFinalizeartifactjob
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
@@ -121,9 +128,6 @@ from .freshness_evidence import FreshnessEvidence
 from .freshness_evidence_state import FreshnessEvidenceState
 from .freshness_policy import FreshnessPolicy
 from .get_agent_upgrade_candidate_response_current_agent_upgrade_api_v1_agents_upgrades_candidate_get import GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet
-from .get_artifact_job_capabilities_response_getartifactjobcapabilities import GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities
-from .get_artifact_job_result_response_getartifactjobresult import GetArtifactJobResultResponseGetartifactjobresult
-from .get_artifact_job_status_response_getartifactjobstatus import GetArtifactJobStatusResponseGetartifactjobstatus
 from .get_authority_response_authority_view_api_v1_authority_get import GetAuthorityResponseAuthorityViewApiV1AuthorityGet
 from .get_node_telemetry_history_resolution import GetNodeTelemetryHistoryResolution
 from .grant_request import GrantRequest
@@ -197,7 +201,6 @@ from .library_run_summary import LibraryRunSummary
 from .library_run_summary_route_state import LibraryRunSummaryRouteState
 from .library_run_summary_state import LibraryRunSummaryState
 from .library_snapshot import LibrarySnapshot
-from .list_artifact_jobs_for_run_response_listartifactjobsforrun import ListArtifactJobsForRunResponseListartifactjobsforrun
 from .list_audit_events_response_audit_view_api_v1_audit_get import ListAuditEventsResponseAuditViewApiV1AuditGet
 from .list_identity_history_response_listidentityhistory import ListIdentityHistoryResponseListidentityhistory
 from .list_recipe_image_availability_state_type_0 import ListRecipeImageAvailabilityStateType0
@@ -486,7 +489,6 @@ from .stop_node_impact_response import StopNodeImpactResponse
 from .stop_plan_response import StopPlanResponse
 from .stop_preview_request import StopPreviewRequest
 from .stop_request import StopRequest
-from .submit_artifact_job_response_submitartifactjob import SubmitArtifactJobResponseSubmitartifactjob
 from .submit_change_response_submit_change_api_v1_changes_post import SubmitChangeResponseSubmitChangeApiV1ChangesPost
 from .target_asset_state import TargetAssetState
 from .target_asset_state_state import TargetAssetStateState
@@ -548,8 +550,18 @@ __all__ = (
     "AgentUpgradeTargetDiagnosticsResponse",
     "ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost",
     "ArtifactFileDeclaration",
+    "ArtifactJobCapabilitiesResponse",
     "ArtifactJobCreate",
     "ArtifactJobCreateParameters",
+    "ArtifactJobListResponse",
+    "ArtifactJobResponse",
+    "ArtifactJobResponseCompiledContract",
+    "ArtifactJobResponseInterface",
+    "ArtifactJobResponseState",
+    "ArtifactJobResultEvidence",
+    "ArtifactJobStorageCapabilities",
+    "ArtifactJobTransportCapabilities",
+    "ArtifactOutputFile",
     "ArtifactStorageImpact",
     "ArtifactStorageImpactNasCoverage",
     "ArtifactStorageImpactRetention",
@@ -578,7 +590,6 @@ __all__ = (
     "CacheEntryResponseCoverage",
     "CacheEntryResponseState",
     "CacheStorageResponse",
-    "CancelArtifactJobResponseCancelartifactjob",
     "CancelRequest",
     "CapabilityEvidence",
     "CapabilityEvidenceEvidence",
@@ -594,7 +605,6 @@ __all__ = (
     "ControllerAssetState",
     "ControllerAssetStateSource",
     "ControllerAssetStateState",
-    "CreateArtifactJobResponseCreateartifactjob",
     "EffectiveParallelism",
     "EffectiveSettingsSelection",
     "EffectiveSettingsSelectionChangeEffects",
@@ -607,7 +617,6 @@ __all__ = (
     "EnrollmentGrantResponsePurpose",
     "EnrollmentListResponse",
     "EnrollmentSummary",
-    "FinalizeArtifactJobResponseFinalizeartifactjob",
     "FleetNode",
     "FleetNodeIdentity",
     "FleetNodeLabels",
@@ -656,9 +665,6 @@ __all__ = (
     "FreshnessEvidenceState",
     "FreshnessPolicy",
     "GetAgentUpgradeCandidateResponseCurrentAgentUpgradeApiV1AgentsUpgradesCandidateGet",
-    "GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities",
-    "GetArtifactJobResultResponseGetartifactjobresult",
-    "GetArtifactJobStatusResponseGetartifactjobstatus",
     "GetAuthorityResponseAuthorityViewApiV1AuthorityGet",
     "GetNodeTelemetryHistoryResolution",
     "GrantRequest",
@@ -732,7 +738,6 @@ __all__ = (
     "LibraryRunSummaryRouteState",
     "LibraryRunSummaryState",
     "LibrarySnapshot",
-    "ListArtifactJobsForRunResponseListartifactjobsforrun",
     "ListAuditEventsResponseAuditViewApiV1AuditGet",
     "ListIdentityHistoryResponseListidentityhistory",
     "ListRecipeImageAvailabilityStateType0",
@@ -1021,7 +1026,6 @@ __all__ = (
     "StopPlanResponse",
     "StopPreviewRequest",
     "StopRequest",
-    "SubmitArtifactJobResponseSubmitartifactjob",
     "SubmitChangeResponseSubmitChangeApiV1ChangesPost",
     "TargetAssetState",
     "TargetAssetStateState",
