@@ -1834,6 +1834,139 @@
         "title": "ControllerAssetState",
         "type": "object"
       },
+      "EffectiveParallelism": {
+        "additionalProperties": false,
+        "description": "Derived from topology; never an editable settings field.",
+        "properties": {
+          "backend": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Backend",
+            "type": "string"
+          },
+          "data": {
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "Data",
+            "type": "integer"
+          },
+          "pipeline": {
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "Pipeline",
+            "type": "integer"
+          },
+          "tensor": {
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "Tensor",
+            "type": "integer"
+          },
+          "world_size": {
+            "maximum": 31.0,
+            "minimum": 1.0,
+            "title": "World Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "world_size",
+          "tensor",
+          "pipeline",
+          "data",
+          "backend"
+        ],
+        "title": "EffectiveParallelism",
+        "type": "object"
+      },
+      "EffectiveSettingsSelection": {
+        "additionalProperties": false,
+        "description": "Canonical effective settings bound into the Run/Switch plan digest.",
+        "properties": {
+          "change_effects": {
+            "additionalProperties": {
+              "enum": [
+                "none",
+                "restart",
+                "reprepare",
+                "rebuild",
+                "reinstall"
+              ],
+              "type": "string"
+            },
+            "maxProperties": 64,
+            "title": "Change Effects",
+            "type": "object"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency"
+          },
+          "context_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tokens"
+          },
+          "identity_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Identity Sha256",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "generation",
+              "embedding",
+              "job"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "knobs": {
+            "additionalProperties": true,
+            "maxProperties": 64,
+            "title": "Knobs",
+            "type": "object"
+          },
+          "max_batch_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Batch Tokens"
+          },
+          "parallelism": {
+            "$ref": "#/components/schemas/EffectiveParallelism"
+          }
+        },
+        "required": [
+          "kind",
+          "parallelism",
+          "change_effects",
+          "identity_sha256"
+        ],
+        "title": "EffectiveSettingsSelection",
+        "type": "object"
+      },
       "EndpointResponse": {
         "additionalProperties": false,
         "properties": {
@@ -13050,6 +13183,112 @@
         "title": "ResolveImportRequest",
         "type": "object"
       },
+      "ResourceDemandEvidence": {
+        "additionalProperties": false,
+        "description": "The evidence terms used for one selected rank's memory fit.",
+        "properties": {
+          "batch_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Bytes"
+          },
+          "concurrency_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency Bytes"
+          },
+          "context_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Bytes"
+          },
+          "evidence_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence Digest"
+          },
+          "evidence_state": {
+            "enum": [
+              "declared",
+              "measured",
+              "fresh",
+              "stale",
+              "unknown"
+            ],
+            "title": "Evidence State",
+            "type": "string"
+          },
+          "runtime_overhead_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Overhead Bytes"
+          },
+          "total_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Bytes"
+          },
+          "weights_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weights Bytes"
+          }
+        },
+        "required": [
+          "evidence_state"
+        ],
+        "title": "ResourceDemandEvidence",
+        "type": "object"
+      },
       "RolloutPreparation": {
         "additionalProperties": false,
         "description": "Normalized preparation identity shared by profiles, Run, web and CLI.",
@@ -14117,6 +14356,16 @@
             "maxItems": 128,
             "title": "Conflicts",
             "type": "array"
+          },
+          "effective_settings": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EffectiveSettingsSelection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "fit": {
             "$ref": "#/components/schemas/SparkFit"
@@ -15217,6 +15466,16 @@
             "minimum": 0.0,
             "title": "Rank",
             "type": "integer"
+          },
+          "resource_demand": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResourceDemandEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "role": {
             "maxLength": 64,

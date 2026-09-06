@@ -22,6 +22,7 @@ if TYPE_CHECKING:
   from ..models.spark_group import SparkGroup
   from ..models.artifact_storage_impact import ArtifactStorageImpact
   from ..models.capability_evidence import CapabilityEvidence
+  from ..models.effective_settings_selection import EffectiveSettingsSelection
   from ..models.run_switch_reason import RunSwitchReason
   from ..models.recipe_build_evidence import RecipeBuildEvidence
   from ..models.rollout_preparation import RolloutPreparation
@@ -75,6 +76,7 @@ class RunSwitchPlan:
             stops (list['StopImpact']):
             storage (ArtifactStorageImpact): Byte impact with unknown values preserved as unknown, never guessed.
             warnings (list['RunSwitchReason']):
+            effective_settings (Union['EffectiveSettingsSelection', None, Unset]):
             preparation (Union['RolloutPreparation', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             stop_before_prepare (Union[Unset, bool]):  Default: False.
@@ -113,6 +115,7 @@ class RunSwitchPlan:
     stops: list['StopImpact']
     storage: 'ArtifactStorageImpact'
     warnings: list['RunSwitchReason']
+    effective_settings: Union['EffectiveSettingsSelection', None, Unset] = UNSET
     preparation: Union['RolloutPreparation', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
     stop_before_prepare: Union[Unset, bool] = False
@@ -128,6 +131,7 @@ class RunSwitchPlan:
         from ..models.spark_group import SparkGroup
         from ..models.artifact_storage_impact import ArtifactStorageImpact
         from ..models.capability_evidence import CapabilityEvidence
+        from ..models.effective_settings_selection import EffectiveSettingsSelection
         from ..models.run_switch_reason import RunSwitchReason
         from ..models.recipe_build_evidence import RecipeBuildEvidence
         from ..models.rollout_preparation import RolloutPreparation
@@ -258,6 +262,14 @@ class RunSwitchPlan:
 
 
 
+        effective_settings: Union[None, Unset, dict[str, Any]]
+        if isinstance(self.effective_settings, Unset):
+            effective_settings = UNSET
+        elif isinstance(self.effective_settings, EffectiveSettingsSelection):
+            effective_settings = self.effective_settings.to_dict()
+        else:
+            effective_settings = self.effective_settings
+
         preparation: Union[None, Unset, dict[str, Any]]
         if isinstance(self.preparation, Unset):
             preparation = UNSET
@@ -309,6 +321,8 @@ class RunSwitchPlan:
             "storage": storage,
             "warnings": warnings,
         })
+        if effective_settings is not UNSET:
+            field_dict["effective_settings"] = effective_settings
         if preparation is not UNSET:
             field_dict["preparation"] = preparation
         if schema_version is not UNSET:
@@ -329,6 +343,7 @@ class RunSwitchPlan:
         from ..models.spark_group import SparkGroup
         from ..models.artifact_storage_impact import ArtifactStorageImpact
         from ..models.capability_evidence import CapabilityEvidence
+        from ..models.effective_settings_selection import EffectiveSettingsSelection
         from ..models.run_switch_reason import RunSwitchReason
         from ..models.recipe_build_evidence import RecipeBuildEvidence
         from ..models.rollout_preparation import RolloutPreparation
@@ -585,6 +600,26 @@ class RunSwitchPlan:
             warnings.append(warnings_item)
 
 
+        def _parse_effective_settings(data: object) -> Union['EffectiveSettingsSelection', None, Unset]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                effective_settings_type_0 = EffectiveSettingsSelection.from_dict(data)
+
+
+
+                return effective_settings_type_0
+            except: # noqa: E722
+                pass
+            return cast(Union['EffectiveSettingsSelection', None, Unset], data)
+
+        effective_settings = _parse_effective_settings(d.pop("effective_settings", UNSET))
+
+
         def _parse_preparation(data: object) -> Union['RolloutPreparation', None, Unset]:
             if data is None:
                 return data
@@ -646,6 +681,7 @@ class RunSwitchPlan:
             stops=stops,
             storage=storage,
             warnings=warnings,
+            effective_settings=effective_settings,
             preparation=preparation,
             schema_version=schema_version,
             stop_before_prepare=stop_before_prepare,
