@@ -176,6 +176,7 @@ pub struct CompiledRuntimeImage {
     pub registry_manifest_digest: Option<String>,
     pub platform_manifest_digest: String,
     pub local_image_config_id: String,
+    pub local_image_reference: String,
     pub runtime_interface_label: String,
     pub oci_layout_sha256: String,
     pub image_bytes: u64,
@@ -498,6 +499,13 @@ impl CompiledJob {
 }
 
 impl CompiledRuntimeImage {
+    /// Derive the local imported reference from the immutable archive and
+    /// registry/platform identity. Controller transport paths never become
+    /// container-engine image arguments.
+    pub fn local_image_reference(&self) -> String {
+        self.local_image_reference.clone()
+    }
+
     fn validate(&self) -> Result<(), WorkloadError> {
         if !self.image_digest.starts_with("sha256:")
             || !lower_hex(&self.image_digest[7..], 64)
@@ -507,6 +515,7 @@ impl CompiledRuntimeImage {
                 .is_some_and(|value| !valid_sha256_prefixed(value))
             || !valid_sha256_prefixed(&self.platform_manifest_digest)
             || !valid_sha256_prefixed(&self.local_image_config_id)
+            || self.local_image_reference != self.expected_local_image_reference()
             || self.platform_manifest_digest != self.image_digest
             || self.runtime_interface_label.is_empty()
             || self.runtime_interface_label.len() > 128
@@ -530,6 +539,14 @@ impl CompiledRuntimeImage {
         self.distribution_object
             .validate()
             .map_err(|_| WorkloadError::Invalid("compiled image distribution object"))
+    }
+
+    fn expected_local_image_reference(&self) -> String {
+        let parent = &self.platform_manifest_digest;
+        format!(
+            "localhost/vonk/compiled-runtime-{}@{}",
+            self.oci_layout_sha256, parent
+        )
     }
 }
 

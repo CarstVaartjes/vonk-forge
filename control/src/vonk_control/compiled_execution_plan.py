@@ -279,6 +279,12 @@ class CompiledRuntimeImage(_StrictModel):
             raise ValueError(
                 "runtime image digest must identify the selected platform manifest"
             )
+        parent = self.platform_manifest_digest
+        expected_reference = (
+            f"localhost/vonk/compiled-runtime-{self.oci_layout_sha256}@{parent}"
+        )
+        if self.local_image_reference not in (None, expected_reference):
+            raise ValueError("runtime local image reference is not bound to its receipt")
         return self
 
 
@@ -542,10 +548,10 @@ class CompiledExecutionPlan(_StrictModel):
             for item in self.artifacts
         ]
         runtime_image = self.runtime_image.model_dump(mode="json")
-        # A Controller transport/archive reference is evidence only.  The
-        # helper derives the runnable local reference after importing and
-        # re-inspecting the exact config digest.
-        runtime_image.pop("local_image_reference", None)
+        parent = runtime_image["platform_manifest_digest"]
+        runtime_image["local_image_reference"] = (
+            f"localhost/vonk/compiled-runtime-{runtime_image['oci_layout_sha256']}@{parent}"
+        )
         payload: dict[str, object] = {
             "schema_version": 2,
             "identity": {

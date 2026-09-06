@@ -95,7 +95,7 @@ fn model_materialization_keeps_nested_paths_selection_scoped() {
 #[test]
 fn empty_support_file_is_valid_but_empty_weights_are_rejected() {
     let mut value = fixture();
-    value["identity"]["model_artifact_bytes"] = json!(0);
+    value["identity"]["model_artifact_bytes"] = json!(2448);
     let artifact = &mut value["artifacts"][0];
     artifact["file_id"] = json!("tokenizer-config");
     artifact["path"] = json!("tokenizer_config.json");

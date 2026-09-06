@@ -44,6 +44,11 @@ pub struct CompiledOciPaths {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OciImageReceipt {
     pub image_digest: String,
+    pub registry_manifest_digest: Option<String>,
+    pub platform_manifest_digest: String,
+    pub local_image_config_id: String,
+    pub runtime_interface: String,
+    pub runtime_interface_label: String,
     pub archive_name: String,
     pub oci_layout_sha256: String,
     pub image_bytes: u64,
@@ -167,7 +172,11 @@ impl CompiledOciInvocation {
         };
         arguments.extend(["--entrypoint".to_owned(), executable.clone()]);
         arguments.push(self.image.clone());
-        arguments.extend(self.command.iter().skip(1).cloned());
+        // Keep the executable as the first post-image argument as well as the
+        // explicit entrypoint. The privileged helper validates this exact
+        // argv shape before it permits a start, and the remaining argv items
+        // stay opaque data supplied by the compiled plan.
+        arguments.extend(self.command.iter().cloned());
         arguments
     }
 }
@@ -281,7 +290,10 @@ pub fn project(
         devices: plan.security.devices.clone(),
         capabilities: plan.security.capabilities.clone(),
         privileged: plan.security.privileged,
-        network_mode: OciNetworkMode::None,
+        network_mode: match plan.security.network_mode.as_str() {
+            "none" => OciNetworkMode::None,
+            _ => return Err(CompiledOciError::Invalid("unsupported network mode")),
+        },
         read_only_root: plan.security.read_only_root,
         no_new_privileges: plan.security.no_new_privileges,
         memory_bytes: plan.runtime.placement.reserved_memory_bytes,
@@ -293,12 +305,17 @@ pub fn project(
     Ok(CompiledOciInvocation {
         image_receipt: OciImageReceipt {
             image_digest: plan.runtime_image.image_digest.clone(),
+            registry_manifest_digest: plan.runtime_image.registry_manifest_digest.clone(),
+            platform_manifest_digest: plan.runtime_image.platform_manifest_digest.clone(),
+            local_image_config_id: plan.runtime_image.local_image_config_id.clone(),
+            runtime_interface: plan.runtime_image.runtime_interface.clone(),
+            runtime_interface_label: plan.runtime_image.runtime_interface_label.clone(),
             archive_name: plan.runtime_image.distribution_object.name.clone(),
             oci_layout_sha256: plan.runtime_image.oci_layout_sha256.clone(),
             image_bytes: plan.runtime_image.image_bytes,
             archive_path: paths.image_archive.clone(),
         },
-        image: plan.runtime.image_digest.clone(),
+        image: plan.runtime_image.local_image_reference(),
         command,
         environment,
         mounts,
@@ -545,13 +562,16 @@ mod tests {
         let podman = invocation.podman_arguments();
         let image_index = podman
             .iter()
-            .position(|item| item == &plan.runtime.image_digest)
+            .position(|item| item == &invocation.image)
             .unwrap();
         assert_eq!(
             &podman[image_index - 2..image_index],
             ["--entrypoint", "/opt/vonk/bin/vllm"]
         );
-        assert_eq!(&podman[image_index + 1..], &plan.runtime.argv);
+        let mut expected_post_image = vec!["/opt/vonk/bin/vllm".to_owned()];
+        expected_post_image.extend(plan.runtime.argv.clone());
+        assert_eq!(&podman[image_index + 1..], expected_post_image.as_slice());
+        assert_eq!(invocation.image, plan.runtime_image.local_image_reference);
         assert!(
             podman
                 .windows(2)

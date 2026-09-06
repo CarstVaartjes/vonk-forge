@@ -697,7 +697,10 @@ def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and
     assert runtime_image["registry_manifest_digest"] != runtime_image["platform_manifest_digest"]
     assert runtime_image["platform_manifest_digest"] == runtime_image["image_digest"]
     assert runtime_image["local_image_config_id"] != runtime_image["image_digest"]
-    assert "local_image_reference" not in runtime_image
+    assert runtime_image["local_image_reference"] == (
+        "localhost/vonk/compiled-runtime-"
+        f"{runtime_image['oci_layout_sha256']}@{runtime_image['platform_manifest_digest']}"
+    )
     assert runtime_image["runtime_interface"] == "vonk.runtime.v1"
     assert runtime_image["runtime_interface_label"] == "v1"
     argv = validated["runtime"]["argv"]

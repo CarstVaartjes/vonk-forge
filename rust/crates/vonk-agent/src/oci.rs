@@ -125,6 +125,10 @@ struct RecipeRunProbe {
 
 pub struct RuntimeStartPlan {
     pub image_digest: String,
+    pub registry_index_digest: String,
+    pub platform_manifest_digest: String,
+    pub archive_sha256: String,
+    pub image_reference: String,
     pub pre_start: Vec<Vec<String>>,
     pub main: Vec<String>,
 }
@@ -132,6 +136,10 @@ pub struct RuntimeStartPlan {
 pub struct RuntimeStopPlan {
     pub remove: Vec<String>,
     pub image_digest: Option<String>,
+    pub registry_index_digest: Option<String>,
+    pub platform_manifest_digest: Option<String>,
+    pub archive_sha256: Option<String>,
+    pub image_reference: Option<String>,
     pub post_stop: Vec<Vec<String>>,
 }
 
@@ -481,11 +489,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         self.write_runtime_contract(spec, installation_id, run_id, placement, None)?;
         let main = self.start_arguments(spec, installation_id, run_id, placement)?;
         let runtime_image_digest = spec.runtime_image.image_digest.clone();
+        let runtime_image_reference = spec.runtime_image.local_image_reference();
         let pre_start = spec
             .lifecycle
             .pre_start
             .iter()
-            .map(|hook| hook_arguments(&main, &runtime_image_digest, hook))
+            .map(|hook| hook_arguments(&main, &runtime_image_reference, hook))
             .collect::<Result<Vec<_>, _>>()?;
         let observation = identity
             .map(|identity| {
@@ -499,7 +508,18 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 {
                     return Err(OciError::Artifact);
                 }
-                let mut arguments = vec![runtime_image_digest.clone()];
+                let registry_index_digest = spec
+                    .runtime_image
+                    .registry_manifest_digest
+                    .clone()
+                    .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone());
+                let platform_manifest_digest = spec.runtime_image.platform_manifest_digest.clone();
+                let mut arguments = vec![
+                    spec.runtime_image.oci_layout_sha256.clone(),
+                    registry_index_digest,
+                    platform_manifest_digest,
+                    runtime_image_reference.clone(),
+                ];
                 arguments.extend(main.clone());
                 let binding = RecipeRunInspectionBinding {
                     artifact_set_digest: self.artifact_set_digest(installation_id)?,
@@ -550,6 +570,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         )?;
         Ok(RuntimeStartPlan {
             image_digest: runtime_image_digest,
+            registry_index_digest: spec
+                .runtime_image
+                .registry_manifest_digest
+                .clone()
+                .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone()),
+            platform_manifest_digest: spec.runtime_image.platform_manifest_digest.clone(),
+            archive_sha256: spec.runtime_image.oci_layout_sha256.clone(),
+            image_reference: spec.runtime_image.local_image_reference(),
             pre_start,
             main,
         })
@@ -583,6 +611,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         }
         Ok(RuntimeStartPlan {
             image_digest: spec.runtime_image.image_digest.clone(),
+            registry_index_digest: spec
+                .runtime_image
+                .registry_manifest_digest
+                .clone()
+                .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone()),
+            platform_manifest_digest: spec.runtime_image.platform_manifest_digest.clone(),
+            archive_sha256: spec.runtime_image.oci_layout_sha256.clone(),
+            image_reference: spec.runtime_image.local_image_reference(),
             pre_start: Vec::new(),
             main: self.start_arguments(spec, installation_id, run_id, placement)?,
         })
@@ -649,23 +685,45 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .as_ref()
             .map(|(spec, _, _, _)| spec.lifecycle.stop_timeout_seconds)
             .unwrap_or(30);
-        let (image_digest, post_stop) = match lifecycle {
+        let (
+            image_digest,
+            registry_index_digest,
+            platform_manifest_digest,
+            archive_sha256,
+            image_reference,
+            post_stop,
+        ) = match lifecycle {
             Some((spec, installation_id, placement, _)) => {
                 let main = self.start_arguments(&spec, &installation_id, run_id, &placement)?;
                 (
                     Some(spec.runtime_image.image_digest.clone()),
+                    Some(
+                        spec.runtime_image
+                            .registry_manifest_digest
+                            .clone()
+                            .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone()),
+                    ),
+                    Some(spec.runtime_image.platform_manifest_digest.clone()),
+                    Some(spec.runtime_image.oci_layout_sha256.clone()),
+                    Some(spec.runtime_image.local_image_reference()),
                     spec.lifecycle
                         .post_stop
                         .iter()
-                        .map(|hook| hook_arguments(&main, &spec.runtime_image.image_digest, hook))
+                        .map(|hook| {
+                            hook_arguments(&main, &spec.runtime_image.local_image_reference(), hook)
+                        })
                         .collect::<Result<Vec<_>, _>>()?,
                 )
             }
-            None => (None, Vec::new()),
+            None => (None, None, None, None, None, Vec::new()),
         };
         Ok(RuntimeStopPlan {
             remove: vec![run_id.to_owned(), stop_timeout.to_string()],
             image_digest,
+            registry_index_digest,
+            platform_manifest_digest,
+            archive_sha256,
+            image_reference,
             post_stop,
         })
     }
@@ -752,7 +810,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             }
             let retained =
                 self.prepare_retained_start(&spec, &installation_id, &run_id, &placement)?;
-            let mut arguments = vec![retained.image_digest];
+            let mut arguments = vec![
+                retained.archive_sha256.clone(),
+                retained.registry_index_digest.clone(),
+                retained.platform_manifest_digest.clone(),
+                retained.image_reference.clone(),
+            ];
             arguments.extend(retained.main);
             if binding.runtime_arguments_sha256
                 != protocol_sha256(
@@ -1342,7 +1405,7 @@ mod tests {
                 "harness_sha256": "c".repeat(64),
                 "build_input_sha256": null,
                 "model_artifact_set_sha256": "d".repeat(64),
-                "model_artifact_bytes": 15
+                "model_artifact_bytes": 16
             },
             "runtime": {
                 "executable": "/opt/vonk/bin/vllm",
@@ -1378,11 +1441,11 @@ mod tests {
                     "file_id": "config-secondary",
                     "path": "config.json",
                     "sha256": secondary,
-                    "size_bytes": 8,
+                    "size_bytes": 9,
                     "roles": ["entrypoint"],
                     "mount": {"target": "/models", "read_only": true},
                     "model": {"publisher": "vonk-forge", "slug": "secondary-model", "content_sha256": "f".repeat(64)},
-                    "distribution_object": {"name": "config.json", "sha256": secondary, "bytes": 8, "kind": "model"}
+                    "distribution_object": {"name": "config.json", "sha256": secondary, "bytes": 9, "kind": "model"}
                 }
             ],
             "runtime_image": {
@@ -1390,6 +1453,7 @@ mod tests {
                 "registry_manifest_digest": format!("sha256:{}", "3".repeat(64)),
                 "platform_manifest_digest": format!("sha256:{}", "1".repeat(64)),
                 "local_image_config_id": format!("sha256:{}", "4".repeat(64)),
+                "local_image_reference": format!("localhost/vonk/compiled-runtime-{}@sha256:{}", "2".repeat(64), "1".repeat(64)),
                 "runtime_interface_label": "v1",
                 "oci_layout_sha256": "2".repeat(64),
                 "image_bytes": 4096,

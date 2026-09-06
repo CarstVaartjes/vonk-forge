@@ -162,7 +162,8 @@ impl ImageImporter<'_> {
             archive_sha256.to_owned(),
             image_bytes.to_string(),
             image_digest.to_owned(),
-            "localhost/vonk/distributed-image".to_owned(),
+            image_digest.to_owned(),
+            format!("localhost/vonk/compiled-runtime-{archive_sha256}@{image_digest}"),
         ]
     }
 
@@ -203,7 +204,11 @@ impl ImageImporter<'_> {
             request.oci_layout_sha256.clone(),
             request.image_bytes.to_string(),
             request.image_digest.clone(),
-            format!("localhost/vonk/recipe-build-{}", request.build_id),
+            request.image_digest.clone(),
+            format!(
+                "localhost/vonk/recipe-build-{}@{}",
+                request.build_id, request.image_digest
+            ),
         ]
     }
 }
