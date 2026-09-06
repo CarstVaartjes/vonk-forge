@@ -127,7 +127,14 @@ def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> Non
         operation = next(iter(child.payload["assignments"].values()))
         assert operation["assignment_id"]
         stored = session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
-        assert stored.payload["distribution_assignment"]["assignment_id"] == operation["assignment_id"]
+        # ArtifactDistributionRequest is a plan reference. The agent fetches
+        # the registered assignment through its authenticated distribution API.
+        assert stored.payload == {
+            "schema_version": 1,
+            "authority_revision": plan.plan_digest,
+            "plan_digest": plan.plan_digest,
+        }
+        assert distribution.authorize(node_id=NODE_A, plan_digest=plan.plan_digest).assignment_id == operation["assignment_id"]
         stored.state = "succeeded"
         stored.current_attempt = 1
         session.add(AgentOperationAttempt(

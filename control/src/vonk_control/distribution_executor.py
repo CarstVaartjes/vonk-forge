@@ -343,7 +343,6 @@ class DurableDistributionPhaseExecutor:
                         "schema_version": 1,
                         "authority_revision": plan.plan_digest,
                         "plan_digest": plan.plan_digest,
-                        "distribution_assignment": assignment.to_mapping(),
                     },
                     operation_id=str(uuid.uuid5(uuid.UUID(child.id), node_id)),
                 )
