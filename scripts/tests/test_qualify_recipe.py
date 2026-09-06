@@ -4,7 +4,9 @@ import json
 import os
 import subprocess
 import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 
 import pytest
 
@@ -51,10 +53,11 @@ def _run(recipe: Path, library_root: Path) -> dict[str, object]:
     return json.loads(result.stdout)
 
 
-def test_archive_safety_rejects_traversal_and_payloads() -> None:
+def test_archive_safety_rejects_traversal_and_reserved_payload_namespaces() -> None:
     namespace = __import__("runpy").run_path(str(SCRIPT))
     safe_member = namespace["_safe_member"]
     safe_member("adapters/example/Dockerfile")
+    safe_member("adapters/example/weights.pt")
     for member in ("../escape", "/absolute", "weights/model.safetensors", "oci/image.tar"):
         with pytest.raises(namespace["QualificationError"]):
             safe_member(member)
@@ -94,6 +97,147 @@ def test_structural_examples_cover_source_job_and_dual_contracts() -> None:
             assert payload["compiled_roles"] > 1
     if "image" in selected:
         assert _run(selected["image"], root)["source_build"] is False
+
+
+def test_qualifier_local_http_persists_and_reloads_evidence_ledger(tmp_path: Path) -> None:
+    root = _library_root()
+    recipe = root / "recipes" / "qwen3-8-27b-nvfp4-dspark-sglang-single.json"
+    if not recipe.is_file():
+        pytest.skip("the v1.0.3 GLM/Qwen producer fixture is unavailable")
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self._write({"data": [{"id": "qwen3-8-27b"}]})
+
+        def do_POST(self) -> None:
+            size = int(self.headers["Content-Length"] or 0)
+            json.loads(self.rfile.read(size))
+            self._write({"choices": [{"message": {"content": "fixture response"}}], "usage": {"completion_tokens": 1}})
+
+        def _write(self, payload: dict[str, object]) -> None:
+            encoded = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    ledger_path = tmp_path / "qualification.jsonl"
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--recipe",
+                str(recipe),
+                "--library-root",
+                str(root),
+                "--platform-root",
+                str(ROOT),
+                "--level",
+                "structural",
+                "--serving-url",
+                f"http://127.0.0.1:{server.server_port}",
+                "--evidence-ledger",
+                str(ledger_path),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        server.shutdown()
+        worker.join(timeout=2)
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["serving"]["scope"] == "local-http"
+    sys.path.insert(0, str(ROOT / "src"))
+    from cluster_profiles.fleet_qualification import EvidenceLedger
+
+    ledger = EvidenceLedger(ledger_path)
+    assert [row["event"] for row in ledger.records] == [
+        "step.started",
+        "step.completed",
+        "step.started",
+        "step.completed",
+    ]
+    assert all(row["payload"]["step"].startswith("serving.") for row in ledger.records)
+
+
+def test_qualifier_local_http_failure_persists_failed_step(tmp_path: Path) -> None:
+    root = _library_root()
+    recipe = root / "recipes" / "qwen3-8-27b-nvfp4-dspark-sglang-single.json"
+    if not recipe.is_file():
+        pytest.skip("the v1.0.3 GLM/Qwen producer fixture is unavailable")
+
+    class FailureHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self._write({"data": [{"id": "qwen3-8-27b"}]})
+
+        def do_POST(self) -> None:
+            size = int(self.headers["Content-Length"] or 0)
+            self.rfile.read(size)
+            self._write({"choices": [{"message": {"content": ""}}]})
+
+        def _write(self, payload: dict[str, object]) -> None:
+            encoded = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FailureHandler)
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    ledger_path = tmp_path / "qualification-failed.jsonl"
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--recipe",
+                str(recipe),
+                "--library-root",
+                str(root),
+                "--platform-root",
+                str(ROOT),
+                "--level",
+                "structural",
+                "--serving-url",
+                f"http://127.0.0.1:{server.server_port}",
+                "--evidence-ledger",
+                str(ledger_path),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        server.shutdown()
+        worker.join(timeout=2)
+    assert result.returncode == 1
+    sys.path.insert(0, str(ROOT / "src"))
+    from cluster_profiles.fleet_qualification import EvidenceLedger
+
+    ledger = EvidenceLedger(ledger_path)
+    assert [row["event"] for row in ledger.records] == [
+        "step.started",
+        "step.completed",
+        "step.started",
+        "step.failed",
+    ]
 
 
 def test_container_gate_reports_environment_without_spark_claim(tmp_path: Path) -> None:
