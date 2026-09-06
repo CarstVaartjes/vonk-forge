@@ -42,6 +42,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import FileResponse, StreamingResponse
 from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
 
 from .agent_api import (
     MAX_RECIPE_IMAGE_BYTES,
@@ -137,7 +138,7 @@ _RECIPE_IMAGE_UPLOAD = re.compile(
 )
 _LOGIN_PATH = "/api/v1/auth/login"
 _TELEMETRY_PATH = "/agent/v1/telemetry"
-_MAX_TELEMETRY_BODY_BYTES = 1_048_576
+_MAX_TELEMETRY_BODY_BYTES = MAX_TELEMETRY_REPORT_BYTES
 _ARTIFACT_INPUT_UPLOAD = re.compile(
     r"/api/v1/artifact-jobs/[0-9a-f-]{36}/inputs/[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z"
 )

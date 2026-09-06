@@ -23,6 +23,7 @@ const SEQUENCE_STATE_KEY: &str = "telemetry_sequence_v1";
 const SEQUENCE_LIMIT_EXCLUSIVE: u64 = i64::MAX as u64 + 1;
 pub const TELEMETRY_STATE_FILENAME: &str = "telemetry-state.sqlite";
 pub const MAX_REPORT_SAMPLES: usize = 16;
+const REPORT_BATCH_TARGET_BYTES: usize = 1024 * 1024;
 pub const COLLECTION_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_ACCELERATORS: usize = 16;
 const MAX_STORAGE_DEVICES: usize = 32;
@@ -30,6 +31,14 @@ const MAX_NETWORK_INTERFACES: usize = 32;
 const MAX_GPU_PROCESSES: usize = 5;
 const MAX_METRIC_SERIES: usize = 512;
 const MAX_CAPABILITIES: usize = 128;
+
+/// The exact wire envelope shared by batching and HTTP serialization.
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TelemetryRequest<'a> {
+    pub schema_version: u8,
+    pub samples: &'a [TelemetrySample],
+}
 
 #[derive(Debug, Error)]
 pub enum TelemetryError {
@@ -1773,11 +1782,24 @@ impl TelemetryQueue {
     }
 
     pub fn batch(&self) -> Vec<TelemetrySample> {
-        self.samples
-            .iter()
-            .take(MAX_REPORT_SAMPLES)
-            .cloned()
-            .collect()
+        let mut batch = Vec::new();
+        for sample in self.samples.iter().take(MAX_REPORT_SAMPLES) {
+            batch.push(sample.clone());
+            let request = TelemetryRequest {
+                schema_version: 1,
+                samples: &batch,
+            };
+            if batch.len() > 1
+                && serde_json::to_vec(&request)
+                    .is_ok_and(|body| body.len() > REPORT_BATCH_TARGET_BYTES)
+            {
+                batch.pop();
+                break;
+            }
+        }
+        // A larger valid sample travels alone. Splitting a batch never
+        // changes its samples, sequence numbers, or acknowledgement state.
+        batch
     }
 
     pub fn acknowledge_prefix(&mut self, count: usize) -> Result<(), TelemetryError> {
@@ -1921,12 +1943,6 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
         || metrics.runtimes.len() > 32
         || metrics.workloads.len() > 128
     {
-        return false;
-    }
-    let Ok(encoded) = serde_json::to_vec(metrics) else {
-        return false;
-    };
-    if encoded.len() > 48 * 1024 {
         return false;
     }
     let mut series_identities = std::collections::BTreeSet::new();

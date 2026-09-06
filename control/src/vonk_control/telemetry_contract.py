@@ -8,7 +8,6 @@ unit, source, or whether a value is measured from a metric name.
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from datetime import datetime
@@ -42,7 +41,6 @@ _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _SOURCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _MAX_TELEMETRY_BYTES = 16 * 1024**4
 _MAX_RATE = 1_000_000_000_000_000.0
-_MAX_METRICS_BYTES = 48 * 1024
 
 
 class TelemetryContractModel(BaseModel):
@@ -244,8 +242,8 @@ class TelemetryWorkload(TelemetryContractModel):
     engine_id: Annotated[str, Field(min_length=1, max_length=128)]
     state: TelemetryWorkloadState
     origin_node_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
-    executor_node_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
-        max_length=64
+    executor_node_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = (
+        Field(max_length=64)
     )
     created_at: datetime | None = None
     started_at: datetime | None = None
@@ -309,14 +307,9 @@ class TelemetryMetrics(TelemetryContractModel):
         ]
         if len(capability_keys) != len(set(capability_keys)):
             raise ValueError("telemetry capability identity is duplicated")
-        encoded = json.dumps(
-            self.model_dump(mode="json"),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-        if len(encoded) > _MAX_METRICS_BYTES:
-            raise ValueError("telemetry metrics payload is too large")
+        # Field types, lengths, and collection cardinalities bound this
+        # document. A valid sensor inventory must not be rejected merely
+        # because its serialized representation crosses an unrelated limit.
         return self
 
 

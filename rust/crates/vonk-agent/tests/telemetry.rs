@@ -990,6 +990,97 @@ fn malformed_or_oversized_optional_evidence_is_bounded_to_null_metrics() {
 }
 
 #[test]
+fn queue_splits_encoded_batches_without_dropping_or_reordering_metrics() {
+    let fixtures = Fixtures::new();
+    let mut collector = TelemetryCollector::new(
+        runner(b"NVIDIA GB10, 25, [N/A], [N/A], 45.5, 17.25, P0\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let started = Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap();
+    let mut queue = TelemetryQueue::new();
+    let mut expected = Vec::new();
+    for offset in 0..15 {
+        let mut sample = collector
+            .sample_at(None, started + chrono::Duration::seconds(offset * 2))
+            .unwrap();
+        let template = sample.metrics.series[0].clone();
+        sample.metrics.series = (0..512)
+            .map(|index| {
+                let mut series = template.clone();
+                series.key = format!("test.metric_{index}");
+                series.value = json!("value".repeat(30));
+                series
+            })
+            .collect();
+        expected.push(sample.clone());
+        queue.push(sample);
+    }
+    let mut received = Vec::new();
+    let mut batches = 0;
+    while !queue.is_empty() {
+        let batch = queue.batch();
+        assert!(!batch.is_empty());
+        let wire = serde_json::to_vec(&json!({"schema_version":1,"samples":&batch})).unwrap();
+        assert!(wire.len() <= 1024 * 1024);
+        assert_eq!(
+            queue.batch(),
+            batch,
+            "retry must preserve unacknowledged samples"
+        );
+        queue.acknowledge_prefix(batch.len()).unwrap();
+        received.extend(batch);
+        batches += 1;
+    }
+    assert!(batches > 1);
+    assert_eq!(received, expected);
+}
+
+#[test]
+fn queue_sends_large_unicode_sample_alone_without_truncation() {
+    let fixtures = Fixtures::new();
+    let mut collector = TelemetryCollector::new(
+        runner(b"NVIDIA GB10, 25, [N/A], [N/A], 45.5, 17.25, P0\n"),
+        FakeFileSystem {
+            capacity: FileSystemCapacity {
+                total_bytes: 10_000,
+                free_bytes: 4_000,
+            },
+        },
+        fixtures.paths(),
+        boot_id(),
+    )
+    .unwrap();
+    let mut sample = collector.sample(None).unwrap();
+    let template = sample.metrics.series[0].clone();
+    sample.metrics.series = (0..512)
+        .map(|index| {
+            let mut series = template.clone();
+            series.key = format!("test.metric_{index}");
+            series.process_name = Some("測".repeat(128));
+            series.value = json!("測".repeat(256));
+            series.support_status = "unavailable".into();
+            series.reason = Some("測".repeat(256));
+            series
+        })
+        .collect();
+    let mut queue = TelemetryQueue::new();
+    queue.push(sample.clone());
+    let batch = queue.batch();
+    assert_eq!(batch, vec![sample]);
+    let wire = serde_json::to_vec(&json!({"schema_version":1,"samples":&batch})).unwrap();
+    assert!(wire.len() > 1024 * 1024);
+    assert!(wire.len() < 16 * 1024 * 1024);
+}
+
+#[test]
 fn queue_keeps_fifteen_samples_and_preserves_exact_gap_on_the_oldest_retained() {
     let fixtures = Fixtures::new();
     let runner = runner(b"NVIDIA GB10, 25, [N/A], [N/A], 45.5, 17.25, P0\n");

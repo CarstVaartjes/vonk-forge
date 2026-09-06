@@ -60,6 +60,11 @@ language's real parser and validator, in both directions.
   structure, provider authentication, transport failure, and an engine rejecting
   an option. Keep secrets out of errors.
 
+Telemetry preserves complete valid samples. The agent batches toward 1 MiB,
+sends a larger sample on its own, and retries without dropping or reordering
+metrics. The authenticated endpoint and shared parser use the same 16 MiB
+transport memory ceiling; there is no separate serialized metrics-size limit.
+
 ## Verify the handoff
 
 Exercise API and worker instances with separate process-local state, real

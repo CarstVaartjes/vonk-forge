@@ -108,13 +108,6 @@ pub struct ExactRecipeRunObservation {
 
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
-struct TelemetryRequest<'a> {
-    schema_version: u8,
-    samples: &'a [TelemetrySample],
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
 struct RenewRequest<'a> {
     csr: &'a str,
     node_id: &'a str,
@@ -1098,7 +1091,7 @@ impl AgentHttpClient {
             .client
             .post(self.endpoint("/agent/v1/telemetry")?)
             .timeout(Duration::from_secs(1))
-            .json(&TelemetryRequest {
+            .json(&crate::telemetry::TelemetryRequest {
                 schema_version: 1,
                 samples,
             })
@@ -2317,6 +2310,41 @@ mod tests {
             ));
             server.join().unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn telemetry_posts_large_valid_metrics_without_content_loss() {
+        let mut sample = telemetry_sample(1);
+        sample.metrics.series = (0..143)
+            .map(|index| {
+                serde_json::from_value(json!({
+                    "key": format!("device.metric_{index}"), "scope": "node",
+                    "process_name": "測".repeat(128), "value": "測".repeat(256),
+                    "unit": "state", "source": "native-collector",
+                    "measurement_kind": "measured", "observed_at": sample.observed_at,
+                    "freshness": "fresh", "freshness_threshold_seconds": 6.0,
+                    "support_status": "available", "aggregation": "last"
+                }))
+                .unwrap()
+            })
+            .collect();
+        let (client, server) = observation_client(204);
+        client
+            .report_telemetry(std::slice::from_ref(&sample))
+            .await
+            .unwrap();
+        let request = server.join().unwrap();
+        let index = request
+            .windows(4)
+            .position(|value| value == b"\r\n\r\n")
+            .unwrap()
+            + 4;
+        let body: Value = serde_json::from_slice(&request[index..]).unwrap();
+        assert!(request.len() - index > 64 * 1024);
+        assert_eq!(
+            body["samples"][0]["metrics"]["series"],
+            json!(sample.metrics.series)
+        );
     }
 
     #[tokio::test]

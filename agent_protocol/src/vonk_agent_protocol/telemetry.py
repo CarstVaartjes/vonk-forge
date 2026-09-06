@@ -13,11 +13,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from .contracts import (
-    MAX_DOCUMENT_BYTES,
     AgentProtocolError,
     canonical_message,
     schema_validator,
 )
+
+# The sender batches toward a smaller soft target. This is an authenticated
+# transport memory safeguard, not a limit on a valid metrics inventory.
+MAX_TELEMETRY_REPORT_BYTES = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -31,9 +34,11 @@ class TelemetryReport:
             raise AgentProtocolError("telemetry report must be an object")
         errors = list(schema_validator("telemetry-report.schema.json").iter_errors(raw))
         if errors:
-            raise AgentProtocolError(f"telemetry report schema is invalid: {errors[0].message}")
+            raise AgentProtocolError(
+                f"telemetry report schema is invalid: {errors[0].message}"
+            )
         encoded = canonical_message(raw)
-        if len(encoded) > MAX_DOCUMENT_BYTES:
+        if len(encoded) > MAX_TELEMETRY_REPORT_BYTES:
             raise AgentProtocolError("telemetry report is too large")
         document = json.loads(encoded)
         samples = tuple(document["samples"])

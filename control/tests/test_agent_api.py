@@ -399,10 +399,13 @@ def chunked_asgi_telemetry(
     *,
     extra_headers: tuple[tuple[bytes, bytes], ...],
 ) -> tuple[int, int]:
+    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+
     async def request() -> tuple[int, int]:
         chunks = [
-            b'{"schema_version":1,"samples":[],"padding":"' + b"x" * (40 * 1024),
-            b"x" * (40 * 1024),
+            b'{"schema_version":1,"samples":[],"padding":"'
+            + b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
+            b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
             b'"}',
         ]
         reads = 0
@@ -454,6 +457,68 @@ def chunked_asgi_telemetry(
         return int(start["status"]), reads
 
     return asyncio.run(request())
+
+
+@pytest.mark.parametrize("series_count", [143, 512])
+def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
+    agent_system,
+    series_count: int,
+) -> None:
+    from vonk_agent_protocol import TelemetryReport
+    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+
+    client, services, _, clock = agent_system
+    payload = telemetry_payload(clock)
+    sampled = payload["samples"][0]
+    series = [
+        {
+            "key": f"device.metric_{index}",
+            "scope": "node",
+            "process_name": "測" * 128,
+            "value": "測" * 256,
+            "unit": "state",
+            "source": "native-collector",
+            "measurement_kind": "measured",
+            "observed_at": sampled["observed_at"],
+            "freshness": "fresh",
+            "freshness_threshold_seconds": 6.0,
+            "support_status": "available",
+            "aggregation": "last",
+        }
+        for index in range(series_count)
+    ]
+    sampled["metrics"] = {
+        "schema_version": 2,
+        "series": series,
+        "capabilities": [],
+        "runtimes": [],
+        "workloads": [],
+        "provenance": {
+            "collector": "native-collector",
+            "collector_version": "2",
+            "host_uptime_seconds": 1,
+            "source_observed_at": sampled["observed_at"],
+        },
+    }
+    encoded = canonical_message(payload)
+    assert 64 * 1024 < len(encoded) < MAX_TELEMETRY_REPORT_BYTES
+    assert (
+        len(TelemetryReport.parse(payload).samples[0]["metrics"]["series"])
+        == series_count
+    )
+    response = client.post(
+        "/agent/v1/telemetry",
+        headers=agent_headers(NODE_A, "serial-a"),
+        content=encoded,
+    )
+    assert response.status_code == 204, response.text
+    with services.sessions() as session:
+        row = session.scalar(select(NodeTelemetrySample))
+        assert row is not None
+        assert [item["key"] for item in row.metrics["series"]] == [
+            item["key"] for item in series
+        ]
+        assert all(item["value"] == "測" * 256 for item in row.metrics["series"])
 
 
 def test_agent_posts_authenticated_telemetry_for_certificate_node(
@@ -874,6 +939,7 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
 
     assert response.status_code == 204
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
     assert storage.verify_existing(layout_digest, len(payload)).read_bytes() == payload
     assert not (services.artifact_root / layout_digest).exists()
@@ -3462,6 +3528,7 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
     payload = b"accepted recipe image archive"
     digest = hashlib.sha256(payload).hexdigest()
     from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
     storage = FilesystemRuntimeImageStorage(services.artifact_root)
     (storage.root / digest).write_bytes(payload)
     services.operations.enqueue(
