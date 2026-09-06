@@ -72,13 +72,15 @@ test("does not offer cache retry for terminal integrity failures", async () => {
 
 test("checks Model access and resumes the retained exact operation", async () => {
   const model = librarySnapshot.models[0]!;
-  const failed = cacheOperation({failure: {code: "access_required", detail: "Model access is required", retryable: true, recovery_actions: ["open_model_access", "configure_hf_token", "check_access_and_resume"], retry_time: null, retry_after_seconds: null, log_excerpt: null, required_bytes: null, free_bytes: null, shortfall_bytes: null}});
+  const failed = cacheOperation({failure: {code: "access_required", detail: "Model access is required", retryable: false, recovery_actions: ["open_model_access", "configure_hf_token", "check_access_and_resume"], retry_time: null, retry_after_seconds: null, log_excerpt: null, required_bytes: null, free_bytes: null, shortfall_bytes: null}});
   const resumed = cacheOperation({state: "queued", failure: null, updated_at: "2026-09-06T12:02:00Z"});
   const downloadModelCache = vi.fn(async () => failed);
   const checkModelCacheAccessAndResume = vi.fn(async () => resumed);
   render(<LibraryModelDownloadAction api={{previewModelCacheDownload: vi.fn(async () => ({schema_version: 2 as const, artifact_set_sha256: failed.artifact_set_sha256!, plan_digest: failed.plan_digest!, source_policy: "nas-first" as const, artifact_count: 2, expected_bytes: 20, already_cached_bytes: 10, new_bytes: 10, blockers: [], warnings: []})), downloadModelCache, checkModelCacheAccessAndResume} as never} model={model} modelAccessUrl="https://huggingface.co/example/model"/>);
 
   await act(async () => { fireEvent.click(screen.getByRole("button", {name: "Make available"})); });
+  expect(await screen.findByRole("button", {name: "Check access and resume"})).toBeVisible();
+  expect(screen.queryByRole("button", {name: "Retry download"})).not.toBeInTheDocument();
   await act(async () => { fireEvent.click(await screen.findByRole("button", {name: "Check access and resume"})); });
   expect(checkModelCacheAccessAndResume).toHaveBeenCalledWith(failed.id, {schema_version: 2, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/), artifact_set_sha256: failed.artifact_set_sha256, plan_digest: failed.plan_digest});
   expect(screen.getByText("Downloading to NAS…")).toBeVisible();
