@@ -233,6 +233,21 @@ class RuntimeImageReceipt:
         return asdict(self)
 
 
+def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 2:
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_invalid",
+            "runtime image receipt schema version is unsupported",
+        )
+    try:
+        return RuntimeImageReceipt(**dict(value))
+    except (TypeError, ValueError, KeyError) as error:
+        raise RuntimeImagePreparationError(
+            "runtime_image.receipt_unavailable",
+            "runtime image receipt is unavailable or malformed",
+        ) from error
+
+
 def persist_runtime_image_receipt(
     session: Session,
     *,
@@ -504,9 +519,9 @@ class FilesystemRuntimeImageStorage:
         for receipt_path in sorted(self.root.glob("*.receipt.json")):
             try:
                 value = json.loads(receipt_path.read_text(encoding="utf-8"))
-                if not isinstance(value, Mapping):
-                    raise TypeError
-                receipt = RuntimeImageReceipt(**dict(value))
+                receipt = _parse_runtime_image_receipt(value)
+            except RuntimeImagePreparationError:
+                raise
             except (OSError, TypeError, ValueError, KeyError) as error:
                 raise RuntimeImagePreparationError(
                     "runtime_image.receipt_unavailable",
@@ -559,9 +574,9 @@ class FilesystemRuntimeImageStorage:
         for receipt_path in sorted(self.root.glob("*.receipt.json")):
             try:
                 value = json.loads(receipt_path.read_text(encoding="utf-8"))
-                if not isinstance(value, Mapping):
-                    raise TypeError
-                receipt = RuntimeImageReceipt(**dict(value))
+                receipt = _parse_runtime_image_receipt(value)
+            except RuntimeImagePreparationError:
+                raise
             except (OSError, TypeError, ValueError, KeyError) as error:
                 raise RuntimeImagePreparationError(
                     "runtime_image.receipt_unavailable",
@@ -595,9 +610,9 @@ class FilesystemRuntimeImageStorage:
         path = self.root / f"{archive_sha256}.receipt.json"
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(value, Mapping):
-                raise TypeError
-            return RuntimeImageReceipt(**dict(value))
+            return _parse_runtime_image_receipt(value)
+        except RuntimeImagePreparationError:
+            raise
         except (OSError, TypeError, ValueError, KeyError) as error:
             raise RuntimeImagePreparationError(
                 "runtime_image.receipt_unavailable", "runtime image receipt is unavailable or malformed"

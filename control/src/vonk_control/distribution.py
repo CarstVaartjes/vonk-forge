@@ -263,10 +263,41 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
         except (RuntimeImagePreparationError, OSError, ValueError):
             return False
 
+    def _published_recipe_requests(self, image_digest: str) -> bool:
+        """Return whether an active Recipe claims this digest as a published image."""
+
+        with self.sessions() as session:
+            revisions = session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                )
+            )
+            for revision in revisions:
+                execution = revision.document.get("execution")
+                image = execution.get("image") if isinstance(execution, Mapping) else None
+                raw_digest = image.get("digest") if isinstance(image, Mapping) else None
+                expected = (
+                    raw_digest
+                    if isinstance(raw_digest, str) and raw_digest.startswith("sha256:")
+                    else f"sha256:{raw_digest}"
+                    if isinstance(raw_digest, str)
+                    else None
+                )
+                if expected == image_digest:
+                    return True
+        return False
+
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
-        return self._published_receipt_authorizes(image_digest, archive_sha256) or super().verify_runtime_image(
-            image_digest, archive_sha256
-        )
+        if self._published_receipt_authorizes(image_digest, archive_sha256):
+            return True
+        # A canonical published-image request must never fall through to a
+        # coincidentally matching RecipeBuild archive after its own receipt or
+        # SQL authority fails.  Build fallback remains valid only for digests
+        # no active published Recipe claims.
+        if self._published_recipe_requests(image_digest):
+            return False
+        return super().verify_runtime_image(image_digest, archive_sha256)
 
     def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
         if self._published_archive_authorizes(digest, expected_bytes):

@@ -192,6 +192,35 @@ def test_corrupt_prebuilt_receipt_fails_before_redownload(tmp_path: Path) -> Non
     assert len(transport.calls) == 1
 
 
+def test_non_schema_two_receipt_is_rejected_by_all_read_paths(tmp_path: Path) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    receipt_path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
+    value = json.loads(receipt_path.read_text(encoding="utf-8"))
+    value["schema_version"] = 1
+    receipt_path.write_text(json.dumps(value), encoding="utf-8")
+    for read in (
+        lambda: storage.find_published(
+            IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        ),
+        lambda: storage.find_verified(
+            IMAGE_DIGEST,
+            expected_architecture="linux/arm64",
+            expected_runtime_interface="vonk.runtime.v1",
+        ),
+        lambda: storage.read_receipt(receipt.oci_archive_sha256),
+    ):
+        with pytest.raises(RuntimeImagePreparationError, match="schema version"):
+            read()
+
+
 def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
