@@ -256,14 +256,20 @@ def resolve_effective_settings(value: Mapping[str, object] | object) -> Settings
             dimensions[name] = None
         else:
             dimensions[name] = value
-    world_size = topology_map.get("node_count") if topology_map else None
-    if type(world_size) is not int or world_size < 1:
+    node_count = topology_map.get("node_count") if topology_map else None
+    if type(node_count) is not int or node_count < 1:
         reasons.append(_reason("resource.parallelism_type", "Canonical topology node_count is invalid."))
-        world_size = 1
+        node_count = None
+    world_size = parallel.get("world_size")
+    if type(world_size) is not int or world_size < 1:
+        reasons.append(_reason("resource.parallelism_type", "Canonical topology parallelism world_size is invalid."))
+        world_size = None
     if all(dimensions[name] is not None for name in ("tensor", "pipeline", "data")):
         product = dimensions["tensor"] * dimensions["pipeline"] * dimensions["data"]
-        if product != world_size:
-            reasons.append(_reason("resource.parallelism_inconsistent", "Topology parallelism product does not equal node_count."))
+        if world_size is not None and product != world_size:
+            reasons.append(_reason("resource.parallelism_inconsistent", "Topology parallelism product does not equal declared world_size."))
+        if node_count is not None and world_size is not None and world_size != node_count:
+            reasons.append(_reason("resource.parallelism_inconsistent", "Declared parallelism world_size does not equal node_count."))
     backend = parallel.get("backend")
     if not isinstance(backend, str) or not backend:
         reasons.append(_reason("resource.parallelism_type", "Canonical topology parallelism backend is invalid."))

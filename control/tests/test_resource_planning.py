@@ -30,6 +30,7 @@ def _recipe_document(settings: dict[str, object]) -> dict[str, object]:
         "topology": {
             "node_count": 2,
             "parallelism": {
+                "world_size": 2,
                 "tensor": 2,
                 "pipeline": 1,
                 "data": 1,
@@ -73,7 +74,7 @@ def test_non_text_settings_may_omit_context_concurrency_and_batch() -> None:
             "settings": {"kind": "job", "knobs": {}},
             "topology": {
                 "node_count": 1,
-                "parallelism": {"tensor": 1, "pipeline": 1, "data": 1, "backend": "local"},
+                "parallelism": {"world_size": 1, "tensor": 1, "pipeline": 1, "data": 1, "backend": "local"},
             },
         }
     )
@@ -82,7 +83,7 @@ def test_non_text_settings_may_omit_context_concurrency_and_batch() -> None:
     assert demand.allowed and demand.total_bytes == 120
 
 
-def test_parallelism_is_derived_from_topology_and_duplicate_is_blocked() -> None:
+def test_parallelism_has_one_topology_authority_and_duplicate_is_blocked() -> None:
     result = resolve_effective_settings(
         {
             "settings": {"kind": "job", "parallelism": {"world_size": 99}},
@@ -94,6 +95,26 @@ def test_parallelism_is_derived_from_topology_and_duplicate_is_blocked() -> None
     )
     assert not result.allowed
     assert any(reason.code == "resource.parallelism_duplicate" for reason in result.reasons)
+
+
+def test_declared_world_size_must_match_node_count_and_dimension_product() -> None:
+    result = resolve_effective_settings(
+        {
+            "settings": {"kind": "job", "knobs": {}},
+            "topology": {
+                "node_count": 2,
+                "parallelism": {
+                    "world_size": 4,
+                    "tensor": 2,
+                    "pipeline": 1,
+                    "data": 1,
+                    "backend": "local",
+                },
+            },
+        }
+    )
+    assert not result.allowed
+    assert any(reason.code == "resource.parallelism_inconsistent" for reason in result.reasons)
 
 
 def test_capacity_only_uses_explicit_planned_stop_release() -> None:

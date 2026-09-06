@@ -365,57 +365,68 @@ def _settings_view(settings: object) -> EffectiveSettingsSelection:
 
 def _selected_model_bytes(
     recipe_document: Mapping[str, object],
-    model_document: Mapping[str, object] | None,
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
     role_name: str,
 ) -> int | None:
-    if model_document is None:
+    if not model_documents:
         return None
-    files = model_document.get("files")
     selections = recipe_document.get("models")
-    if not isinstance(files, Sequence) or isinstance(files, (str, bytes)):
-        return None
     if not isinstance(selections, Sequence) or isinstance(selections, (str, bytes)):
         return None
-    by_id = {
-        str(file.get("id")): file
-        for file in files
-        if isinstance(file, Mapping) and isinstance(file.get("id"), str)
-    }
-    selected_ids: set[str] = set()
+    total = 0
+    selected_any = False
     for selection in selections:
         if not isinstance(selection, Mapping):
             return None
+        model_ref = selection.get("model")
+        if not isinstance(model_ref, Mapping):
+            return None
+        reference = tuple(model_ref.get(name) for name in ("publisher", "slug", "content_sha256"))
+        if any(not isinstance(value, str) or not value for value in reference):
+            return None
+        model_document = model_documents.get(reference)
+        if model_document is None:
+            return None
+        files = model_document.get("files")
+        if not isinstance(files, Sequence) or isinstance(files, (str, bytes)):
+            return None
+        by_id = {
+            str(file.get("id")): file
+            for file in files
+            if isinstance(file, Mapping) and isinstance(file.get("id"), str)
+        }
         raw_files = selection.get("files")
         if not isinstance(raw_files, Sequence) or isinstance(raw_files, (str, bytes)):
             return None
+        selected_ids: set[str] = set()
         for item in raw_files:
             if not isinstance(item, Mapping):
                 return None
             roles = item.get("roles", ())
-            if isinstance(roles, Sequence) and role_name in roles:
+            if isinstance(roles, Sequence) and not isinstance(roles, (str, bytes)) and role_name in roles:
                 file_id = item.get("file_id")
                 if not isinstance(file_id, str) or file_id not in by_id:
                     return None
                 selected_ids.add(file_id)
-    total = 0
-    for file_id in selected_ids:
-        size = by_id[file_id].get("size_bytes")
-        if type(size) is not int or size < 0:
-            return None
-        total += size
-    return total if selected_ids else None
+        for file_id in selected_ids:
+            size = by_id[file_id].get("size_bytes")
+            if type(size) is not int or size < 0:
+                return None
+            total += size
+            selected_any = True
+    return total if selected_any else None
 
 
 def _resource_evidence(
     recipe_document: Mapping[str, object],
     memory: Mapping[str, object],
     role_name: str,
-    model_document: Mapping[str, object] | None,
+    model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None,
     declared_total_bytes: int,
     settings: object | None,
 ) -> ResourceEvidence:
     del memory
-    model_bytes = _selected_model_bytes(recipe_document, model_document, role_name)
+    model_bytes = _selected_model_bytes(recipe_document, model_documents, role_name)
     return ResourceEvidence(
         weights_bytes=model_bytes,
         runtime_overhead_bytes=None,
@@ -427,12 +438,8 @@ def _resource_evidence(
     )
 
 
-def _resource_evidence_digest(
-    recipe_document: Mapping[str, object], role_name: str
-) -> str | None:
-    del role_name
-    digest = recipe_document.get("identity_sha256")
-    return digest if isinstance(digest, str) and len(digest) == 64 else None
+def _resource_evidence_digest(revision_digest: str | None) -> str | None:
+    return revision_digest if isinstance(revision_digest, str) and len(revision_digest) == 64 else None
 
 
 def _planned_stop_releases(
@@ -1368,7 +1375,7 @@ class RunSwitchOperationService:
                 else _string_or_none(run.plan.get("model_version_sha256"))
             )
             recipe_digest = revision.content_digest if revision is not None else None
-            _model_document, model_caps, recipe_caps, _document_blockers = self._resolve_documents(
+            _model_document, _model_documents, model_caps, recipe_caps, _document_blockers = self._resolve_documents(
                 session,
                 revision,
                 model_digest,
@@ -1676,7 +1683,7 @@ class RunSwitchOperationService:
                         scope="model",
                     )
                 )
-            _model_document, model_caps, recipe_caps, document_blockers = self._resolve_documents(
+            _model_document, model_documents, model_caps, recipe_caps, document_blockers = self._resolve_documents(
                 session,
                 revision,
                 request.model_version_sha256,
@@ -1714,7 +1721,8 @@ class RunSwitchOperationService:
                 now=now,
                 excluded_run_ids=(),
                 effective_settings=effective_settings,
-                model_document=_model_document,
+                model_documents=model_documents,
+                revision_digest=revision.content_digest if revision is not None else None,
             )
             fit_after_stop = None
             after_fit_blockers: list[RunSwitchReason] = []
@@ -1727,7 +1735,8 @@ class RunSwitchOperationService:
                     now=now,
                     excluded_run_ids=stopped_run_ids,
                     effective_settings=effective_settings,
-                    model_document=_model_document,
+                    model_documents=model_documents,
+                    revision_digest=revision.content_digest if revision is not None else None,
                     planned_stops=stops,
                 )
                 # A current capacity failure caused only by the workload that
@@ -2033,16 +2042,18 @@ class RunSwitchOperationService:
         requested_recipe_digest: str | None,
     ) -> tuple[
         Mapping[str, object] | None,
+        Mapping[tuple[str, str, str], Mapping[str, object]],
         list[CapabilityEvidence],
         list[CapabilityEvidence],
         list[RunSwitchReason],
     ]:
         blockers: list[RunSwitchReason] = []
         model_document: Mapping[str, object] | None = None
+        model_documents: dict[tuple[str, str, str], Mapping[str, object]] = {}
         recipe_caps = _recipe_capability_facts(revision.document if revision is not None else None)
         model_caps: list[CapabilityEvidence] = []
         if revision is None:
-            return None, [], recipe_caps, blockers
+            return None, {}, [], recipe_caps, blockers
         if requested_recipe_digest is not None and revision.content_digest != requested_recipe_digest:
             blockers.append(
                 _as_reason(
@@ -2055,13 +2066,24 @@ class RunSwitchOperationService:
         try:
             resolved = resolve_recipe_entities(session, revision.document)
             resolved_models = resolved.get("models")
-            resolved_model = (
-                resolved_models[0]
+            resolved_model_items = (
+                tuple(resolved_models)
                 if isinstance(resolved_models, Sequence)
                 and not isinstance(resolved_models, (str, bytes))
-                and resolved_models
-                else None
+                else ()
             )
+            resolved_model = resolved_model_items[0] if resolved_model_items else None
+            for resolved_item in resolved_model_items:
+                candidate_item = getattr(resolved_item, "document", None)
+                if not isinstance(candidate_item, Mapping):
+                    continue
+                reference = (
+                    getattr(resolved_item, "publisher", None),
+                    getattr(resolved_item, "slug", None),
+                    getattr(resolved_item, "content_digest", None),
+                )
+                if all(isinstance(value, str) and value for value in reference):
+                    model_documents[reference] = candidate_item
             candidate = getattr(resolved_model, "document", None)
             if isinstance(candidate, Mapping):
                 model_document = candidate
@@ -2092,7 +2114,7 @@ class RunSwitchOperationService:
                     scope="recipe",
                 )
             )
-        return model_document, model_caps, recipe_caps, blockers
+        return model_document, model_documents, model_caps, recipe_caps, blockers
 
     def _resolve_mapping(
         self,
@@ -3071,7 +3093,8 @@ class RunSwitchOperationService:
         now: datetime,
         excluded_run_ids: Sequence[str],
         effective_settings: object | None = None,
-        model_document: Mapping[str, object] | None = None,
+        model_documents: Mapping[tuple[str, str, str], Mapping[str, object]] | None = None,
+        revision_digest: str | None = None,
         planned_stops: Sequence[StopImpact] = (),
     ) -> tuple[list[FreshnessEvidence], SparkFit, list[RunSwitchReason], list[RunSwitchReason]]:
         freshness: list[FreshnessEvidence] = []
@@ -3197,7 +3220,7 @@ class RunSwitchOperationService:
                             revision.document if revision is not None else {},
                             memory,
                             item.role,
-                            model_document,
+                            model_documents,
                             required_memory,
                             effective_settings,
                         )
@@ -3321,8 +3344,7 @@ class RunSwitchOperationService:
                             total_bytes=demand.total_bytes,
                             evidence_state=demand.evidence_state,
                             evidence_digest=_resource_evidence_digest(
-                                revision.document if revision is not None else {},
-                                item.role,
+                                revision_digest,
                             ),
                         )
                         if demand is not None
