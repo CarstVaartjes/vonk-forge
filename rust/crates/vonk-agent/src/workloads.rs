@@ -314,7 +314,7 @@ impl CompiledExecutionPlan {
         }
         self.runtime.validate()?;
         self.runtime_image.validate()?;
-        self.security.validate()?;
+        self.security.validate(&self.runtime.placement)?;
         self.topology.validate()?;
         self.lifecycle.validate()?;
         match (&self.endpoint, &self.job) {
@@ -405,12 +405,16 @@ impl CompiledRuntime {
 }
 
 impl CompiledSecurity {
-    fn validate(&self) -> Result<(), WorkloadError> {
+    fn validate(&self, placement: &CompiledRuntimePlacement) -> Result<(), WorkloadError> {
+        let bridge_required =
+            placement.endpoint_address.is_some() || placement.master_port.is_some();
+        let expected_network_mode = if bridge_required { "bridge" } else { "none" };
         if self.privileged
             || !self.no_new_privileges
             || !self.read_only_root
-            || self.network_mode != "none"
+            || self.network_mode != expected_network_mode
             || !self.capabilities.is_empty()
+            || self.devices.len() > 1
             || self
                 .devices
                 .iter()

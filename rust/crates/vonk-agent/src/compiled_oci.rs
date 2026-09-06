@@ -68,8 +68,8 @@ pub struct OciSecurityOptions {
     pub devices: Vec<String>,
     pub capabilities: Vec<String>,
     pub privileged: bool,
-    /// The only network mode admitted by the current signed compiled plan.
-    /// Host and bridge modes require a future signed contract field.
+    /// Network mode is signed by the placement's endpoint/rendezvous fields;
+    /// host networking is never admitted.
     pub network_mode: OciNetworkMode,
     pub read_only_root: bool,
     pub no_new_privileges: bool,
@@ -82,12 +82,14 @@ pub struct OciSecurityOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OciNetworkMode {
     None,
+    Bridge,
 }
 
 impl OciNetworkMode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::None => "none",
+            Self::Bridge => "bridge",
         }
     }
 }
@@ -292,6 +294,7 @@ pub fn project(
         privileged: plan.security.privileged,
         network_mode: match plan.security.network_mode.as_str() {
             "none" => OciNetworkMode::None,
+            "bridge" => OciNetworkMode::Bridge,
             _ => return Err(CompiledOciError::Invalid("unsupported network mode")),
         },
         read_only_root: plan.security.read_only_root,
@@ -356,11 +359,20 @@ fn validate_paths(paths: &CompiledOciPaths) -> Result<(), CompiledOciError> {
 }
 
 fn validate_security(plan: &CompiledExecutionPlan) -> Result<(), CompiledOciError> {
+    let bridge_required = plan.runtime.placement.endpoint_address.is_some()
+        || plan.runtime.placement.master_port.is_some();
+    let expected_network_mode = if bridge_required { "bridge" } else { "none" };
     if plan.security.privileged
         || !plan.security.capabilities.is_empty()
         || !plan.security.read_only_root
         || !plan.security.no_new_privileges
-        || plan.security.network_mode != "none"
+        || plan.security.network_mode != expected_network_mode
+        || plan.security.devices.len() > 1
+        || plan
+            .security
+            .devices
+            .iter()
+            .any(|value| value != "nvidia.com/gpu=all")
     {
         return Err(CompiledOciError::Invalid("security override"));
     }
@@ -413,9 +425,11 @@ fn ordered_environment(
     if let Some(port) = placement.master_port {
         add("VONK_MASTER_PORT", port.to_string())?;
     }
-    if let Some(endpoint) = &plan.endpoint {
-        add("VONK_LISTEN_HOST", "0.0.0.0".to_owned())?;
-        add("VONK_LISTEN_PORT", endpoint.port.to_string())?;
+    if plan.runtime.placement.endpoint_address.is_some() {
+        if let Some(endpoint) = &plan.endpoint {
+            add("VONK_LISTEN_HOST", "0.0.0.0".to_owned())?;
+            add("VONK_LISTEN_PORT", endpoint.port.to_string())?;
+        }
     }
     if let Some(job) = &plan.job {
         add("VONK_INPUT_ROOT", "/inputs".to_owned())?;
@@ -426,16 +440,15 @@ fn ordered_environment(
 }
 
 fn publications(plan: &CompiledExecutionPlan) -> Result<Vec<String>, CompiledOciError> {
-    let Some(endpoint) = &plan.endpoint else {
-        return Ok(Vec::new());
-    };
     let placement = &plan.runtime.placement;
-    let first = match placement.endpoint_address {
-        Some(IpAddr::V4(address)) => format!("{address}:{}:{}", placement.port, endpoint.port),
-        Some(IpAddr::V6(address)) => format!("[{address}]:{}:{}", placement.port, endpoint.port),
-        None => format!("{}:{}", placement.port, endpoint.port),
-    };
-    let mut result = vec![first];
+    let mut result = Vec::new();
+    if let (Some(endpoint), Some(endpoint_address)) = (&plan.endpoint, placement.endpoint_address) {
+        let first = match endpoint_address {
+            IpAddr::V4(address) => format!("{address}:{}:{}", placement.port, endpoint.port),
+            IpAddr::V6(address) => format!("[{address}]:{}:{}", placement.port, endpoint.port),
+        };
+        result.push(first);
+    }
     if placement.rank == 0 {
         if let (Some(master), Some(master_port)) = (placement.master_address, placement.master_port)
         {
@@ -503,7 +516,7 @@ fn path_prefix_conflict(left: &Path, right: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompiledOciError, CompiledOciPaths, project};
+    use super::{CompiledOciError, CompiledOciPaths, OciNetworkMode, project};
     use crate::workloads::CompiledExecutionPlan;
     use serde_json::{Value, json};
     use std::path::PathBuf;
@@ -721,5 +734,30 @@ mod tests {
         assert_eq!(invocation.lifecycle.pre_start[0][1], "--network");
         assert_eq!(invocation.lifecycle.post_stop[0][1], "");
         assert_eq!(invocation.lifecycle.stop_timeout_seconds, 45);
+    }
+
+    #[test]
+    fn signed_endpoint_selects_bridge_and_exact_cdi_device() {
+        let mut value = fixture();
+        value["runtime"]["placement"]["endpoint_address"] = json!("192.168.1.211");
+        value["security"]["network_mode"] = json!("bridge");
+        value["security"]["devices"] = json!(["nvidia.com/gpu=all"]);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let invocation = project(&plan, &paths()).unwrap();
+        assert_eq!(invocation.security.network_mode, OciNetworkMode::Bridge);
+        assert_eq!(invocation.security.devices, vec!["nvidia.com/gpu=all"]);
+        assert_eq!(invocation.publishes, vec!["192.168.1.211:8000:8000"]);
+        assert!(
+            invocation
+                .environment
+                .iter()
+                .any(|entry| entry.name == "VONK_LISTEN_PORT" && entry.value == "8000")
+        );
+        assert!(
+            invocation
+                .podman_arguments()
+                .windows(2)
+                .any(|window| window == ["--network", "bridge"])
+        );
     }
 }

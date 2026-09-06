@@ -407,6 +407,7 @@ class CompiledExecutionPlan(_StrictModel):
                 "registry_manifest_digest": self.runtime_image.registry_manifest_digest,
                 "platform_manifest_digest": self.runtime_image.platform_manifest_digest,
                 "local_image_config_id": self.runtime_image.local_image_config_id,
+                "local_image_reference": self.runtime_image.local_image_reference,
                 "runtime_interface_label": self.runtime_image.runtime_interface_label,
                 "distribution_object": self.runtime_image.distribution_object.model_dump(
                     mode="json"
@@ -524,11 +525,17 @@ class CompiledExecutionPlan(_StrictModel):
         if type(placement_doc["role"]) is not str or not placement_doc["role"]:
             raise CompiledExecutionPlanError("runtime role is invalid")
 
-        network_mode = security.get("network_mode")
-        if network_mode != "none" or security.get("host_network") is not False:
+        declared_network_mode = security.get("network_mode")
+        if declared_network_mode not in {"none", "bridge"} or security.get("host_network") is not False:
             raise CompiledExecutionPlanError(
-                "compiled security must use isolated network mode with host networking disabled"
+                "compiled security has an unsupported network mode or host networking"
             )
+        network_mode = (
+            "bridge"
+            if placement_doc["endpoint_address"] is not None
+            or placement_doc["master_port"] is not None
+            else "none"
+        )
 
         artifacts = [
             {
@@ -1108,9 +1115,25 @@ def validate_compiled_launch_payload(value: object) -> dict[str, object]:
     }
     if set(security) != security_required:
         raise CompiledExecutionPlanError("compiled launch security fields are invalid")
-    if security.get("network_mode") != "none" or security.get("host_network") is not False:
+    expected_network_mode = (
+        "bridge"
+        if placement.get("endpoint_address") is not None
+        or placement.get("master_port") is not None
+        else "none"
+    )
+    if (
+        security.get("network_mode") != expected_network_mode
+        or security.get("host_network") is not False
+        or not isinstance(security.get("devices"), list)
+        or len(security["devices"]) > 1
+        or any(device != "nvidia.com/gpu=all" for device in security["devices"])
+        or security.get("capabilities") != []
+        or security.get("privileged") is not False
+        or security.get("read_only_root") is not True
+        or security.get("no_new_privileges") is not True
+    ):
         raise CompiledExecutionPlanError(
-            "compiled launch security must use isolated network mode with host networking disabled"
+            "compiled launch security must match signed ports with isolated network and host networking disabled"
         )
     mounts = security.get("mounts")
     if not isinstance(mounts, list):
