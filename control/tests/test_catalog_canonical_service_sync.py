@@ -12,7 +12,7 @@ from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
 from vonk_control.models import Base, CatalogDocumentRevision
-from vonk_control.recipe_library import RecipeLibraryItem, RecipeLibrarySnapshot
+from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
 from vonk_control.recipe_packages import PACKAGE_MEDIA_TYPE, RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
 
