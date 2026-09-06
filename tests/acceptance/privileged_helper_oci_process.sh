@@ -17,6 +17,7 @@ registry_name=vonk-helper-proof-registry
 image_base=localhost:5001/vonk/helper-tiny
 image_name="$image_base:v1"
 image_platform="$image_base:arm64"
+local_image=''
 image_ref=''
 helper_pid=''
 fixture_dir=$(mktemp -d)
@@ -52,6 +53,8 @@ cat > "$fixture_dir/Dockerfile" <<'DOCKERFILE'
 FROM --platform=linux/arm64 busybox:1.36.1
 RUN addgroup -g 10001 vonk \
     && adduser -D -H -u 10001 -G vonk vonk \
+    && mkdir -p /opt/vonk/bin \
+    && ln -s /bin/sh /opt/vonk/bin/vllm \
     && mkdir -p /outputs/cache/home /outputs/tmp \
     && chown -R 10001:10001 /outputs
 USER 10001:10001
@@ -84,12 +87,13 @@ registry_digest=$(curl --fail --silent --show-error --head \
   | awk -F': ' 'tolower($1) == "docker-content-digest" {gsub("\r", "", $2); print $2; exit}')
 test -n "$registry_digest"
 test "$registry_digest" != "$platform_digest"
-image_ref="$image_platform@$platform_digest"
 config_id=$(docker image inspect "$image_platform" --format '{{.Id}}')
-docker image inspect "$image_ref" >"$report_root/source-image-ref-inspect.json"
-docker save --output "$fixture_dir/image.oci.tar" "$image_ref"
+docker image inspect "$platform_ref" >"$report_root/source-image-ref-inspect.json"
+docker save --output "$fixture_dir/image.oci.tar" "$platform_ref"
 archive_sha=$(sha256sum "$fixture_dir/image.oci.tar" | awk '{print $1}')
 archive_bytes=$(stat -c '%s' "$fixture_dir/image.oci.tar")
+local_image="localhost/vonk/compiled-runtime-$archive_sha"
+image_ref="$local_image@$platform_digest"
 cp "$fixture_dir/image.oci.tar" "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
 chown vonk-agent:vonk-agent "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
 chmod 0600 "/var/lib/vonk-forge-agent/oci-archives/$archive_sha"
@@ -126,7 +130,7 @@ export VONK_HELPER_REQUEST_ROOT=/run/vonk-forge-agent/runtime-requests
 "$probe_binary" setup >"$report_root/setup.log"
 chown root:vonk-agent /etc/vonk-forge-agent/observation-receipt.pub
 chmod 0640 /etc/vonk-forge-agent/observation-receipt.pub
-for ref in "$image_ref" "$image_platform" "$image_name"; do
+for ref in "$image_ref" "$local_image" "$image_platform" "$image_name"; do
   docker image rm "$ref" >>"$report_root/source-image-removal.log" 2>&1 || true
 done
 if docker image inspect "$image_ref" >/dev/null 2>&1; then
@@ -200,7 +204,7 @@ grep -q '"--read-only"' "$report_root/start.log"
 grep -q '"--cap-drop=ALL"' "$report_root/start.log"
 grep -q '"--security-opt=no-new-privileges"' "$report_root/start.log"
 grep -q '"--user","10001:10001"' "$report_root/start.log"
-grep -q '"--entrypoint","/bin/sh"' "$report_root/start.log"
+grep -q '"--entrypoint","/opt/vonk/bin/vllm"' "$report_root/start.log"
 if grep -q '"--device"' "$report_root/start.log"; then
   echo 'unexpected device flag in the GPU-free proof' >&2
   exit 1

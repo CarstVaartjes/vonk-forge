@@ -2,235 +2,144 @@ from __future__ import annotations
 
 import copy
 import json
-from pathlib import Path
+from importlib.resources import files
 
 import pytest
-from vonk_control.catalog_contract import CatalogKind
-from vonk_control.recipe_contract import (
-    RecipeContractError,
-    canonical_recipe,
-    parse_recipe_json,
-    recipe_content_sha256,
-    recipe_model_dependencies,
-    recipe_references,
-    recipe_topology,
-    validate_recipe,
+from pydantic import ValidationError
+from vonk_control.recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    compile_runtime_spec,
 )
-
-ROOT = Path(__file__).resolve().parents[2]
-RECIPE_FIXTURE = ROOT / "control/tests/fixtures/global/recipe-v1-minimal.json"
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
-def recipe_document() -> dict[str, object]:
-    return json.loads(RECIPE_FIXTURE.read_text())
+def _example(name: str) -> dict[str, object]:
+    return json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", name)
+        .read_text(encoding="utf-8")
+    )
 
 
-def artifact_job_document() -> dict[str, object]:
-    document = recipe_document()
-    document["interfaces"] = [
-        {
-            "adapter": "image-job",
-            "path": "/outputs",
-            "input": {
-                "path": "/inputs",
-                "required": True,
-                "media_types": ["image/png", "image/jpeg"],
-                "max_bytes": 32 * 1024 * 1024,
-            },
-            "output": {
-                "path": "/outputs",
-                "max_total_bytes": 1024,
-                "slots": [
-                    {
-                        "id": "image",
-                        "label": "Image",
-                        "description": "Generated image",
-                        "media_types": ["image/png"],
-                        "extensions": [".png"],
-                        "min_files": 1,
-                        "max_files": 1,
-                        "max_file_bytes": 1024,
-                        "max_total_bytes": 1024,
-                    }
-                ],
-            },
-        }
-    ]
-    document["validation"]["validators"] = [
-        {"interface": "image-job", "checks": ["artifact.mime.image-png"]}
-    ]
-    document["runtime"]["security"]["mounts"] = [
-        {"source": "model", "target": "/models", "read_only": True},
-        {"source": "inputs", "target": "/inputs", "read_only": True},
-        {"source": "outputs", "target": "/outputs", "read_only": False},
-    ]
-    return document
+@pytest.fixture(scope="module")
+def model() -> ModelDefinition:
+    return ModelDefinition.model_validate(_example("model-definition.json"))
 
 
-def test_recipe_has_one_topology_and_exact_bindings() -> None:
-    document = parse_recipe_json(RECIPE_FIXTURE.read_bytes())
-
-    validate_recipe(document)
-
-    assert recipe_topology(document)["node_count"] == 1
-    assert {item.kind for item in recipe_references(document)} == {
-        CatalogKind.MODEL_VERSION,
-        CatalogKind.EXECUTION_HARNESS,
-        CatalogKind.RUNTIME_DISTRIBUTION,
-    }
+def _recipe(name: str = "recipe-image.json") -> RecipeDefinition:
+    return RecipeDefinition.model_validate(_example(name))
 
 
-@pytest.mark.parametrize("capability", ["SYS_ADMIN", "SYS_CHROOT", "SYS_PTRACE"])
-def test_recipe_build_options_are_closed_and_unsafe_podman_args_are_absent(
-    capability: str,
+def _compile(recipe: RecipeDefinition, model: ModelDefinition) -> dict[str, object]:
+    return compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+
+
+def test_recipe_uses_the_canonical_model_and_topology_bindings(
+    model: ModelDefinition,
 ) -> None:
-    document = recipe_document()
-    document["build"]["options"]["device"] = "/dev/nvidia0"
+    recipe = _recipe()
 
-    with pytest.raises(RecipeContractError, match="unexpected field: device"):
-        validate_recipe(document)
-
-    document = recipe_document()
-    document["build"]["security"]["capabilities"] = [capability]
-
-    with pytest.raises(RecipeContractError):
-        validate_recipe(document)
+    assert recipe.schema_version == 2
+    assert recipe.kind == "recipe"
+    assert recipe.topology.node_count == 1
+    assert recipe.models[0].model.kind == "model"
+    assert recipe.models[0].model.content_sha256 == content_sha256(model)
+    assert recipe.interfaces[0].adapter == "openai"
 
 
-def test_recipe_patch_bundle_is_nullable_and_part_of_exact_references() -> None:
-    document = recipe_document()
-    document["execution"]["patch_bundle"] = {
-        "kind": "patch-bundle",
-        "publisher": "vonk-forge",
-        "slug": "vllm-fix",
-        "content_sha256": "e" * 64,
+def test_canonical_recipe_compiles_a_shell_free_read_only_projection(
+    model: ModelDefinition,
+) -> None:
+    spec = _compile(_recipe(), model)
+    command = spec["runtime"]["entrypoint"]
+
+    assert command[0] == "/opt/vonk/bin/vllm"
+    assert "-c" not in command
+    assert spec["security"]["user"] == "10001:10001"
+    assert spec["security"]["capabilities"] == []
+    assert spec["security"]["read_only_root"] is True
+    assert spec["runtime"]["writable_paths"]
+    assert spec["security"]["mounts"][0]["read_only"] is True
+
+
+def test_canonical_recipe_preserves_unknown_engine_arguments(
+    model: ModelDefinition,
+) -> None:
+    raw = _example("recipe-image.json")
+    raw["runtime"]["arguments"] = [
+        {"name": "future_option", "value": '{"mode":"first"}'},
+        {"name": "future_toggle", "value": True},
+        {"name": "future_payload", "value": "unicode Ω; $HOME"},
+    ]
+    recipe = RecipeDefinition.model_validate(raw)
+    argv = _compile(recipe, model)["runtime"]["entrypoint"]
+
+    assert argv[3:6] == ["--future_option", '{"mode":"first"}', "--future_toggle"]
+    assert "unicode Ω; $HOME" in argv
+
+
+def test_canonical_recipe_rejects_unsafe_entrypoints(model: ModelDefinition) -> None:
+    raw = _example("recipe-image.json")
+    raw["runtime"]["entrypoint"] = ["bash", "-c", "vllm serve /models"]
+
+    with pytest.raises((ValidationError, RecipeRuntimeSpecError)):
+        _compile(RecipeDefinition.model_validate(raw), model)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("settings", "context_tokens", "value"), 0),
+        (("topology", "parallelism", "tensor"), 2),
+        (("topology", "fabric", "connectivity"), "connected"),
+    ],
+)
+def test_canonical_recipe_rejects_invalid_cross_field_values(
+    path: tuple[str, ...], value: object,
+) -> None:
+    raw = _example("recipe-image.json")
+    target: object = raw
+    for part in path[:-1]:
+        target = target[part]  # type: ignore[index]
+    target[path[-1]] = value  # type: ignore[index]
+
+    with pytest.raises(ValidationError):
+        RecipeDefinition.model_validate(raw)
+
+
+def test_canonical_job_recipe_declares_a_read_only_input_contract(
+    model: ModelDefinition,
+) -> None:
+    raw = _example("recipe-job.json")
+    raw["runtime"]["engine"] = "diffusers"
+    raw["runtime"]["entrypoint"] = ["diffusers-job"]
+    raw["interfaces"][0]["input"] = {
+        "path": "/inputs",
+        "required": True,
+        "media_types": ["image/png"],
+        "max_bytes": 1024,
+    }
+    raw["validation"]["serving"]["checks"][0]["request"]["input_path"] = "/inputs"
+    recipe = RecipeDefinition.model_validate(raw)
+    spec = _compile(recipe, model)
+
+    assert spec["security"]["mounts"][-1] == {
+        "source": "/run/vonk/inputs",
+        "target": "/inputs",
+        "read_only": True,
     }
 
-    validate_recipe(document)
 
-    references = recipe_references(document)
-    assert [reference.kind for reference in references] == [
-        CatalogKind.MODEL_VERSION,
-        CatalogKind.EXECUTION_HARNESS,
-        CatalogKind.RUNTIME_DISTRIBUTION,
-        CatalogKind.PATCH_BUNDLE,
-    ]
-
-
-def test_recipe_supports_exact_auxiliary_model_versions() -> None:
-    document = recipe_document()
-    dependency = {
-        "kind": "model-version",
-        "publisher": "vonk-forge",
-        "slug": "synthetic-auxiliary-fp16",
-        "content_sha256": "f" * 64,
-    }
-    document["dependencies"] = [dependency]
-
-    validate_recipe(document)
-
-    dependencies = recipe_model_dependencies(document)
-    assert len(dependencies) == 1
-    assert dependencies[0].portable_identity == (
-        "model-version",
-        "vonk-forge",
-        "synthetic-auxiliary-fp16",
-        "f" * 64,
-    )
-    assert [reference.kind for reference in recipe_references(document)] == [
-        CatalogKind.MODEL_VERSION,
-        CatalogKind.EXECUTION_HARNESS,
-        CatalogKind.RUNTIME_DISTRIBUTION,
-        CatalogKind.MODEL_VERSION,
-    ]
-
-
-def test_huggingface_snapshot_include_paths_are_safe_sorted_and_kind_scoped() -> None:
-    document = recipe_document()
-    document["artifacts"][0]["include_paths"] = [
-        "text_encoder/model.safetensors",
-        "transformer/",
-    ]
-    validate_recipe(document)
-
-    for selectors in [
-        ["../weights"],
-        ["weights*"],
-        ["transformer/", "text_encoder/model.safetensors"],
-        ["transformer/", "transformer/"],
-    ]:
-        invalid = recipe_document()
-        invalid["artifacts"][0]["include_paths"] = selectors
-        with pytest.raises(RecipeContractError):
-            validate_recipe(invalid)
-
-    non_hf = recipe_document()
-    non_hf["artifacts"][0].update(
-        {
-            "kind": "http.file",
-            "repository": "https://example.com/model.bin",
-            "revision": "sha256:" + "a" * 64,
-            "include_paths": ["model.bin"],
-        }
-    )
-    with pytest.raises(RecipeContractError):
-        validate_recipe(non_hf)
-
-
-def test_recipe_rejects_the_primary_model_as_an_auxiliary_dependency() -> None:
-    document = recipe_document()
-    document["dependencies"] = [document["model"]]
-
-    with pytest.raises(RecipeContractError, match="primary model version"):
-        validate_recipe(document)
-
-
-def test_recipe_keeps_patch_binding_distinct_from_auxiliary_models() -> None:
-    document = recipe_document()
-    document["execution"]["patch_bundle"] = {
-        "kind": "patch-bundle",
-        "publisher": "vonk-forge",
-        "slug": "vllm-fix",
-        "content_sha256": "e" * 64,
-    }
-    document["dependencies"] = [
-        {
-            "kind": "model-version",
-            "publisher": "vonk-forge",
-            "slug": "synthetic-auxiliary-fp16",
-            "content_sha256": "f" * 64,
-        }
-    ]
-
-    validate_recipe(document)
-
-    assert [reference.kind for reference in recipe_references(document)] == [
-        CatalogKind.MODEL_VERSION,
-        CatalogKind.EXECUTION_HARNESS,
-        CatalogKind.RUNTIME_DISTRIBUTION,
-        CatalogKind.PATCH_BUNDLE,
-        CatalogKind.MODEL_VERSION,
-    ]
-
-
-def test_job_interface_can_declare_a_read_only_input_contract() -> None:
-    document = artifact_job_document()
-
-    validate_recipe(document)
-
-
-def test_artifact_job_rejects_distributed_topology_until_protocol_supports_it() -> None:
-    document = artifact_job_document()
-    endpoint = copy.deepcopy(document["topology"]["roles"][0])
-    worker = copy.deepcopy(endpoint)
+def test_canonical_job_recipe_retains_distributed_topology_dimensions() -> None:
+    raw = _example("recipe-job.json")
+    role = copy.deepcopy(raw["topology"]["roles"][0])
+    worker = copy.deepcopy(role)
     worker.update({"name": "worker", "endpoint_owner": False})
-    document["artifacts"][0]["roles"] = ["entrypoint", "worker"]
-    document["topology"].update(
+    raw["topology"].update(
         {
-            "name": "dual-job",
             "mode": "distributed",
             "node_count": 2,
-            "roles": [endpoint, worker],
+            "roles": [role, worker],
             "parallelism": {
                 "world_size": 2,
                 "tensor": 2,
@@ -238,136 +147,43 @@ def test_artifact_job_rejects_distributed_topology_until_protocol_supports_it() 
                 "data": 1,
                 "backend": "native",
             },
-            "fabric": {
-                "connectivity": "connected",
-                "minimum_bandwidth_mbps": 200_000,
-            },
+            "fabric": {"connectivity": "connected", "minimum_bandwidth_mbps": 1},
             "start_order": ["entrypoint", "worker"],
             "stop_order": ["entrypoint", "worker"],
         }
     )
 
-    with pytest.raises(RecipeContractError, match="single-node topology"):
-        validate_recipe(document)
+    recipe = RecipeDefinition.model_validate(raw)
+    assert recipe.topology.node_count == 2
+    assert recipe.topology.parallelism.world_size == 2
 
 
-@pytest.mark.parametrize("hook", ["pre_start", "post_stop"])
-def test_artifact_job_rejects_unsafe_lifecycle_hooks(hook: str) -> None:
-    document = artifact_job_document()
-    document["runtime"]["lifecycle"][hook] = [["/bin/true"]]
-
-    with pytest.raises(RecipeContractError, match="cannot declare"):
-        validate_recipe(document)
-
-
-def test_recipe_rejects_an_input_contract_without_a_matching_mount() -> None:
-    document = recipe_document()
-    document["interfaces"] = [
-        {
-            "adapter": "image-job",
-            "path": "/outputs",
-            "input": {
-                "path": "/inputs",
-                "required": True,
-                "media_types": ["image/png"],
-                "max_bytes": 1024,
-            },
-            "output": {
-                "path": "/outputs",
-                "max_total_bytes": 1024,
-                "slots": [
-                    {
-                        "id": "image",
-                        "label": "Image",
-                        "description": "Generated image",
-                        "media_types": ["image/png"],
-                        "extensions": [".png"],
-                        "min_files": 1,
-                        "max_files": 1,
-                        "max_file_bytes": 1024,
-                        "max_total_bytes": 1024,
-                    }
-                ],
-            },
-        }
-    ]
-    document["validation"]["validators"] = [
-        {"interface": "image-job", "checks": ["artifact.mime.image-png"]}
-    ]
-
-    with pytest.raises(RecipeContractError, match="read-only /inputs mount"):
-        validate_recipe(document)
-
-
-def test_recipe_rejects_filesystem_inputs_on_an_openai_interface() -> None:
-    document = recipe_document()
-    document["interfaces"][0]["input"] = {
-        "path": "/inputs",
-        "required": True,
-        "media_types": ["image/png"],
-        "max_bytes": 1024,
-    }
-
-    with pytest.raises(RecipeContractError, match="OpenAI interfaces"):
-        validate_recipe(document)
-
-
-def test_recipe_digest_changes_with_patch_identity() -> None:
-    unpatched = recipe_document()
-    patched = recipe_document()
-    patched["execution"]["patch_bundle"] = {
-        "kind": "patch-bundle",
-        "publisher": "vonk-forge",
-        "slug": "vllm-fix",
-        "content_sha256": "e" * 64,
-    }
-
-    assert recipe_content_sha256(unpatched) != recipe_content_sha256(patched)
-
-
-def test_unknown_root_shape_is_rejected() -> None:
-    document = recipe_document()
-    document["unexpected_root"] = []
-
-    with pytest.raises(RecipeContractError, match="additionalProperties"):
-        validate_recipe(document)
-
-
-def test_recipe_parser_rejects_duplicate_keys_and_floats() -> None:
-    with pytest.raises(RecipeContractError, match="duplicate object key"):
-        parse_recipe_json(b'{"identity":{},"identity":{}}')
-    with pytest.raises(RecipeContractError, match="floats are not permitted"):
-        parse_recipe_json(b'{"value":1.5}')
-
-
-def test_recipe_canonicalization_is_stable() -> None:
-    document = {"z": 1, "a": [True, None]}
-
-    assert canonical_recipe(document) == b'{"a":[true,null],"z":1}'
-    assert recipe_content_sha256(document) == (
-        "ca6da02fba3343778761e7785f2b55f7fb17b36ce16eee3492dc392fa7c9deaa"
-    )
-
-
-@pytest.mark.parametrize(
-    ("path", "value", "code"),
-    [
-        (("parameters", 0, "default"), "32768", "recipe.parameter_type"),
-        (("parameters", 0, "minimum"), 131073, "recipe.parameter_bounds"),
-        (("topology", "parallelism", "tensor"), 2, "recipe.topology_parallelism"),
-        (("topology", "fabric", "connectivity"), "connected", "recipe.topology_fabric"),
-    ],
-)
-def test_recipe_rejects_invalid_cross_field_values(
-    path: tuple[str | int, ...], value: object, code: str
+def test_source_build_requires_an_exact_image_receipt(
+    model: ModelDefinition,
 ) -> None:
-    document = recipe_document()
-    target: object = document
-    for part in path[:-1]:
-        target = target[part]  # type: ignore[index]
-    target[path[-1]] = value  # type: ignore[index]
+    recipe = _recipe("recipe-source-build.json")
 
-    with pytest.raises(RecipeContractError) as raised:
-        validate_recipe(document)
+    with pytest.raises(RecipeRuntimeSpecError, match="receipt"):
+        _compile(recipe, model)
 
-    assert raised.value.code == code
+    digest = "a" * 64
+    spec = compile_runtime_spec(
+        recipe,
+        models=[model],
+        package_handle={
+            "image_reference": f"localhost/vonk/build@sha256:{digest}",
+            "image_digest": digest,
+            "paths": ["context.tar", "Dockerfile"],
+        },
+        role="entrypoint",
+        rank=0,
+    )
+    assert spec["runtime"]["image"] == f"localhost/vonk/build@sha256:{digest}"
+
+
+def test_canonical_recipe_rejects_unknown_root_fields() -> None:
+    raw = _example("recipe-image.json")
+    raw["unexpected_root"] = []
+
+    with pytest.raises(ValidationError):
+        RecipeDefinition.model_validate(raw)

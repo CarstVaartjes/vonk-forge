@@ -6,8 +6,7 @@ import argparse
 import base64
 import hashlib
 import http.client
-import importlib.machinery
-import importlib.util
+import io
 import ipaddress
 import json
 import os
@@ -17,13 +16,21 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
+import uuid
 from collections.abc import Callable
-from pathlib import Path
-from typing import Protocol, Self
+from pathlib import Path, PurePosixPath
+from typing import NamedTuple, Protocol, Self
 
 import yaml
+
+from cluster_profiles.serving_execution import (
+    HttpObservation,
+    ServingExecutionError,
+    evaluate_http_response,
+)
 
 sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
@@ -68,6 +75,10 @@ VERSION = re.compile(
 )
 SAFE_HTTPS_URL = re.compile(r"https://[A-Za-z0-9._~:/-]+\Z")
 NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
+UUID = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+    r"[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z"
+)
 SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
 PROJECT = re.compile(r"vonk-spark-[1-9][0-9]*-arm64\Z")
 # Exercise the production-supported lower bound.  The agent renews at two thirds
@@ -124,6 +135,20 @@ FORBIDDEN_SPARK_TAILNET_INPUTS = (
     "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
     "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",
 )
+SYNTHETIC_CANARY_STATES = (
+    "inventory-ready",
+    "recipe-resolved",
+    "source-verified",
+    "image-built",
+    "image-distributed",
+    "installed",
+    "running",
+    "route-published",
+    "inference-ok",
+    "stopped",
+    "route-withdrawn",
+    "uninstalled",
+)
 
 
 def _require_loopback_controller_boundary() -> None:
@@ -174,6 +199,208 @@ def _openssl_compatible_ed25519_private_key(raw: bytes) -> bytes:
 
 class LifecycleError(RuntimeError):
     """A bounded acceptance failure that contains no credential material."""
+
+
+class CanonicalCanaryFixture(NamedTuple):
+    """Exact producer-owned Recipe package selected for the fresh canary."""
+
+    index_path: Path
+    index_bytes: bytes
+    package_path: PurePosixPath
+    package_bytes: bytes
+    source_commit: str
+    publisher: str
+    slug: str
+    recipe_content_sha256: str
+    model_version_sha256: str
+    role: str
+    serving_check: dict[str, object]
+    recipe: dict[str, object]
+
+
+def _canary_index_path(library_root: Path) -> Path:
+    selected = os.environ.get("VONK_SYNTHETIC_CANARY_INDEX")
+    if not selected:
+        raise LifecycleError(
+            "VONK_SYNTHETIC_CANARY_INDEX must select the exact producer fixture"
+        )
+    relative = PurePosixPath(selected)
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        raise LifecycleError("synthetic canary index path is invalid")
+    path = (library_root / Path(*relative.parts)).resolve()
+    if not path.is_relative_to(library_root) or not path.is_file():
+        raise LifecycleError("canonical synthetic canary package index is unavailable")
+    return path
+
+
+def _package_archive_path(
+    library_root: Path, index_path: Path, package_path: PurePosixPath
+) -> Path:
+    candidates = {
+        candidate.resolve()
+        for candidate in (
+            library_root / Path(*package_path.parts),
+            index_path.parent / Path(*package_path.parts),
+        )
+        if candidate.is_file()
+    }
+    if len(candidates) != 1:
+        raise LifecycleError("canonical synthetic canary package archive is unavailable")
+    archive = candidates.pop()
+    if not archive.is_relative_to(library_root):
+        raise LifecycleError("synthetic canary package escapes the recipe library")
+    return archive
+
+
+def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
+    root = library_root.expanduser().resolve()
+    if not root.is_dir():
+        raise LifecycleError("VONK_RECIPE_LIBRARY_ROOT is not an available directory")
+    contracts_source = root / "contracts/src"
+    if not contracts_source.is_dir():
+        raise LifecycleError("canonical Recipe/Model contract source is unavailable")
+    sys.path.insert(0, os.fspath(contracts_source))
+    try:
+        from vonk_forge_contracts import (
+            ModelDefinition,
+            RecipeDefinition,
+            content_sha256,
+        )
+    except ImportError as error:
+        raise LifecycleError(
+            "canonical Recipe/Model contract package is unavailable"
+        ) from error
+    index_path = _canary_index_path(root)
+    try:
+        index_bytes = index_path.read_bytes()
+        index = json.loads(index_bytes)
+        entry = index["recipes"][0]
+        raw_recipe = entry["document"]
+        package = entry["package"]
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
+        raise LifecycleError("canonical synthetic canary package index is invalid") from error
+    try:
+        recipe_contract = RecipeDefinition.model_validate(raw_recipe)
+        recipe = recipe_contract.model_dump(mode="json")
+        catalog_models = [
+            ModelDefinition.model_validate(value["document"])
+            for value in index["catalog_entities"]
+            if isinstance(value, dict)
+            and isinstance(value.get("document"), dict)
+            and value["document"].get("kind") == "model"
+        ]
+    except (KeyError, TypeError, ValueError) as error:
+        raise LifecycleError("canonical synthetic canary contract is invalid") from error
+    if recipe != raw_recipe or len(recipe_contract.models) != 1:
+        raise LifecycleError("canonical synthetic canary Recipe is not canonical")
+    model_reference = recipe_contract.models[0].model
+    matching_models = [
+        model
+        for model in catalog_models
+        if model.identity.publisher == model_reference.publisher
+        and model.identity.slug == model_reference.slug
+        and content_sha256(model) == model_reference.content_sha256
+    ]
+    if len(matching_models) != 1:
+        raise LifecycleError("canonical synthetic canary Model closure is invalid")
+    package_value = package.get("path") if isinstance(package, dict) else None
+    if not isinstance(package_value, str):
+        raise LifecycleError("canonical synthetic canary package descriptor is invalid")
+    package_path = PurePosixPath(package_value)
+    if (
+        package_path.is_absolute()
+        or any(part in {"", ".", ".."} for part in package_path.parts)
+        or re.fullmatch(r"[A-Za-z0-9._/-]{1,512}", package_value) is None
+        or index.get("schema_version") != 2
+        or index.get("kind") != "recipe-library-index"
+        or index.get("repository") != "CarstVaartjes/vonk-forge-recipes"
+        or not isinstance(index.get("source_commit"), str)
+        or SOURCE_SHA.fullmatch(index["source_commit"]) is None
+        or not isinstance(entry.get("content_sha256"), str)
+        or entry["content_sha256"] != content_sha256(recipe_contract)
+        or package.get("media_type")
+        != "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
+        or package.get("recipe_content_sha256")
+        not in {None, entry["content_sha256"]}
+    ):
+        raise LifecycleError("canonical synthetic canary contract is invalid")
+    roles = recipe_contract.topology.roles
+    if (
+        recipe_contract.execution.mode != "build"
+        or recipe_contract.topology.mode != "single"
+        or recipe_contract.topology.node_count != 1
+        or len(roles) != 1
+        or roles[0].endpoint_owner is not True
+    ):
+        raise LifecycleError("canonical synthetic canary topology is invalid")
+    http_checks = [
+        check
+        for check in recipe_contract.validation.serving.checks
+        if check.request.transport == "http" and check.kind == "openai.chat"
+    ]
+    if len(http_checks) != 1:
+        raise LifecycleError("canonical synthetic canary serving check is invalid")
+    check = http_checks[0].model_dump(mode="json")
+    request = check["request"]
+    body = request.get("body")
+    max_tokens = body.get("max_tokens") if isinstance(body, dict) else None
+    if (
+        request.get("method") != "POST"
+        or request.get("path") != "/v1/chat/completions"
+        or type(max_tokens) is not int
+        or not 1 <= max_tokens <= 64
+    ):
+        raise LifecycleError("synthetic canary inference is not bounded")
+    archive_path = _package_archive_path(root, index_path, package_path)
+    try:
+        if not 1 <= archive_path.stat().st_size <= 256 * 1024 * 1024:
+            raise LifecycleError("canonical synthetic canary package size is invalid")
+        package_bytes = archive_path.read_bytes()
+    except OSError as error:
+        raise LifecycleError("canonical synthetic canary package is unavailable") from error
+    if (
+        package.get("expected_bytes") != len(package_bytes)
+        or package.get("sha256") != hashlib.sha256(package_bytes).hexdigest()
+    ):
+        raise LifecycleError("canonical synthetic canary package digest is invalid")
+    try:
+        with tarfile.open(fileobj=io.BytesIO(package_bytes), mode="r:gz") as archive:
+            manifest_member = archive.getmember("manifest.json")
+            recipe_member = archive.getmember("recipe.json")
+            if (
+                not manifest_member.isfile()
+                or not recipe_member.isfile()
+                or manifest_member.size > 12 * 1024 * 1024
+                or recipe_member.size > 12 * 1024 * 1024
+            ):
+                raise tarfile.TarError("canonical package entrypoint is not a file")
+            manifest = json.loads(archive.extractfile(manifest_member).read())
+            packaged_recipe = json.loads(archive.extractfile(recipe_member).read())
+    except (KeyError, OSError, tarfile.TarError, AttributeError, json.JSONDecodeError) as error:
+        raise LifecycleError("canonical synthetic canary package closure is invalid") from error
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != 2
+        or manifest.get("kind") != "recipe-package"
+        or manifest.get("package_type") != "recipe"
+        or manifest.get("recipe_content_sha256") != entry["content_sha256"]
+        or packaged_recipe != recipe
+    ):
+        raise LifecycleError("canonical synthetic canary Recipe differs from its package")
+    return CanonicalCanaryFixture(
+        index_path=index_path,
+        index_bytes=index_bytes,
+        package_path=package_path,
+        package_bytes=package_bytes,
+        source_commit=index["source_commit"],
+        publisher=recipe_contract.identity.publisher,
+        slug=recipe_contract.identity.slug,
+        recipe_content_sha256=entry["content_sha256"],
+        model_version_sha256=model_reference.content_sha256,
+        role=roles[0].name,
+        serving_check=check,
+        recipe=recipe,
+    )
 
 
 class ObservedLifecycle(Protocol):
@@ -335,6 +562,81 @@ def _configure_acceptance_renewal(
     os.chmod(compose_path, 0o644)
 
 
+def _configure_canonical_canary_library(
+    bundle: Path, fixture: CanonicalCanaryFixture
+) -> None:
+    """Serve one exact producer package to the isolated Controller sync client."""
+
+    compose_path = bundle / "docker-compose.yaml"
+    try:
+        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        control_environment = compose["services"]["control-api"]["environment"]
+        caddy_service = compose["services"]["caddy"]
+        caddy_configs = caddy_service["configs"]
+        caddy_source = next(
+            value["source"]
+            for value in caddy_configs
+            if value.get("target") == "/etc/caddy/Caddyfile"
+        )
+        caddy_path = bundle / "secrets/runtime-configs" / caddy_source
+        caddy = caddy_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, TypeError, KeyError, StopIteration, yaml.YAMLError) as error:
+        raise LifecycleError("canonical canary Controller package boundary is invalid") from error
+    if (
+        not isinstance(control_environment, dict)
+        or not isinstance(caddy_service, dict)
+        or "http://:8085" in caddy
+    ):
+        raise LifecycleError("canonical canary Controller package boundary is invalid")
+    serving_root = bundle / "secrets/synthetic-recipe-library"
+    index_target = serving_root / "v1/recipe-library/index.json"
+    package_target = serving_root / Path(*fixture.package_path.parts)
+    try:
+        index_target.parent.mkdir(mode=0o755, parents=True)
+        package_target.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+        index_target.write_bytes(fixture.index_bytes)
+        package_target.write_bytes(fixture.package_bytes)
+    except OSError as error:
+        raise LifecycleError("canonical canary package staging failed") from error
+    for directory in (
+        serving_root,
+        serving_root / "v1",
+        serving_root / "v1/recipe-library",
+        package_target.parent,
+    ):
+        os.chmod(directory, 0o755)
+    os.chmod(index_target, 0o644)
+    os.chmod(package_target, 0o644)
+    if (
+        index_target.read_bytes() != fixture.index_bytes
+        or package_target.read_bytes() != fixture.package_bytes
+    ):
+        raise LifecycleError("canonical canary staged package bytes differ")
+    control_environment["VONK_RECIPE_LIBRARY_PACKAGE_URL"] = "http://caddy:8085"
+    volumes = caddy_service.setdefault("volumes", [])
+    if not isinstance(volumes, list):
+        raise LifecycleError("canonical canary Caddy volumes are invalid")
+    volumes.append(
+        "./secrets/synthetic-recipe-library:/srv/vonk-recipe-library:ro"
+    )
+    caddy_path.write_text(
+        caddy.rstrip()
+        + "\n\nhttp://:8085 {\n"
+        + "\troot * /srv/vonk-recipe-library\n"
+        + f"\t@canary_package path /{fixture.package_path.as_posix()}\n"
+        + "\theader @canary_package Content-Type application/octet-stream\n"
+        + "\tfile_server\n"
+        + "}\n",
+        encoding="utf-8",
+    )
+    os.chmod(caddy_path, 0o644)
+    compose_path.write_text(
+        yaml.safe_dump(compose, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
+    )
+    os.chmod(compose_path, 0o644)
+
+
 def _synthetic_device_fixture(platform_name: str) -> tuple[bytes, str]:
     if platform_name not in PLATFORMS:
         raise LifecycleError("synthetic device fixture platform is invalid")
@@ -353,37 +655,6 @@ def _synthetic_device_fixture(platform_name: str) -> tuple[bytes, str]:
         separators=(",", ":"),
     ).encode("ascii")
     return raw, hashlib.sha256(raw).hexdigest()
-
-
-def _load_development_runner() -> object:
-    runner_path = REPOSITORY_ROOT / "scripts/run-development-slices"
-    scripts_path = os.fspath(runner_path.parent)
-    loader = importlib.machinery.SourceFileLoader(
-        "spark_lifecycle_development_runner", os.fspath(runner_path)
-    )
-    specification = importlib.util.spec_from_loader(loader.name, loader)
-    if specification is None or specification.loader is None:
-        raise LifecycleError("synthetic canary runner is unavailable")
-    module = importlib.util.module_from_spec(specification)
-    shared_client = sys.modules.get("scripts.development_slice_client")
-    if shared_client is None:
-        raise LifecycleError("synthetic canary client is unavailable")
-    previous_client = sys.modules.get("development_slice_client")
-    sys.modules["development_slice_client"] = shared_client
-    sys.path.insert(0, scripts_path)
-    try:
-        specification.loader.exec_module(module)
-    except (ImportError, OSError) as error:
-        raise LifecycleError("synthetic canary runner is unavailable") from error
-    finally:
-        sys.path.remove(scripts_path)
-        if previous_client is None:
-            sys.modules.pop("development_slice_client", None)
-        else:
-            sys.modules["development_slice_client"] = previous_client
-    if module.SliceError is not SliceError:
-        raise LifecycleError("synthetic canary client identity is inconsistent")
-    return module
 
 
 def _agent_package_installed() -> bool:
@@ -895,6 +1166,13 @@ class SparkLifecycle:
             self.bundle,
             lifetime_seconds=CERTIFICATE_LIFETIME_SECONDS,
             agent_source_address=f"172.31.{self.synthetic_fabric_octet}.1",
+        )
+        library_root = self._required_environment("VONK_RECIPE_LIBRARY_ROOT")
+        self.synthetic_canary_fixture = _canonical_canary_fixture(
+            Path(library_root)
+        )
+        _configure_canonical_canary_library(
+            self.bundle, self.synthetic_canary_fixture
         )
         self._assert_project_is_empty()
         self._assert_compose_image_graph()
@@ -1606,48 +1884,294 @@ class SparkLifecycle:
         assert (
             self.control is not None
             and self.browser is not None
-            and self.temporary_root is not None
+            and isinstance(self.synthetic_canary_fixture, CanonicalCanaryFixture)
         )
         if NODE_ID.fullmatch(node_id) is None:
             raise LifecycleError("synthetic canary node identity is invalid")
-        module = _load_development_runner()
-        recipe, catalog, source_context = self._synthetic_canary_inputs(module)
-        evidence = self.temporary_root / "synthetic-canary.json"
-        arguments = argparse.Namespace(
-            phase="synthetic",
-            api_base=f"https://{self.control_hostname}",
-            inference_base=f"https://{self.control_hostname}",
-            admin_token_file=None,
-            inference_token_file=None,
-            timeout_seconds=300.0,
-            recipe=recipe,
-            catalog=catalog,
-            library_root=REPOSITORY_ROOT,
-            builder_node=node_id,
-            target_node=[node_id],
-            failure_node=None,
-            source_context=source_context,
-            qualification_file=None,
-            evidence_file=evidence,
-            poll_seconds=1.0,
-            stop_after=None,
-        )
+        fixture = self.synthetic_canary_fixture
+        completed = ["inventory-ready"]
         try:
+            _, sync_payload = self.control.request(
+                "POST",
+                "/api/v1/catalog/managed-recipes/sync",
+                {
+                    "request_key": self._canary_request_key(
+                        fixture, node_id, "catalog-sync"
+                    ),
+                    "expected_commit": fixture.source_commit,
+                },
+            )
+            sync = require_object(sync_payload, "synthetic canary catalog sync")
+            if (
+                sync.get("state") != "current"
+                or sync.get("commit") != fixture.source_commit
+                or sync.get("total_count") != 1
+                or sync.get("processed_count") != 1
+                or (sync.get("imported_count"), sync.get("unchanged_count"))
+                not in {(1, 0), (0, 1)}
+                or sync.get("problems") != []
+            ):
+                raise LifecycleError("synthetic canary catalog sync is incomplete")
+            _, listed_payload = self.control.request(
+                "GET", "/api/v1/library/recipes"
+            )
+            listed = require_object(listed_payload, "synthetic canary Library")
+            recipes = listed.get("recipes")
+            if not isinstance(recipes, list):
+                raise LifecycleError("synthetic canary Library response is invalid")
+            matches = [
+                value
+                for value in recipes
+                if isinstance(value, dict)
+                and value.get("publisher") == fixture.publisher
+                and value.get("slug") == fixture.slug
+                and value.get("content_sha256") == fixture.recipe_content_sha256
+            ]
+            if len(matches) != 1:
+                raise LifecycleError("exact synthetic canary Recipe is unavailable")
+            summary = matches[0]
+            recipe_id = summary.get("recipe_id")
+            revision_id = summary.get("recipe_revision_id")
+            if (
+                not isinstance(recipe_id, str)
+                or UUID.fullmatch(recipe_id) is None
+                or not isinstance(revision_id, str)
+                or UUID.fullmatch(revision_id) is None
+            ):
+                raise LifecycleError("synthetic canary Recipe identity is invalid")
+            _, detail_payload = self.control.request(
+                "GET", f"/api/v1/library/recipes/{recipe_id}"
+            )
+            detail = require_object(detail_payload, "synthetic canary Recipe detail")
+            model_documents = detail.get("model_documents")
+            model_item = (
+                model_documents[0]
+                if isinstance(model_documents, list)
+                and len(model_documents) == 1
+                and isinstance(model_documents[0], dict)
+                else None
+            )
+            selection = model_item.get("selection") if model_item is not None else None
+            selected_model = (
+                selection.get("model") if isinstance(selection, dict) else None
+            )
+            if (
+                detail.get("definition") != fixture.recipe
+                or not isinstance(selected_model, dict)
+                or selected_model.get("content_sha256")
+                != fixture.model_version_sha256
+            ):
+                raise LifecycleError("synthetic canary canonical closure differs")
+            completed.append("recipe-resolved")
+            run_request = {
+                "schema_version": 2,
+                "model_version_sha256": fixture.model_version_sha256,
+                "recipe_revision_id": revision_id,
+                "spark_group": {
+                    "nodes": [
+                        {
+                            "node_id": node_id,
+                            "rank": 0,
+                            "role": fixture.role,
+                            "endpoint_owner": True,
+                        }
+                    ]
+                },
+                "alias": fixture.slug,
+                "action": "run",
+                "retention": "retain-cached",
+                "invocation": {
+                    "origin": "spark-lifecycle-acceptance",
+                    "reason": "fresh canonical synthetic serving canary",
+                },
+            }
+            _, preview_payload = self.control.request(
+                "POST", "/api/v1/recipes/run-switch-plans/preview", run_request
+            )
+            preview = require_object(preview_payload, "synthetic canary run preview")
+            plan_digest = preview.get("plan_digest")
+            phases = preview.get("phases")
+            planned = [
+                (phase.get("kind"), phase.get("subphase"))
+                for phase in phases
+                if isinstance(phase, dict)
+            ] if isinstance(phases, list) else []
+            required_phases = {
+                ("prepare", "container-build"),
+                ("transfer", "model-download"),
+                ("prepare", "runtime-image"),
+                ("prepare", "runtime-plan"),
+                ("transfer", "target-copy"),
+                ("verify", "target-copy"),
+                ("prepare", "runtime-install"),
+                ("start", None),
+                ("final_verify", None),
+            }
+            build = preview.get("build")
+            source = build.get("source") if isinstance(build, dict) else None
+            if (
+                preview.get("allowed") is not True
+                or not isinstance(plan_digest, str)
+                or SHA256.fullmatch(plan_digest) is None
+                or not required_phases.issubset(planned)
+                or not isinstance(source, dict)
+                or source.get("state") != "available"
+            ):
+                raise LifecycleError("canonical synthetic canary run is not admitted")
+            completed.append("source-verified")
+            _, operation_payload = self.control.request(
+                "POST",
+                "/api/v1/recipes/run-switches",
+                {
+                    **run_request,
+                    "plan_digest": plan_digest,
+                    "request_key": self._canary_request_key(
+                        fixture, node_id, "run-switch"
+                    ),
+                },
+            )
+            operation = self._await_canary_run_switch(
+                require_object(operation_payload, "synthetic canary run operation"),
+                expected_phases=[kind for kind, _subphase in planned],
+                label="synthetic canary run",
+            )
+            result = require_object(operation.get("result"), "synthetic canary run result")
+            phase_results = result.get("phase_results")
+            if not isinstance(phase_results, list):
+                raise LifecycleError("synthetic canary run evidence is invalid")
+            image = next(
+                (
+                    value
+                    for value in phase_results
+                    if isinstance(value, dict)
+                    and isinstance(value.get("image_digest"), str)
+                    and re.fullmatch(r"sha256:[0-9a-f]{64}", value["image_digest"])
+                    is not None
+                    and isinstance(value.get("oci_layout_sha256"), str)
+                    and SHA256.fullmatch(value["oci_layout_sha256"]) is not None
+                    and type(value.get("image_bytes")) is int
+                    and value["image_bytes"] > 0
+                ),
+                None,
+            )
+            installation_id = self._canary_phase_identity(
+                phase_results, "installation_id"
+            )
+            run_id = self._canary_phase_identity(phase_results, "run_id")
+            verified_image = next(
+                (
+                    value
+                    for value in phase_results
+                    if isinstance(value, dict)
+                    and image is not None
+                    and value.get("verified_image_digest")
+                    == image.get("image_digest")
+                    and value.get("verified_oci_layout_sha256")
+                    == image.get("oci_layout_sha256")
+                ),
+                None,
+            )
+            if image is None or verified_image is None:
+                raise LifecycleError("synthetic canary build evidence is incomplete")
+            completed.extend(("image-built", "image-distributed", "installed", "running"))
+            self._await_canary_endpoint(fixture.slug, published=True)
+            completed.append("route-published")
             inference_key = self._read_secret("litellm-master-key")
             inference = self.browser.bearer(inference_key, timeout=30)
             del inference_key
-            runner = module.Runner(
-                arguments,
-                control_client=self.control,
-                inference_client=inference,
+            response_digest = self._run_canonical_inference(
+                inference, fixture.serving_check, fixture.slug
             )
-            runner.run()
-        except module.SliceError as error:
+            completed.append("inference-ok")
+            stop_request = {
+                "schema_version": 2,
+                "run_id": run_id,
+                "invocation": {
+                    "origin": "spark-lifecycle-acceptance",
+                    "reason": "complete fresh canonical synthetic serving canary",
+                },
+            }
+            _, stop_preview_payload = self.control.request(
+                "POST", "/api/v1/recipes/run-switch-stops/preview", stop_request
+            )
+            stop_preview = require_object(
+                stop_preview_payload, "synthetic canary stop preview"
+            )
+            stop_digest = stop_preview.get("plan_digest")
+            stop_phases = stop_preview.get("phases")
+            stop_kinds = [
+                phase.get("kind")
+                for phase in stop_phases
+                if isinstance(phase, dict)
+            ] if isinstance(stop_phases, list) else []
+            if (
+                stop_preview.get("allowed") is not True
+                or not isinstance(stop_digest, str)
+                or SHA256.fullmatch(stop_digest) is None
+                or stop_kinds != ["stop", "final_verify"]
+            ):
+                raise LifecycleError("synthetic canary stop is not admitted")
+            _, stop_payload = self.control.request(
+                "POST",
+                "/api/v1/recipes/run-switch-stops",
+                {
+                    **stop_request,
+                    "plan_digest": stop_digest,
+                    "request_key": self._canary_request_key(
+                        fixture, node_id, f"stop:{run_id}"
+                    ),
+                },
+            )
+            self._await_canary_run_switch(
+                require_object(stop_payload, "synthetic canary stop operation"),
+                expected_phases=stop_kinds,
+                label="synthetic canary stop",
+            )
+            completed.append("stopped")
+            self._await_canary_endpoint(fixture.slug, published=False)
+            completed.append("route-withdrawn")
+            _, uninstall_preview_payload = self.control.request(
+                "POST",
+                "/api/v1/recipes/uninstall-plans/preview",
+                {"installation_id": installation_id},
+            )
+            uninstall_preview = require_object(
+                uninstall_preview_payload, "synthetic canary uninstall preview"
+            )
+            uninstall_digest = uninstall_preview.get("plan_digest")
+            if (
+                uninstall_preview.get("allowed") is not True
+                or uninstall_preview.get("installation_id") != installation_id
+                or uninstall_preview.get("recipe_content_sha256")
+                != fixture.recipe_content_sha256
+                or uninstall_preview.get("active_run_count") != 0
+                or not isinstance(uninstall_digest, str)
+                or SHA256.fullmatch(uninstall_digest) is None
+            ):
+                raise LifecycleError("synthetic canary uninstall is not admitted")
+            _, uninstall_payload = self.control.request(
+                "POST",
+                f"/api/v1/recipes/installations/{installation_id}/uninstall",
+                {
+                    "plan_digest": uninstall_digest,
+                    "request_key": self._canary_request_key(
+                        fixture, node_id, f"uninstall:{installation_id}"
+                    ),
+                },
+            )
+            self._await_canary_recipe_operation(
+                require_object(
+                    uninstall_payload, "synthetic canary uninstall operation"
+                ),
+                node_id=node_id,
+                owner_id=installation_id,
+                plan_digest=uninstall_digest,
+            )
+            completed.append("uninstalled")
+        except (SliceError, ServingExecutionError) as error:
             raise LifecycleError(f"synthetic canary failed: {error}") from error
-        completed = runner.evidence.get("completed_states")
-        response_digest = runner.outputs.get("inference_response_sha256")
         if (
-            completed != list(module.SYNTHETIC_STATES)
+            completed != list(SYNTHETIC_CANARY_STATES)
             or not isinstance(response_digest, str)
             or SHA256.fullmatch(response_digest) is None
         ):
@@ -1657,84 +2181,143 @@ class SparkLifecycle:
             "deterministic_response_sha256": response_digest,
         }
 
-    def _synthetic_canary_inputs(self, module: object) -> tuple[Path, Path, Path]:
-        assert self.temporary_root is not None
-        # Do not manufacture an AMD64 recipe: the production recipe, catalog,
-        # harness, Controller, and agent workload contracts are Spark/ARM64-only.
-        if self.arguments.platform != "linux-arm64":
-            raise LifecycleError("synthetic canary platform is invalid")
-        architecture = "arm64"
-        image_digest = (
-            "9bb659dc6d5218917236f3711e866a5634bb4c2f208de9d4533aa4863f57c1d3"
+    @staticmethod
+    def _canary_request_key(
+        fixture: CanonicalCanaryFixture, node_id: str, stage: str
+    ) -> str:
+        return str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                "vonk:spark-lifecycle:canonical-canary:"
+                f"{fixture.source_commit}:{fixture.recipe_content_sha256}:"
+                f"{node_id}:{stage}",
+            )
         )
-        image = f"docker.io/library/python:3.12.11-slim-bookworm@sha256:{image_digest}"
-        fixture = REPOSITORY_ROOT / "control/tests/fixtures/recipes/dev-http-smoke"
-        generated = self.temporary_root / "synthetic-canary-inputs"
-        catalog = generated / "entities"
-        source_context = generated / "context"
-        catalog.mkdir(mode=0o700, parents=True, exist_ok=True)
-        source_context.mkdir(mode=0o700, exist_ok=True)
-        try:
-            recipe = json.loads((fixture / "recipe.json").read_text(encoding="utf-8"))
-            runtime_path = fixture / "entities/05-runtime-distribution.json"
-            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-            expected = (fixture / "expected.json").read_bytes()
-            dockerfile = (fixture / "context/Dockerfile").read_text(encoding="utf-8")
-            dockerfile = re.sub(
-                r"docker\.io/library/python:3\.12\.11-slim-bookworm@sha256:[0-9a-f]{64}",
-                image,
-                dockerfile,
-                count=1,
-            )
-            if dockerfile.count(image) != 1:
-                raise ValueError("synthetic Dockerfile base image is invalid")
-            (source_context / "Dockerfile").write_text(dockerfile, encoding="utf-8")
-            shutil.copyfile(fixture / "context/server.py", source_context / "server.py")
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise LifecycleError("synthetic canary fixture is invalid") from error
-        except ValueError as error:
-            raise LifecycleError("synthetic canary fixture is invalid") from error
-        if not isinstance(recipe, dict) or not isinstance(runtime, dict):
-            raise LifecycleError("synthetic canary fixture is invalid")
-        try:
-            runtime["identity"]["slug"] = f"development-vllm-shim-{architecture}"
-            runtime["image"] = image
-            runtime["platform"] = f"linux/{architecture}"
-            recipe["build"]["platform"] = f"linux/{architecture}"
-            archive, context_sha256, _ = module._source_bundle(source_context)
-            recipe["build"]["context"]["sha256"] = context_sha256
-            recipe["build"]["context"]["expected_bytes"] = len(archive)
-            distribution = recipe["runtime"]["distribution"]
-            distribution["slug"] = runtime["identity"]["slug"]
-            distribution["content_sha256"] = module._recipe_content_digest(runtime)
-        except (AttributeError, KeyError, TypeError) as error:
-            raise LifecycleError("synthetic canary fixture is invalid") from error
 
-        def write_json(path: Path, document: dict[str, object]) -> None:
-            path.write_text(
-                json.dumps(
-                    document,
-                    ensure_ascii=False,
-                    allow_nan=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
+    def _await_canary_run_switch(
+        self,
+        operation: dict[str, object],
+        *,
+        expected_phases: list[object],
+        label: str,
+    ) -> dict[str, object]:
+        assert self.control is not None
+        operation_id = operation.get("operation_id")
+        if not isinstance(operation_id, str) or UUID.fullmatch(operation_id) is None:
+            raise LifecycleError(f"{label} identity is invalid")
+        deadline = time.monotonic() + 300
+        while operation.get("state") in {"queued", "running"}:
+            if time.monotonic() >= deadline:
+                raise LifecycleError(f"{label} did not converge")
+            time.sleep(1)
+            _, payload = self.control.request(
+                "GET", f"/api/v1/recipes/run-switches/{operation_id}"
+            )
+            operation = require_object(payload, label)
+        if (
+            operation.get("state") != "succeeded"
+            or operation.get("completed_phases") != expected_phases
+        ):
+            reason = operation.get("status_reason")
+            raise LifecycleError(
+                f"{label} failed: {reason if isinstance(reason, str) else 'incomplete evidence'}"
+            )
+        return operation
+
+    def _await_canary_recipe_operation(
+        self,
+        operation: dict[str, object],
+        *,
+        node_id: str,
+        owner_id: str,
+        plan_digest: str,
+    ) -> dict[str, object]:
+        assert self.control is not None
+        operation_id = operation.get("id")
+        if not isinstance(operation_id, str) or UUID.fullmatch(operation_id) is None:
+            raise LifecycleError("synthetic canary uninstall identity is invalid")
+        deadline = time.monotonic() + 300
+        while operation.get("state") in {"queued", "running"}:
+            if time.monotonic() >= deadline:
+                raise LifecycleError("synthetic canary uninstall did not converge")
+            time.sleep(1)
+            _, payload = self.control.request(
+                "GET", f"/api/v1/recipes/operations/{operation_id}"
+            )
+            operation = require_object(payload, "synthetic canary uninstall")
+        if (
+            operation.get("state") != "succeeded"
+            or operation.get("owner_id") != owner_id
+            or operation.get("plan_digest") != plan_digest
+            or operation.get("nodes") != [node_id]
+        ):
+            raise LifecycleError("synthetic canary uninstall evidence is incomplete")
+        return operation
+
+    @staticmethod
+    def _canary_phase_identity(results: list[object], field: str) -> str:
+        identities = {
+            value[field]
+            for value in results
+            if isinstance(value, dict)
+            and isinstance(value.get(field), str)
+            and UUID.fullmatch(value[field]) is not None
+        }
+        if len(identities) != 1:
+            raise LifecycleError(f"synthetic canary {field} evidence is invalid")
+        return identities.pop()
+
+    def _await_canary_endpoint(self, alias: str, *, published: bool) -> None:
+        assert self.control is not None
+        deadline = time.monotonic() + 300
+        while True:
+            allowed = (200,) if published else (404, 503)
+            try:
+                status, payload = self.control.request(
+                    "GET", f"/api/v1/endpoints/{alias}", allowed=allowed
                 )
-                + "\n",
-                encoding="utf-8",
-            )
+            except SliceError:
+                status, payload = 0, None
+            if published and status == 200:
+                endpoint = require_object(payload, "synthetic canary endpoint")
+                if endpoint.get("alias") == alias:
+                    return
+            if not published and status in {404, 503}:
+                return
+            if time.monotonic() >= deadline:
+                raise LifecycleError("synthetic canary route state did not converge")
+            time.sleep(1)
 
-        try:
-            write_json(generated / "recipe.json", recipe)
-            (generated / "expected.json").write_bytes(expected)
-            for source in sorted((fixture / "entities").glob("*.json")):
-                target = catalog / source.name
-                if source == runtime_path:
-                    write_json(target, runtime)
-                else:
-                    shutil.copyfile(source, target)
-        except OSError as error:
-            raise LifecycleError("synthetic canary fixture is unavailable") from error
-        return generated / "recipe.json", catalog, source_context
+    @staticmethod
+    def _run_canonical_inference(
+        inference: Client, check: dict[str, object], alias: str
+    ) -> str:
+        request = require_object(check.get("request"), "synthetic serving request")
+
+        def substitute(value: object) -> object:
+            if isinstance(value, str) and value in {"$ALIAS", "$MODEL"}:
+                return alias
+            if isinstance(value, dict):
+                return {str(key): substitute(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [substitute(item) for item in value]
+            return value
+
+        body = substitute(request.get("body"))
+        if not isinstance(body, dict):
+            raise LifecycleError("synthetic serving request body is invalid")
+        responses: list[dict[str, object]] = []
+        for _attempt in range(2):
+            status, payload = inference.request("POST", str(request["path"]), body)
+            response = require_object(payload, "synthetic serving response")
+            evaluate_http_response(
+                HttpObservation(status=status, headers={}, body=_canonical(response)),
+                check,
+            )
+            responses.append(response)
+        if responses[0] != responses[1]:
+            raise LifecycleError("synthetic canary response is not deterministic")
+        return hashlib.sha256(_canonical(responses[0])).hexdigest()
 
     @staticmethod
     def _serial_proof(serial: str) -> str:

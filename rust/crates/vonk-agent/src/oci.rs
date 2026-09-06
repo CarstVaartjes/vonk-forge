@@ -1624,7 +1624,7 @@ mod tests {
             .join(&plan.identity.model_artifact_set_sha256)
             .join("primary");
         fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("tokenizer_config.json"), &[]).unwrap();
+        fs::write(source.join("tokenizer_config.json"), []).unwrap();
         materialize_compiled_models(
             data.path(),
             &plan,

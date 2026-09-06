@@ -1022,7 +1022,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let expected_archive = archive_root.join(archive_sha256);
         let canonical_archive =
             fs::canonicalize(&expected_archive).map_err(|_| OperationError::InvalidArtifact)?;
-        let (_local_image, embedded_digest) = parse_local_image_reference(image_reference)?;
+        let (local_image, embedded_digest) = parse_local_image_reference(image_reference)?;
         if !archive.is_absolute()
             || archive != expected_archive
             || canonical_archive.parent() != Some(canonical_archive_root.as_path())
@@ -1049,22 +1049,35 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 OperationError::CommandFailed => OperationError::RuntimeImageLoadFailed,
                 other => other,
             })?;
-        // Docker's human-readable load output is not a stable interface: it
-        // varies across Docker releases and archive producers (some omit the
-        // tag, and some emit no output at all). The image reference and
-        // metadata are verified below, so requiring a particular output line
-        // would reject an otherwise valid, digest-bound import for no safety
-        // benefit.
+        // Docker's human-readable load output varies across Docker releases
+        // and archive producers. Accept only a single explicit source image
+        // or image ID below; without one, the helper cannot prove which
+        // object was loaded and fails closed.
         if !loaded.success {
             return Err(OperationError::RuntimeImageLoadFailed);
         }
-        let inspected =
-            self.inspect_runtime_image(image_reference)
-                .map_err(|error| match error {
-                    OperationError::CommandFailed => OperationError::RuntimeImageInspectFailed,
-                    OperationError::InvalidArtifact => OperationError::RuntimeImageIdentityInvalid,
-                    other => other,
-                })?;
+        // Docker archives retain either the source tag or image ID that the
+        // producer exported. Bind that explicit loaded object to the
+        // controller-derived local reference before inspecting it.
+        let source_image = loaded_image_source(&loaded.stdout)
+            .map_err(|_| OperationError::RuntimeImageIdentityInvalid)?
+            .ok_or(OperationError::RuntimeImageIdentityInvalid)?;
+        let tagged = self
+            .run_docker(&["tag".to_owned(), source_image, local_image])
+            .map_err(|error| match error {
+                OperationError::CommandFailed => OperationError::RuntimeImageInspectFailed,
+                other => other,
+            })?;
+        if !tagged.success {
+            return Err(OperationError::RuntimeImageInspectFailed);
+        }
+        let (inspected, _) = self
+            .inspect_runtime_image_for_reference(image_reference)
+            .map_err(|error| match error {
+                OperationError::CommandFailed => OperationError::RuntimeImageInspectFailed,
+                OperationError::InvalidArtifact => OperationError::RuntimeImageIdentityInvalid,
+                other => other,
+            })?;
         if inspected.1 != "linux"
             || inspected.2 != "arm64"
             || inspected.3 != "v1"
@@ -1108,7 +1121,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        let inspected = self.inspect_runtime_image(image_reference)?;
+        let (inspected, _) = self.inspect_runtime_image_for_reference(image_reference)?;
         if inspected.1 != "linux"
             || inspected.2 != "arm64"
             || inspected.3 != "v1"
@@ -1158,7 +1171,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map(|_| self.job_cancellation.begin(&validated.run_id))
             .transpose()?;
         self.require_host_endpoint_firewall(&validated)?;
-        let inspected = self.inspect_runtime_image(&validated.local_image_reference)?;
+        let (inspected, operational_image) =
+            self.inspect_runtime_image_for_reference(&validated.local_image_reference)?;
         self.require_image_receipt(
             archive_sha256,
             registry_index_digest,
@@ -1195,6 +1209,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // validated.arguments unchanged: the semantic receipt identity is
         // bound to the exact signed request shape above.
         let mut compiled = validated.docker_arguments()?;
+        compiled[validated.image_index] = operational_image;
         if validated.detached || validated.job_timeout_seconds.is_some() {
             compiled.splice(
                 validated.image_index..validated.image_index,
@@ -1292,7 +1307,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             return Err(OperationError::InvalidOperation);
         }
         self.require_host_endpoint_firewall(&validated)?;
-        let inspected = self.inspect_runtime_image(&validated.local_image_reference)?;
+        let (inspected, _) =
+            self.inspect_runtime_image_for_reference(&validated.local_image_reference)?;
         self.require_image_receipt(
             archive_sha256,
             registry_index_digest,
@@ -1457,10 +1473,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .map_err(|_| OperationError::CommandFailed)
     }
 
-    fn inspect_runtime_image(
-        &self,
-        image: &str,
-    ) -> Result<(String, String, String, String, String), OperationError> {
+    fn inspect_runtime_image(&self, image: &str) -> Result<RuntimeImageInspection, OperationError> {
         let output = self.run_docker(&[
             "image".to_owned(),
             "inspect".to_owned(),
@@ -1483,6 +1496,26 @@ impl<R: CommandRunner> OperationExecutor<R> {
             fields[3].clone(),
             fields[4].clone(),
         ))
+    }
+
+    fn inspect_runtime_image_for_reference(
+        &self,
+        image_reference: &str,
+    ) -> Result<(RuntimeImageInspection, String), OperationError> {
+        let (local_image, _) = parse_local_image_reference(image_reference)?;
+        match self.inspect_runtime_image(image_reference) {
+            Ok(inspected) => Ok((inspected, image_reference.to_owned())),
+            Err(OperationError::InvalidArtifact) => {
+                // Classic Docker may discard RepoDigests while loading an OCI
+                // archive. The signed logical reference remains receipt-bound;
+                // use the verified local config ID as the daemon reference so
+                // launch stays pinned to the inspected image object.
+                let inspected = self.inspect_runtime_image(&local_image)?;
+                let operational_image = inspected.0.clone();
+                Ok((inspected, operational_image))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn write_image_receipt(
@@ -1682,6 +1715,8 @@ struct ValidatedDockerRun {
     host_endpoint_port: Option<u16>,
     job_timeout_seconds: Option<u16>,
 }
+
+type RuntimeImageInspection = (String, String, String, String, String);
 
 impl ValidatedDockerRun {
     fn docker_arguments(&self) -> Result<Vec<String>, OperationError> {
@@ -2626,6 +2661,38 @@ fn valid_local_image_reference(value: &str) -> bool {
         .is_some_and(|(image, digest)| valid_local_image(image) && valid_oci_digest(digest))
 }
 
+fn loaded_image_source(stdout: &[u8]) -> Result<Option<String>, ()> {
+    let text = std::str::from_utf8(stdout).map_err(|_| ())?;
+    let mut source = None;
+    for line in text.lines() {
+        let candidate = if let Some(value) = line.strip_prefix("Loaded image: ") {
+            let value = value.trim();
+            if value.is_empty()
+                || value.len() > 256
+                || value.starts_with('-')
+                || value
+                    .bytes()
+                    .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+            {
+                return Err(());
+            }
+            value.to_owned()
+        } else if let Some(value) = line.strip_prefix("Loaded image ID: ") {
+            let value = value.trim();
+            if !valid_oci_digest(value) {
+                return Err(());
+            }
+            value.to_owned()
+        } else {
+            continue;
+        };
+        if source.replace(candidate).is_some() {
+            return Err(());
+        }
+    }
+    Ok(source)
+}
+
 fn valid_entrypoint(value: &str) -> bool {
     value.starts_with("/opt/vonk/bin/")
         && value.len() <= 256
@@ -2698,7 +2765,8 @@ mod tests {
     use super::{
         CommandOutput, CommandRunner, JobCancellationFence, ManagedRoots, OperationError,
         OperationExecutor, RuntimeImageReceipt, bounded_container_exit_code, finish_timed_out_job,
-        hex_sha256, parse_publication, parse_runtime_stop, validate_docker_run,
+        hex_sha256, loaded_image_source, parse_publication, parse_runtime_stop,
+        validate_docker_run,
     };
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
@@ -2743,17 +2811,82 @@ mod tests {
             assert_eq!(executable, Path::new("/usr/bin/docker"));
             let inspect = arguments.first().map(String::as_str) == Some("image")
                 && arguments.get(1).map(String::as_str) == Some("inspect");
+            let digest_lookup =
+                inspect && arguments.last().is_some_and(|image| image.contains('@'));
             Ok(CommandOutput {
-                success: true,
-                stdout: if inspect {
+                success: !digest_lookup,
+                stdout: if arguments.first().map(String::as_str) == Some("load") {
+                    b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest\n"
+                        .to_vec()
+                } else if inspect && !digest_lookup {
                     format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "c".repeat(64))
                         .into_bytes()
                 } else {
                     Vec::new()
                 },
-                exit_code: Some(0),
+                exit_code: Some(if digest_lookup { 1 } else { 0 }),
             })
         }
+    }
+
+    #[derive(Clone, Default)]
+    struct NoLoadIdentityRunner {
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+    }
+
+    impl CommandRunner for NoLoadIdentityRunner {
+        fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+            self.calls.lock().unwrap().push(arguments.to_vec());
+            if arguments.first().map(String::as_str) == Some("load") {
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    exit_code: Some(0),
+                });
+            }
+            RuntimeImportRunner.run(executable, arguments)
+        }
+    }
+
+    #[test]
+    fn loaded_image_source_accepts_only_a_single_safe_load_line() {
+        assert_eq!(
+            loaded_image_source(
+                b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest\n"
+            ),
+            Ok(Some(
+                "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest"
+                    .to_owned()
+            ))
+        );
+        assert_eq!(
+            loaded_image_source(
+                b"Loaded image ID: sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662\n"
+            ),
+            Ok(Some(
+                "sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
+                    .to_owned()
+            ))
+        );
+        assert_eq!(loaded_image_source(b"Loaded image: unsafe tag\n"), Err(()));
+        assert_eq!(
+            loaded_image_source(b"Loaded image ID: sha256:deadbeef\n"),
+            Err(())
+        );
+        assert_eq!(loaded_image_source(b"Loaded image: --help\n"), Err(()));
+        assert_eq!(
+            loaded_image_source(
+                b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest\nLoaded image ID: sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662\n"
+            ),
+            Err(())
+        );
+        assert_eq!(
+            loaded_image_source(
+                b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest\nLoaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000003:latest\n"
+            ),
+            Err(())
+        );
+        assert_eq!(loaded_image_source(b"docker load completed\n"), Ok(None));
     }
 
     #[test]
@@ -3479,6 +3612,47 @@ mod tests {
             )
             .unwrap();
         assert!(roots.runtime_image_receipts.join(&archive_sha256).is_file());
+    }
+
+    #[test]
+    fn runtime_image_import_rejects_load_without_an_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        fs::create_dir_all(&roots.data).unwrap();
+        let payload = b"tiny cached image";
+        let archive_sha256 = hex_sha256(payload);
+        let registry_manifest = format!("sha256:{}", "b".repeat(64));
+        let local_reference =
+            format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
+        let archive_root = roots.agent_data.join("oci-archives");
+        fs::create_dir_all(&archive_root).unwrap();
+        let archive = archive_root.join(&archive_sha256);
+        fs::write(&archive, payload).unwrap();
+        fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
+        // The runner reports a valid pre-existing local image if asked; the
+        // helper must reject before inspecting it because docker load gave no
+        // authoritative identity for the newly imported archive.
+        let runner = NoLoadIdentityRunner::default();
+        let calls = runner.calls.clone();
+        let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner, None).unwrap();
+        let error = executor
+            .runtime_image_import(&[
+                archive.display().to_string(),
+                archive_sha256.clone(),
+                payload.len().to_string(),
+                format!("sha256:{}", "a".repeat(64)),
+                registry_manifest,
+                local_reference,
+            ])
+            .unwrap_err();
+        assert!(matches!(error, OperationError::RuntimeImageIdentityInvalid));
+        assert!(
+            calls
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|arguments| { arguments.first().map(String::as_str) != Some("image") })
+        );
     }
 
     #[test]
