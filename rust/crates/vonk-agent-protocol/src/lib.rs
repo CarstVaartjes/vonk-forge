@@ -239,14 +239,21 @@ impl AgentClaim {
             self.operation.as_str(),
             "agent.upgrade.v1"
                 | "artifact.distribution.v1"
+                | "node.probe"
                 | "recipe.build.v1"
                 | "recipe.image.import.v1"
                 | "recipe.job.run.v1"
                 | "recipe.install"
+                | "recipe.model-uninstall.v1"
                 | "recipe.start"
                 | "recipe.stop"
                 | "recipe.uninstall"
-                | "recipe.model-uninstall.v1"
+                | "release.install"
+                | "workload.health"
+                | "workload.prepare"
+                | "workload.start"
+                | "workload.stop"
+                | "workload.verify"
         ) {
             return Err(ProtocolError::Identity("claim operation"));
         }
@@ -1817,6 +1824,62 @@ fn link_local(value: std::net::IpAddr) -> bool {
 
 fn valid_fabric_address(value: std::net::IpAddr) -> bool {
     !value.is_loopback() && !value.is_unspecified() && !value.is_multicast() && !link_local(value)
+}
+
+#[cfg(test)]
+mod claim_operation_tests {
+    use super::*;
+
+    fn claim(operation: &str) -> AgentClaim {
+        let payload = serde_json::json!({});
+        AgentClaim {
+            attempt: 1,
+            authority_revision: "a".repeat(64),
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: "spk_11111111111111111111111111111111".to_owned(),
+            operation: operation.to_owned(),
+            operation_id: Uuid::new_v4(),
+            payload: payload.clone(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            schema_version: 1,
+        }
+    }
+
+    #[test]
+    fn controller_operation_claims_cover_the_full_advertised_wire_set() {
+        for operation in [
+            "agent.upgrade.v1",
+            "artifact.distribution.v1",
+            "node.probe",
+            "recipe.build.v1",
+            "recipe.image.import.v1",
+            "recipe.job.run.v1",
+            "recipe.install",
+            "recipe.model-uninstall.v1",
+            "recipe.start",
+            "recipe.stop",
+            "recipe.uninstall",
+            "release.install",
+            "workload.health",
+            "workload.prepare",
+            "workload.start",
+            "workload.stop",
+            "workload.verify",
+        ] {
+            let claim = claim(operation);
+            let encoded = canonical_json(&claim).expect("claim is serializable");
+            let decoded: AgentClaim =
+                parse_strict(&encoded).expect("claim uses the Controller wire shape");
+            assert!(decoded.validate().is_ok(), "{operation}");
+        }
+    }
+
+    #[test]
+    fn unknown_operation_claim_remains_rejected() {
+        assert!(claim("operation.unknown").validate().is_err());
+    }
 }
 
 #[cfg(test)]

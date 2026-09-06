@@ -1274,7 +1274,10 @@ fn valid_oci_digest(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentHttpClient, ClientError, ExactRecipeRunObservation, valid_reported_hostname};
+    use super::{
+        AgentHttpClient, ClientError, ExactRecipeRunObservation, parse_claim_response,
+        valid_reported_hostname,
+    };
     use crate::{oci::RecipeRunObservation, telemetry::TelemetrySample};
     use chrono::{DateTime, Utc};
     use serde_json::{Value, json};
@@ -2050,6 +2053,27 @@ mod tests {
             progress: serde_json::json!({"phase": "executing"}),
             schema_version: 1,
         }
+    }
+
+    #[test]
+    fn claim_response_accepts_controller_generic_operation_claims() {
+        let payload = json!({});
+        let claim = AgentClaim {
+            attempt: 1,
+            authority_revision: "a".repeat(64),
+            deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
+            operation: "node.probe".to_owned(),
+            operation_id: Uuid::new_v4(),
+            payload: payload.clone(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            schema_version: 1,
+        };
+
+        let body = canonical_json(&claim).unwrap();
+        assert_eq!(parse_claim_response(200, &body).unwrap(), Some(claim));
     }
 
     #[tokio::test]
