@@ -7,7 +7,8 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.get_artifact_job_capabilities_response_getartifactjobcapabilities import GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities
+from ...models.artifact_job_capabilities_response import ArtifactJobCapabilitiesResponse
+from ...models.bounded_error_response import BoundedErrorResponse
 from typing import cast
 
 
@@ -31,13 +32,27 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]]:
     if response.status_code == 200:
-        response_200 = GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities.from_dict(response.json())
+        response_200 = ArtifactJobCapabilitiesResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 401:
+        response_401 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 503:
+        response_503 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_503
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -45,7 +60,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -58,7 +73,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities]:
+) -> Response[Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]]:
     """ Capabilities
 
     Raises:
@@ -66,7 +81,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities]
+        Response[Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]]
      """
 
 
@@ -84,7 +99,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities]:
+) -> Optional[Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]]:
     """ Capabilities
 
     Raises:
@@ -92,7 +107,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities
+        Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]
      """
 
 
@@ -105,7 +120,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities]:
+) -> Response[Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]]:
     """ Capabilities
 
     Raises:
@@ -113,7 +128,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities]
+        Response[Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]]
      """
 
 
@@ -131,7 +146,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities]:
+) -> Optional[Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]]:
     """ Capabilities
 
     Raises:
@@ -139,7 +154,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        GetArtifactJobCapabilitiesResponseGetartifactjobcapabilities
+        Union[ArtifactJobCapabilitiesResponse, BoundedErrorResponse]
      """
 
 

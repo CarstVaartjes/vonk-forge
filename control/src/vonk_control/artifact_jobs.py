@@ -11,7 +11,9 @@ from collections.abc import AsyncIterable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -88,8 +90,127 @@ def _active_recipe_revision(
     return revision, recipe
 
 
+class ArtifactJobContractModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ArtifactFileDeclaration(ArtifactJobContractModel):
+    slot: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    media_type: str = Field(
+        pattern=r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/"
+        r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
+    )
+    size_bytes: int = Field(ge=0, le=MAX_INPUT_FILE_BYTES)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ArtifactOutputFile(ArtifactJobContractModel):
+    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    media_type: str = Field(
+        pattern=r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/"
+        r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
+    )
+    size_bytes: int = Field(ge=0, le=1024**3)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class OutputLimits(ArtifactJobContractModel):
+    max_files: int = Field(ge=1, le=32)
+    max_file_bytes: int = Field(ge=1, le=1024**3)
+    max_total_bytes: int = Field(ge=1, le=2 * 1024**3)
+    allowed_media_types: list[str] = Field(min_length=1, max_length=16)
+
+
+class ArtifactJobResultEvidence(ArtifactJobContractModel):
+    """Known evidence fields with room for engine-specific evidence keys."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+    elapsed_milliseconds: int | None = Field(default=None, ge=0)
+    peak_memory_bytes: int | None = Field(default=None, ge=0)
+
+
+class ArtifactJobResponse(ArtifactJobContractModel):
+    model_config = ConfigDict(extra="forbid", strict=True, from_attributes=True)
+
+    id: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
+    run_id: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
+    operation_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    )
+    interface: Literal[
+        "audio-job", "video-job", "image-job", "mesh-job", "artifact-job"
+    ]
+    state: Literal[
+        "draft",
+        "ready",
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelling",
+        "cancelled",
+        "waiting-for-operator",
+    ]
+    contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    compiled_contract: dict[str, object]
+    input_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    input_total_bytes: int = Field(ge=0)
+    input_declarations: tuple[ArtifactFileDeclaration, ...]
+    input_files: tuple[ArtifactFileDeclaration, ...]
+    output_limits: OutputLimits
+    output_manifest_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    output_files: tuple[ArtifactOutputFile, ...]
+    result_evidence: ArtifactJobResultEvidence | None = None
+    status_reason: str | None = Field(default=None, max_length=512)
+    timeout_seconds: int = Field(ge=1, le=3_600)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ArtifactJobListResponse(ArtifactJobContractModel):
+    jobs: list[ArtifactJobResponse] = Field(max_length=100)
+
+
+class ArtifactJobTransportCapabilities(ArtifactJobContractModel):
+    max_input_files: int = Field(ge=1, le=32)
+    max_input_file_bytes: int = Field(ge=1, le=MAX_INPUT_FILE_BYTES)
+    max_input_total_bytes: int = Field(ge=1, le=1024**3)
+    max_output_files: int = Field(ge=1, le=32)
+    max_output_file_bytes: int = Field(ge=1, le=1024**3)
+    max_output_total_bytes: int = Field(ge=1, le=2 * 1024**3)
+    max_timeout_seconds: int = Field(ge=1, le=3_600)
+    reserved_input_names: list[str] = Field(min_length=1, max_length=32)
+
+
+class ArtifactJobStorageCapabilities(ArtifactJobContractModel):
+    max_stored_bytes: int = Field(ge=1)
+    used_bytes: int = Field(ge=0)
+    reserved_bytes: int = Field(ge=0)
+    in_flight_uploads: int = Field(ge=0)
+    remaining_bytes: int = Field(ge=0)
+
+
+class ArtifactJobCapabilitiesResponse(ArtifactJobContractModel):
+    schema_version: Literal[1] = 1
+    transport: ArtifactJobTransportCapabilities
+    storage: ArtifactJobStorageCapabilities
+
+
+
 @dataclass(frozen=True, slots=True)
 class ArtifactJobView:
+    """Internal lifecycle projection; HTTP routes validate it at the boundary."""
+
     id: str
     run_id: str
     operation_id: str | None
@@ -1793,7 +1914,11 @@ class ArtifactJobService:
 
 __all__ = [
     "MAX_INPUT_FILE_BYTES",
+    "ArtifactFileDeclaration",
+    "ArtifactJobCapabilitiesResponse",
     "ArtifactJobError",
+    "ArtifactJobResponse",
     "ArtifactJobService",
     "ArtifactJobView",
+    "OutputLimits",
 ]
