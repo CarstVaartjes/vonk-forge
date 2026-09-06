@@ -46,10 +46,9 @@ export type ProposalInput = {base_revision: string; changes: {path: string; docu
 export type ProposalPreview = {base_revision: string; digest: string; patch: string; affected_documents: string[]; validation_results: string[]};
 export type AuditSummary = {request_id: string; actor: string; action: string; authority_revision?: string; targets: string[]; occurred_at?: string | null};
 export type AuditResponse = {events: AuditSummary[]};
-export type CatalogRecipeSummary = components["schemas"]["RecipeSummaryResponse"];
-export type CatalogRecipeRevision = components["schemas"]["RecipeRevisionResponse"];
-export type CatalogRecipeList = components["schemas"]["RecipeListResponse"];
-export type CatalogRecipeDocument = Record<string, unknown>;
+export type ModelDefinition = components["schemas"]["ModelDefinition"];
+export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
+export type LibraryRecipeModel = components["schemas"]["LibraryRecipeModel"];
 export type SourceBundleReceipt = {sha256: string; archive_bytes: number; total_bytes: number; file_count: number; files: string[]};
 export type SourcePolicyFinding = {code: string; path: string; line: number | null; detail: string};
 export type SourcePolicyReport = {passed: boolean; source_bundle_sha256: string; dockerfile: string; findings: SourcePolicyFinding[]};
@@ -192,52 +191,12 @@ export type ModelCacheEvictionPreviewResponse = components["schemas"]["ModelCach
 export type ModelCacheUpdateResponse = components["schemas"]["ModelCacheUpdateResponse"];
 export type ModelCacheUpdatesResponse = components["schemas"]["ModelCacheUpdatesResponse"];
 export type ModelCacheOperationsResponse = components["schemas"]["ModelCacheOperationsResponse"];
-export type GlobalRecipeRevision = {
-  publisher: string; slug: string; recipe_id: string; revision_number: number; revision_id: string;
-  content_sha256: string; published_at: string; document: Record<string, unknown>;
-};
-// Public catalog responses are generated from the canonical Controller OpenAPI
-// document. Keep these aliases thin so the UI cannot drift into a second DTO.
-export type PublicRecipe = components["schemas"]["PublicRecipeListItem"];
-export type PublicRecipeCapability = PublicRecipe["capabilities"][number];
-export type PublicRecipeExecutionReadiness = PublicRecipe["execution_readiness"];
-export type PublicRecipeExecutionReadinessBasis = PublicRecipe["execution_readiness_basis"];
-export type PublicRecipeQualificationBasis = PublicRecipe["qualification_basis"];
-export type PublicRecipeAlignment = PublicRecipe["alignment"];
-export type PublicRecipeChange = components["schemas"]["PublicRecipeChange"];
-export type PublicRecipeRelease = components["schemas"]["PublicRecipeRelease"];
-export type PublicRecipeLocalState = components["schemas"]["PublicRecipeLocalState"];
-export type PublicRecipeList = components["schemas"]["PublicRecipeListResponse"];
-export type PublicRecipePreview = components["schemas"]["PublicRecipePreviewResponse"];
-export type ManagedCatalogSyncSummary = components["schemas"]["ManagedCatalogSyncResponse"];
-export type ManagedCatalogSyncInput = components["schemas"]["ManagedCatalogSyncRequest"];
 export type LibraryPlacementPreviewInput = components["schemas"]["LibraryPlacementPreviewRequest"];
 export type LibraryPlacementPreview = components["schemas"]["LibraryPlacementPreview"];
 export type LibraryPlacementApplyInput = components["schemas"]["LibraryPlacementApplyRequest"];
 export type LibraryPlacementApplication = components["schemas"]["LibraryPlacementApplication"];
 export type LibraryModelDeletionPlan = components["schemas"]["ModelDeletionPlanResponse"];
 export interface CatalogApi {
-  catalogRecipes(cursor?: string): Promise<CatalogRecipeList>;
-  catalogRecipe(recipeId: string): Promise<CatalogRecipeRevision>;
-  createCatalogRecipe(input: {slug: string; document: CatalogRecipeDocument}): Promise<CatalogRecipeRevision>;
-  updateCatalogRecipe(recipeId: string, expectedRevision: number, document: CatalogRecipeDocument): Promise<CatalogRecipeRevision>;
-  resolveCatalogRecipe(recipeId: string, expectedRevision: number): Promise<CatalogRecipeRevision>;
-  forkCatalogRecipe(recipeId: string, revision: number, slug: string): Promise<CatalogRecipeRevision>;
-  previewGlobalRecipe(uri: string): Promise<GlobalRecipeRevision>;
-  importGlobalRecipe(uri: string, expectedContentSha256: string): Promise<CatalogRecipeRevision>;
-  listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList>;
-  previewPublicRecipe(uri: string, signal?: AbortSignal): Promise<PublicRecipePreview>;
-  importPublicRecipe(uri: string, expectedContentSha256: string, signal?: AbortSignal): Promise<CatalogRecipeRevision>;
-  syncManagedRecipeCatalog(input?: ManagedCatalogSyncInput, signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
-  managedRecipeCatalogSyncStatus(signal?: AbortSignal): Promise<ManagedCatalogSyncSummary>;
-  attachPublicationReport(recipeId: string, report: Record<string, unknown>): Promise<void>;
-  publicationExport(recipeId: string, publisher: string): Promise<Record<string, unknown>>;
-  uploadSourceBundle(sha256: string, archive: Uint8Array): Promise<SourceBundleReceipt>;
-  checkRecipeSource(recipeRevisionId: string): Promise<SourcePolicyReport>;
-  previewRecipeBuild(recipeRevisionId: string, builderNodeId: string): Promise<RecipeBuildPlan>;
-  buildRecipe(plan: RecipeBuildPlan): Promise<RecipeOperation>;
-  previewRecipeMapping(recipeRevisionId: string, nodeIds: string[]): Promise<RecipeMappingPlan>;
-  createRecipeMapping(plan: RecipeMappingPlan): Promise<{mapping_id: string; generation: number; placement_digest: string}>;
 }
 export type ImportDisposition = "imported" | "transformed" | "resolution_required" | "overlay_required" | "unsupported_blocking" | "dropped_redundant";
 export type ImportReportItem = {source_path: string; disposition: ImportDisposition; destination_path: string | null; reason_code: string; detail: string; blocking: boolean};
@@ -285,7 +244,6 @@ export interface LibraryApi {
   artifactJobResultUrl(jobId: string, sha256: string): string;
 }
 export interface ControlApi extends LibraryApi {
-  listPublicRecipes(signal?: AbortSignal): Promise<PublicRecipeList>;
   fleetProfiles(signal?: AbortSignal): Promise<FleetProfileList>;
   fleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfile>;
   createFleetProfile(input: FleetProfileInput, signal?: AbortSignal): Promise<FleetProfile>;
