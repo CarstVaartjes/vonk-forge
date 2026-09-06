@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import httpx
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -66,6 +67,7 @@ from .resource_planning import (
 )
 from .run_switch_contract import (
     ArtifactStorageImpact,
+    ArtifactVerificationResult,
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
     CapabilityEvidence,
@@ -5219,6 +5221,21 @@ def _validate_artifact_execution(
             )
         return
     if phase.kind == "verify":
+        try:
+            verification = ArtifactVerificationResult.model_validate(result, strict=True)
+        except (TypeError, ValidationError) as error:
+            if (
+                plan.recipe_build_id is not None
+                and isinstance(result, Mapping)
+                and result.get("verified_build_id") != plan.recipe_build_id
+            ):
+                raise RunSwitchOperationConflict(
+                    "run-switch.runtime-build-verification-mismatch"
+                ) from error
+            raise RunSwitchOperationConflict(
+                "run-switch.artifact-verification-result-invalid"
+            ) from error
+        result = verification.model_dump(mode="python")
         if result.get("verified") is not True:
             raise RunSwitchOperationConflict(
                 "run-switch.artifact-digest-verification-failed"
@@ -5249,14 +5266,14 @@ def _validate_artifact_execution(
                 raise RunSwitchOperationConflict(
                     "run-switch.runtime-layout-verification-mismatch"
                 )
-        elif plan.recipe_build_id is not None:
+        if verification.verified_build_id != plan.recipe_build_id:
             # A build performed by the same high-level operation has no OCI
             # output digest at preview time.  The distribution adapter must
-            # bind its verification receipt to the exact durable build row.
-            if result.get("verified_build_id") != plan.recipe_build_id:
-                raise RunSwitchOperationConflict(
-                    "run-switch.runtime-build-verification-mismatch"
-                )
+            # bind its verification receipt to the exact durable build row;
+            # published-image plans must carry an explicit null build ID.
+            raise RunSwitchOperationConflict(
+                "run-switch.runtime-build-verification-mismatch"
+            )
     elif phase.kind == "cleanup":
         if result.get("scope") != "spark-local":
             raise RunSwitchOperationConflict(
