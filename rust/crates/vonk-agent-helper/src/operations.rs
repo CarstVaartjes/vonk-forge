@@ -259,8 +259,9 @@ struct RuntimeRequestOutcome {
 /// deliberately separate: the registry manifest identifies the signed image,
 /// the archive digest identifies the enrolled delivery, the stable archive
 /// metadata binds that delivery to its retained inode, and the config digest
-/// identifies the loaded image. Docker stores may expose either that config
-/// digest or the platform manifest as their local image ID.
+/// identifies the archive config while the daemon image ID identifies the
+/// loaded object. Docker-save and Docker's local store may expose different
+/// values for those two identities.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct RuntimeImageReceipt {
@@ -270,6 +271,7 @@ struct RuntimeImageReceipt {
     archive_sha256: String,
     archive_bytes: u64,
     archive_identity: RuntimeArchiveIdentity,
+    archive_config_id: String,
     image_config_id: String,
     local_image_reference: String,
 }
@@ -1096,6 +1098,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let source_image = loaded_image_source(&loaded.stdout)
             .map_err(|_| OperationError::RuntimeImageIdentityInvalid)?
             .ok_or(OperationError::RuntimeImageIdentityInvalid)?;
+        let source_inspected =
+            self.inspect_runtime_image(&source_image)
+                .map_err(|error| match error {
+                    OperationError::CommandFailed => OperationError::RuntimeImageInspectFailed,
+                    OperationError::InvalidArtifact => OperationError::RuntimeImageIdentityInvalid,
+                    other => other,
+                })?;
+        if source_inspected.1 != "linux"
+            || source_inspected.2 != "arm64"
+            || source_inspected.3 != "v1"
+            || !numeric_non_root_user(&source_inspected.4)
+        {
+            return Err(OperationError::RuntimeImageIdentityInvalid);
+        }
         let tagged = self
             .run_docker(&["tag".to_owned(), source_image, local_image])
             .map_err(|error| match error {
@@ -1112,32 +1128,23 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 OperationError::InvalidArtifact => OperationError::RuntimeImageIdentityInvalid,
                 other => other,
             })?;
-        if inspected.1 != "linux"
-            || inspected.2 != "arm64"
-            || inspected.3 != "v1"
-            || !numeric_non_root_user(&inspected.4)
-        {
-            return Err(OperationError::RuntimeImageIdentityInvalid);
-        }
-        if !runtime_image_identity_matches(
-            &inspected.0,
-            &archive_config_id,
-            platform_manifest_digest,
-        ) {
+        if inspected.0 != source_inspected.0 {
             return Err(OperationError::RuntimeImageIdentityInvalid);
         }
         if archive_identity != self.inspect_runtime_archive(archive, expected_bytes)? {
             return Err(OperationError::InvalidArtifact);
         }
-        self.write_image_receipt(
-            registry_index_digest,
-            platform_manifest_digest,
-            archive_sha256,
-            expected_bytes,
-            image_reference,
-            &archive_config_id,
+        self.write_image_receipt(RuntimeImageReceipt {
+            schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+            registry_index_digest: registry_index_digest.to_owned(),
+            platform_manifest_digest: platform_manifest_digest.to_owned(),
+            archive_sha256: archive_sha256.to_owned(),
+            archive_bytes: expected_bytes,
             archive_identity,
-        )
+            archive_config_id,
+            image_config_id: inspected.0,
+            local_image_reference: image_reference.to_owned(),
+        })
         .map_err(|error| match error {
             OperationError::Io(_) | OperationError::InvalidArtifact => {
                 OperationError::RuntimeImageReceiptFailed
@@ -1563,40 +1570,26 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
     }
 
-    fn write_image_receipt(
-        &self,
-        registry_index_digest: &str,
-        platform_manifest_digest: &str,
-        archive_sha256: &str,
-        archive_bytes: u64,
-        local_image_reference: &str,
-        local_config_id: &str,
-        archive_identity: RuntimeArchiveIdentity,
-    ) -> Result<(), OperationError> {
+    fn write_image_receipt(&self, receipt: RuntimeImageReceipt) -> Result<(), OperationError> {
         fs::create_dir_all(&self.roots.runtime_image_receipts)?;
         fs::set_permissions(
             &self.roots.runtime_image_receipts,
             fs::Permissions::from_mode(0o700),
         )?;
-        if !valid_oci_digest(registry_index_digest)
-            || !valid_oci_digest(platform_manifest_digest)
-            || !lower_hex(archive_sha256, 64)
-            || !valid_local_image_reference(local_image_reference)
-            || !valid_oci_digest(local_config_id)
+        if receipt.schema_version != RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION
+            || !valid_oci_digest(&receipt.registry_index_digest)
+            || !valid_oci_digest(&receipt.platform_manifest_digest)
+            || !lower_hex(&receipt.archive_sha256, 64)
+            || !valid_local_image_reference(&receipt.local_image_reference)
+            || !valid_oci_digest(&receipt.archive_config_id)
+            || !valid_oci_digest(&receipt.image_config_id)
         {
             return Err(OperationError::InvalidArtifact);
         }
-        let path = self.roots.runtime_image_receipts.join(archive_sha256);
-        let receipt = RuntimeImageReceipt {
-            schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
-            registry_index_digest: registry_index_digest.to_owned(),
-            platform_manifest_digest: platform_manifest_digest.to_owned(),
-            archive_sha256: archive_sha256.to_owned(),
-            archive_bytes,
-            archive_identity,
-            image_config_id: local_config_id.to_owned(),
-            local_image_reference: local_image_reference.to_owned(),
-        };
+        let path = self
+            .roots
+            .runtime_image_receipts
+            .join(&receipt.archive_sha256);
         let mut body = canonical_json(&receipt).map_err(|_| OperationError::InvalidArtifact)?;
         body.push(b'\n');
         match OpenOptions::new().write(true).create_new(true).open(&path) {
@@ -1651,6 +1644,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || receipt.registry_index_digest != registry_index_digest
             || receipt.platform_manifest_digest != platform_manifest_digest
             || receipt.local_image_reference != local_image_reference
+            || !valid_oci_digest(&receipt.archive_config_id)
+            || receipt.image_config_id != image_config_id
         {
             return Err(OperationError::InvalidArtifact);
         }
@@ -1658,11 +1653,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let archive = archive_root.join(archive_sha256);
         if self.inspect_runtime_archive(&archive, receipt.archive_bytes)?
             != receipt.archive_identity
-            || !runtime_image_identity_matches(
-                image_config_id,
-                &receipt.image_config_id,
-                platform_manifest_digest,
-            )
         {
             return Err(OperationError::InvalidArtifact);
         }
@@ -1707,14 +1697,24 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidArtifact);
         }
-        let file = File::open(path).map_err(|_| OperationError::InvalidArtifact)?;
+        // The path belongs to the unprivileged agent.  Do not let a final
+        // component replacement turn the checked regular file into a
+        // symlink before the helper opens it.
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(path)
+            .map_err(|_| OperationError::InvalidArtifact)?;
         let before = file
             .metadata()
             .map_err(|_| OperationError::InvalidArtifact)?;
         let after = file
             .metadata()
             .map_err(|_| OperationError::InvalidArtifact)?;
-        if before.len() != expected_bytes || stable_identity(&before) != stable_identity(&after) {
+        if artifact_identity(&metadata) != artifact_identity(&before)
+            || before.len() != expected_bytes
+            || artifact_identity(&before) != artifact_identity(&after)
+        {
             return Err(OperationError::InvalidArtifact);
         }
         Ok(runtime_archive_identity(&before))
@@ -1723,14 +1723,6 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn require_directory(&self, path: &Path) -> Result<(), OperationError> {
         require_safe_directory(path, self.required_owner_uid)
     }
-}
-
-fn runtime_image_identity_matches(
-    local_image_id: &str,
-    archive_config_id: &str,
-    platform_manifest_digest: &str,
-) -> bool {
-    local_image_id == archive_config_id || local_image_id == platform_manifest_digest
 }
 
 fn runtime_archive_config_digest(path: &Path) -> Result<String, OperationError> {
@@ -2999,9 +2991,9 @@ mod tests {
 
     use super::{
         CommandOutput, CommandRunner, JobCancellationFence, ManagedRoots, OperationError,
-        OperationExecutor, RuntimeImageReceipt, bounded_container_exit_code, finish_timed_out_job,
-        hex_sha256, loaded_image_source, parse_publication, parse_runtime_stop,
-        validate_docker_run,
+        OperationExecutor, RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION, RuntimeImageReceipt,
+        bounded_container_exit_code, finish_timed_out_job, hex_sha256, loaded_image_source,
+        parse_publication, parse_runtime_stop, validate_docker_run,
     };
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
@@ -3879,15 +3871,17 @@ mod tests {
             .inspect_runtime_archive(&archive, payload.len() as u64)
             .unwrap();
         executor
-            .write_image_receipt(
-                &format!("sha256:{}", "a".repeat(64)),
-                &registry_manifest,
-                &archive_sha256,
-                payload.len() as u64,
-                &local_reference,
-                &config_id,
+            .write_image_receipt(RuntimeImageReceipt {
+                schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+                registry_index_digest: format!("sha256:{}", "a".repeat(64)),
+                platform_manifest_digest: registry_manifest.clone(),
+                archive_sha256: archive_sha256.clone(),
+                archive_bytes: payload.len() as u64,
                 archive_identity,
-            )
+                archive_config_id: config_id.clone(),
+                image_config_id: config_id.clone(),
+                local_image_reference: local_reference.clone(),
+            })
             .unwrap();
         executor
             .require_image_receipt(
@@ -3960,15 +3954,17 @@ mod tests {
             .inspect_runtime_archive(&archive, payload.len() as u64)
             .unwrap();
         executor
-            .write_image_receipt(
-                &format!("sha256:{}", "a".repeat(64)),
-                &registry_manifest,
-                &archive_sha256,
-                payload.len() as u64,
-                &local_reference,
-                &config_id,
+            .write_image_receipt(RuntimeImageReceipt {
+                schema_version: RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+                registry_index_digest: format!("sha256:{}", "a".repeat(64)),
+                platform_manifest_digest: registry_manifest.clone(),
+                archive_sha256: archive_sha256.clone(),
+                archive_bytes: payload.len() as u64,
                 archive_identity,
-            )
+                archive_config_id: config_id.clone(),
+                image_config_id: config_id.clone(),
+                local_image_reference: local_reference.clone(),
+            })
             .unwrap();
 
         let mut replacement = payload;
@@ -3985,6 +3981,24 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn runtime_archive_rejects_final_component_symlinks() {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        fs::create_dir_all(&roots.data).unwrap();
+        let executor =
+            OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
+        let archive_root = roots.agent_data.join("oci-archives");
+        fs::create_dir_all(&archive_root).unwrap();
+        let target = archive_root.join("target");
+        let link = archive_root.join("link");
+        fs::write(&target, b"archive").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert!(executor.inspect_runtime_archive(&link, 7).is_err());
     }
 
     #[test]
@@ -4027,7 +4041,11 @@ mod tests {
             &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
         )
         .unwrap();
-        assert_eq!(receipt.image_config_id, config_id);
+        assert_eq!(receipt.archive_config_id, config_id);
+        assert_eq!(
+            receipt.image_config_id,
+            format!("sha256:{}", "b".repeat(64))
+        );
     }
 
     #[test]

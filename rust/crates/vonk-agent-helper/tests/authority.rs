@@ -584,6 +584,7 @@ fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
                 "modified_seconds": archive_metadata.mtime(),
             },
             "archive_bytes": body.len(),
+            "archive_config_id": config_id,
             "archive_sha256": archive_sha256,
             "image_config_id": config_id,
             "local_image_reference": image_reference,
@@ -649,6 +650,7 @@ fn assert_archive_import_accepts_load_output(load_output: Vec<u8>, expected_sour
     assert_eq!(receipt["schema_version"], 2);
     assert_eq!(receipt["archive_sha256"], archive_sha256);
     assert_eq!(receipt["archive_bytes"], body.len());
+    assert_eq!(receipt["archive_config_id"], config_id);
     assert_eq!(
         receipt["platform_manifest_digest"],
         platform_manifest_digest
@@ -728,6 +730,7 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
             "platform_manifest_digest": platform_manifest_digest,
             "archive_sha256": archive_sha256,
             "archive_bytes": archive_body.len(),
+            "archive_config_id": image_id,
             "image_config_id": image_id,
             "local_image_reference": image_reference,
         }))
