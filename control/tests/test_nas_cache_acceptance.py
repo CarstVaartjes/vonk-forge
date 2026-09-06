@@ -9,7 +9,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
 from vonk_agent_protocol import DistributionAssignment, DistributionObject
 from vonk_control.distribution import (
     CompositeVerifiedObjectSource,
@@ -32,7 +31,6 @@ from vonk_control.models import (
     FleetProfile,
     RecipeBuild,
 )
-
 
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 NODE_A = "spk_" + "a" * 32
@@ -621,8 +619,26 @@ def test_nonempty_artifact_pin_rejects_an_empty_source_body(controller, tmp_path
         model_version_sha256="c" * 64,
         artifacts=[artifact],
     )
-    assert cache.run_pending() == 1
+    for _ in range(3):
+        assert cache.run_pending() == 1
     failed = cache.get_operation(operation.id)
     assert failed.state == "failed"
+    assert failed.attempt == 3
+    assert failed.retryable is True
     assert failed.last_error and "before the immutable artifact size" in failed.last_error
-    assert cache.get_entry(str(operation.artifact_set_sha256))["coverage"] == "incomplete"
+    assert failed.result is None
+    assert failed.progress == {
+        "schema_version": 2,
+        "phase": "downloading",
+        "completed_artifacts": 0,
+        "total_artifacts": 1,
+        "downloaded_bytes": 0,
+        "expected_bytes": len(expected),
+        "current_artifact_key": "artifact-cccccccccccc-metadata",
+    }
+    entry = cache.get_entry(str(operation.artifact_set_sha256))
+    assert entry["state"] == "needs-repair"
+    assert entry["coverage"] == "incomplete"
+    assert entry["verified_bytes"] == 0
+    with pytest.raises(ModelCacheConflict, match="not completely verified"):
+        cache.resolve_verified_artifact_set(str(operation.artifact_set_sha256))
