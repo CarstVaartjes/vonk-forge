@@ -760,43 +760,54 @@ impl AgentHttpClient {
         Ok(assignment)
     }
 
-    /// Consume a complete assignment. Every model/configiliary object and the
+    /// Consume a complete assignment. Every model/configuration object and the
     /// exact OCI archive is fetched through the assignment-bound endpoint;
     /// complete files are reused by trusted metadata, while `.partial` files
-    /// resume by identity and length after an agent process restart.
+    /// resume by identity and length after an agent process restart. The
+    /// archive root is supplied by the caller so retention uses one explicit
+    /// global cache location across assignment directories.
     pub async fn download_distribution(
         &self,
         plan_digest: &str,
         destination_root: &Path,
+        archive_root: &Path,
     ) -> Result<DistributionDownloadEvidence, ClientError> {
-        self.download_distribution_with_progress(plan_digest, destination_root, |_| {})
-            .await
+        self.download_distribution_with_progress(
+            plan_digest,
+            destination_root,
+            archive_root,
+            |_| {},
+        )
+        .await
     }
 
     pub async fn download_distribution_with_progress<F>(
         &self,
         plan_digest: &str,
         destination_root: &Path,
+        archive_root: &Path,
         mut progress: F,
     ) -> Result<DistributionDownloadEvidence, ClientError>
     where
         F: FnMut(DistributionProgress),
     {
-        if !valid_sha256(plan_digest) || !destination_root.is_absolute() {
+        if !valid_sha256(plan_digest)
+            || !destination_root.is_absolute()
+            || !archive_root.is_absolute()
+        {
             return Err(ClientError::Protocol);
         }
         let assignment = self.distribution_manifest(plan_digest).await?;
-        let storage_root = distribution_storage_root(destination_root);
         let model_root = destination_root
             .join("models")
             .join(&assignment.model_artifact_set_sha256);
-        let oci_root = storage_root.join("oci-archives");
+        let oci_root = archive_root.to_path_buf();
         tokio::fs::create_dir_all(&model_root).await?;
         tokio::fs::create_dir_all(&oci_root).await?;
         tokio::fs::set_permissions(&model_root, std::fs::Permissions::from_mode(0o700)).await?;
         tokio::fs::set_permissions(&oci_root, std::fs::Permissions::from_mode(0o700)).await?;
         ensure_private_parent(&model_root, destination_root).await?;
-        ensure_private_parent(&oci_root, storage_root).await?;
+        ensure_private_parent(&oci_root, archive_root).await?;
         let mut model_paths = Vec::new();
         let mut model_digests = Vec::new();
         let mut downloaded_bytes = 0_u64;
@@ -815,7 +826,7 @@ impl AgentHttpClient {
             let managed_root = if object.kind == "model" {
                 destination_root
             } else {
-                storage_root
+                archive_root
             };
             if !path.starts_with(managed_root) {
                 return Err(ClientError::Protocol);
@@ -1391,18 +1402,6 @@ fn partial_path(path: &Path) -> PathBuf {
     PathBuf::from(value)
 }
 
-fn distribution_storage_root(destination_root: &Path) -> &Path {
-    destination_root
-        .parent()
-        .filter(|parent| {
-            parent
-                .file_name()
-                .is_some_and(|name| name == "distribution")
-        })
-        .and_then(Path::parent)
-        .unwrap_or(destination_root)
-}
-
 fn validate_trusted_metadata(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
     metadata.file_type().is_file()
         && !metadata.file_type().is_symlink()
@@ -1801,7 +1800,7 @@ mod tests {
             AgentHttpClient::for_http_test(&format!("http://{address}/"), &assignment.node_id);
         let root = tempfile::tempdir().unwrap();
         let evidence = client
-            .download_distribution(&assignment.plan_digest, root.path())
+            .download_distribution(&assignment.plan_digest, root.path(), root.path())
             .await
             .unwrap();
         assert_eq!(
@@ -2052,9 +2051,10 @@ mod tests {
         );
         let root = tempfile::tempdir().unwrap();
         let assignment_root = root.path().join("distribution").join("plan");
+        let archive_root = root.path().join("oci-archives");
         std::fs::create_dir_all(&assignment_root).unwrap();
         let evidence = client
-            .download_distribution(&assignment.plan_digest, &assignment_root)
+            .download_distribution(&assignment.plan_digest, &assignment_root, &archive_root)
             .await
             .unwrap();
         assert_eq!(evidence.oci_image_digest, format!("sha256:{image_digest}"));
@@ -2084,7 +2084,7 @@ mod tests {
             .unwrap();
         assert_eq!(cached, evidence.oci_archive_path);
         let reused_evidence = client
-            .download_distribution(&assignment.plan_digest, &assignment_root)
+            .download_distribution(&assignment.plan_digest, &assignment_root, &archive_root)
             .await
             .unwrap();
         assert_eq!(reused_evidence.downloaded_bytes, evidence.downloaded_bytes);
@@ -2140,7 +2140,7 @@ mod tests {
             DistributionFixtureMode::Good,
         );
         client
-            .download_distribution(&assignment.plan_digest, root.path())
+            .download_distribution(&assignment.plan_digest, root.path(), root.path())
             .await
             .unwrap();
         assert_eq!(std::fs::read(&model_path).unwrap(), model);
@@ -2162,7 +2162,11 @@ mod tests {
         );
         assert!(matches!(
             corrupt_client
-                .download_distribution(&assignment.plan_digest, corrupt_root.path())
+                .download_distribution(
+                    &assignment.plan_digest,
+                    corrupt_root.path(),
+                    corrupt_root.path(),
+                )
                 .await,
             Err(ClientError::Protocol)
         ));
@@ -2261,7 +2265,7 @@ mod tests {
         );
         assert!(matches!(
             client
-                .download_distribution(&assignment.plan_digest, root.path())
+                .download_distribution(&assignment.plan_digest, root.path(), root.path())
                 .await,
             Err(ClientError::Protocol)
         ));
