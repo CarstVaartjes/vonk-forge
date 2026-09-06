@@ -15,9 +15,8 @@ use url::Url;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
     HostRuntimeAction, HostRuntimeRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
-    RecipeRunInspectionBinding, RecipeRunObservationReceipt, canonical_json, hex_sha256,
-    parse_strict,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES, RecipeRunInspectionBinding,
+    RecipeRunObservationReceipt, canonical_json, hex_sha256, parse_strict,
 };
 
 use crate::{

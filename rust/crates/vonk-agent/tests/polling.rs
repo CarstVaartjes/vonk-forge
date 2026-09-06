@@ -5,11 +5,11 @@ use serde_json::{Value, json};
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
+use vonk_agent::workloads::CompiledExecutionPlan;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     RecipeOperationRequest, canonical_json, hex_sha256,
 };
-use vonk_agent::workloads::CompiledExecutionPlan;
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
