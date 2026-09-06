@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -132,6 +132,7 @@ class Worker:
         reconciliations=None,
         recipes=None,
         model_cache=None,
+        background_services: Sequence[Callable[[], object]] = (),
         loop_heartbeat: Callable[[], object] | None = None,
     ) -> None:
         self._jobs = jobs
@@ -143,6 +144,7 @@ class Worker:
         self._reconciliations = reconciliations
         self._recipes = recipes
         self._model_cache = model_cache
+        self._background_services = tuple(background_services)
         self._loop_heartbeat = loop_heartbeat
         self._source_cursor = 0
 
@@ -158,6 +160,10 @@ class Worker:
             sources.append(self._recipes.tick)
         if self._model_cache is not None:
             sources.append(self._run_model_cache)
+        sources.extend(
+            lambda service=service: bool(service())
+            for service in self._background_services
+        )
         sources.append(self._run_generic)
         if self._source_cursor >= len(sources):
             self._source_cursor = 0
@@ -173,6 +179,9 @@ class Worker:
         return advanced
 
     def _run_model_cache(self) -> bool:
+        tick = getattr(self._model_cache, "tick", None)
+        if callable(tick):
+            return bool(tick())
         return bool(self._model_cache.run_pending(limit=1))
 
     def _run_generic(self) -> bool:
@@ -232,6 +241,7 @@ def assemble_production_worker(
     artifact_job_reconcile_interval_seconds: int,
     artifact_job_reconcile_batch_limit: int,
     model_cache=None,
+    background_services: Sequence[Callable[[], object]] = (),
     agent_artifact_root: Path | None = None,
     compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
     runtime_image_preparer: Callable[..., object] | None = None,
@@ -329,6 +339,7 @@ def assemble_production_worker(
         clock=clock,
         mappings=ClusterMappingService(sessions),
         model_cache=model_cache,
+        background_services=background_services,
         artifact_phase_executor=artifact_phase_executor,
     )
     recipe_operations = RecipeOperationWorker(
@@ -455,6 +466,7 @@ if __name__ == "__main__":
         sessions,
         settings.model_cache_root,
         reserve_bytes=settings.model_cache_reserve_bytes,
+        max_parallel_downloads=settings.model_cache_parallel_downloads,
         clock=clock,
         huggingface_token_path=settings.huggingface_token_path,
     )

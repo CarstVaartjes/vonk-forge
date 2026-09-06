@@ -34,6 +34,8 @@ from .model_cache_contract import (
     ModelCacheUpdatesResponse,
 )
 from .operation_api import bounded_error_responses
+from .operation_contract import AvailabilityOperationFailure
+from .logging import redact_text
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/v1/model-cache"): "getModelCacheInventory",
@@ -110,6 +112,62 @@ def install_model_cache_routes(
         return HTTPException(status_code=503, detail=unavailable)
 
     def operation_response(operation: Any) -> ModelCacheOperationResponse:
+        result = None if operation.result is None else dict(operation.result)
+        failure = None
+        raw_failure = getattr(operation, "failure", None)
+        if isinstance(raw_failure, Mapping):
+            semantic_codes = {
+                "model_cache.credentials_missing": "access_required",
+                "model_cache.credentials_denied": "access_denied",
+                "model_cache.credentials_invalid": "credentials_invalid",
+                "model_cache.rate_limited": "rate_limited",
+                "model_cache.digest_mismatch": "integrity_mismatch",
+                "model_cache.source_size_mismatch": "integrity_mismatch",
+                "model_cache.capacity": "capacity",
+                "model_cache.interrupted": "interrupted",
+            }
+            code = semantic_codes.get(
+                str(raw_failure.get("code", "model_cache.operation_failed")),
+                str(raw_failure.get("code", "model_cache.operation_failed")),
+            )
+            recovery = raw_failure.get("recovery")
+            recovery_actions = {
+                "access_required": [
+                    "open_model_access",
+                    "configure_hf_token",
+                    "check_access_and_resume",
+                ],
+                "access_denied": ["open_model_access", "check_access_and_resume"],
+                "credentials_invalid": [
+                    "configure_hf_token",
+                    "check_access_and_resume",
+                ],
+                "resume": ["resume"],
+                "download_again": ["download_again"],
+                "retry": ["retry"],
+                "capacity": ["free_space", "resume"],
+            }
+            actions = (
+                recovery_actions.get(recovery, ["inspect"])
+                if isinstance(recovery, str) and recovery
+                else ["inspect"]
+            )
+            failure = AvailabilityOperationFailure.model_validate(
+                {
+                    "code": code,
+                    "detail": raw_failure.get("detail") or operation.last_error or "model cache operation failed",
+                    "recovery_actions": actions,
+                    "retryable": bool(raw_failure.get("retryable", False)),
+                    "retry_time": raw_failure.get("retry_time"),
+                    "retry_after_seconds": raw_failure.get("retry_after_seconds"),
+                    "log_excerpt": redact_text(raw_failure.get("detail"))[:1024]
+                    if raw_failure.get("detail")
+                    else None,
+                    "required_bytes": raw_failure.get("required_bytes"),
+                    "free_bytes": raw_failure.get("free_bytes"),
+                    "shortfall_bytes": raw_failure.get("shortfall_bytes"),
+                }
+            )
         return ModelCacheOperationResponse.model_validate(
             {
                 "schema_version": 2,
@@ -121,12 +179,8 @@ def install_model_cache_routes(
                 "artifact_set_sha256": operation.artifact_set_sha256,
                 "plan_digest": operation.plan_digest,
                 "progress": dict(operation.progress),
-                "result": (
-                    None
-                    if operation.result is None
-                    else dict(operation.result)
-                ),
-                "last_error": operation.last_error,
+                "result": result,
+                "failure": failure,
                 "created_at": operation.created_at,
                 "updated_at": operation.updated_at,
                 "completed_at": operation.completed_at,
