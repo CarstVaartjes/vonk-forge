@@ -12,7 +12,6 @@ from .agent_upgrade_preview_request_strategy import AgentUpgradePreviewRequestSt
 from .agent_upgrade_target_diagnostics_response import AgentUpgradeTargetDiagnosticsResponse
 from .agents_response import AgentsResponse
 from .apply_agent_upgrade_response_apply_agent_upgrade_api_v1_agents_upgrades_post import ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost
-from .apply_request import ApplyRequest
 from .artifact_file_declaration import ArtifactFileDeclaration
 from .artifact_job_create import ArtifactJobCreate
 from .artifact_job_create_parameters import ArtifactJobCreateParameters
@@ -319,7 +318,6 @@ from .preparation_reason import PreparationReason
 from .preparation_reason_severity import PreparationReasonSeverity
 from .preview_agent_upgrade_response_preview_agent_upgrade_api_v1_agents_upgrades_preview_post import PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost
 from .preview_proposal_response_proposal_preview_api_v1_proposals_post import PreviewProposalResponseProposalPreviewApiV1ProposalsPost
-from .preview_request import PreviewRequest
 from .projection_reason import ProjectionReason
 from .projection_reason_code import ProjectionReasonCode
 from .projection_reason_severity import ProjectionReasonSeverity
@@ -399,8 +397,6 @@ from .recipe_validation_check_assertions_item import RecipeValidationCheckAssert
 from .recipe_validation_check_kind import RecipeValidationCheckKind
 from .rejected_node import RejectedNode
 from .request_key import RequestKey
-from .resolve_import_request import ResolveImportRequest
-from .resolve_import_request_overlays import ResolveImportRequestOverlays
 from .resource_demand_evidence import ResourceDemandEvidence
 from .resource_demand_evidence_evidence_state import ResourceDemandEvidenceEvidenceState
 from .rollout_preparation import RolloutPreparation
@@ -528,7 +524,6 @@ __all__ = (
     "AgentUpgradePreviewRequestStrategy",
     "AgentUpgradeTargetDiagnosticsResponse",
     "ApplyAgentUpgradeResponseApplyAgentUpgradeApiV1AgentsUpgradesPost",
-    "ApplyRequest",
     "ArtifactFileDeclaration",
     "ArtifactJobCreate",
     "ArtifactJobCreateParameters",
@@ -835,7 +830,6 @@ __all__ = (
     "PreparationReasonSeverity",
     "PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost",
     "PreviewProposalResponseProposalPreviewApiV1ProposalsPost",
-    "PreviewRequest",
     "ProjectionReason",
     "ProjectionReasonCode",
     "ProjectionReasonSeverity",
@@ -915,8 +909,6 @@ __all__ = (
     "RecipeValidationCheckKind",
     "RejectedNode",
     "RequestKey",
-    "ResolveImportRequest",
-    "ResolveImportRequestOverlays",
     "ResourceDemandEvidence",
     "ResourceDemandEvidenceEvidenceState",
     "RolloutPreparation",
