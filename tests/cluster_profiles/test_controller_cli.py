@@ -135,6 +135,7 @@ class _StrictTaskClient(_Client):
             ("POST", "/api/v1/model-cache/repair-preview"): {"artifact_set_sha256"},
             ("POST", "/api/v1/model-cache/repair"): {"artifact_set_sha256", "plan_digest", "request_key"},
             ("GET", "/api/v1/operations"): {"limit", "state"},
+            ("GET", "/api/v1/operations/profile-switch-1"): set(),
         }
         if (method, path) not in allowed:
             raise AssertionError(f"unexpected Controller route: {method} {path}")
@@ -146,6 +147,10 @@ class _StrictTaskClient(_Client):
             raise AssertionError(f"unexpected body for {path}: {payload}")
         self.calls.append((method, path, payload, query))
         self.extra_headers.append(extra_headers)
+        if path == "/api/v1/fleet-profiles/profile-1/switch":
+            return {"schema_version": 2, "operation_id": "profile-switch-1", "state": "queued"}
+        if path == "/api/v1/operations/profile-switch-1":
+            return {"schema_version": 2, "id": "profile-switch-1", "state": "succeeded"}
         if path == "/api/v1/model-cache/eviction-preview":
             return {"schema_version": 2, "plan_digest": "d" * 64}
         if path == "/api/v1/model-cache/evict":
@@ -1698,6 +1703,7 @@ def test_strict_fixture_rejects_route_query_and_body_drift() -> None:
     for command in commands:
         result, _payload = _invoke(client, "--json", *command)
         assert result == 0
+    assert ("GET", "/api/v1/operations/profile-switch-1", None, None) in client.calls
 
 
 def test_artifact_job_create_declares_hashed_bounded_local_inputs(

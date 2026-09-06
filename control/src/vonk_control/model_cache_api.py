@@ -617,7 +617,13 @@ class ModelCacheOperationProvider:
         return f"{created_at}|{operation_id}"[:1024]
 
     def get_operation(self, operation_id: str) -> dict[str, object]:
-        return self._summary(self._service.get_operation(operation_id))
+        try:
+            operation = self._service.get_operation(operation_id)
+        except ModelCacheNotFound:
+            # A global Activity lookup asks every family. An absent cache
+            # operation must let another family supply the requested operation.
+            raise KeyError(operation_id) from None
+        return self._summary(operation)
 
     def _summary(self, operation: Any) -> dict[str, object]:
         progress = dict(operation.progress)

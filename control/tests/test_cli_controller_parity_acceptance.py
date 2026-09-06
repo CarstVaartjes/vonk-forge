@@ -497,7 +497,8 @@ class _UncertainTransport(_AppTransport):
 def _invoke(transport: _AppTransport, *argv: str) -> dict[str, object]:
     output = StringIO()
     with redirect_stdout(output):
-        assert cli.main(argv, control_client=transport, request_id_factory=lambda: "00000000-0000-4000-8000-000000000099") == 0
+        result = cli.main(argv, control_client=transport, request_id_factory=lambda: "00000000-0000-4000-8000-000000000099")
+        assert result == 0, output.getvalue()
     return json.loads(output.getvalue())
 
 
@@ -576,9 +577,11 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
     assert profile_apply.status_code == 202
     api_profile = profile_apply.json()
     cli_profile = _invoke(transport, "--json", "profiles", "switch", profile_id, "--request-key", profile_key)
-    assert cli_profile["result"]["current_operation_id"] == api_profile["current_operation_id"]
-    assert cli_profile["result"]["plan_digest"] == api_profile["plan_digest"]
-    assert cli_profile["result"]["progress"]["completed_steps"] == 1
+    observed_profile = api.get(f"/api/v1/operations/{api_profile['id']}", headers=headers)
+    assert observed_profile.status_code == 200
+    assert cli_profile["result"] == observed_profile.json()
+    assert cli_profile["result"]["id"] == api_profile["id"]
+    assert cli_profile["plan"]["plan_digest"] == api_profile["plan_digest"]
 
     # Seed one failed recipe operation in the same composed ledger.  This is
     # the persisted operation an operator would select from Activity before
@@ -614,6 +617,14 @@ def test_uncertain_cache_submission_reuses_request_key_against_same_app() -> Non
         audits=MemoryAuditStore(),
         fleet=lambda: {"nodes": []},
         model_cache=cache,
+        operations=OperationApiServices(
+            endpoint=lambda _alias: {},
+            agents=list,
+            job_operations=lambda *_args: None,
+            resume_job=lambda _job_id: None,
+            operation_providers=(ledger.provider(),),
+            cursor_codec=codec.cursor_codec(),
+        ),
     )
     headers = {
         "Authorization": f"Bearer {codec.issue(Actor('admin', 'administrator'), ttl_seconds=100, now=int(time.time()))}"
@@ -864,10 +875,16 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     )
     assert profile_apply.status_code == 202
     cli_profile = _invoke(
-        transport, "--json", "profiles", "switch", profile_id, "--request-key", profile_key
+        transport, "--json", "profiles", "switch", profile_id, "--request-key", profile_key,
+        "--timeout-seconds", "0",
     )
     assert cli_profile["result"]["id"] == profile_apply.json()["id"]
-    assert cli_profile["result"]["plan_digest"] == profile_plan.json()["plan_digest"]
+    assert cli_profile["plan"]["plan_digest"] == profile_plan.json()["plan_digest"]
+    observed_profile = api.get(
+        f"/api/v1/operations/{profile_apply.json()['id']}", headers=headers
+    )
+    assert observed_profile.status_code == 200, observed_profile.text
+    assert cli_profile["result"]["state"] == observed_profile.json()["state"]
 
     activity = api.get("/api/v1/operations", headers=headers, params={"limit": 100})
     assert activity.status_code == 200, activity.text

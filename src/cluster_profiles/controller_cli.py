@@ -11,7 +11,6 @@ import stat
 import sys
 import time
 import urllib.parse
-import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
