@@ -598,11 +598,21 @@ def _configure_canonical_canary_library(
         package_target.write_bytes(fixture.package_bytes)
     except OSError as error:
         raise LifecycleError("canonical canary package staging failed") from error
+    # The producer's package path is repository-relative and may contain
+    # several directories (the canonical canary lives under
+    # ``tests/fixtures/...``).  ``Path.mkdir(parents=True)`` applies its mode
+    # only to the leaf, so make every bind-mounted ancestor traversable by
+    # Caddy explicitly even under a private umask.
+    package_directories = [
+        path
+        for path in package_target.parents
+        if path.is_relative_to(serving_root)
+    ]
     for directory in (
         serving_root,
         serving_root / "v1",
         serving_root / "v1/recipe-library",
-        package_target.parent,
+        *reversed(package_directories),
     ):
         os.chmod(directory, 0o755)
     os.chmod(index_target, 0o644)
@@ -2169,7 +2179,11 @@ class SparkLifecycle:
             )
             completed.append("uninstalled")
         except (SliceError, ServingExecutionError) as error:
-            raise LifecycleError(f"synthetic canary failed: {error}") from error
+            # Keep the API response concise for the lifecycle client, but make
+            # the bounded Controller logs available before cleanup.  This is
+            # the only useful evidence for an unexpected 5xx from a fresh
+            # candidate and uses the existing secret redaction path.
+            raise self._installation_failure("synthetic canary", error) from error
         if (
             completed != list(SYNTHETIC_CANARY_STATES)
             or not isinstance(response_digest, str)
