@@ -11,15 +11,15 @@ from pathlib import Path
 import pytest
 
 contracts = pytest.importorskip("vonk_forge_contracts")
-from vonk_control.recipe_runtime_specs import (  # noqa: E402
-    RecipeRuntimeSpecError,
-    compile_runtime_spec,
-)
-from vonk_control.harnesses.canonical import (  # noqa: E402
+from vonk_control.harnesses.canonical import (
     _scalar,
     _validate_argv_size,
 )
-from vonk_control.harnesses.common import structured_command  # noqa: E402
+from vonk_control.harnesses.common import structured_command
+from vonk_control.recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    compile_runtime_spec,
+)
 
 
 def _example(name: str) -> dict[str, object]:
@@ -376,6 +376,26 @@ def test_published_distributed_sglang_preserves_authored_launch_and_rank() -> No
     assert {
         mount["target"] for mount in entrypoint["security"]["mounts"]
     } == {"/models", "/outputs"}
+
+
+def test_sglang_wrapper_receives_root_for_target_mount() -> None:
+    raw = _example("recipe-image.json")
+    raw["runtime"]["engine"] = "sglang"  # type: ignore[index]
+    raw["runtime"]["entrypoint"] = ["/opt/vonk/bin/sglang-serve"]  # type: ignore[index]
+    raw["runtime"]["arguments"] = [  # type: ignore[index]
+        {"name": "model-path", "value": "/models"},
+    ]
+    raw["models"][0]["files"][0]["mount"]["target"] = "/models/target"  # type: ignore[index]
+    recipe = contracts.RecipeDefinition.model_validate(raw)
+    model = contracts.ModelDefinition.model_validate(_example("model-definition.json"))
+    spec = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
+
+    argv = spec["runtime"]["entrypoint"]
+    assert argv[:4] == ["/opt/vonk/bin/sglang-serve", "--model-path", "/models", "--host"]
+    assert {mount["target"] for mount in spec["security"]["mounts"]} == {
+        "/models/target",
+        "/outputs",
+    }
 
 
 def test_published_ds4_keeps_target_and_drafter_mount_roles() -> None:
