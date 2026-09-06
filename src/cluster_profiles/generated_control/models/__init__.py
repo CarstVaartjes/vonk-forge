@@ -243,6 +243,7 @@ from .model_cache_repair_preview_request import ModelCacheRepairPreviewRequest
 from .model_cache_repair_preview_response import ModelCacheRepairPreviewResponse
 from .model_cache_repair_preview_response_current_state import ModelCacheRepairPreviewResponseCurrentState
 from .model_cache_repair_request import ModelCacheRepairRequest
+from .model_cache_retry_request import ModelCacheRetryRequest
 from .model_cache_update_response import ModelCacheUpdateResponse
 from .model_cache_updates_response import ModelCacheUpdatesResponse
 from .model_capabilities import ModelCapabilities
@@ -442,6 +443,7 @@ from .run_switch_progress_subphase_type_0 import RunSwitchProgressSubphaseType0
 from .run_switch_reason import RunSwitchReason
 from .run_switch_reason_scope import RunSwitchReasonScope
 from .run_switch_reason_severity import RunSwitchReasonSeverity
+from .run_switch_retry_request import RunSwitchRetryRequest
 from .run_switch_stop_apply_request import RunSwitchStopApplyRequest
 from .run_switch_stop_preview_request import RunSwitchStopPreviewRequest
 from .runtime_argument_value import RuntimeArgumentValue
@@ -755,6 +757,7 @@ __all__ = (
     "ModelCacheRepairPreviewResponse",
     "ModelCacheRepairPreviewResponseCurrentState",
     "ModelCacheRepairRequest",
+    "ModelCacheRetryRequest",
     "ModelCacheUpdateResponse",
     "ModelCacheUpdatesResponse",
     "ModelCapabilities",
@@ -954,6 +957,7 @@ __all__ = (
     "RunSwitchReason",
     "RunSwitchReasonScope",
     "RunSwitchReasonSeverity",
+    "RunSwitchRetryRequest",
     "RunSwitchStopApplyRequest",
     "RunSwitchStopPreviewRequest",
     "RuntimeArgumentValue",
