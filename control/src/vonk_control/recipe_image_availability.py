@@ -26,6 +26,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
+from .model_cache import ModelCacheNotFound
 from .models import CatalogDocumentRevision, Job, RecipeBuild
 from .operation_contract import normalize_operation_progress, sanitize_failure_evidence
 from .runtime_image_preparation import (
@@ -150,6 +151,8 @@ class RecipeImageAvailabilityView:
     created_at: str
     updated_at: str
     model_child: Mapping[str, object] | None = None
+    image_state: str | None = None
+    image_failure: Mapping[str, object] | None = None
 
     def document(self) -> dict[str, object]:
         return {
@@ -297,8 +300,7 @@ def _recovery_actions(
         return ["download_again"] if mode == "image" else ["force_rebuild"]
     if retryable:
         resumable = mode == "image" and (
-            code.startswith("registry.")
-            or code.startswith("runtime_image.transport")
+            code.startswith(("registry.", "runtime_image.transport"))
             or code in {"recipe_image.download_interrupted", "recipe_image.network_error"}
         )
         return ["resume", "retry"] if resumable else ["retry"]
@@ -1154,7 +1156,7 @@ class RecipeImageAvailabilityService:
                     operation.current_attempt = int(operation.current_attempt)
                     self._set_progress(operation, "available", total_bytes=receipt.image_bytes,
                                        completed_bytes=receipt.image_bytes)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - persist failures at the background job boundary
             self._fail(operation_id, error)
         finally:
             if heartbeat is not None:
@@ -1170,7 +1172,7 @@ class RecipeImageAvailabilityService:
             return child
         try:
             operation = self._model_cache.get_operation(child_id)
-        except Exception:
+        except ModelCacheNotFound:
             return dict(child) | {
                 "state": "failed",
                 "failure": {
@@ -1477,36 +1479,38 @@ class RecipeImageAvailabilityService:
         model_child = self._current_model_child(payload)
         raw_image_progress = payload.get("progress")
         image_progress = dict(raw_image_progress) if isinstance(raw_image_progress, Mapping) else {}
+        image_result = payload.get("image_result")
+        image_ready = isinstance(image_result, Mapping)
+        image_state = "succeeded" if image_ready else operation.state
+        raw_failure = payload.get("failure")
+        failure = raw_failure if isinstance(raw_failure, Mapping) else None
+        if image_ready:
+            image_bytes = image_result.get("image_bytes")
+            image_progress.update(
+                phase="available",
+                completed_bytes=image_bytes if type(image_bytes) is int else 0,
+                total_bytes=image_bytes if type(image_bytes) is int else None,
+                total_bytes_known=type(image_bytes) is int,
+            )
+            image_progress.pop("bytes_per_second", None)
+            image_progress.pop("eta_seconds", None)
         progress = dict(image_progress)
-        image_members = progress.get("members")
-        image_members = list(image_members) if isinstance(image_members, list) else []
-        image_index = next(
-            (index for index, member in enumerate(image_members)
-             if isinstance(member, Mapping) and member.get("member_id") == "runtime-image"),
-            None,
-        )
-        if image_index is None:
-            image_members.append({
-                "member_id": "runtime-image",
-                "phase": str(progress.get("phase", "prepare")),
-                "completed_bytes": int(progress.get("completed_bytes", 0) or 0),
-                "total_bytes": progress.get("total_bytes"),
-                "state": operation.state,
-            })
-            image_index = len(image_members) - 1
+        image_members = [{
+            "member_id": "runtime-image",
+            "phase": str(image_progress.get("phase", "prepare")),
+            "completed_bytes": int(image_progress.get("completed_bytes", 0) or 0),
+            "total_bytes": image_progress.get("total_bytes"),
+            "state": image_state,
+        }]
         progress["members"] = image_members
         if model_child is not None:
-            child_state = str(model_child.get("state", "queued"))
-            if child_state != "succeeded":
-                image_member = dict(image_members[image_index])
-                image_member["completed_bytes"] = 0
-                image_member["state"] = "queued"
-                image_members[image_index] = image_member
             child_progress = model_child.get("progress")
             if isinstance(child_progress, Mapping):
-                child_completed = child_progress.get("completed_bytes", 0)
-                child_total = child_progress.get("total_bytes")
-                image_member = image_members[image_index]
+                child_completed = child_progress.get(
+                    "completed_bytes", child_progress.get("downloaded_bytes", 0)
+                )
+                child_total = child_progress.get("total_bytes", child_progress.get("expected_bytes"))
+                image_member = image_members[0]
                 image_completed = image_member.get("completed_bytes", 0)
                 image_total = image_member.get("total_bytes")
                 progress["completed_bytes"] = (
@@ -1516,6 +1520,14 @@ class RecipeImageAvailabilityService:
                 if isinstance(child_total, int) and isinstance(image_total, int):
                     progress["total_bytes"] = child_total + image_total
                     progress["total_bytes_known"] = True
+                else:
+                    progress["total_bytes"] = None
+                    progress["total_bytes_known"] = False
+                # One child's rate/ETA is not an aggregate transfer estimate.
+                progress.pop("bytes_per_second", None)
+                progress.pop("eta_seconds", None)
+                if image_ready and model_child.get("state") != "succeeded":
+                    progress["phase"] = str(child_progress.get("phase", "download"))
                 members = list(progress["members"])
                 members = [member for member in members if not (
                     isinstance(member, Mapping) and member.get("member_id") == "model-cache"
@@ -1530,8 +1542,6 @@ class RecipeImageAvailabilityService:
                     }
                 )
                 progress["members"] = members
-        raw_failure = payload.get("failure")
-        failure = raw_failure if isinstance(raw_failure, Mapping) else None
         actions = (
             tuple(str(item) for item in failure.get("recovery_actions", []) if isinstance(item, str))
             if failure is not None and isinstance(failure.get("recovery_actions"), list)
@@ -1546,6 +1556,8 @@ class RecipeImageAvailabilityService:
             build_input_sha256=(payload.get("build_input_sha256") if isinstance(payload.get("build_input_sha256"), str) else None),
             progress=progress,
             image_progress=image_progress,
+            image_state=image_state,
+            image_failure=None if image_ready or failure is None else dict(failure),
             result=(dict(result) if result is not None and operation.state == "succeeded" else None),
             failure=(dict(failure) if failure is not None else None),
             supported_actions=actions,

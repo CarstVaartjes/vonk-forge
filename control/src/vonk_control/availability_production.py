@@ -35,7 +35,6 @@ from .runtime_image_preparation import (
     persist_runtime_image_receipt,
 )
 
-
 _BUILDER_ADMISSION_CODES = frozenset(
     {
         "build.node_unknown",

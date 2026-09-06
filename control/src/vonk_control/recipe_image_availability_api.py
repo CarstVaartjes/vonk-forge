@@ -230,8 +230,9 @@ def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailability
             + [_child({
                 "id": view.id,
                 "request_key": view.request_id,
-                "state": view.state,
+                "state": view.image_state or view.state,
                 "progress": view.image_progress or {"phase": "prepare"},
+                "failure": view.image_failure,
             }, kind="runtime-image")]
         ),
         result=result_model,
@@ -342,9 +343,9 @@ def install_recipe_image_availability_routes(
 
 
 __all__ = [
+    "RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS",
     "RecipeImageAvailabilityResponse",
     "RecipeImageAvailabilityRetry",
     "RecipeImageAvailabilityStart",
-    "RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS",
     "install_recipe_image_availability_routes",
 ]

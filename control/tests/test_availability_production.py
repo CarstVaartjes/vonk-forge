@@ -18,6 +18,7 @@ from vonk_control.availability_production import (
     RecipeImageAvailabilityScheduler,
     build_recipe_image_availability,
 )
+from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -27,10 +28,9 @@ from vonk_control.models import (
     RecipeBuild,
     RuntimeImageReceipt,
 )
-from vonk_control.model_cache import ModelCacheService
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityError
 from vonk_control.runtime_image_preparation import PulledImageEvidence
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
 class _Claim:
@@ -85,14 +85,14 @@ def test_production_factory_separates_api_service_and_worker_scheduler(tmp_path)
     class Settings:
         agent_artifact_root = tmp_path / "api-artifacts"
 
-    kwargs = dict(
-        sessions=sessions,
-        settings=Settings(),
-        managed_catalog_sync=None,
-        recipe_builds=object(),
-        recipe_operations=object(),
-        clock=lambda: datetime.now(UTC),
-    )
+    kwargs = {
+        "sessions": sessions,
+        "settings": Settings(),
+        "managed_catalog_sync": None,
+        "recipe_builds": object(),
+        "recipe_operations": object(),
+        "clock": lambda: datetime.now(UTC),
+    }
     api = build_recipe_image_availability(**kwargs)
     assert api.scheduler is None
     assert api.storage.root == tmp_path / "api-artifacts" / "oci-archives"
@@ -128,13 +128,13 @@ def test_production_factory_claim_compiles_and_persists_sql_receipt(
                 id="model-revision",
                 document_id="model-document",
                 kind="model",
-                publisher="vonk-forge",
-                slug="synthetic-tiny-fp16",
+                publisher=model["identity"]["publisher"],
+                slug=model["identity"]["slug"],
                 revision_number=1,
                 schema_version=2,
                 state="active",
                 document=model,
-                content_digest="7b5431cb5c3f062afa8cc3e7013610cd1fa52fad35c53b5dd0f57482649c4202",
+                content_digest=content_sha256(ModelDefinition.model_validate(model)),
                 artifact_key="b" * 64,
                 projected={},
                 created_by="test",
@@ -532,7 +532,6 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     }
     model_raw["files"][0]["sha256"] = hashlib.sha256(model_bytes).hexdigest()
     model_raw["files"][0]["size_bytes"] = len(model_bytes)
-    from vonk_forge_contracts import ModelDefinition
 
     model = ModelDefinition.model_validate(model_raw)
     model_digest = content_sha256(model)

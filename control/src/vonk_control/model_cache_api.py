@@ -18,10 +18,10 @@ from .model_cache import (
 )
 from .model_cache_contract import (
     CacheEntryResponse,
+    ModelCacheAccessResumeRequest,
     ModelCacheDownloadPreviewRequest,
     ModelCacheDownloadPreviewResponse,
     ModelCacheDownloadRequest,
-    ModelCacheAccessResumeRequest,
     ModelCacheEvictionPreviewRequest,
     ModelCacheEvictionPreviewResponse,
     ModelCacheEvictRequest,

@@ -199,3 +199,24 @@ Issues #593–#598 and #551 remain tracked. Local fixtures do not close deployed
 cache, progress, provenance, preflight, recovery and sanitized-failure
 journeys. After combined checks, publish/deploy compatible consumers through
 the authorized Controller-managed Spark path, preserving secrets and volumes.
+
+## Selected NAS downloads
+
+On 6 September the user narrowed the initial download scope to the current
+MiaAI-Lab Qwen3.8 Flash Next, DeepSeek V4 Flash and GLM5.3 Flash recipes, plus
+all 3D recipes. At published producer main `807957c9`, this selects 15 Recipes
+and 15 Model definitions. Their selected files total 1,044,798,538,422 bytes
+after SHA-256 deduplication. Qwen's SGLang and vLLM recipes share files. The
+selection includes the current DeepSeek 0731, SparkInfer and Vision variants,
+GLM EXL3/DFlash2 and NVFP4 variants, and eight 3D recipes. Downloading these
+Model files does not start workloads or build runtime images.
+
+Live preflight confirmed both Sparks online with no loaded workloads, but the
+deployed Controller has no ModelCache API yet. The mounted Docker share has
+approximately 2.35 TB free; this is not proof of the named cache volume's free
+space. Authenticated UGREEN Docker UI access is available for the supported
+project redeploy. No Model downloads have started. After publication and
+deployment, inspect the official cache inventory/storage endpoint, generate
+fresh download previews, submit the returned plan digests and retain the
+durable operation IDs. Preserve existing secrets, named volumes and valid
+cached files; do not substitute direct NAS downloads for the Controller API.

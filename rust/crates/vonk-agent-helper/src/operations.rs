@@ -26,6 +26,7 @@ const MAX_ARTIFACT_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
 const MAX_RUNTIME_REQUEST_BYTES: u64 = 64 * 1024;
+const MAX_RUNTIME_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 const MAX_COMPILED_MODEL_FILES: usize = 4096;
 const MAX_COMPILED_MODEL_PATH_BYTES: usize = 512;
 const MAX_COMPILED_MODEL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
@@ -256,8 +257,10 @@ struct RuntimeRequestOutcome {
 /// The helper's durable proof that one exact archive was imported into one
 /// exact local image reference.  These identities are deliberately separate:
 /// the registry manifest identifies the signed image, the archive digest
-/// identifies the transferred bytes, and Docker's config ID identifies the
-/// object actually loaded on this host.
+/// identifies the transferred bytes, and the archive's config digest identifies
+/// the image configuration. Docker stores may expose either that config digest
+/// or the platform manifest as their local image ID, so the operational check
+/// accepts only one of those two identities after the archive is verified.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct RuntimeImageReceipt {
@@ -268,6 +271,12 @@ struct RuntimeImageReceipt {
     archive_bytes: u64,
     image_config_id: String,
     local_image_reference: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct DockerSaveManifestEntry {
+    config: String,
 }
 
 struct RuntimeRequestGrantBinding<'a> {
@@ -1039,6 +1048,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             .filter(|value| (1..=MAX_RUNTIME_ARCHIVE_BYTES).contains(value))
             .ok_or(OperationError::InvalidOperation)?;
         self.verify_runtime_archive(archive, archive_sha256, expected_bytes)?;
+        let archive_config_id = runtime_archive_config_digest(archive)?;
         let loaded = self
             .run_docker(&[
                 "load".to_owned(),
@@ -1085,13 +1095,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::RuntimeImageIdentityInvalid);
         }
+        if !runtime_image_identity_matches(
+            &inspected.0,
+            &archive_config_id,
+            platform_manifest_digest,
+        ) {
+            return Err(OperationError::RuntimeImageIdentityInvalid);
+        }
         self.write_image_receipt(
             registry_index_digest,
             platform_manifest_digest,
             archive_sha256,
             expected_bytes,
             image_reference,
-            &inspected.0,
+            &archive_config_id,
         )
         .map_err(|error| match error {
             OperationError::Io(_) | OperationError::InvalidArtifact => {
@@ -1604,13 +1621,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
             || receipt.registry_index_digest != registry_index_digest
             || receipt.platform_manifest_digest != platform_manifest_digest
             || receipt.local_image_reference != local_image_reference
-            || receipt.image_config_id != image_config_id
         {
             return Err(OperationError::InvalidArtifact);
         }
         let (archive_root, _) = self.canonical_archive_root()?;
         let archive = archive_root.join(archive_sha256);
         self.verify_runtime_archive(archive.as_path(), archive_sha256, receipt.archive_bytes)?;
+        let archive_config_id = runtime_archive_config_digest(&archive)?;
+        if receipt.image_config_id != archive_config_id
+            || !runtime_image_identity_matches(
+                image_config_id,
+                &archive_config_id,
+                platform_manifest_digest,
+            )
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
         Ok(())
     }
 
@@ -1685,6 +1711,77 @@ impl<R: CommandRunner> OperationExecutor<R> {
     fn require_directory(&self, path: &Path) -> Result<(), OperationError> {
         require_safe_directory(path, self.required_owner_uid)
     }
+}
+
+fn runtime_image_identity_matches(
+    local_image_id: &str,
+    archive_config_id: &str,
+    platform_manifest_digest: &str,
+) -> bool {
+    local_image_id == archive_config_id || local_image_id == platform_manifest_digest
+}
+
+fn runtime_archive_config_digest(path: &Path) -> Result<String, OperationError> {
+    let manifest = read_runtime_archive_member(path, Path::new("manifest.json"))?;
+    let entries: Vec<DockerSaveManifestEntry> =
+        serde_json::from_slice(&manifest).map_err(|_| OperationError::InvalidArtifact)?;
+    if entries.len() != 1 {
+        return Err(OperationError::InvalidArtifact);
+    }
+    let config_path = Path::new(&entries[0].config);
+    let config = config_member_name(config_path).ok_or(OperationError::InvalidArtifact)?;
+    let bytes = read_runtime_archive_member(path, config_path)?;
+    if hex_sha256(&bytes) != config {
+        return Err(OperationError::InvalidArtifact);
+    }
+    Ok(format!("sha256:{config}"))
+}
+
+fn read_runtime_archive_member(path: &Path, target: &Path) -> Result<Vec<u8>, OperationError> {
+    let file = File::open(path).map_err(|_| OperationError::InvalidArtifact)?;
+    let mut archive = tar::Archive::new(file);
+    let mut found = None;
+    // A Docker-save archive can contain many layer and manifest blobs. Read
+    // only the exact member selected by manifest.json, seeking past payloads
+    // so config verification does not reread every multi-gigabyte layer.
+    for entry in archive
+        .entries_with_seek()
+        .map_err(|_| OperationError::InvalidArtifact)?
+    {
+        let mut entry = entry.map_err(|_| OperationError::InvalidArtifact)?;
+        if entry.path().map_err(|_| OperationError::InvalidArtifact)? != target {
+            continue;
+        }
+        if found.is_some()
+            || !entry.header().entry_type().is_file()
+            || entry.size() > MAX_RUNTIME_CONFIG_BYTES as u64
+        {
+            return Err(OperationError::InvalidArtifact);
+        }
+        let size = entry.size() as usize;
+        let mut bytes = Vec::with_capacity(size);
+        entry
+            .read_to_end(&mut bytes)
+            .map_err(|_| OperationError::InvalidArtifact)?;
+        if bytes.len() != size {
+            return Err(OperationError::InvalidArtifact);
+        }
+        found = Some(bytes);
+    }
+    found.ok_or(OperationError::InvalidArtifact)
+}
+
+fn config_member_name(path: &Path) -> Option<String> {
+    let value = path.to_str()?;
+    let digest = if let Some(value) = value.strip_prefix("blobs/sha256/") {
+        value.strip_suffix(".json").unwrap_or(value)
+    } else {
+        if path.components().count() != 1 {
+            return None;
+        }
+        value.strip_suffix(".json")?
+    };
+    lower_hex(digest, 64).then(|| digest.to_owned())
 }
 
 fn bounded_container_exit_code(output: &CommandOutput) -> i32 {
@@ -2071,7 +2168,7 @@ fn validate_docker_run_with_archive(
     let (uid, _gid) = user.ok_or(OperationError::InvalidOperation)?;
     let outputs = outputs.ok_or(OperationError::InvalidOperation)?;
     let cache_root = cache_root.ok_or(OperationError::InvalidOperation)?;
-    require_safe_directory(&cache_root, agent_data_owner_uid)?;
+    require_runtime_directory(&cache_root, agent_data_owner_uid, uid)?;
     let runtime_contract = runtime_contract.ok_or(OperationError::InvalidOperation)?;
     let state_run_id = outputs
         .parent()
@@ -2159,7 +2256,7 @@ fn validate_docker_run_with_archive(
     {
         return Err(OperationError::InvalidOperation);
     }
-    let canonical_model_root = canonical_model_root(roots, agent_data_owner_uid)?;
+    let canonical_model_root = canonical_model_root(roots, &models, agent_data_owner_uid)?;
     let mut model_files = 0_usize;
     let mut model_bytes = 0_u64;
     for path in &models {
@@ -2318,18 +2415,18 @@ fn finish_timed_out_job(
 }
 
 fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool {
-    if !source.starts_with(&roots.models) {
-        return false;
-    }
     if target.len() > MAX_COMPILED_MODEL_PATH_BYTES
         || (target != "/models"
             && (!target.starts_with("/models/")
                 || target.ends_with('/')
-                || !target.split('/').skip(1).all(valid_artifact_id)))
+                || !target.split('/').skip(1).all(valid_model_path_component)))
     {
         return false;
     }
-    let relative = source.strip_prefix(&roots.models).ok();
+    let Some(model_root) = runtime_model_root(source, roots) else {
+        return false;
+    };
+    let relative = source.strip_prefix(model_root).ok();
     let components = relative
         .into_iter()
         .flat_map(Path::components)
@@ -2337,14 +2434,10 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
     let new_layout = components.len() >= 3
         && matches!(components[0], Component::Normal(value) if lower_hex(&value.to_string_lossy(), 64))
         && matches!(components[1], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()))
-        && components[2..]
-            .iter()
-            .all(|component| matches!(component, Component::Normal(value) if valid_artifact_id(&value.to_string_lossy())));
+        && valid_model_path_components(&components[2..]);
     let selection_layout = components.len() >= 2
         && matches!(components[0], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()) && value != "sha256")
-        && components[1..]
-            .iter()
-            .all(|component| matches!(component, Component::Normal(value) if valid_artifact_id(&value.to_string_lossy())));
+        && valid_model_path_components(&components[1..]);
     let legacy_layout = components.len() == 2
         && matches!(components[0], Component::Normal(value) if value == "sha256")
         && matches!(components[1], Component::Normal(value) if lower_hex(&value.to_string_lossy(), 64));
@@ -2356,7 +2449,29 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
     }
     target
         .strip_prefix("/models/")
-        .is_some_and(|value| value.split('/').all(valid_artifact_id))
+        .is_some_and(|value| value.split('/').all(valid_model_path_component))
+}
+
+fn valid_model_path_components(components: &[Component<'_>]) -> bool {
+    let mut bytes = 0_usize;
+    components.iter().all(|component| {
+        let Component::Normal(value) = component else {
+            return false;
+        };
+        let Some(value) = value.to_str() else {
+            return false;
+        };
+        bytes = bytes.saturating_add(value.len().saturating_add(1));
+        bytes <= MAX_COMPILED_MODEL_PATH_BYTES && valid_model_path_component(value)
+    })
+}
+
+fn valid_model_path_component(value: &str) -> bool {
+    !value.is_empty()
+        && !matches!(value, "." | "..")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
 fn valid_runtime_cache_mount(source: &Path, roots: &ManagedRoots) -> bool {
@@ -2444,23 +2559,63 @@ fn collect_model_tree(
 
 fn canonical_model_root(
     roots: &ManagedRoots,
+    models: &[PathBuf],
     agent_data_owner_uid: Option<u32>,
 ) -> Result<PathBuf, OperationError> {
     let agent_data = &roots.agent_data;
-    let models = agent_data.join("models");
-    for path in [agent_data, &models] {
+    let installations = agent_data.join("installations");
+    let model_root = models
+        .first()
+        .and_then(|path| runtime_model_root(path, roots))
+        .ok_or(OperationError::UnsafePath)?;
+    if models
+        .iter()
+        .any(|path| runtime_model_root(path, roots).as_deref() != Some(model_root.as_path()))
+    {
+        return Err(OperationError::UnsafePath);
+    }
+    let installation = model_root.parent().ok_or(OperationError::UnsafePath)?;
+    for path in [
+        agent_data.as_path(),
+        installations.as_path(),
+        installation,
+        model_root.as_path(),
+    ] {
         require_safe_directory(path, agent_data_owner_uid)?;
     }
     let canonical_agent_data = agent_data
         .canonicalize()
         .map_err(|_| OperationError::UnsafePath)?;
-    let canonical_models = models
+    let canonical_installations = installations
         .canonicalize()
         .map_err(|_| OperationError::UnsafePath)?;
-    if canonical_models.parent() != Some(canonical_agent_data.as_path()) {
+    let canonical_installation = installation
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    let canonical_models = model_root
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
+    if canonical_installations.parent() != Some(canonical_agent_data.as_path())
+        || canonical_installation.parent() != Some(canonical_installations.as_path())
+        || canonical_models.parent() != Some(canonical_installation.as_path())
+    {
         return Err(OperationError::UnsafePath);
     }
     Ok(canonical_models)
+}
+
+fn runtime_model_root(source: &Path, roots: &ManagedRoots) -> Option<PathBuf> {
+    let installations = roots.agent_data.join("installations");
+    let relative = source.strip_prefix(&installations).ok()?;
+    let mut components = relative.components();
+    let installation = match components.next()? {
+        Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()) => value,
+        _ => return None,
+    };
+    if !matches!(components.next(), Some(Component::Normal(value)) if value == "models") {
+        return None;
+    }
+    Some(installations.join(installation).join("models"))
 }
 
 fn require_safe_directory(
@@ -2476,6 +2631,61 @@ fn require_safe_directory(
         return Err(OperationError::UnsafePath);
     }
     Ok(())
+}
+
+fn require_runtime_directory(
+    path: &Path,
+    required_owner_uid: Option<u32>,
+    runtime_uid: u32,
+) -> Result<(), OperationError> {
+    let metadata = fs::symlink_metadata(path).map_err(|_| OperationError::UnsafePath)?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || metadata.mode() & 0o002 != 0
+        || required_owner_uid.is_some_and(|uid| metadata.uid() != uid)
+        || metadata.mode() & 0o020 != 0 && !exact_runtime_acl(path, runtime_uid)
+    {
+        return Err(OperationError::UnsafePath);
+    }
+    Ok(())
+}
+
+fn exact_runtime_acl(path: &Path, runtime_uid: u32) -> bool {
+    const ACL_VERSION: u32 = 0x0002;
+    const USER_OBJ: u16 = 0x0001;
+    const USER: u16 = 0x0002;
+    const GROUP_OBJ: u16 = 0x0004;
+    const MASK: u16 = 0x0010;
+    const OTHER: u16 = 0x0020;
+    let Ok(Some(value)) = xattr::get(path, "system.posix_acl_access") else {
+        return false;
+    };
+    if value.len() < 4 || u32::from_le_bytes(value[..4].try_into().unwrap()) != ACL_VERSION {
+        return false;
+    }
+    let entries = &value[4..];
+    if entries.len() % 8 != 0 || entries.len() / 8 != 5 {
+        return false;
+    }
+    let mut user_object = false;
+    let mut runtime_user = false;
+    let mut group_object = false;
+    let mut mask = false;
+    let mut other = false;
+    for entry in entries.chunks_exact(8) {
+        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
+        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
+        let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+        match tag {
+            USER_OBJ => user_object = permissions == 0o7,
+            USER if identifier == runtime_uid => runtime_user = permissions == 0o7,
+            GROUP_OBJ => group_object = permissions == 0,
+            MASK => mask = permissions == 0o7,
+            OTHER => other = permissions == 0,
+            _ => return false,
+        }
+    }
+    user_object && runtime_user && group_object && mask && other
 }
 
 fn ensure_private_directory(
@@ -2760,6 +2970,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Instant;
 
+    use tar::Builder;
     use tempfile::TempDir;
 
     use super::{
@@ -2819,7 +3030,7 @@ mod tests {
                     b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest\n"
                         .to_vec()
                 } else if inspect && !digest_lookup {
-                    format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "c".repeat(64))
+                    format!("sha256:{}\tlinux\tarm64\tv1\t10001:10001\n", "b".repeat(64))
                         .into_bytes()
                 } else {
                     Vec::new()
@@ -2977,7 +3188,20 @@ mod tests {
     fn runtime_fixture() -> (TempDir, ManagedRoots) {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(&temp.path().join("data"));
-        fs::create_dir_all(roots.agent_data.join("models").join("sha256")).unwrap();
+        initialize_runtime_fixture(&roots);
+        (temp, roots)
+    }
+
+    fn runtime_fixture_with_separate_agent_data() -> (TempDir, ManagedRoots) {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(&temp.path().join("data"))
+            .with_agent_data(&temp.path().join("agent-data"));
+        initialize_runtime_fixture(&roots);
+        (temp, roots)
+    }
+
+    fn initialize_runtime_fixture(roots: &ManagedRoots) {
+        fs::create_dir_all(runtime_models(&roots).join("sha256")).unwrap();
         fs::create_dir_all(
             roots
                 .agent_data
@@ -2991,15 +3215,108 @@ mod tests {
         let metadata = roots.agent_data.join("run-metadata").join(RUN_ID);
         fs::create_dir_all(&metadata).unwrap();
         fs::write(metadata.join("runtime.json"), b"{}").unwrap();
-        (temp, roots)
     }
 
     fn artifact_path(roots: &ManagedRoots, key: char) -> PathBuf {
-        roots
-            .agent_data
-            .join("models")
+        runtime_models(roots)
             .join("sha256")
             .join(key.to_string().repeat(64))
+    }
+
+    fn runtime_models(roots: &ManagedRoots) -> PathBuf {
+        roots
+            .agent_data
+            .join("installations")
+            .join("installation-1")
+            .join("models")
+    }
+
+    fn docker_save_archive(root_config: bool) -> (Vec<u8>, String) {
+        let config = br#"{"config":{"User":"10001:10001"}}"#;
+        let config_digest = hex_sha256(config);
+        let config_member = if root_config {
+            format!("{config_digest}.json")
+        } else {
+            format!("blobs/sha256/{config_digest}")
+        };
+        let unrelated_blob = format!("blobs/sha256/{}", "d".repeat(64));
+        let other_manifest = format!("blobs/sha256/{}", "e".repeat(64));
+        let archive = docker_config_archive(
+            &config_member,
+            &[
+                (&unrelated_blob, b"layer payload"),
+                (&config_member, config),
+                (&other_manifest, b"unrelated OCI manifest"),
+            ],
+        );
+        (archive, format!("sha256:{config_digest}"))
+    }
+
+    fn docker_config_archive(config_member: &str, members: &[(&str, &[u8])]) -> Vec<u8> {
+        let manifest = serde_json::to_vec(&serde_json::json!([
+            {
+                "Config": config_member,
+                "RepoTags": ["localhost/vonk/test:latest"],
+                "Layers": [],
+            }
+        ]))
+        .unwrap();
+        let mut builder = Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(manifest.len() as u64);
+        header.set_mode(0o600);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, "manifest.json", manifest.as_slice())
+            .unwrap();
+        for (name, bytes) in members {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(bytes.len() as u64);
+            header.set_mode(0o600);
+            header.set_cksum();
+            builder.append_data(&mut header, name, *bytes).unwrap();
+        }
+        builder.into_inner().unwrap()
+    }
+
+    #[test]
+    fn runtime_archive_config_digest_selects_exact_config_in_both_docker_layouts() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("image.tar");
+        for root_config in [true, false] {
+            let (payload, config_id) = docker_save_archive(root_config);
+            fs::write(&archive, payload).unwrap();
+            assert_eq!(
+                super::runtime_archive_config_digest(&archive).unwrap(),
+                config_id
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_archive_config_digest_rejects_ambiguous_or_tampered_members() {
+        let temp = tempfile::tempdir().unwrap();
+        let archive = temp.path().join("image.tar");
+        let config = b"{}";
+        let config_name = format!("{}.json", hex_sha256(config));
+        let valid_member = (config_name.as_str(), config.as_slice());
+        let duplicate_config = [valid_member, valid_member];
+        let duplicate_manifest = [valid_member, ("manifest.json", b"[]".as_slice())];
+        let tampered_config = [(config_name.as_str(), b"changed".as_slice())];
+        for members in [
+            duplicate_config.as_slice(),
+            duplicate_manifest.as_slice(),
+            tampered_config.as_slice(),
+        ] {
+            fs::write(&archive, docker_config_archive(&config_name, members)).unwrap();
+            assert!(super::runtime_archive_config_digest(&archive).is_err());
+        }
+        fs::write(
+            &archive,
+            docker_config_archive(&format!("../{config_name}"), &[valid_member]),
+        )
+        .unwrap();
+        assert!(super::runtime_archive_config_digest(&archive).is_err());
     }
 
     fn runtime_arguments(roots: &ManagedRoots, mounts: &[(PathBuf, &str, bool)]) -> Vec<String> {
@@ -3216,7 +3533,7 @@ mod tests {
     #[test]
     fn runtime_accepts_selection_scoped_nested_model_files_beyond_legacy_limit() {
         let (_temp, roots) = runtime_fixture();
-        let model_set = roots.agent_data.join("models").join("a".repeat(64));
+        let model_set = runtime_models(&roots).join("a".repeat(64));
         let primary = model_set.join("primary");
         let draft = model_set.join("draft");
         fs::create_dir_all(&primary).unwrap();
@@ -3247,6 +3564,25 @@ mod tests {
     }
 
     #[test]
+    fn runtime_accepts_mixed_case_long_model_filename() {
+        let (_temp, roots) = runtime_fixture_with_separate_agent_data();
+        let filename =
+            "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf";
+        let source = runtime_models(&roots).join("primary").join(filename);
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, b"model fixture").unwrap();
+        let target = format!("/models/primary/{filename}");
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(source, &target, true)]),
+                &roots,
+                None,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn compiled_workload_fixture_reaches_helper_validation_with_scoped_receipts() {
         let plan: serde_json::Value =
             serde_json::from_str(include_str!("../tests/fixtures/compiled_workload_v2.json"))
@@ -3260,7 +3596,7 @@ mod tests {
         assert_eq!(plan["security"]["host_network"], false);
 
         let (_temp, roots) = runtime_fixture();
-        let model_set = roots.agent_data.join("models").join(
+        let model_set = runtime_models(&roots).join(
             plan["identity"]["model_artifact_set_sha256"]
                 .as_str()
                 .unwrap(),
@@ -3506,15 +3842,14 @@ mod tests {
         fs::create_dir_all(&roots.data).unwrap();
         let executor =
             OperationExecutor::new(roots.clone(), &[0; 32], MissingContainerRunner, None).unwrap();
-        let payload = [0_u8; 17];
+        let (payload, config_id) = docker_save_archive(false);
         let archive_sha256 = hex_sha256(&payload);
         let registry_manifest = format!("sha256:{}", "b".repeat(64));
         let local_reference =
             format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
-        let config_id = format!("sha256:{}", "c".repeat(64));
         fs::create_dir_all(roots.agent_data.join("oci-archives")).unwrap();
         let archive = roots.agent_data.join("oci-archives").join(&archive_sha256);
-        fs::write(&archive, payload).unwrap();
+        fs::write(&archive, &payload).unwrap();
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
         executor
             .write_image_receipt(
@@ -3568,8 +3903,9 @@ mod tests {
             &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
         )
         .unwrap();
+        assert_ne!(config_id, registry_manifest);
         assert_eq!(receipt.archive_sha256, archive_sha256);
-        assert_eq!(receipt.archive_bytes, 17);
+        assert_eq!(receipt.archive_bytes, payload.len() as u64);
         assert_eq!(receipt.platform_manifest_digest, registry_manifest);
         assert_eq!(receipt.image_config_id, config_id);
         assert_eq!(receipt.local_image_reference, local_reference);
@@ -3580,15 +3916,15 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(temp.path());
         fs::create_dir_all(&roots.data).unwrap();
-        let payload = b"tiny cached image";
-        let archive_sha256 = hex_sha256(payload);
+        let (payload, config_id) = docker_save_archive(false);
+        let archive_sha256 = hex_sha256(&payload);
         let registry_manifest = format!("sha256:{}", "b".repeat(64));
         let local_reference =
             format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
         let archive_root = roots.agent_data.join("oci-archives");
         fs::create_dir_all(&archive_root).unwrap();
         let archive = archive_root.join(&archive_sha256);
-        fs::write(&archive, payload).unwrap();
+        fs::write(&archive, &payload).unwrap();
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
         let executor =
             OperationExecutor::new(roots.clone(), &[0; 32], RuntimeImportRunner, None).unwrap();
@@ -3608,10 +3944,14 @@ mod tests {
                 &format!("sha256:{}", "a".repeat(64)),
                 &registry_manifest,
                 &local_reference,
-                &format!("sha256:{}", "c".repeat(64)),
+                &format!("sha256:{}", "b".repeat(64)),
             )
             .unwrap();
-        assert!(roots.runtime_image_receipts.join(&archive_sha256).is_file());
+        let receipt: RuntimeImageReceipt = serde_json::from_slice(
+            &fs::read(roots.runtime_image_receipts.join(&archive_sha256)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(receipt.image_config_id, config_id);
     }
 
     #[test]
@@ -3619,15 +3959,15 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(temp.path());
         fs::create_dir_all(&roots.data).unwrap();
-        let payload = b"tiny cached image";
-        let archive_sha256 = hex_sha256(payload);
+        let (payload, _config_id) = docker_save_archive(false);
+        let archive_sha256 = hex_sha256(&payload);
         let registry_manifest = format!("sha256:{}", "b".repeat(64));
         let local_reference =
             format!("localhost/vonk/compiled-runtime-{archive_sha256}@{registry_manifest}");
         let archive_root = roots.agent_data.join("oci-archives");
         fs::create_dir_all(&archive_root).unwrap();
         let archive = archive_root.join(&archive_sha256);
-        fs::write(&archive, payload).unwrap();
+        fs::write(&archive, &payload).unwrap();
         fs::set_permissions(&archive, fs::Permissions::from_mode(0o600)).unwrap();
         // The runner reports a valid pre-existing local image if asked; the
         // helper must reject before inspecting it because docker load gave no
@@ -3664,20 +4004,14 @@ mod tests {
         fs::create_dir_all(&tokenizer).unwrap();
 
         let invalid_single_mounts = [
-            (roots.agent_data.join("models"), "/models", true),
-            (
-                roots.agent_data.join("models").join("sha256"),
-                "/models",
-                true,
-            ),
-            (
-                roots.agent_data.join("models").join("a".repeat(64)),
-                "/models",
-                true,
-            ),
+            (runtime_models(&roots), "/models", true),
+            (runtime_models(&roots).join("sha256"), "/models", true),
+            (runtime_models(&roots).join("a".repeat(64)), "/models", true),
             (
                 roots
                     .agent_data
+                    .join("installations")
+                    .join("installation-1")
                     .join("models")
                     .join("sha256")
                     .join("..")
@@ -3691,7 +4025,7 @@ mod tests {
             (model.clone(), "/model", true),
             (model.clone(), "/models/..", true),
             (model.clone(), "/models/model/", true),
-            (model.clone(), "/models/Model", true),
+            (model.clone(), "/models/model name", true),
         ];
         for mount in invalid_single_mounts {
             assert!(
@@ -3720,9 +4054,7 @@ mod tests {
 
         let too_many = (0..4097)
             .map(|index| {
-                let source = roots
-                    .agent_data
-                    .join("models")
+                let source = runtime_models(&roots)
                     .join("sha256")
                     .join(format!("{index:064x}"));
                 fs::create_dir(&source).unwrap();
@@ -3748,10 +4080,36 @@ mod tests {
     }
 
     #[test]
+    fn runtime_accepts_installation_model_root_and_rejects_legacy_model_root() {
+        let (_temp, roots) = runtime_fixture_with_separate_agent_data();
+        let current_model = artifact_path(&roots, 'a');
+        fs::create_dir_all(&current_model).unwrap();
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(current_model, "/models", true)]),
+                &roots,
+                None,
+            )
+            .is_ok()
+        );
+
+        let legacy_model = roots.models.join("sha256").join("b".repeat(64));
+        fs::create_dir_all(&legacy_model).unwrap();
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(legacy_model, "/models", true)]),
+                &roots,
+                None,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn runtime_rejects_symlinked_model_ancestors_and_canonical_escapes() {
         {
             let (temp, roots) = runtime_fixture();
-            let models = roots.agent_data.join("models");
+            let models = runtime_models(&roots);
             fs::remove_dir_all(&models).unwrap();
             let outside_models = temp.path().join("outside-models");
             let outside_model = outside_models.join("sha256").join("a".repeat(64));
@@ -3771,7 +4129,7 @@ mod tests {
 
         {
             let (temp, roots) = runtime_fixture();
-            let model_root = roots.agent_data.join("models").join("sha256");
+            let model_root = runtime_models(&roots).join("sha256");
             fs::remove_dir(&model_root).unwrap();
             let outside_model_root = temp.path().join("outside-sha256");
             fs::create_dir_all(outside_model_root.join("a".repeat(64))).unwrap();
@@ -3789,11 +4147,44 @@ mod tests {
         }
 
         {
+            let (_temp, roots) = runtime_fixture_with_separate_agent_data();
+            let installation = roots
+                .agent_data
+                .join("installations")
+                .join("installation-1");
+            let sibling = roots
+                .agent_data
+                .join("installations")
+                .join("installation-2");
+            fs::create_dir_all(sibling.join("models").join("sha256")).unwrap();
+            fs::remove_dir_all(&installation).unwrap();
+            symlink(&sibling, &installation).unwrap();
+            let model = installation
+                .join("models")
+                .join("sha256")
+                .join("a".repeat(64));
+            fs::create_dir_all(&model).unwrap();
+            assert!(
+                validate_docker_run(
+                    &runtime_arguments(&roots, &[(model, "/models", true)]),
+                    &roots,
+                    None,
+                )
+                .is_err()
+            );
+        }
+
+        {
             let temp = tempfile::tempdir().unwrap();
             let outside = temp.path().join("outside-agent-data");
             let agent_data = temp.path().join("agent-data-link");
             let roots = ManagedRoots::under(&agent_data);
-            let model = outside.join("models").join("sha256").join("a".repeat(64));
+            let model = outside
+                .join("installations")
+                .join("installation-1")
+                .join("models")
+                .join("sha256")
+                .join("a".repeat(64));
             fs::create_dir_all(&model).unwrap();
             fs::create_dir_all(outside.join("runs").join(RUN_ID).join("outputs")).unwrap();
             let metadata = outside.join("run-metadata").join(RUN_ID);
@@ -3826,8 +4217,9 @@ mod tests {
 
         for path in [
             roots.agent_data.clone(),
-            roots.agent_data.join("models"),
-            roots.agent_data.join("models").join("sha256"),
+            roots.agent_data.join("installations"),
+            runtime_models(&roots),
+            runtime_models(&roots).join("sha256"),
             model,
         ] {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o770)).unwrap();

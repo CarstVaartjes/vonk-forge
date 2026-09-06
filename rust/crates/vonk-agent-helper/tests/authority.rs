@@ -422,10 +422,12 @@ impl RecordingRunner {
 fn fixture() -> (TempDir, ManagedRoots, RecordingRunner, Ed25519KeyPair) {
     let temp = tempfile::tempdir().unwrap();
     let data = temp.path().join("data");
-    let roots = ManagedRoots::under(&data);
+    let agent_data = temp.path().join("agent-data");
+    let roots = ManagedRoots::under(&data).with_agent_data(&agent_data);
     fs::create_dir_all(&roots.models).unwrap();
     fs::create_dir_all(&roots.state).unwrap();
     fs::create_dir_all(&roots.incoming).unwrap();
+    fs::create_dir_all(&roots.agent_data).unwrap();
     fs::create_dir_all(
         roots
             .agent_data
@@ -645,6 +647,8 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let metadata = roots.agent_data.join("run-metadata").join(run_id);
     let model = roots
         .agent_data
+        .join("installations")
+        .join("installation-1")
         .join("models")
         .join("sha256")
         .join("a".repeat(64));

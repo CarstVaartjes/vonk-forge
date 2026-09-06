@@ -281,6 +281,7 @@ __all__ = [
     "CacheArtifactResponse",
     "CacheEntryResponse",
     "CacheStorageResponse",
+    "ModelCacheAccessResumeRequest",
     "ModelCacheDownloadPreviewRequest",
     "ModelCacheDownloadPreviewResponse",
     "ModelCacheDownloadRequest",
@@ -296,7 +297,6 @@ __all__ = [
     "ModelCacheRepairPreviewResponse",
     "ModelCacheRepairRequest",
     "ModelCacheRetryRequest",
-    "ModelCacheAccessResumeRequest",
     "ModelCacheUpdateResponse",
     "ModelCacheUpdatesResponse",
 ]

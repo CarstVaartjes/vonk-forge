@@ -15,7 +15,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .catalog_service import CatalogError, CatalogService
 from .models import RecipeLibrarySyncRun
-from .recipe_library_types import RecipeLibraryError, RecipeLibraryItem, RecipeLibrarySnapshot
+from .recipe_library_types import (
+    RecipeLibraryError,
+    RecipeLibraryItem,
+    RecipeLibrarySnapshot,
+)
 
 _MAX_RESULT_ITEMS = 256
 

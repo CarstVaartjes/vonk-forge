@@ -1,21 +1,19 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
-import copy
-from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from importlib import resources
+from pathlib import Path
 
 import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_forge_contracts import ModelDefinition, content_sha256
-
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache_contract import ModelCacheOperationProgress
 from vonk_control.models import (
@@ -24,6 +22,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     ModelCacheOperation,
 )
+from vonk_forge_contracts import ModelDefinition, content_sha256
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
 

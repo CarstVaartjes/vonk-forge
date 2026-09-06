@@ -17,8 +17,8 @@ import re
 import shutil
 import threading
 import uuid
-from concurrent.futures import Future, ThreadPoolExecutor
 from collections.abc import Iterator, Mapping, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -29,6 +29,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from .logging import redact_text
 from .models import (
     CatalogDocumentRevision,
     FleetProfile,
@@ -39,7 +40,6 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
 )
-from .logging import redact_text
 from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
 
@@ -3295,7 +3295,7 @@ class ModelCacheService:
                 failed_artifact_key = future_specs.pop(future, None)
                 try:
                     future.result()
-                except BaseException as error:
+                except Exception as error:  # noqa: BLE001 - settle failed background transfers durably
                     if first_error is None:
                         first_error = error
                         record["failure"] = error
@@ -4201,7 +4201,7 @@ class ModelCacheService:
         # lineage decision from operators.
         explicit = [item for item in candidates if _supersedes_revision(item, current)]
         if explicit:
-            return current, explicit if len(explicit) == 1 else explicit
+            return current, explicit
         return current, candidates
 
     @staticmethod
