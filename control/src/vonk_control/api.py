@@ -1947,18 +1947,27 @@ def production_app() -> FastAPI:
         force: bool,
         progress: Callable[[Mapping[str, object]], None],
     ) -> Mapping[str, object]:
-        del recipe, runtime, force
+        del recipe, runtime
         plan = availability_plans.get(build_input_sha256)
         if plan is None:
             raise RecipeImageAvailabilityError(
                 "recipe_image.build_input_missing",
                 "canonical build plan is unavailable",
             )
-        operation = recipe_operations.build(
-            plan,
-            build_input_sha256=build_input_sha256,
-            actor="recipe-image-availability",
-            request_id=str(uuid.uuid4()),
+        operation = (
+            recipe_operations.force_build(
+                plan,
+                build_input_sha256=build_input_sha256,
+                actor="recipe-image-availability",
+                request_id=str(uuid.uuid4()),
+            )
+            if force
+            else recipe_operations.build(
+                plan,
+                build_input_sha256=build_input_sha256,
+                actor="recipe-image-availability",
+                request_id=str(uuid.uuid4()),
+            )
         )
         while operation.state not in {"succeeded", "failed", "expired"}:
             progress({"step": "build", "completed_bytes": 0})

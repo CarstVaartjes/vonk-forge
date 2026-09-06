@@ -340,6 +340,54 @@ class RecipeOperationService:
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
+    def force_build(
+        self,
+        plan: RecipeBuildPlan,
+        *,
+        build_input_sha256: str,
+        actor: str,
+        request_id: str,
+    ) -> RecipeOperationView:
+        """Queue a fresh build for the exact input while retaining old evidence."""
+
+        if build_input_sha256 != plan.build_input_sha256:
+            raise RecipeOperationConflict("submitted build input does not match preview")
+        now = self._clock()
+        with self._sessions.begin() as session:
+            build = session.get(RecipeBuild, plan.build_id, with_for_update=True)
+            previous = session.scalar(
+                select(Job)
+                .where(
+                    Job.kind == "recipe.build.v1",
+                    Job.state == "succeeded",
+                    Job.payload["owner_id"].as_string() == plan.build_id,
+                    Job.payload["plan_digest"].as_string() == build_input_sha256,
+                )
+                .order_by(Job.updated_at.desc())
+                .limit(1)
+            )
+            if build is None or previous is None:
+                return self.build(
+                    plan,
+                    build_input_sha256=build_input_sha256,
+                    actor=actor,
+                    request_id=request_id,
+                )
+            if build.state not in {"succeeded", "failed"}:
+                raise RecipeOperationConflict("recipe build is already active")
+            previous.state = "expired"
+            build.state = "failed"
+            build.updated_at = now
+            job = self._retry_build_in_session(
+                session,
+                previous,
+                actor=actor,
+                request_id=request_id,
+                now=now,
+            )
+        self._agent_jobs.notify_available()
+        return self.get(job.id)
+
     @staticmethod
     def _successful_build_job_in_session(
         session: Session, build_id: str, build_input_sha256: str
