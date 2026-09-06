@@ -14,7 +14,8 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
-    HostRuntimeAction, HostRuntimeRequest, MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    HostRuntimeAction, HostRuntimeRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     RecipeRunInspectionBinding, RecipeRunObservationReceipt, canonical_json, hex_sha256,
     parse_strict,
 };
@@ -31,7 +32,7 @@ use crate::{
 };
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
-const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES;
+const MAX_CLAIM_BODY_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES;
 const RECIPE_IMAGE_UPLOAD_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const HOST_RUNTIME_GRANT_TTL_SECONDS: u16 = 10;
 

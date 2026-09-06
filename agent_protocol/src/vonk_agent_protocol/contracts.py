@@ -18,6 +18,9 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 MAX_DOCUMENT_BYTES = 64 * 1024
 MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
+MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES = (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES
+)
 NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -265,15 +268,15 @@ def _validate_safe_keys(
                 and path == ("package_url",)
                 and AGENT_PACKAGE_URL.fullmatch(value) is not None
             )
-            or (
-                operation is AgentOperation.ARTIFACT_DISTRIBUTION
+                or (
+                    operation is AgentOperation.ARTIFACT_DISTRIBUTION
                 and len(path) == 4
                 and path[0] == "distribution_assignment"
                 and path[1] == "objects"
                 and isinstance(path[2], int)
-                and path[3] == "name"
-            )
-            or (
+                    and path[3] == "name"
+                )
+                or (
                 typed_result_strings
                 and ("/" in value or "\\" in value)
                 and _typed_result_string(path, value)

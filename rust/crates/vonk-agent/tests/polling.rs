@@ -1,14 +1,15 @@
 #![forbid(unsafe_code)]
 
 use chrono::{DateTime, FixedOffset, Utc};
-use serde_json::json;
+use serde_json::{Value, json};
 use tempfile::tempdir;
 use uuid::Uuid;
 use vonk_agent::state::{BeginDecision, StateError, StateStore};
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
-    canonical_json, hex_sha256,
+    RecipeOperationRequest, canonical_json, hex_sha256,
 };
+use vonk_agent::workloads::CompiledExecutionPlan;
 
 const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
 
@@ -177,4 +178,39 @@ fn claim_response_parser_enforces_status_size_and_protocol() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn real_751_artifact_claim_parses_through_rust_and_full_plan_dto() {
+    let plan: Value = serde_json::from_str(include_str!(
+        "../../../../control/tests/fixtures/compiled_plan_751.json"
+    ))
+    .unwrap();
+    assert_eq!(plan["artifacts"].as_array().unwrap().len(), 751);
+    let payload = json!({
+        "schema_version": 2,
+        "installation_id": "00000000-0000-4000-8000-000000000001",
+        "plan_digest": "a".repeat(64),
+        "expected_bytes": 4096,
+        "rank": 0,
+        "role": "entrypoint",
+        "compiled_execution_plan": plan,
+    });
+    let mut raw = claim(1, "2099-01-01T00:00:00+00:00");
+    raw.operation = "recipe.install".to_owned();
+    raw.payload_digest = hex_sha256(&canonical_json(&payload).unwrap());
+    raw.payload = payload;
+    let body = canonical_json(&raw).unwrap();
+    assert!(body.len() > 500 * 1024);
+    let parsed = vonk_agent::client::parse_claim_response(200, &body)
+        .unwrap()
+        .unwrap();
+    let request = RecipeOperationRequest::parse(&parsed).unwrap();
+    let RecipeOperationRequest::Install(request) = request else {
+        panic!("expected install request");
+    };
+    let plan: CompiledExecutionPlan =
+        serde_json::from_value(request.compiled_execution_plan).unwrap();
+    plan.validate().unwrap();
+    assert_eq!(plan.artifacts.len(), 751);
 }

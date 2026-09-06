@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
@@ -32,6 +33,7 @@ from vonk_control.compiled_execution_plan import (
     validate_compiled_launch_payload,
 )
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
+from vonk_control.jobs import _canonical_payload
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -307,6 +309,24 @@ def test_compiled_launch_payload_rejects_document_over_dedicated_ceiling() -> No
     payload["runtime"]["oversized_flat_field"] = "x" * MAX_COMPILED_EXECUTION_PLAN_BYTES
     with pytest.raises(CompiledExecutionPlanError, match="too large"):
         validate_compiled_launch_payload(payload)
+
+
+def test_controller_produces_real_751_artifact_plan() -> None:
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "compiled_plan_751.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    plan = validate_compiled_launch_payload(fixture)
+    assert len(plan["artifacts"]) == 751
+    assert len(canonical_message(plan)) > 500 * 1024
+    parent_payload, encoded = _canonical_payload(
+        {"phases": [{"payload": {"compiled_execution_plan": plan}}]},
+        kind="recipe.start",
+    )
+    assert parent_payload["phases"]
+    assert len(encoded) > 500 * 1024
+
 
 
 def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() -> None:
