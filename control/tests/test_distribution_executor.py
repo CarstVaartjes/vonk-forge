@@ -193,6 +193,7 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
     view = executor.get(child_id)
     assert view.state == "failed"
     assert view.result["members"][0]["error"] == "digest mismatch"
+    assert view.result["reason"] == "digest mismatch"
 
 
 @pytest.mark.parametrize("image_prepared", [True, False])

@@ -240,6 +240,8 @@ class DurableDistributionPhaseExecutor:
                 "members": members,
                 "evidence": evidence,
             }
+            if child.status_reason:
+                payload["reason"] = child.status_reason
             return _ChildView(state=state, result=payload)
 
     def _ensure_child(
