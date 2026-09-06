@@ -704,30 +704,6 @@ impl AgentHttpClient {
         .await
     }
 
-    async fn download_trusted_distribution_object_with_progress<F>(
-        &self,
-        plan_digest: &str,
-        sha256: &str,
-        expected_bytes: u64,
-        destination: &Path,
-        managed_root: &Path,
-        progress: F,
-    ) -> Result<(), ClientError>
-    where
-        F: FnMut(u64),
-    {
-        self.download_trusted_content_addressed_with_progress(
-            "/agent/v1/distribution/objects",
-            plan_digest,
-            sha256,
-            expected_bytes,
-            destination,
-            managed_root,
-            progress,
-        )
-        .await
-    }
-
     /// Fetch and validate the assignment manifest before selecting model files
     /// or an OCI archive. The manifest is bounded and mTLS-authenticated.
     pub async fn distribution_manifest(
@@ -876,9 +852,8 @@ impl AgentHttpClient {
         })
     }
 
-    async fn download_trusted_content_addressed_with_progress<F>(
+    async fn download_trusted_distribution_object_with_progress<F>(
         &self,
-        endpoint: &str,
         plan_digest: &str,
         sha256: &str,
         expected_bytes: u64,
@@ -933,7 +908,7 @@ impl AgentHttpClient {
             let end = expected_bytes
                 .saturating_sub(1)
                 .min(offset.saturating_add(8 * 1024 * 1024 - 1));
-            let mut url = self.endpoint(&format!("{endpoint}/{sha256}"))?;
+            let mut url = self.endpoint(&format!("/agent/v1/distribution/objects/{sha256}"))?;
             url.query_pairs_mut()
                 .append_pair("plan_digest", plan_digest);
             let response = self
@@ -1433,10 +1408,10 @@ async fn inspect_trusted_final(
 }
 
 async fn open_trusted_partial(path: &Path) -> Result<tokio::fs::File, ClientError> {
-    if let Ok(metadata) = tokio::fs::symlink_metadata(path).await {
-        if !validate_trusted_metadata(&metadata, metadata.len()) {
-            return Err(ClientError::Protocol);
-        }
+    if let Ok(metadata) = tokio::fs::symlink_metadata(path).await
+        && !validate_trusted_metadata(&metadata, metadata.len())
+    {
+        return Err(ClientError::Protocol);
     }
     let file = tokio::fs::OpenOptions::new()
         .create(true)
