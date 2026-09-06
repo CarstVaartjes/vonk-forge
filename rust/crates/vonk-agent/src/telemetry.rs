@@ -2075,11 +2075,40 @@ fn valid_metric_text(value: &str, maximum: usize) -> bool {
 fn valid_metric_value(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(_) => true,
-        serde_json::Value::Number(number) => number
-            .as_f64()
-            .is_some_and(|value| value.is_finite() && value.abs() <= 1e15),
-        serde_json::Value::String(value) => valid_metric_text(value, 256),
+        serde_json::Value::Number(number) => {
+            if number.as_i64().is_some() {
+                true
+            } else if let Some(value) = number.as_u64() {
+                value <= i64::MAX as u64
+            } else {
+                number.as_f64().is_some_and(f64::is_finite)
+            }
+        }
+        serde_json::Value::String(value) => value.chars().count() <= 256,
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod scalar_contract_tests {
+    use super::valid_metric_value;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn metric_scalar_contract_matches_json_values() {
+        assert!(valid_metric_value(&Value::Null));
+        assert!(valid_metric_value(&Value::Bool(true)));
+        assert!(valid_metric_value(&json!(i64::MIN)));
+        assert!(valid_metric_value(&json!(i64::MAX)));
+        assert!(valid_metric_value(&json!(f64::MAX)));
+        assert!(valid_metric_value(&Value::String(String::new())));
+        assert!(valid_metric_value(&Value::String("\u{0000}é".to_owned())));
+        assert!(valid_metric_value(&Value::String("x".repeat(256))));
+
+        assert!(!valid_metric_value(&json!(i64::MAX as u64 + 1)));
+        assert!(!valid_metric_value(&Value::String("x".repeat(257))));
+        assert!(!valid_metric_value(&Value::Array(Vec::new())));
+        assert!(!valid_metric_value(&Value::Object(Default::default())));
     }
 }
 

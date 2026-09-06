@@ -8,12 +8,12 @@ unit, source, or whether a value is measured from a metric name.
 
 from __future__ import annotations
 
-import math
 import re
 from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from vonk_agent_protocol.telemetry import validate_telemetry_scalar
 
 TelemetryScope = Literal[
     "node",
@@ -40,7 +40,6 @@ _KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,95}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _SOURCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _MAX_TELEMETRY_BYTES = 16 * 1024**4
-_MAX_RATE = 1_000_000_000_000_000.0
 
 
 class TelemetryContractModel(BaseModel):
@@ -96,22 +95,10 @@ class TelemetrySeries(TelemetryContractModel):
             raise ValueError("telemetry aggregation is invalid")
         return value
 
-    @field_validator("value")
+    @field_validator("value", mode="before")
     @classmethod
-    def finite_numeric_value(cls, value: object) -> object:
-        if isinstance(value, float) and (
-            not math.isfinite(value) or abs(value) > _MAX_RATE
-        ):
-            raise ValueError("telemetry series value is invalid")
-        if (
-            isinstance(value, int)
-            and not isinstance(value, bool)
-            and abs(value) > 2**63 - 1
-        ):
-            raise ValueError("telemetry series value is invalid")
-        if isinstance(value, str) and len(value) > 256:
-            raise ValueError("telemetry series text value is invalid")
-        return value
+    def scalar_value(cls, value: object) -> object:
+        return validate_telemetry_scalar(value)
 
     @model_validator(mode="after")
     def support_reason_and_scope(self) -> TelemetrySeries:
