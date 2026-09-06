@@ -79,14 +79,18 @@ for _ in {1..30}; do
   sleep 1
 done
 docker manifest annotate "$image_name" "$image_platform" --os linux --arch arm64 >"$report_root/manifest-annotate.log"
+manifest_push_succeeded=false
 for _ in {1..30}; do
   if manifest_push_output=$(docker manifest push --insecure "$image_name" 2>&1); then
     printf '%s\n' "$manifest_push_output" >"$report_root/manifest-push.log"
+    manifest_push_succeeded=true
     break
   fi
   printf '%s\n' "$manifest_push_output" >"$report_root/manifest-push.log"
   sleep 1
 done
+test "$manifest_push_succeeded" = true
+docker manifest inspect --insecure "$image_name" >"$report_root/manifest-inspect.json"
 platform_ref=$(docker image inspect "$image_platform" --format '{{index .RepoDigests 0}}')
 platform_digest=${platform_ref##*@}
 registry_digest=$(printf '%s\n' "$manifest_push_output" \

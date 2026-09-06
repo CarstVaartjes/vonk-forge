@@ -17,6 +17,8 @@
     ],
     "env": [
       {"name": "HOME", "value": "/outputs/cache/home"},
+      {"name": "XDG_CACHE_HOME", "value": "/outputs/cache"},
+      {"name": "TMPDIR", "value": "/outputs/tmp"},
       {"name": "VONK_RUNTIME_SPEC", "value": "/run/vonk/runtime.json"}
     ],
     "image_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
