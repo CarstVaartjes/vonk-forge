@@ -188,7 +188,7 @@ class AvailabilityOperationFailure(BaseModel):
             ) is None:
                 raise ValueError("retry_time must be RFC3339")
             try:
-                parsed = datetime.fromisoformat(self.retry_time.replace("Z", "+00:00"))
+                parsed = datetime.fromisoformat(self.retry_time)
             except ValueError as error:
                 raise ValueError("retry_time must be RFC3339") from error
             if parsed.tzinfo is None:
@@ -416,12 +416,12 @@ def recovery_for_state(state: str, *, uncertain: bool = False) -> OperationRecov
 
 
 __all__ = [
+    "AvailabilityOperationFailure",
+    "AvailabilityRecoveryAction",
     "OperationCheckpoint",
     "OperationEvidenceDownload",
     "OperationEvidenceProvenance",
     "OperationFailureEvidence",
-    "AvailabilityRecoveryAction",
-    "AvailabilityOperationFailure",
     "OperationMemberProgress",
     "OperationPhase",
     "OperationProgress",

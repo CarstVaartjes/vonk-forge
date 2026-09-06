@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
@@ -16,6 +16,7 @@ from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
     RecipeImageAvailabilityService,
 )
+from vonk_control.recipe_image_availability_api import _view_document
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
     PulledImageEvidence,
@@ -653,6 +654,14 @@ def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path
     assert partial.state == "partial"
     assert partial.result is None
     assert transport.calls == 1
+    assert partial.image_state == "succeeded"
+    assert partial.image_failure is None
+    assert partial.progress["completed_bytes"] == 40 + len(ARCHIVE)
+    image_child = next(
+        item for item in _view_document(partial).children if item.kind == "runtime-image"
+    )
+    assert image_child.state == "succeeded"
+    assert image_child.progress.completed_bytes == len(ARCHIVE)
     assert partial.progress["members"][-1]["member_id"] == "model-cache"
     child.state = "succeeded"
     with sessions.begin() as session:
@@ -746,7 +755,10 @@ def test_force_download_is_a_distinct_operation_for_same_revision(tmp_path: Path
     assert transport.calls == 2
 
 
-def test_parent_progress_aggregates_model_and_image_members_once(tmp_path: Path) -> None:
+@pytest.mark.parametrize("model_state", ["running", "failed"])
+def test_parent_progress_retains_ready_image_while_model_is_incomplete(
+    tmp_path: Path, model_state: str
+) -> None:
     recipe = _recipe("recipe-image.json")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -763,18 +775,19 @@ def test_parent_progress_aggregates_model_and_image_members_once(tmp_path: Path)
         "recipe_revision_id": "revision-progress",
         "recipe_content_sha256": content_sha256(recipe),
         "progress": {
-            "phase": "prepare",
-            "completed_bytes": 0,
+            "phase": "available",
+            "completed_bytes": 20,
             "total_bytes": 20,
             "total_bytes_known": True,
         },
+        "image_result": {"image_bytes": 20},
         "model_child": {
             "id": "model-child",
-            "state": "running",
+            "state": model_state,
             "progress": {
                 "phase": "download",
-                "completed_bytes": 40,
-                "total_bytes": 100,
+                "downloaded_bytes": 40,
+                "expected_bytes": 100,
                 "total_bytes_known": True,
             },
         },
@@ -783,7 +796,7 @@ def test_parent_progress_aggregates_model_and_image_members_once(tmp_path: Path)
         id="availability-progress",
         request_id="p" * 36,
         kind="recipe.image.availability.v2",
-        state="partial",
+        state="failed" if model_state == "failed" else "partial",
         actor="operator",
         authority_revision="revision-progress",
         targets=["revision-progress"],
@@ -797,13 +810,19 @@ def test_parent_progress_aggregates_model_and_image_members_once(tmp_path: Path)
     with sessions.begin() as session:
         session.add(operation)
     view = service.get("availability-progress")
-    assert view.progress["completed_bytes"] == 40
+    assert view.progress["completed_bytes"] == 60
     assert view.progress["total_bytes"] == 120
     members = {member["member_id"]: member for member in view.progress["members"]}
     assert members["model-cache"]["completed_bytes"] == 40
     assert members["model-cache"]["total_bytes"] == 100
-    assert members["runtime-image"]["completed_bytes"] == 0
+    assert members["runtime-image"]["completed_bytes"] == 20
     assert members["runtime-image"]["total_bytes"] == 20
+    assert members["runtime-image"]["state"] == "succeeded"
+    response = _view_document(view)
+    children = {child.kind: child for child in response.children}
+    assert children["runtime-image"].state == "succeeded"
+    assert children["runtime-image"].failure is None
+    assert children["model-cache"].state == model_state
     assert view.image_progress is not None
     assert view.image_progress["total_bytes"] == 20
     rows, total, cursor = service.list_page(limit=1)

@@ -2273,8 +2273,8 @@ dependencies = [
  "toml",
  "url",
  "uuid",
- "vonk-agent-protocol",
  "vonk-agent-helper",
+ "vonk-agent-protocol",
  "x509-parser",
 ]
 
@@ -2289,7 +2289,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "tar",
  "tar",
  "tempfile",
  "thiserror",
