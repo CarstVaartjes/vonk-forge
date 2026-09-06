@@ -30,6 +30,9 @@ from vonk_agent_protocol import (
     AgentProtocolError,
     AgentResult,
     ContainerRuntimeAction,
+    SignedHostHelperGrant,
+    SignedPackageHelperGrant,
+    SignedPackageObjectReceipt,
     canonical_message,
 )
 from vonk_agent_protocol.workload_packages import (
@@ -104,10 +107,11 @@ from .workload_helper_authority import (
 )
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_UUID_TEXT = (
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+_UUID4_TEXT = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
+_IDENTIFIER_TEXT = r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
 _MAX_CSR_BYTES = 16 * 1024
 _MAX_EVIDENCE_FIELDS = 8
@@ -477,10 +481,10 @@ class AgentUpgradeApplyResponse(BaseModel):
 class AgentGrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    job_id: str = Field(pattern=_UUID_TEXT)
-    operation_id: str = Field(pattern=_UUID_TEXT)
+    job_id: str = Field(pattern=_UUID4_TEXT)
+    operation_id: str = Field(pattern=_UUID4_TEXT)
     attempt: int = Field(ge=1, le=2**31 - 1)
-    fence: str = Field(pattern=_UUID_TEXT)
+    fence: str = Field(pattern=_UUID4_TEXT)
     expires_in_seconds: int = Field(ge=1, le=300)
 
 
@@ -494,27 +498,35 @@ class AgentUpgradeGrantRequest(AgentGrantRequest):
     package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
 
 
+class PackageHelperReceiptObjectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    object_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(strict=True, gt=0, le=2**63 - 1)
+
+
 class PackageHelperReceiptsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    job_id: str = Field(pattern=_UUID_TEXT)
-    operation_id: str = Field(pattern=_UUID_TEXT)
+    job_id: str = Field(pattern=_UUID4_TEXT)
+    operation_id: str = Field(pattern=_UUID4_TEXT)
     attempt: int = Field(ge=1, le=2**31 - 1)
-    fence: str = Field(pattern=_UUID_TEXT)
+    fence: str = Field(pattern=_UUID4_TEXT)
     release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    objects: list[dict[str, object]] = Field(max_length=256)
+    objects: list[PackageHelperReceiptObjectRequest] = Field(
+        min_length=1, max_length=256
+    )
 
 
 class PackageHelperGrantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    request_id: str = Field(pattern=_UUID_TEXT)
+    request_id: str = Field(pattern=_UUID4_TEXT)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    job_id: str = Field(pattern=_UUID_TEXT)
-    operation_id: str = Field(pattern=_UUID_TEXT)
+    job_id: str = Field(pattern=_UUID4_TEXT)
+    operation_id: str = Field(pattern=_UUID4_TEXT)
     attempt: int = Field(ge=1, le=2**31 - 1)
-    fence: str = Field(pattern=_UUID_TEXT)
+    fence: str = Field(pattern=_UUID4_TEXT)
     release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    generation: int = Field(ge=1, le=2**63 - 1)
+    generation: str = Field(strict=True, pattern=_IDENTIFIER_TEXT)
     operation: Literal[
         "prepare", "verify", "start", "health", "infer", "stop", "verify-release"
     ]
@@ -537,6 +549,24 @@ class RecipeRunObservationGrantResponse(BaseModel):
     schema_version: Literal[1]
     observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     grant: dict[str, object]
+
+
+def _host_grant_response(grant: object) -> dict[str, object]:
+    parsed = SignedHostHelperGrant.parse(grant.to_mapping())
+    return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
+
+
+def _package_grant_response(grant: object) -> dict[str, object]:
+    parsed = SignedPackageHelperGrant.parse(grant.to_mapping())
+    return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
+
+
+def _package_receipts_response(receipts: object) -> dict[str, object]:
+    parsed = [
+        SignedPackageObjectReceipt.parse(receipt.to_mapping()).to_mapping()
+        for receipt in receipts
+    ]
+    return PackageHelperReceiptsResponse(receipts=parsed).model_dump()
 
 
 def _agent_upgrade_request_material(
@@ -2454,7 +2484,7 @@ def install_agent_routes(
                 expires_in_seconds=body.expires_in_seconds,
             )
             return _json_response(
-                AgentGrantResponse(grant=grant.to_mapping()).model_dump()
+                _host_grant_response(grant)
             )
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
@@ -2480,7 +2510,7 @@ def install_agent_routes(
                 expires_in_seconds=body.expires_in_seconds,
             )
             return _json_response(
-                AgentGrantResponse(grant=grant.to_mapping()).model_dump()
+                _host_grant_response(grant)
             )
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
@@ -2501,13 +2531,11 @@ def install_agent_routes(
                 attempt=body.attempt,
                 fence=body.fence,
                 release_digest=body.release_digest,
-                objects=body.objects,
+                objects=[item.model_dump() for item in body.objects],
                 certificate_serial=identity.certificate_serial,
             )
             return _json_response(
-                PackageHelperReceiptsResponse(
-                    receipts=[item.to_mapping() for item in receipts]
-                ).model_dump()
+                _package_receipts_response(receipts)
             )
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
@@ -2536,7 +2564,7 @@ def install_agent_routes(
                 expires_in_seconds=body.expires_in_seconds,
             )
             return _json_response(
-                AgentGrantResponse(grant=grant.to_mapping()).model_dump()
+                _package_grant_response(grant)
             )
         except (KeyError, TypeError, ValueError, WorkloadHelperAuthorityError):
             raise HTTPException(
