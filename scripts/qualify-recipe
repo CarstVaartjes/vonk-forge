@@ -482,13 +482,13 @@ def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Nam
     """
     if not args.serving_url:
         return None
-    control_src = args.platform_root / "control" / "src"
-    if str(control_src) not in sys.path:
-        sys.path.insert(0, str(control_src))
     profile_src = args.platform_root / "src"
     if str(profile_src) not in sys.path:
         sys.path.insert(0, str(profile_src))
-    from vonk_control.serving_execution import ServingExecutionError, execute_http_check
+    from cluster_profiles.serving_execution import (
+        ServingExecutionError,
+        execute_http_check,
+    )
     try:
         from cluster_profiles.fleet_qualification import EvidenceLedger
     except ImportError as error:
