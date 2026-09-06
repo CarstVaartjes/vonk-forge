@@ -1,13 +1,13 @@
 # Mia DeepSeek V4 Flash on two DGX Sparks
 
-This runbook covers the native v1 two-node Mia recipe. It is genuine vLLM
+This runbook covers the canonical two-node Mia RecipeDefinition. It is genuine vLLM
 multiprocessing tensor parallelism with TP=2. It is not a claim that the generic
 vLLM harness supports arbitrary distributed execution.
 
-Spark acceptance remains a required gate for this v1 recipe. The commands
-below are the real executable qualification path, but `--level container` must
-be run on a linux/arm64 DGX Spark host with Docker, both GPUs, and the exact
-model snapshot already installed.
+Spark acceptance remains a required gate for this recipe. Structural
+qualification is executable now. Container qualification remains unavailable
+until the production `CompiledExecutionPlan` materializer is linked; an
+`environment-limited` result is not container evidence.
 
 ## Pinned release
 
@@ -41,8 +41,8 @@ ungated. Qualification performs no startup network fetch. Install every model
 file and all source/image inputs before qualification, preserving the contract
 paths and hashes.
 
-Mia upstream bind-mounts and applies patches at startup. The native v1 source
-bundle instead vendors and hashes those files, applies them while building the
+Mia upstream bind-mounts and applies patches at startup. The canonical recipe
+package instead vendors and hashes those files, applies them while building the
 image, and verifies the installed result. There is no startup patching, source
 mutation, package installation, or network access.
 
@@ -63,8 +63,10 @@ only after both ranks are healthy.
 
 ## Qualify the exact inputs
 
-Structural qualification works without GPU hardware and proves strict v1
-contract, reference, compiler, and adapter compatibility:
+Structural qualification works without GPU hardware and proves the canonical
+ModelDefinition, RecipeDefinition, package, compiler, and adapter contract.
+Run it in the dev/CI workspace against the exact repository checkout; that
+checkout is qualification input and is not production recipe authority:
 
 ```bash
 cd '<REPOSITORY_CHECKOUT>'
@@ -75,32 +77,26 @@ scripts/qualify-recipe \
   --level structural > '<EVIDENCE_DIRECTORY>/mia-structural.json'
 ```
 
-On a supported DGX Spark host, execute the complete path:
+The production Controller follows the global recipe repository's `main` branch
+through its Caddy proxy and refreshes metadata at startup and every 15 minutes.
+Select the immutable Model and Recipe revision from that refreshed metadata,
+then use Controller Run/Switch for the physical lifecycle:
 
 ```bash
-scripts/run-development-slices \
-  --api-base 'http://127.0.0.1:<LOCAL_API_PORT>' \
-  --inference-base 'http://127.0.0.1:<LOCAL_INFERENCE_PORT>' \
-  --admin-token-file '<EVIDENCE_DIRECTORY>/admin-token' \
-  --inference-token-file '<LOCAL_SECRETS_DIR>/litellm-master-key' \
-  --phase model-multinode \
-  --qualification-file '<EVIDENCE_DIRECTORY>/mia-structural.json' \
-  --builder-node '<SPARK_1_NODE_ID>' \
-  --target-node '<SPARK_1_NODE_ID>' \
-  --target-node '<SPARK_2_NODE_ID>' \
-  --failure-node '<SPARK_2_NODE_ID>' \
-  --evidence-file '<EVIDENCE_DIRECTORY>/mia-container.json' \
-  --timeout-seconds 3600 \
-  --stop-after inference-ok
+vonkctl models run --input-file '<RUN_REQUEST_JSON>' --json
 ```
 
-The qualifier resolves the digest-pinned base image, verifies the expected
-linux/arm64 manifest, builds offline from the retained context, starts worker
-then entrypoint, checks collective and endpoint-owner readiness, invokes the
-OpenAI-compatible endpoint, performs bounded stop/restart, and cleans up. It
-writes canonical evidence and fails closed on every incomplete phase. Resume
-with the identical command and evidence file after each documented failure or
-restart action, advancing only when the corresponding checkpoint is proven.
+The Controller resolves the digest-pinned image, verified model bytes, exact
+recipe revision, and selected Spark group; previews the operation; then runs
+the build, distribution, install, start, and route phases. Applying a changed
+revision eagerly fetches its exact immutable recipe package and source bundle
+into the read-only execution cache. Retain the recipe revision, package and
+source-bundle digests, operation ID, plan digest, per-rank receipts, route
+state, recovery transitions, and cleanup result. Run the Recipe's declared
+serving checks against the active endpoint with `scripts/qualify-recipe
+--serving-url URL --evidence-ledger PATH` and retain that bounded result with
+the structural output. Do not record a container-qualified gate until the
+production materializer exists and the container path completes successfully.
 
 ## Failure, recovery, and cleanup
 
