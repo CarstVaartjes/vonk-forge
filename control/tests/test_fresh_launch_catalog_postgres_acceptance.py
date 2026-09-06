@@ -533,6 +533,15 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
     assert library_model_keys == {
         _model_key(row) for row in corpus.index["catalog_entities"]
     }
+    expected_model_documents = {
+        _model_key(row): row["document"] for row in corpus.index["catalog_entities"]
+    }
+    assert {
+        (item.model.publisher, item.model.slug, item.model.content_sha256): item.model_document.model_dump(
+            mode="json"
+        )
+        for item in library_models
+    } == expected_model_documents
     actual_unlinked = {
         (item.model.publisher, item.model.slug, item.model.content_sha256)
         for item in library_models
@@ -546,6 +555,14 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
     by_digest = {item.content_sha256: item for item in library_recipes}
     assert len(by_digest) == len(library_recipes)
     assert set(by_digest) == {_recipe_key(row)[2] for row in corpus.index["recipes"]}
+    expected_recipe_documents = {
+        _recipe_key(row)[2]: row["document"] for row in corpus.index["recipes"]
+    }
+    assert {
+        item.content_sha256: item.recipe_document.model_dump(mode="json")
+        for item in library_recipes
+    } == expected_recipe_documents
+    multi_model_detail_seen = False
     for row in corpus.index["recipes"]:
         digest = _recipe_key(row)[2]
         detail_response = api.get(f"/api/v1/library/recipes/{by_digest[digest].recipe_id}")
@@ -567,6 +584,10 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
             )
             for selection in row["document"]["models"]
         ]
+        if len(row["document"]["models"]) > 1:
+            multi_model_detail_seen = True
+            assert len(detail.model_documents) == len(row["document"]["models"])
+    assert multi_model_detail_seen, "frozen corpus has no multi-Model Recipe detail"
 
     from vonk_control.catalog_api import CATALOG_OPERATION_IDS
 
