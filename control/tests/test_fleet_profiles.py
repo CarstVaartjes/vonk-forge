@@ -34,9 +34,9 @@ from vonk_control.models import (
     ClusterMappingNode,
     FleetProfile,
     FleetProfileApplication,
+    InstallationNode,
     RecipeBuild,
     RecipeInstallation,
-    InstallationNode,
     RecipeRun,
     RunNode,
 )
@@ -1323,7 +1323,7 @@ def test_composite_switch_owns_unlisted_scoped_runtime_conflict_once() -> None:
 
 def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
     sessions = _database()
-    _recipe_id, revision_id = _seed(sessions)
+    _seed(sessions)
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -1362,11 +1362,12 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
         from .test_recipe_operations import setup_services
     except ImportError as error:
         pytest.skip(f"run-operation fixture awaits canonical catalog migration: {error}")
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
-    from vonk_control.run_switch_operations import RunSwitchOperationService
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path, nodes=2
@@ -1443,7 +1444,7 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
     assert child.node_ids == list(nodes)
     assert child.action == "switch"
     assert current.progress["child_progress"]["node_ids"] == list(nodes)
-    assert current.progress["child_progress"]["phase"] == "target-copy"
+    assert current.progress["child_progress"]["phase"] == "runtime-install"
 
     replay = adapter.start(
         application_id=application.id,
@@ -1489,11 +1490,12 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
         )
     except ImportError as error:
         pytest.skip(f"run-operation fixture awaits canonical catalog migration: {error}")
+    from vonk_control.run_switch_operations import RunSwitchOperationService
+
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
     )
-    from vonk_control.run_switch_operations import RunSwitchOperationService
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     installation = installed_recipe(
