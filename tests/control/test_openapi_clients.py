@@ -387,54 +387,47 @@ def test_generated_library_contract_has_one_recipe_topology_and_strict_identitie
 ):
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
     detail = schema["LibraryRecipeDetail"]
-    visual = schema["VisualRecipeDocument"]
 
-    assert set(detail["properties"]) >= {"topology", "placement", "visual_recipe"}
+    assert set(detail["properties"]) >= {"topology", "placement", "definition"}
     assert "profiles" not in detail["properties"]
-    assert set(visual["properties"]) >= {"model", "execution", "runtime", "interfaces"}
-    assert "workload" not in visual["properties"]
-    assert "adapter" not in schema["VisualRuntime"]["properties"]
+    definition = schema["LibraryRecipeDefinition"]
+    assert set(definition["properties"]) >= {
+        "execution",
+        "models",
+        "runtime",
+        "interfaces",
+        "settings",
+        "validation",
+        "release",
+        "provenance",
+    }
+    assert "VisualRecipeDocument" not in schema
 
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    mapping_contract = typescript.split("MappingPreviewInput: {", 1)[1].split("};", 1)[
-        0
-    ]
-    detail_contract = typescript.split("LibraryRecipeDetail: {", 1)[1].split("};", 1)[0]
-    runtime_contract = typescript.split("VisualRuntime: {", 1)[1].split("};", 1)[0]
-    assert "topology_name" not in mapping_contract
-    assert "topology:" in detail_contract and "profiles:" not in detail_contract
-    assert "distribution:" in runtime_contract and "adapter:" not in runtime_contract
+
+def test_generated_openapi_removes_retired_catalog_recipe_operations() -> None:
+    document = json.loads(OPENAPI.read_text())
+    paths = document["paths"]
+    operations = {
+        operation.get("operationId")
+        for methods in paths.values()
+        if isinstance(methods, dict)
+        for operation in methods.values()
+        if isinstance(operation, dict)
+    }
+    assert "/api/v1/catalog/public-recipes" not in paths
+    assert "/api/v1/catalog/imports/public" not in paths
+    assert "/api/v1/catalog/imports/recipe-library" not in paths
+    assert "listPublicRecipes" not in operations
+    assert "previewPublicRecipeImport" not in operations
+    assert "importPublicRecipe" not in operations
 
 
-def test_generated_library_artifact_preserves_exact_huggingface_subset_identity() -> (
-    None
-):
+def test_generated_library_contract_drops_legacy_visual_artifact_identity() -> None:
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
-    include_paths = schema["VisualArtifact"]["properties"]["include_paths"]
-    assert include_paths["maxItems"] == 256
-    assert include_paths["items"]["maxLength"] == 512
-    assert "include_paths" in schema["VisualArtifact"]["required"]
+    assert "VisualArtifact" not in schema
+    assert "LibraryModelArtifact" in schema
+    assert "include_paths" not in schema["LibraryModelArtifact"]["properties"]
 
-    from cluster_profiles.generated_control.models.visual_artifact import (
-        VisualArtifact,
-    )
-
-    subset = ["config.json", "weights/model-00001.safetensors"]
-    artifact = VisualArtifact(
-        download_bytes=1,
-        id="model",
-        include_paths=subset,
-        installed_bytes=1,
-        kind="huggingface.snapshot",
-        repository="publisher/model",
-        revision="a" * 40,
-        roles=["entrypoint"],
-    )
-    assert artifact.to_dict()["include_paths"] == subset
-
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    contract = typescript.split("VisualArtifact: {", 1)[1].split("};", 1)[0]
-    assert "include_paths: string[];" in contract
 
 
 def test_generated_python_client_imports_in_the_root_locked_environment() -> None:

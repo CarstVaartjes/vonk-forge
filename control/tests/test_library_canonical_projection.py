@@ -84,3 +84,8 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     detail = client.get(f"/api/v1/library/recipes/{recipe_id}")
     assert detail.status_code == 200
     assert detail.json()["recipe"]["recipe_id"] == recipe_id
+    detail_payload = detail.json()
+    assert detail_payload["definition"]["execution"]
+    assert detail_payload["definition"]["models"]
+    assert "visual_recipe" not in detail_payload
+    assert "VisualRecipeDocument" not in app.openapi()["components"]["schemas"]

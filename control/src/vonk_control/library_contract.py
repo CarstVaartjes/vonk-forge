@@ -575,6 +575,19 @@ class RecipeTopology(_StrictModel):
     stop_order: list[Text64] = Field(max_length=32)
 
 
+class LibraryRecipeDefinition(_StrictModel):
+    """Canonical RecipeDefinition fields projected without legacy visual DTOs."""
+
+    execution: dict[str, object]
+    models: list[dict[str, object]] = Field(max_length=32)
+    runtime: dict[str, object]
+    interfaces: list[dict[str, object]] = Field(max_length=64)
+    settings: dict[str, object]
+    validation: dict[str, object]
+    release: dict[str, object]
+    provenance: dict[str, object]
+
+
 class OperationalBuild(_StrictModel):
     recipe_build_id: UuidId
     recipe_revision_id: UuidId
@@ -806,7 +819,7 @@ class LibraryRecipeDetail(_StrictModel):
     generated_at: datetime
     recipe: LibraryRecipeIdentity
     selected_revision: RecipeRevisionSummary | None
-    visual_recipe: VisualRecipeDocument | None
+    definition: LibraryRecipeDefinition
     topology: RecipeTopology | None
     operational_state: OperationalState
     placement: list[TopologyPlacement] = Field(max_length=1)

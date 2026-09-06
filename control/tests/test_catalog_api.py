@@ -10,7 +10,7 @@ def _administrator() -> Actor:
     return Actor("administrator", "test")
 
 
-def test_catalog_api_exposes_only_canonical_import_and_sync_routes() -> None:
+def test_catalog_api_exposes_only_canonical_bundle_and_sync_routes() -> None:
     app = FastAPI()
     install_catalog_routes(
         app,
@@ -19,10 +19,12 @@ def test_catalog_api_exposes_only_canonical_import_and_sync_routes() -> None:
         service=None,
     )
     paths = app.openapi()["paths"]
-    assert "/api/v1/catalog/imports/recipe-library" in paths
-    assert "/api/v1/catalog/imports/public" in paths
+    assert "/api/v1/catalog/source-bundles/{sha256}" in paths
     assert "/api/v1/catalog/managed-recipes/sync" in paths
     assert "/api/v1/catalog/managed-recipes/sync-status" in paths
+    assert "/api/v1/catalog/public-recipes" not in paths
+    assert "/api/v1/catalog/imports/public" not in paths
+    assert "/api/v1/catalog/imports/recipe-library" not in paths
     assert "/api/v1/catalog/recipes" not in paths
     operation_ids = {
         operation["operationId"]

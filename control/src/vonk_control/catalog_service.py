@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime
-from typing import Any, BinaryIO
+from typing import BinaryIO
 
 from jsonschema import Draft202012Validator, FormatChecker
 from sqlalchemy import select, update
@@ -79,27 +79,6 @@ class RemoteRecipeImportPreview:
     report: tuple[ImportReportItem, ...]
     report_digest: str
     source_sha256: str
-
-
-@dataclass(frozen=True, slots=True)
-class RecipeSummary:
-    recipe_id: str
-    slug: str
-    title: str
-    source_kind: str
-    revision_number: int
-    lifecycle: str
-    content_sha256: str | None
-    execution_harness: str
-    runtime_distribution: str
-    source_bundle_sha256: str | None
-    artifact_count: int
-    expected_download_bytes: int
-    topology_name: str
-    topology_mode: str
-    node_count: int
-    maximum_installed_bytes_per_node: int
-    maximum_runtime_memory_bytes_per_node: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,28 +179,6 @@ class CatalogService:
         if observed != expected:
             raise CatalogValidationError("bundle.metadata_mismatch", "source bundle storage does not match its database metadata")
         return stored.archive
-
-    def list_recipes(self, *, limit: int = 20, cursor: str | None = None) -> tuple[list[RecipeSummary], str | None]:
-        if not 1 <= limit <= 100:
-            raise CatalogValidationError("catalog.limit", "catalog limit is invalid")
-        with self._sessions() as session:
-            rows = list(
-                session.scalars(
-                    select(CatalogDocumentRevision)
-                    .where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                    )
-                    .order_by(CatalogDocumentRevision.created_at.desc(), CatalogDocumentRevision.id.desc())
-                )
-            )
-        if cursor is not None:
-            boundary = next((index for index, row in enumerate(rows) if row.document_id == cursor or row.id == cursor), None)
-            if boundary is None:
-                raise CatalogValidationError("catalog.cursor", "catalog cursor is invalid")
-            rows = rows[boundary + 1 :]
-        page = rows[:limit]
-        return [_summary(row) for row in page], (page[-1].document_id if len(rows) > limit else None)
 
     def get_recipe(self, recipe_id: str) -> RecipeRevisionView:
         with self._sessions() as session:
@@ -484,73 +441,12 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
     )
 
 
-def _summary(revision: CatalogDocumentRevision) -> RecipeSummary:
-    metrics = _document_summary(revision.document)
-    projected = revision.projected or {}
-    return RecipeSummary(
-        recipe_id=revision.document_id,
-        slug=revision.slug,
-        title=str(revision.document.get("metadata", {}).get("title", revision.slug)),
-        source_kind="recipe_library",
-        revision_number=revision.revision_number,
-        lifecycle="resolved" if revision.state == "active" else revision.state,
-        content_sha256=revision.content_digest,
-        source_bundle_sha256=projected.get("source_bundle_sha256"),
-        **metrics,
-    )
-
-
 def _release_version(document: Mapping[str, object]) -> str | None:
     release = document.get("release")
     history = release.get("history") if isinstance(release, Mapping) else None
     current = history[0] if isinstance(history, list) and history else None
     version = current.get("version") if isinstance(current, Mapping) else None
     return version if isinstance(version, str) and _RELEASE_VERSION.fullmatch(version) else None
-
-
-def _document_summary(document: Mapping[str, object]) -> dict[str, Any]:
-    execution = document.get("execution")
-    execution = execution if isinstance(execution, Mapping) else {}
-    runtime = document.get("runtime")
-    runtime = runtime if isinstance(runtime, Mapping) else {}
-    topology = document.get("topology")
-    topology = topology if isinstance(topology, Mapping) else {}
-    roles = topology.get("roles", [])
-    roles = roles if isinstance(roles, list) else []
-    installed = 0
-    runtime_memory = 0
-    for value in roles:
-        role = value if isinstance(value, Mapping) else {}
-        resources = role.get("resources")
-        resources = resources if isinstance(resources, Mapping) else {}
-        disk = resources.get("disk")
-        memory = resources.get("memory")
-        disk = disk if isinstance(disk, Mapping) else {}
-        memory = memory if isinstance(memory, Mapping) else {}
-        installed = max(installed, sum(int(disk.get(key, 0) or 0) for key in ("image_bytes", "artifact_bytes", "cache_bytes")))
-        runtime_memory = max(runtime_memory, sum(int(memory.get(key, 0) or 0) for key in ("startup_peak_bytes", "steady_state_bytes", "runtime_growth_bytes")))
-    models = document.get("models")
-    files = []
-    if isinstance(models, list):
-        for selection in models:
-            if isinstance(selection, Mapping) and isinstance(selection.get("files"), list):
-                files.extend(item for item in selection["files"] if isinstance(item, Mapping))
-    expected = max(1, sum(int(item.get("size_bytes", 0) or 0) for item in files))
-    return {
-        "execution_harness": str(_ref_slug(execution.get("harness"))),
-        "runtime_distribution": str(_ref_slug(runtime.get("distribution"))),
-        "artifact_count": len(files),
-        "expected_download_bytes": expected,
-        "topology_name": str(topology.get("name", "unknown")),
-        "topology_mode": str(topology.get("mode", "unknown")),
-        "node_count": max(1, int(topology.get("node_count", 1) or 1)),
-        "maximum_installed_bytes_per_node": max(1, installed),
-        "maximum_runtime_memory_bytes_per_node": max(1, runtime_memory),
-    }
-
-
-def _ref_slug(value: object) -> object:
-    return value.get("slug", "unknown") if isinstance(value, Mapping) else "unknown"
 
 
 def _package_handle_metadata(handle: object, *, recipe: RecipeDefinition, package_sha256: str | None) -> dict[str, object]:
