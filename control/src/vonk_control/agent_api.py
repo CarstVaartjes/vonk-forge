@@ -128,6 +128,7 @@ def _runtime_image_receipt_matches(
     revision_id: str,
     revision_digest: str,
     installation_image_digest: str,
+    installation_recipe_build_id: str | None,
 ) -> bool:
     """Bind one persisted launch image to its verified Controller receipt."""
 
@@ -166,6 +167,7 @@ def _runtime_image_receipt_matches(
             and getattr(receipt, "registry_manifest_digest", None) is not None
             and runtime_image.get("build_id") is None
             and getattr(receipt, "build_id", None) is None
+            and installation_recipe_build_id is None
         )
     if source == "controller-build":
         return (
@@ -2248,6 +2250,7 @@ def install_agent_routes(
                 revision_id=revision_id,
                 revision_digest=revision_content_digest,
                 installation_image_digest=installation_image_digest,
+                installation_recipe_build_id=installation_recipe_build_id,
             )
         ]
         if len(matching_receipts) != 1:

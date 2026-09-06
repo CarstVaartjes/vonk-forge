@@ -120,6 +120,17 @@ def test_persisted_published_image_binds_without_a_recipe_build() -> None:
         revision_id="revision",
         revision_digest="a" * 64,
         installation_image_digest=runtime_image["image_digest"],
+        installation_recipe_build_id=None,
+    )
+
+    assert not _runtime_image_receipt_matches(
+        runtime_image,
+        identity,
+        receipt,
+        revision_id="revision",
+        revision_digest="a" * 64,
+        installation_image_digest=runtime_image["image_digest"],
+        installation_recipe_build_id="foreign-build",
     )
 
 
@@ -135,6 +146,7 @@ def test_persisted_controller_build_image_requires_matching_build_receipt() -> N
         revision_id="revision",
         revision_digest="a" * 64,
         installation_image_digest=runtime_image["image_digest"],
+        installation_recipe_build_id="build",
     )
 
     receipt.local_image_config_id = "sha256:" + "0" * 64
@@ -145,6 +157,7 @@ def test_persisted_controller_build_image_requires_matching_build_receipt() -> N
         revision_id="revision",
         revision_digest="a" * 64,
         installation_image_digest=runtime_image["image_digest"],
+        installation_recipe_build_id="build",
     )
 
     receipt.local_image_config_id = runtime_image["local_image_config_id"]
@@ -156,4 +169,5 @@ def test_persisted_controller_build_image_requires_matching_build_receipt() -> N
         revision_id="revision",
         revision_digest="a" * 64,
         installation_image_digest=runtime_image["image_digest"],
+        installation_recipe_build_id="build",
     )
