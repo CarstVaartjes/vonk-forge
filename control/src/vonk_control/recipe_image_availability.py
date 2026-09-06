@@ -655,7 +655,7 @@ class RecipeImageAvailabilityService:
                             f"vonk:recipe-availability-model-retry:{child_id}:{parent_request_key}",
                         )
                     )
-                    actions = child.get("failure")
+                    actions = operation.failure
                     actions = actions.get("recovery_actions", []) if isinstance(actions, Mapping) else []
                     if (
                         "check_access_and_resume" in actions
