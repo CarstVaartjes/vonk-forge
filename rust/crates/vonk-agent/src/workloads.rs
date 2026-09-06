@@ -173,6 +173,10 @@ pub struct ModelArtifactIdentity {
 #[serde(deny_unknown_fields)]
 pub struct CompiledRuntimeImage {
     pub image_digest: String,
+    pub registry_manifest_digest: Option<String>,
+    pub platform_manifest_digest: String,
+    pub local_image_config_id: String,
+    pub runtime_interface_label: String,
     pub oci_layout_sha256: String,
     pub image_bytes: u64,
     pub architecture: String,
@@ -497,14 +501,25 @@ impl CompiledRuntimeImage {
     fn validate(&self) -> Result<(), WorkloadError> {
         if !self.image_digest.starts_with("sha256:")
             || !lower_hex(&self.image_digest[7..], 64)
+            || self
+                .registry_manifest_digest
+                .as_ref()
+                .is_some_and(|value| !valid_sha256_prefixed(value))
+            || !valid_sha256_prefixed(&self.platform_manifest_digest)
+            || !valid_sha256_prefixed(&self.local_image_config_id)
+            || self.platform_manifest_digest != self.image_digest
+            || self.runtime_interface_label.is_empty()
+            || self.runtime_interface_label.len() > 128
             || !lower_hex(&self.oci_layout_sha256, 64)
             || self.image_bytes == 0
             || self.architecture != "linux-arm64"
             || self.runtime_interface != "vonk.runtime.v1"
             || !matches!(self.source.as_str(), "published" | "controller-build")
             || (self.source == "published" && self.build_id.is_some())
+            || (self.source == "published" && self.registry_manifest_digest.is_none())
             || (self.source == "controller-build"
                 && self.build_id.as_deref().is_none_or(str::is_empty))
+            || (self.source == "controller-build" && self.registry_manifest_digest.is_some())
             || self.distribution_object.kind != "oci-archive"
             || self.distribution_object.name != "image.oci.tar"
             || self.distribution_object.sha256 != self.oci_layout_sha256
@@ -595,6 +610,10 @@ fn lower_hex(value: &str, length: usize) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn valid_sha256_prefixed(value: &str) -> bool {
+    value.starts_with("sha256:") && lower_hex(&value[7..], 64)
 }
 
 fn valid_role(value: &str) -> bool {

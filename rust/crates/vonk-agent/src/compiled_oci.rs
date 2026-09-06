@@ -517,7 +517,7 @@ mod tests {
             invocation.mounts[0].source,
             std::path::Path::new("/run/vonk/models/primary/config.json")
         );
-        assert_eq!(invocation.mounts[0].target, "/models/config.json");
+        assert_eq!(invocation.mounts[0].target, "/models/target/config.json");
         assert_eq!(
             invocation.mounts[1].source,
             std::path::Path::new(
@@ -627,6 +627,10 @@ mod tests {
             "kind":"model"
         });
         value["artifacts"] = json!([artifact.clone()]);
+        value["security"]["mounts"] = json!([
+            {"source":"model","target":"/models/target","read_only":true},
+            {"source":"outputs","target":"/outputs","read_only":false}
+        ]);
         let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let invocation = project(&plan, &paths()).unwrap();
         assert_eq!(

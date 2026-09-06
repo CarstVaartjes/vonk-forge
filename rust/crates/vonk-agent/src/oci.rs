@@ -339,7 +339,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if spec.runtime_image.runtime_interface != policy.runtime_interface
             || spec.runtime_image.architecture != policy.architecture
             || policy.required_image_label.name != "ai.vonkforge.runtime-interface"
-            || policy.required_image_label.value != "v1"
+            || spec.runtime_image.runtime_interface_label != policy.required_image_label.value
             || spec.runtime.image_digest != spec.runtime_image.image_digest
         {
             return Err(OciError::ImageDigest);
@@ -1387,6 +1387,10 @@ mod tests {
             ],
             "runtime_image": {
                 "image_digest": format!("sha256:{}", "1".repeat(64)),
+                "registry_manifest_digest": format!("sha256:{}", "3".repeat(64)),
+                "platform_manifest_digest": format!("sha256:{}", "1".repeat(64)),
+                "local_image_config_id": format!("sha256:{}", "4".repeat(64)),
+                "runtime_interface_label": "v1",
                 "oci_layout_sha256": "2".repeat(64),
                 "image_bytes": 4096,
                 "architecture": "linux-arm64",
