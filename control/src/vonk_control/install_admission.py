@@ -425,10 +425,15 @@ class InstallAdmissionService:
                 else 0
             )
             if reused_image == 0:
-                blockers.append(
+                # Run/Switch may deliberately compile and persist the exact
+                # schema-2 launch plan before its ordered target-copy phase.
+                # The high-level operation owns the missing-image transfer;
+                # admission records the gap as evidence instead of rejecting
+                # a valid cold install before the Controller can distribute it.
+                warnings.append(
                     AdmissionReason(
-                        "install.image_not_distributed",
-                        "The exact built image must be imported on this GPU node before installation.",
+                        "install.image_distribution_pending",
+                        "The exact built image will be imported by the ordered Run/Switch target-copy phase.",
                     )
                 )
             reused_artifacts = sum(

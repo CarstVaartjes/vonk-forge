@@ -266,10 +266,15 @@ class RuntimeImageStorage(Protocol):
 
 
 class FilesystemRuntimeImageStorage:
-    """Flat content-addressed archive storage used by Controller/NAS."""
+    """Content-addressed Controller/NAS storage under the OCI namespace.
+
+    The caller supplies the shared Controller artifact root.  Runtime image
+    archives and their receipts are kept in the explicit ``oci-archives``
+    namespace so model/build objects cannot be confused with OCI payloads.
+    """
 
     def __init__(self, root: Path, *, maximum_bytes: int = 16 * 1024**4) -> None:
-        self.root = root
+        self.root = root / "oci-archives"
         self.maximum_bytes = maximum_bytes
         self.root.mkdir(parents=True, exist_ok=True)
 

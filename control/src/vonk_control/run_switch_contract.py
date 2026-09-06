@@ -281,6 +281,8 @@ class RunSwitchPhase(_StrictModel):
     subphase: Literal[
         "container-build",
         "model-download",
+        "runtime-image",
+        "runtime-plan",
         "target-copy",
         "runtime-install",
     ] | None = None
@@ -352,6 +354,8 @@ class RunSwitchProgress(_StrictModel):
     subphase: Literal[
         "container-build",
         "model-download",
+        "runtime-image",
+        "runtime-plan",
         "target-copy",
         "runtime-install",
     ] | None = None

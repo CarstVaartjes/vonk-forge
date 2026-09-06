@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ import pytest
 from sqlalchemy import select
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingService
+from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.inventory_repository import (
     InventoryRepository,
     InventorySnapshotInput,
@@ -18,8 +20,9 @@ from vonk_control.models import (
     AgentNode,
     ClusterMapping,
     ClusterMappingNode,
+    CatalogDocumentRevision,
     Job,
-    LocalRecipeRevision,
+    NodeArtifact,
     NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
@@ -29,6 +32,12 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.recipe_builds import RecipeBuildPlan
+from vonk_control.recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    PulledImageEvidence,
+    prepare_runtime_image,
+)
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
     RunSwitchApplyRequest,
@@ -45,7 +54,12 @@ from vonk_control.run_switch_operations import (
     effective_build_receipt,
 )
 
-from .test_recipe_operations import NOW, installed_recipe, setup_services
+from .test_recipe_operations import (
+    NOW,
+    _CanonicalModelCache,
+    installed_recipe,
+    setup_services,
+)
 
 MODEL_ARTIFACT = "c" * 64
 MODEL_ARTIFACT_SET = "f" * 64
@@ -282,16 +296,102 @@ class BuildThenCopyExecutor:
         if phase.subphase == "target-copy":
             self.receipts.append(effective_build_receipt(plan, progress))
             return PhaseExecution(result={"copied_bytes": 0})
+        if phase.subphase == "runtime-image":
+            with self._sessions() as session:
+                build = session.get(RecipeBuild, plan.recipe_build_id)
+                assert build is not None
+                assert build.image_digest is not None
+                assert build.oci_layout_sha256 is not None
+                assert build.image_bytes is not None
+                return PhaseExecution(
+                    result={
+                        "runtime_image": {
+                            "source": "controller-build",
+                            "image_digest": build.image_digest,
+                            "oci_layout_sha256": build.oci_layout_sha256,
+                            "image_bytes": build.image_bytes,
+                        },
+                        "image_digest": build.image_digest,
+                        "oci_layout_sha256": build.oci_layout_sha256,
+                        "image_bytes": build.image_bytes,
+                    }
+                )
         return PhaseExecution(result={"phase": phase.kind})
 
     def get(self, operation_id: str):
         return self.children.get(operation_id)
 
 
+class ColdStartPhaseExecutor:
+    """Value-bearing phase driver for a cold preview/apply ordering test."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def execute(
+        self,
+        plan,
+        phase,
+        *,
+        item_index,
+        actor,
+        request_key,
+        progress,
+    ) -> PhaseExecution:
+        del item_index, actor, request_key, progress
+        identity = phase.subphase or phase.kind
+        self.events.append(identity)
+        if phase.subphase == "model-download":
+            return PhaseExecution(
+                result={
+                    "artifact_set_sha256": plan.preparation.model.artifact_set_sha256,
+                    "coverage": "complete",
+                    "downloaded_bytes": plan.storage.missing_nas_bytes,
+                    "total_bytes": plan.storage.missing_nas_bytes,
+                }
+            )
+        if phase.subphase == "runtime-image":
+            return PhaseExecution(
+                result={
+                    "runtime_image": {
+                        "source": "controller-build",
+                        "image_digest": plan.build.image_digest,
+                        "oci_layout_sha256": plan.build.oci_layout_sha256,
+                        "image_bytes": plan.build.image_bytes,
+                    },
+                    "image_digest": plan.build.image_digest,
+                    "oci_layout_sha256": plan.build.oci_layout_sha256,
+                    "image_bytes": plan.build.image_bytes,
+                }
+            )
+        if phase.kind == "transfer" and phase.subphase == "target-copy":
+            return PhaseExecution(
+                result={"copied_bytes": plan.storage.missing_spark_bytes}
+            )
+        if phase.kind == "verify":
+            return PhaseExecution(
+                result={
+                    "verified": True,
+                    "verified_digests": list(plan.storage.artifact_digests),
+                    "verified_image_digest": plan.image_digest,
+                    "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
+                }
+            )
+        # ``runtime-install`` represents the real admission/compile boundary
+        # in this focused driver; the asserted event ordering is the contract.
+        return PhaseExecution(result={"compiled_plan_persisted": True})
+
+    def get(self, _operation_id: str):
+        raise KeyError(_operation_id)
+
+
 def _request(sessions, node_id: str, *, action: str = "run", retention: str = "retain-cached"):
     with sessions() as session:
         revision = session.scalar(
-            select(LocalRecipeRevision).where(LocalRecipeRevision.lifecycle == "resolved")
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
         )
         assert revision is not None
         model = revision.document["models"][0]["model"]
@@ -353,6 +453,7 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(tmp_pat
         lifecycle._clock(),
         lifecycle,
         artifact_executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
     request = _request(sessions, node_id)
     plan = service.preview(request, actor="admin")
@@ -365,11 +466,20 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(tmp_pat
     assert plan.build.state == "available"
     assert plan.preparation is not None
     assert [phase.kind for phase in plan.phases] == [
+        "prepare",
         "transfer",
         "verify",
         "prepare",
         "start",
         "final_verify",
+    ]
+    assert [phase.subphase for phase in plan.phases] == [
+        "runtime-plan",
+        "target-copy",
+        "target-copy",
+        "runtime-install",
+        None,
+        None,
     ]
 
     operation = service.apply(
@@ -394,8 +504,10 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(tmp_pat
     assert service.tick() is True
     assert service.tick() is True
     assert service.tick() is True
+    assert service.tick() is True
     progressed = service.get(operation.operation_id)
     assert progressed.current_phase == "prepare"
+    assert progressed.progress.subphase == "runtime-install"
     assert progressed.state == "running"
     with sessions() as session:
         created = session.scalar(
@@ -424,8 +536,8 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     assert plan.storage.nas_coverage == "partial"
     assert [(phase.kind, phase.subphase) for phase in plan.phases[:3]] == [
         ("transfer", "model-download"),
+        ("prepare", "runtime-plan"),
         ("transfer", "target-copy"),
-        ("verify", "target-copy"),
     ]
     assert plan.storage.missing_nas_bytes == 1024
     assert plan.preparation is not None
@@ -435,6 +547,348 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     }
     assert "run-switch.nas-download-required" in {
         reason.code for reason in plan.warnings
+    }
+
+
+def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
+    tmp_path: Path,
+) -> None:
+    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    with sessions.begin() as session:
+        session.query(NodeArtifact).delete()
+    inspector = CompleteArtifactInspector(missing_spark_bytes=1024)
+
+    class ColdInspector(CompleteArtifactInspector):
+        def inspect(self, *args, **kwargs):
+            value = super().inspect(*args, **kwargs)
+            return replace(
+                value,
+                missing_nas_bytes=1024,
+                nas_coverage="partial",
+            )
+
+    executor = ColdStartPhaseExecutor()
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=ColdInspector(
+            missing_spark_bytes=inspector.missing_spark_bytes,
+        ),
+        phase_executor=executor,
+        artifact_phase_executor=executor,
+        memory_floor_bytes=50,
+    )
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    assert [(phase.kind, phase.subphase) for phase in plan.phases[:5]] == [
+        ("transfer", "model-download"),
+        ("prepare", "runtime-image"),
+        ("prepare", "runtime-plan"),
+        ("transfer", "target-copy"),
+        ("verify", "target-copy"),
+    ]
+    assert plan.storage.nas_coverage == "partial"
+    assert plan.runtime_storage.spark_coverage == "partial"
+    assert plan.preparation is not None
+
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **_request(sessions, nodes[0]).model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    for _ in range(4):
+        assert service.tick() is True
+    assert executor.events == [
+        "model-download",
+        "runtime-image",
+        "runtime-plan",
+        "target-copy",
+    ]
+    assert service.get(operation.operation_id).current_phase == "verify"
+
+
+def test_cold_production_phases_prepare_receipts_before_real_install_compile(
+    tmp_path: Path,
+) -> None:
+    """Exercise the real image prep and install compiler after cold preview."""
+
+    sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
+    with sessions.begin() as session:
+        session.query(NodeArtifact).delete()
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        image_digest = build.image_digest
+        layout_digest = build.oci_layout_sha256
+        image_bytes = build.image_bytes
+        revision_id = build.recipe_revision_id
+    assert image_digest is not None
+    assert layout_digest is not None
+    assert image_bytes is not None
+
+    controller_storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
+    archive = b"canonical-runtime-image-archive"[:image_bytes]
+    assert hashlib.sha256(archive).hexdigest() == layout_digest
+    (controller_storage.root / layout_digest).write_bytes(archive)
+
+    class ColdModelCache(_CanonicalModelCache):
+        ready = False
+
+        def verified_model_objects_for_set(self, artifact_set_sha256):
+            if not self.ready:
+                raise RuntimeError("model bytes are not verified yet")
+            return super().verified_model_objects_for_set(artifact_set_sha256)
+
+    model_cache = ColdModelCache()
+
+    class _BuildArchiveTransport:
+        def inspect_archive(
+            self,
+            archive_path: Path,
+            *,
+            expected_architecture: str,
+            expected_runtime_interface: str,
+            expected_archive_sha256: str,
+            expected_archive_bytes: int,
+        ) -> PulledImageEvidence:
+            assert archive_path.read_bytes() == archive
+            return PulledImageEvidence(
+                manifest_digest=image_digest,
+                requested_manifest_digest=None,
+                config_id="sha256:" + "4" * 64,
+                local_reference="oci-archive:" + str(archive_path),
+                architecture=expected_architecture,
+                runtime_interface="v1",
+                archive_sha256=expected_archive_sha256,
+                archive_bytes=expected_archive_bytes,
+            )
+
+    transport = _BuildArchiveTransport()
+
+    def resolve_runtime_image(document, requested_digest, runtime_spec):
+        assert requested_digest == image_digest
+        runtime = runtime_spec["runtime"]
+        receipt = controller_storage.find_verified(
+            requested_digest,
+            expected_architecture=runtime["architecture"],
+            expected_runtime_interface=runtime["interface"],
+        )
+        if receipt is None:
+            raise RuntimeError("verified runtime image receipt is unavailable")
+        return receipt
+
+    execution_plans = ControllerExecutionPlanService(
+        model_cache,
+        runtime_image_resolver=resolve_runtime_image,
+    )
+    # Keep the final compile strict/read-only.  The worker phase below is the
+    # only code that writes the cold model/image receipts first.
+    lifecycle._install_admission._compiled_plan_provider = (
+        execution_plans.compile_installation
+    )
+
+    class ColdInspector(CompleteArtifactInspector):
+        def inspect(self, *args, **kwargs):
+            value = super().inspect(*args, **kwargs)
+            return replace(
+                value,
+                missing_nas_bytes=1024,
+                nas_coverage="partial",
+            )
+
+    class ProductionColdExecutor:
+        def __init__(self) -> None:
+            self.events: list[str] = []
+            self.delegate = RecipeLifecyclePhaseExecutor(
+                lifecycle,
+                sessions,
+                ClusterMappingService(sessions),
+                lambda: NOW,
+            )
+
+        def execute(
+            self,
+            plan,
+            phase,
+            *,
+            item_index,
+            actor,
+            request_key,
+            progress,
+        ):
+            identity = phase.subphase or phase.kind
+            self.events.append(identity)
+            if phase.subphase == "model-download":
+                model_cache.ready = True
+                return PhaseExecution(
+                    result={
+                        "artifact_set_sha256": plan.preparation.model.artifact_set_sha256,
+                        "coverage": "complete",
+                        "downloaded_bytes": plan.storage.missing_nas_bytes,
+                        "total_bytes": plan.storage.missing_nas_bytes,
+                    }
+                )
+            if phase.subphase == "runtime-image":
+                with sessions() as session:
+                    revision = session.get(CatalogDocumentRevision, revision_id)
+                    build = session.get(RecipeBuild, build_id)
+                    assert revision is not None and build is not None
+                    entities = resolve_recipe_entities(session, revision.document)
+                    runtime_spec = compile_runtime_spec(
+                        revision.document,
+                        resolved_entities=entities,
+                        parameters=(
+                            dict(plan.mapping.parameters)
+                            if plan.mapping is not None
+                            else {}
+                        ),
+                        role=plan.spark_group.nodes[0].role,
+                        rank=plan.spark_group.nodes[0].rank,
+                        package_handle={
+                            "image_digest": build.image_digest,
+                            "image_reference": f"localhost/vonk/recipe-build@{build.image_digest}",
+                            "build_input_sha256": build.build_input_sha256,
+                            "platform": "linux/arm64",
+                        },
+                    )
+                    receipt = prepare_runtime_image(
+                        revision.document,
+                        runtime=runtime_spec["runtime"],
+                        storage=controller_storage,
+                        transport=transport,
+                        build_receipt={
+                            "state": build.state,
+                            "build_id": build.id,
+                            "image_digest": build.image_digest,
+                            "oci_layout_sha256": build.oci_layout_sha256,
+                            "image_bytes": build.image_bytes,
+                        },
+                        now=NOW,
+                    )
+                return PhaseExecution(
+                    result={
+                        "runtime_image": receipt.to_mapping(),
+                        "image_digest": receipt.image_digest,
+                        "oci_layout_sha256": receipt.oci_layout_sha256,
+                        "image_bytes": receipt.image_bytes,
+                    }
+                )
+            if phase.subphase in {"runtime-plan", "runtime-install"}:
+                return self.delegate.execute(
+                    plan,
+                    phase,
+                    item_index=item_index,
+                    actor=actor,
+                    request_key=request_key,
+                    progress=progress,
+                )
+            if phase.kind == "transfer" and phase.subphase == "target-copy":
+                return PhaseExecution(result={"copied_bytes": plan.storage.missing_spark_bytes})
+            if phase.kind == "verify":
+                return PhaseExecution(
+                    result={
+                        "verified": True,
+                        "verified_digests": list(plan.storage.artifact_digests),
+                        "verified_image_digest": plan.image_digest,
+                        "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
+                    }
+                )
+            return PhaseExecution(result={"phase": phase.kind})
+
+        def get(self, operation_id: str):
+            return self.delegate.get(operation_id)
+
+    executor = ProductionColdExecutor()
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifacts=ColdInspector(missing_spark_bytes=1024),
+        phase_executor=executor,
+        artifact_phase_executor=executor,
+        memory_floor_bytes=50,
+    )
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    assert not controller_storage.find_verified(
+        image_digest,
+        expected_architecture="linux/arm64",
+        expected_runtime_interface="vonk.runtime.v1",
+    )
+
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert service.tick() is True
+    assert service.tick() is True
+    assert executor.events == ["model-download", "runtime-image"]
+    assert controller_storage.find_verified(
+        image_digest,
+        expected_architecture="linux/arm64",
+        expected_runtime_interface="vonk.runtime.v1",
+    ) is not None
+
+    # Controller compilation/persistence is synchronous and must not create a
+    # Spark install child before target-copy verification.
+    assert service.tick() is True
+    planned = service.get(operation.operation_id)
+    assert planned.progress.subphase == "target-copy"
+    assert planned.result.get("child_operation_id") is None
+    with sessions() as session:
+        installation = session.scalar(
+            select(RecipeInstallation).where(
+                RecipeInstallation.recipe_build_id == build_id,
+            )
+        )
+        assert installation is not None, list(
+            session.scalars(select(RecipeInstallation))
+        )
+        compiled_plans = installation.plan["compiled_execution_plans"]
+        assert compiled_plans
+        assert all(
+            payload["schema_version"] == 2
+            for payload in compiled_plans.values()
+        )
+    assert executor.events == ["model-download", "runtime-image", "runtime-plan"]
+
+    assert service.tick() is True
+    assert service.get(operation.operation_id).progress.subphase == "target-copy"
+    assert service.tick() is True
+    assert service.get(operation.operation_id).progress.subphase == "runtime-install"
+    assert service.get(operation.operation_id).result.get("child_operation_id") is None
+    assert service.tick() is True
+    waiting = service.get(operation.operation_id)
+    assert waiting.progress.subphase == "runtime-install"
+    install_child_id = waiting.result["child_operation_id"]
+    assert install_child_id
+    assert executor.events == [
+        "model-download",
+        "runtime-image",
+        "runtime-plan",
+        "target-copy",
+        "target-copy",
+        "runtime-install",
+    ]
+
+    lifecycle.record_node_result(
+        install_child_id,
+        nodes[0],
+        succeeded=True,
+        evidence={"installed_bytes": 1024},
+    )
+    assert service.tick() is True
+    assert service.get(operation.operation_id).progress.subphase in {
+        "start",
+        None,
     }
 
 
@@ -473,12 +927,12 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         )
         assert snapshot is not None
         snapshot.capabilities = ["recipe.build.v1"]
-        revision = session.get(LocalRecipeRevision, build.recipe_revision_id)
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
         build_plan = RecipeBuildPlan(
             build_id=build.id,
             recipe_revision_id=revision.id,
-            recipe_content_sha256=revision.content_sha256,
+            recipe_content_sha256=revision.content_digest,
             builder_node_id=nodes[0],
             source_bundle_sha256=build.source_bundle_sha256,
             build_input_sha256=build.build_input_sha256,
@@ -514,8 +968,10 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert plan.allowed, [reason.code for reason in plan.blockers]
     assert plan.build.state == "planned"
     assert plan.build.image_digest is None
-    assert [(phase.kind, phase.subphase) for phase in plan.phases[:2]] == [
+    assert [(phase.kind, phase.subphase) for phase in plan.phases[:4]] == [
         ("prepare", "container-build"),
+        ("prepare", "runtime-image"),
+        ("prepare", "runtime-plan"),
         ("transfer", "target-copy"),
     ]
     second_plan = service.preview(request, actor="admin")
@@ -561,8 +1017,8 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         completed.image_bytes = 30
     assert restarted.tick() is True
     resumed = restarted.get(operation.operation_id)
-    assert resumed.current_phase == "transfer"
-    assert resumed.progress.subphase == "target-copy"
+    assert resumed.current_phase == "prepare"
+    assert resumed.progress.subphase == "runtime-image"
     receipt = effective_build_receipt(plan, resumed.result)
     assert receipt == {
         "build_id": build_id,
@@ -571,6 +1027,11 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         "oci_layout_sha256": "3" * 64,
         "image_bytes": 30,
     }
+    assert restarted.tick() is True
+    assert restarted.get(operation.operation_id).progress.subphase == "runtime-plan"
+    assert restarted.tick() is True
+    assert restarted.get(operation.operation_id).current_phase == "transfer"
+    assert restarted.get(operation.operation_id).progress.subphase == "target-copy"
     assert restarted.tick() is True
     assert executor.receipts == [receipt]
 
@@ -640,7 +1101,10 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     )
     with sessions.begin() as session:
         revision = session.scalar(
-            select(LocalRecipeRevision).where(LocalRecipeRevision.lifecycle == "resolved")
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
         )
         assert revision is not None
         fake_builds = PendingBuilds(
@@ -664,10 +1128,11 @@ def test_uncached_run_selects_external_fresh_builder_and_plans_container_phase(
     assert plan.build.builder_node_id == builder_id
     assert plan.build.build_input_sha256 == "d" * 64
     assert fake_builds.calls == [builder_id]
-    assert [(phase.kind, phase.subphase) for phase in plan.phases[:3]] == [
+    assert [(phase.kind, phase.subphase) for phase in plan.phases[:4]] == [
         ("prepare", "container-build"),
+        ("prepare", "runtime-image"),
+        ("prepare", "runtime-plan"),
         ("transfer", "target-copy"),
-        ("verify", "target-copy"),
     ]
     assert "run-switch.container-build-required" in {
         reason.code for reason in plan.warnings
@@ -705,7 +1170,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
                 verified_at=NOW,
             )
         )
-        revision = session.get(LocalRecipeRevision, build.recipe_revision_id)
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
         node = session.get(AgentNode, nodes[0])
         assert node is not None
@@ -723,7 +1188,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
     build_plan = RecipeBuildPlan(
         build_id=build_id,
         recipe_revision_id=revision.id,
-        recipe_content_sha256=revision.content_sha256,
+        recipe_content_sha256=revision.content_digest,
         builder_node_id=nodes[0],
         source_bundle_sha256=source_digest,
         build_input_sha256="e" * 64,
@@ -832,19 +1297,28 @@ def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_befo
     assert [phase.kind for phase in plan.phases] == [
         "stop",
         "prepare",
+        "prepare",
         "start",
         "final_verify",
     ]
 
 
 def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(tmp_path: Path) -> None:
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
     artifact_executor = RecordingArtifactExecutor(child_transfer=True)
     service = _service(
         sessions,
         lifecycle._clock(),
         lifecycle,
         artifact_executor,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
     request = _request(sessions, nodes[0])
     plan = service.preview(request, actor="admin")
@@ -871,6 +1345,7 @@ def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(tmp_path: Pat
         lifecycle._clock(),
         lifecycle,
         bad_artifacts,
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
     bad_plan = bad_service.preview(request, actor="admin")
     bad_operation = bad_service.apply(
@@ -889,7 +1364,14 @@ def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(tmp_path: Pat
 
 
 def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -> None:
-    sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
     artifact_executor = RecordingArtifactExecutor(child_transfer=True)
     service = _service(
         sessions,

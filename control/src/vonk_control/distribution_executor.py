@@ -570,32 +570,23 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         request_key: str,
         progress: Mapping[str, object],
     ) -> PhaseExecution:
-        runtime_result: Mapping[str, object] | None = None
-        effective_progress = progress
-        if phase.kind == "transfer" and phase.subphase == "target-copy":
+        if phase.kind == "prepare" and phase.subphase == "runtime-image":
+            # This is the only mutating image boundary.  It runs as its own
+            # durable high-level phase so install admission cannot compile a
+            # schema-2 payload until the Controller archive and receipt are
+            # present.  Target-copy only consumes the persisted evidence.
             runtime_result = self._prepare_runtime_image(plan)
-            if runtime_result is not None:
-                effective_progress = dict(progress)
-                phase_results = list(progress.get("phase_results", []))
-                phase_results.append(dict(runtime_result))
-                effective_progress["phase_results"] = phase_results
+            if runtime_result is None:
+                raise RuntimeError("runtime image preparation returned no evidence")
+            return PhaseExecution(result=runtime_result)
         if phase.subphase != "model-download":
-            execution = super().execute(
+            return super().execute(
                 plan,
                 phase,
                 item_index=item_index,
                 actor=actor,
                 request_key=request_key,
-                progress=effective_progress,
-            )
-            if runtime_result is None:
-                return execution
-            result = dict(execution.result or {})
-            result.update(runtime_result)
-            return PhaseExecution(
-                operation_id=execution.operation_id,
-                result=result,
-                waiting=execution.waiting,
+                progress=progress,
             )
         if phase.kind != "transfer" or item_index != 0:
             raise RuntimeError("invalid model-download phase")

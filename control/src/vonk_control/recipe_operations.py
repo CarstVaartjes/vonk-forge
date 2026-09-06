@@ -359,6 +359,186 @@ class RecipeOperationService:
             mapping_id, recipe_build_id, now=self._clock()
         )
 
+    def prepare_installation(
+        self,
+        plan: InstallPlan,
+        *,
+        actor: str,
+    ) -> str:
+        """Persist an admitted installation without starting Spark work.
+
+        Run/Switch has to compile and persist the exact launch document before
+        it copies model/image bytes to a target.  The regular ``install``
+        method intentionally queues the agent child immediately, so this
+        small lifecycle primitive stops at the durable Controller boundary.
+        Reusing a matching installation makes the phase safe to replay after a
+        process crash between the database commit and high-level progress
+        checkpoint.
+        """
+
+        if not plan.allowed:
+            raise RecipeOperationConflict("install plan is blocked")
+        now = self._clock()
+        with self._sessions.begin() as session:
+            existing = session.scalar(
+                select(RecipeInstallation)
+                .where(
+                    RecipeInstallation.mapping_id == plan.mapping_id,
+                    RecipeInstallation.mapping_generation == plan.mapping_generation,
+                    RecipeInstallation.recipe_build_id == plan.recipe_build_id,
+                    RecipeInstallation.plan_digest == plan.plan_digest,
+                    RecipeInstallation.state.in_(
+                        ("planned", "installing", "partial", "installed")
+                    ),
+                )
+                .order_by(RecipeInstallation.created_at.desc())
+                .limit(1)
+            )
+            if existing is not None:
+                stored_plans = (
+                    existing.plan.get("compiled_execution_plans")
+                    if isinstance(existing.plan, Mapping)
+                    else None
+                )
+                if not isinstance(stored_plans, Mapping):
+                    raise RecipeOperationConflict(
+                        "stored installation has no compiled execution plan"
+                    )
+                return existing.id
+            try:
+                installation_id = self._install_admission.accept_install_in_session(
+                    session, plan, actor=actor, now=now
+                )
+            except (RuntimeError, ValueError) as error:
+                raise RecipeOperationConflict(str(error)) from error
+            installation = session.get(RecipeInstallation, installation_id)
+            assert installation is not None
+            if not isinstance(installation.plan, Mapping) or not isinstance(
+                installation.plan.get("compiled_execution_plans"), Mapping
+            ):
+                raise RecipeOperationConflict(
+                    "compiled execution plan was not persisted"
+                )
+            return installation_id
+
+    def start_installation(
+        self,
+        installation_id: str,
+        *,
+        actor: str,
+        request_id: str,
+    ) -> RecipeOperationView:
+        """Queue the already prepared installation after target verification."""
+
+        now = self._clock()
+        with self._sessions.begin() as session:
+            installation = session.get(
+                RecipeInstallation, installation_id, with_for_update=True
+            )
+            if installation is None:
+                raise RecipeOperationConflict("recipe installation is unavailable")
+            existing = self._idempotent_in_session(
+                session,
+                request_id,
+                "recipe.install",
+                installation.plan_digest,
+                owner_kind="installation",
+                owner_id=installation_id,
+            )
+            if existing is not None:
+                return existing
+            if installation.state == "installed":
+                completed = session.scalar(
+                    select(Job)
+                    .where(
+                        Job.kind == "recipe.install",
+                        Job.state == "succeeded",
+                        Job.payload["owner_id"].as_string() == installation_id,
+                        Job.payload["plan_digest"].as_string()
+                        == installation.plan_digest,
+                    )
+                    .order_by(Job.updated_at.desc())
+                    .limit(1)
+                )
+                if completed is not None:
+                    return self._view(completed)
+                raise RecipeOperationConflict(
+                    "recipe installation is already complete without an operation"
+                )
+            active = session.scalar(
+                select(Job)
+                .where(
+                    Job.kind == "recipe.install",
+                    Job.state.in_(("queued", "running")),
+                    Job.payload["owner_id"].as_string() == installation_id,
+                    Job.payload["plan_digest"].as_string() == installation.plan_digest,
+                )
+                .order_by(Job.updated_at.desc(), Job.id)
+                .limit(1)
+            )
+            if active is not None:
+                return self._view(active)
+            if installation.state not in {"planned", "partial", "failed", "installing"}:
+                raise RecipeOperationConflict("recipe installation is not launchable")
+            raw_plans = (
+                installation.plan.get("compiled_execution_plans")
+                if isinstance(installation.plan, Mapping)
+                else None
+            )
+            if not isinstance(raw_plans, Mapping):
+                raise RecipeOperationConflict(
+                    "compiled execution plan is unavailable"
+                )
+            nodes = tuple(
+                session.scalars(
+                    select(InstallationNode)
+                    .where(InstallationNode.installation_id == installation_id)
+                    .order_by(InstallationNode.rank, InstallationNode.node_id)
+                )
+            )
+            if not nodes or any(
+                not isinstance(raw_plans.get(node.node_id), Mapping) for node in nodes
+            ):
+                raise RecipeOperationConflict(
+                    "compiled execution plan is missing for one or more nodes"
+                )
+            revision = _active_recipe_revision(session, installation.recipe_revision_id)
+            if revision is None or revision.content_digest is None:
+                raise RecipeOperationConflict("recipe revision is unavailable")
+            installation.state = "installing"
+            installation.updated_at = now
+            for node in nodes:
+                node.state = "planned"
+                node.updated_at = now
+            job = self._queue_in_session(
+                session,
+                kind="recipe.install",
+                owner_kind="installation",
+                owner_id=installation_id,
+                plan_digest=installation.plan_digest,
+                actor=actor,
+                request_id=request_id,
+                node_payloads=tuple(
+                    (
+                        node.node_id,
+                        {
+                            "schema_version": 2,
+                            "installation_id": installation_id,
+                            "plan_digest": installation.plan_digest,
+                            "rank": node.rank,
+                            "role": node.role,
+                            "expected_bytes": node.required_bytes,
+                            "compiled_execution_plan": raw_plans[node.node_id],
+                        },
+                    )
+                    for node in nodes
+                ),
+                authority_digest=revision.content_digest,
+                now=now,
+            )
+        self._agent_jobs.notify_available()
+        return self.get(job.id)
+
     def preview_image_distribution(
         self,
         recipe_build_id: str,

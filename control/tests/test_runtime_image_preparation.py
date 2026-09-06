@@ -102,6 +102,8 @@ def test_prebuilt_pull_export_is_verified_and_receipt_is_immediately_readable(
     assert receipt.local_image_reference is None
     assert receipt.runtime_interface == "vonk.runtime.v1"
     assert receipt.runtime_interface_label == "v1"
+    assert storage.root == tmp_path / "objects" / "oci-archives"
+    assert Path(receipt.archive_path).parent == storage.root
     assert Path(receipt.archive_path).read_bytes() == ARCHIVE
     assert storage.read_receipt(ARCHIVE_DIGEST) == receipt
     assert transport.calls[0][0].endswith(IMAGE_DIGEST)

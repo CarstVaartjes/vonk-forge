@@ -865,6 +865,26 @@ class RecipeLifecyclePhaseExecutor:
             if execution.operation_id is None:
                 _validate_artifact_execution(plan, phase, execution.result)
             return execution
+        if phase.kind == "prepare" and phase.subphase == "runtime-image":
+            if self._artifact_executor is None:
+                raise RunSwitchOperationConflict(
+                    "run-switch.runtime-image-executor-unavailable"
+                )
+            execution = self._artifact_executor.execute(
+                plan,
+                phase,
+                item_index=item_index,
+                actor=actor,
+                request_key=request_key,
+                progress=progress,
+            )
+            if execution.operation_id is None and execution.waiting:
+                raise RunSwitchOperationConflict(
+                    "run-switch.runtime-image-waiting-without-child"
+                )
+            if execution.operation_id is None:
+                _validate_artifact_execution(plan, phase, execution.result)
+            return execution
         if phase.kind == "stop":
             if item_index >= len(plan.stops):
                 return PhaseExecution()
@@ -883,10 +903,11 @@ class RecipeLifecyclePhaseExecutor:
                 actor=actor,
                 request_key=request_key,
             )
-        if phase.kind == "prepare":
-            # A new mapping and installation are created through the existing
-            # lifecycle primitives.  The resulting installation identity is
-            # returned as durable phase evidence for the later start phase.
+        if phase.kind == "prepare" and phase.subphase == "runtime-plan":
+            # Bind and persist the exact schema-2 launch plan at the
+            # Controller boundary.  This phase deliberately does not enqueue
+            # Spark work: target-copy must verify every model/image receipt
+            # before the agent install child can start.
             mapping_id = plan.mapping.mapping_id if plan.mapping is not None else None
             phase_results = progress.get("phase_results")
             if isinstance(phase_results, list):
@@ -922,15 +943,65 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     f"run-switch.install-plan-unavailable: {error}"
                 ) from error
-            value = self._lifecycle.install(
-                install_plan,
-                plan_digest=install_plan.plan_digest,
-                actor=actor,
-                request_id=str(uuid.uuid5(uuid.UUID(request_key), "prepare-install")),
+            prepare_installation = getattr(
+                self._lifecycle, "prepare_installation", None
             )
+            if not callable(prepare_installation):
+                raise RunSwitchOperationConflict(
+                    "run-switch.install-preparation-unavailable"
+                )
+            try:
+                installation_id = prepare_installation(
+                    install_plan,
+                    actor=actor,
+                )
+            except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
+                raise RunSwitchOperationConflict(
+                    f"run-switch.install-preparation-failed: {error}"
+                ) from error
+            return PhaseExecution(
+                result={
+                    "installation_id": installation_id,
+                    "mapping_id": mapping_id,
+                    "install_plan_digest": install_plan.plan_digest,
+                    "compiled_plan_persisted": True,
+                }
+            )
+        if phase.kind == "prepare" and phase.subphase == "runtime-install":
+            installation_id = plan.installation_id
+            phase_results = progress.get("phase_results")
+            if installation_id is None and isinstance(phase_results, list):
+                for result in reversed(phase_results):
+                    if isinstance(result, Mapping):
+                        installation_id = _string_or_none(result.get("installation_id"))
+                        if installation_id is not None:
+                            break
+            if installation_id is None:
+                raise RunSwitchOperationConflict(
+                    "run-switch.installation-preparation-unavailable"
+                )
+            start_installation = getattr(self._lifecycle, "start_installation", None)
+            if not callable(start_installation):
+                raise RunSwitchOperationConflict(
+                    "run-switch.install-executor-unavailable"
+                )
+            try:
+                value = start_installation(
+                    installation_id,
+                    actor=actor,
+                    request_id=str(uuid.uuid5(uuid.UUID(request_key), "runtime-install")),
+                )
+            except (KeyError, RecipeOperationConflict, RuntimeError, TypeError, ValueError) as error:
+                raise RunSwitchOperationConflict(
+                    f"run-switch.install-start-failed: {error}"
+                ) from error
             return PhaseExecution(
                 value.id,
-                {"installation_id": value.owner_id, "mapping_id": mapping_id},
+                {"installation_id": installation_id},
+            )
+        if phase.kind == "prepare":
+            raise RunSwitchOperationConflict(
+                "run-switch.prepare-subphase-unsupported"
             )
         if phase.kind == "start":
             installation_id = plan.installation_id
@@ -1671,13 +1742,17 @@ class RunSwitchOperationService:
                 and self._artifact_phase_executor is None
                 and any(
                     phase.kind in {"transfer", "verify", "cleanup"}
+                    or (
+                        phase.kind == "prepare"
+                        and phase.subphase == "runtime-image"
+                    )
                     for phase in phases
                 )
             ):
                 blockers.append(
                     _as_reason(
                         "run-switch.artifact-phase-executor-unavailable",
-                        "Artifact transfer, verification, or Spark-local cleanup requires an injected cache boundary.",
+                        "Artifact transfer, verification, Spark-local cleanup, or Controller image preparation requires an injected cache boundary.",
                         scope="artifact",
                         node_ids=node_ids,
                     )
@@ -3107,6 +3182,18 @@ class RunSwitchOperationService:
                 and runtime_storage.missing_image_distribution_bytes not in (None, 0)
             )
         )
+        # Image preparation is a Controller-side phase.  It must complete
+        # before install admission compiles and persists the schema-2 agent
+        # payload, even when the selected Spark already has a copy.  A pending
+        # source build has no image identity at preview time, so it is also an
+        # explicit preparation input for the same durable phase sequence.
+        needs_runtime_image_prepare = (
+            build_required
+            or (
+                runtime_storage is not None
+                and runtime_storage.missing_image_distribution_bytes not in (None, 0)
+            )
+        )
         needs_prepare = (
             build_required
             or installation_id is None
@@ -3161,17 +3248,6 @@ class RunSwitchOperationService:
                 "Download the exact model artifact set into Controller/NAS cache before Spark distribution.",
                 subphase="model-download",
             )
-        if needs_target_copy:
-            add(
-                "transfer",
-                "Copy missing model artifacts and runtime images while retaining reusable verified content.",
-                subphase="target-copy",
-            )
-            add(
-                "verify",
-                "Verify every transferred artifact against its immutable model set and OCI identity.",
-                subphase="target-copy",
-            )
         if stops and stop_before_prepare and not stop_added:
             add("stop", "Stop conflicting workloads before memory-consuming runtime preparation.")
             stop_added = True
@@ -3184,10 +3260,33 @@ class RunSwitchOperationService:
                 "Build the exact linux-arm64 runtime container in Controller storage before target transfer.",
                 subphase="container-build",
             )
+        if needs_runtime_image_prepare:
+            add(
+                "prepare",
+                "Prepare and verify the exact Controller OCI runtime image before install admission.",
+                subphase="runtime-image",
+            )
         if needs_prepare:
             add(
                 "prepare",
-                "Prepare the exact runtime and installation for this recipe revision.",
+                "Compile and persist the exact schema-2 launch plan before target transfer.",
+                subphase="runtime-plan",
+            )
+        if needs_target_copy:
+            add(
+                "transfer",
+                "Copy missing model artifacts and runtime images after the verified schema-2 payload is persisted.",
+                subphase="target-copy",
+            )
+            add(
+                "verify",
+                "Verify every transferred artifact against its immutable model set and OCI identity.",
+                subphase="target-copy",
+            )
+        if needs_prepare:
+            add(
+                "prepare",
+                "Start the prepared installation after target copy and verification complete.",
                 subphase="runtime-install",
             )
         if needs_cleanup:
@@ -3482,7 +3581,9 @@ class RunSwitchOperationService:
                     ):
                         results.append(receipt)
                         progress["phase_results"] = results
-                if phase.kind in {"transfer", "verify", "cleanup"}:
+                if phase.kind in {"transfer", "verify", "cleanup"} or (
+                    phase.kind == "prepare" and phase.subphase == "runtime-image"
+                ):
                     try:
                         _validate_artifact_execution(
                             persisted_plan,
@@ -3557,6 +3658,19 @@ class RunSwitchOperationService:
         if execution.waiting and execution.operation_id is None:
             self._fail(operation_id, f"run-switch.{phase.kind}-waiting-without-child")
             return True
+        if (
+            execution.operation_id is None
+            and execution.result is not None
+            and (
+                phase.kind in {"transfer", "verify", "cleanup"}
+                or (phase.kind == "prepare" and phase.subphase == "runtime-image")
+            )
+        ):
+            try:
+                _validate_artifact_execution(plan, phase, execution.result)
+            except RunSwitchOperationConflict as error:
+                self._fail(operation_id, str(error))
+                return True
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None:
@@ -3584,6 +3698,10 @@ class RunSwitchOperationService:
                     results.append(dict(execution.result))
                     progress["phase_results"] = results
             else:
+                if execution.result is not None:
+                    results = list(progress.get("phase_results", []))
+                    results.append(dict(execution.result))
+                    progress["phase_results"] = results
                 if phase.subphase == "container-build":
                     try:
                         receipt = _build_receipt_in_session(session, plan)
@@ -4268,6 +4386,8 @@ def _progress_view(
         if subphase not in {
             "container-build",
             "model-download",
+            "runtime-image",
+            "runtime-plan",
             "target-copy",
             "runtime-install",
         }:
@@ -4373,6 +4493,31 @@ def _validate_artifact_execution(
         raise RunSwitchOperationConflict(
             f"run-switch.{phase.kind}-returned-invalid-evidence"
         )
+    if phase.kind == "prepare" and phase.subphase == "runtime-image":
+        raw_receipt = result.get("runtime_image")
+        receipt = raw_receipt if isinstance(raw_receipt, Mapping) else result
+        image_digest = receipt.get("image_digest")
+        layout_digest = receipt.get("oci_layout_sha256", receipt.get("oci_archive_sha256"))
+        image_bytes = receipt.get("image_bytes")
+        if (
+            not _is_oci_digest(image_digest)
+            or not _is_hex_digest(layout_digest)
+            or type(image_bytes) is not int
+            or image_bytes < 1
+        ):
+            raise RunSwitchOperationConflict(
+                "run-switch.runtime-image-preparation-evidence-invalid"
+            )
+        if plan.image_digest is not None and image_digest != plan.image_digest:
+            raise RunSwitchOperationConflict(
+                "run-switch.runtime-image-preparation-digest-mismatch"
+            )
+        expected_layout = plan.build.oci_layout_sha256
+        if expected_layout is not None and layout_digest != expected_layout:
+            raise RunSwitchOperationConflict(
+                "run-switch.runtime-image-preparation-layout-mismatch"
+            )
+        return
     if phase.kind == "transfer" and phase.subphase == "model-download":
         preparation = plan.preparation
         expected_set = (
