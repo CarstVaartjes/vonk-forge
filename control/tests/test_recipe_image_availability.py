@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 
@@ -192,3 +192,97 @@ def test_expired_claim_is_reclaimable_after_restart(tmp_path: Path) -> None:
         operation.payload = dict(operation.payload) | {"claim_until": "2000-01-01T00:00:00+00:00"}
     reclaimed = service.claim_pending(owner_id="worker-b")
     assert reclaimed and reclaimed[0].claim_owner == "worker-b"
+
+
+def test_claim_skips_backoff_and_renews_live_lease(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-backoff", recipe)
+    now = datetime.now(UTC)
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id: (recipe, _runtime()),
+        transport=Transport(),
+        clock=lambda: now,
+    )
+    queued = service.start("revision-backoff", actor="operator", request_id="3" * 36)
+    with sessions.begin() as session:
+        operation = session.get(Job, queued.id)
+        assert operation is not None
+        operation.payload = dict(operation.payload) | {
+            "retry_after_at": (now + timedelta(minutes=5)).isoformat(),
+        }
+    assert service.claim_pending(owner_id="worker-a") == ()
+    with sessions.begin() as session:
+        operation = session.get(Job, queued.id)
+        assert operation is not None
+        operation.payload = dict(operation.payload) | {
+            "retry_after_at": (now - timedelta(seconds=1)).isoformat(),
+        }
+
+    claim = service.claim_pending(owner_id="worker-a")
+    assert claim and claim[0].operation_id == queued.id
+    with sessions.begin() as session:
+        operation = session.get(Job, queued.id)
+        assert operation is not None
+        before = operation.payload["claim_until"]
+    assert service._renew_claim(queued.id, "worker-a") is True
+    with sessions.begin() as session:
+        operation = session.get(Job, queued.id)
+        assert operation is not None
+        assert operation.payload["claim_until"] == before
+
+
+def test_claim_identity_uses_authoritative_image_and_running_claim_is_not_repeated(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-identity", recipe)
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda _revision_id: (recipe, _runtime()),
+        transport=Transport(),
+        clock=lambda: datetime.now(UTC),
+    )
+    service.start("revision-identity", actor="operator", request_id="4" * 36)
+    claim = service.claim_pending(owner_id="worker-a")
+    assert claim and claim[0].image_identity == IMAGE_DIGEST
+    assert service.claim_pending(owner_id="worker-b") == ()
+
+
+def test_same_immutable_image_reuses_preparation_across_recipe_revisions(tmp_path: Path) -> None:
+    recipe = _recipe("recipe-image.json")
+    recipe_b_raw = recipe.model_dump(mode="json")
+    recipe_b_raw["metadata"]["title"] = "Synthetic Tiny Image (notes update)"
+    recipe_b = RecipeDefinition.model_validate(recipe_b_raw)
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-image-a", recipe)
+        _add_revision(session, "revision-image-b", recipe_b)
+    transport = Transport()
+    service = RecipeImageAvailabilityService(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda revision_id: (recipe if revision_id.endswith("-a") else recipe_b, _runtime()),
+        transport=transport,
+        clock=lambda: datetime.now(UTC),
+        max_parallel=2,
+    )
+    first = service.start("revision-image-a", actor="operator", request_id="5" * 36)
+    second = service.start("revision-image-b", actor="operator", request_id="6" * 36)
+    claims = service.claim_pending(limit=2, owner_id="worker-a")
+    assert {claim.operation_id for claim in claims} == {first.id, second.id}
+    for claim in claims:
+        service.run_claim(claim)
+    assert service.get(first.id).state == "succeeded"
+    assert service.get(second.id).state == "succeeded"
+    assert transport.calls == 1

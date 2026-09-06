@@ -26,7 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
-from .models import CatalogDocumentRevision, Job
+from .models import CatalogDocumentRevision, Job, RecipeBuild
 from .operation_contract import normalize_operation_progress, sanitize_failure_evidence
 from .runtime_image_preparation import (
     RuntimeImageReceipt,
@@ -52,6 +52,25 @@ _TERMINAL_FAILURE_CODES = frozenset(
         "runtime_image.archive_conflict",
         "runtime_image.receipt_identity_conflict",
         "runtime_image.authorization_invalid",
+    }
+)
+_CAPACITY_FAILURE_CODES = frozenset(
+    {
+        "build.insufficient_disk",
+        "build.insufficient_memory",
+        "recipe_image.insufficient_disk",
+        "recipe_image.insufficient_memory",
+        "runtime_image.insufficient_disk",
+    }
+)
+_INTEGRITY_FAILURE_CODES = frozenset(
+    {
+        "registry.digest_mismatch",
+        "recipe_package.digest_mismatch",
+        "runtime_image.digest_mismatch",
+        "runtime_image.archive_mismatch",
+        "runtime_image.archive_conflict",
+        "runtime_image.evidence_invalid",
     }
 )
 
@@ -149,7 +168,6 @@ class RecipeImageAvailabilityClaim:
     recipe_revision_id: str
     image_identity: str | None
     build_input_sha256: str | None
-    claim_owner: str
     claim_owner: str
 
 
@@ -250,7 +268,27 @@ def _log_excerpt(error: BaseException) -> str | None:
         value = getattr(error, "detail", None)
     if not isinstance(value, str) or not value.strip():
         return None
-    return value[:2048]
+    return value[:1024]
+
+
+def _recovery_actions(
+    payload: Mapping[str, object], code: str, retryable: bool
+) -> list[str]:
+    """Map stable failure classes to UI action identifiers."""
+
+    mode = payload.get("execution_mode")
+    if code in _CAPACITY_FAILURE_CODES:
+        return ["free_space"]
+    if code in _INTEGRITY_FAILURE_CODES:
+        return ["download_again"] if mode == "image" else ["force_rebuild"]
+    if retryable:
+        resumable = mode == "image" and (
+            code.startswith("registry.")
+            or code.startswith("runtime_image.transport")
+            or code in {"recipe_image.download_interrupted", "recipe_image.network_error"}
+        )
+        return ["resume", "retry"] if resumable else ["retry"]
+    return ["inspect"]
 
 
 class RecipeImageAvailabilityService:
@@ -305,6 +343,8 @@ class RecipeImageAvailabilityService:
         self._claim_lease_seconds = claim_lease_seconds
         self._pull_slots = threading.BoundedSemaphore(max_parallel)
         self._build_slots = threading.BoundedSemaphore(max_parallel_builds)
+        self._identity_locks: dict[str, threading.Lock] = {}
+        self._identity_locks_guard = threading.Lock()
 
     def start(
         self,
@@ -418,6 +458,7 @@ class RecipeImageAvailabilityService:
                 "build_input_sha256": build_input_sha256,
                 "image_identity": image_identity,
                 "identity_key": identity_key,
+                "execution_mode": recipe.execution.mode,
                 "recipe": recipe.model_dump(mode="json"),
                 "runtime": dict(runtime),
                 "force_download": force_download,
@@ -526,16 +567,10 @@ class RecipeImageAvailabilityService:
     def run_pending(self, *, limit: int = 1) -> int:
         if not 1 <= limit <= 16:
             raise ValueError("availability worker batch limit is invalid")
-        with self._sessions() as session:
-            rows = list(session.scalars(select(Job).where(
-                Job.kind == OPERATION_KIND,
-                Job.state.in_(("queued", "running", "partial")),
-            ).order_by(Job.updated_at, Job.id).limit(limit)))
-            ids = [row.id for row in rows]
-        for operation_id in ids:
-            if self._eligible(operation_id):
-                self._run(operation_id)
-        return len(ids)
+        claims = self.claim_pending(limit=min(limit, self._max_parallel))
+        for claim in claims:
+            self.run_claim(claim)
+        return len(claims)
 
     def claim_pending(self, *, limit: int = 4, owner_id: str | None = None) -> tuple[RecipeImageAvailabilityClaim, ...]:
         """Return independent durable claims for an external worker scheduler.
@@ -557,10 +592,31 @@ class RecipeImageAvailabilityService:
                 select(Job).where(
                     Job.kind == OPERATION_KIND,
                     Job.state.in_(("queued", "running", "partial")),
-                ).order_by(Job.updated_at, Job.id).limit(limit * 2).with_for_update()
+                ).order_by(Job.updated_at, Job.id).limit(limit * 8).with_for_update()
             ))
+            active_builds = 0
+            active_pulls = 0
+            for active in rows:
+                active_payload = active.payload if isinstance(active.payload, Mapping) else {}
+                if active.state != "running":
+                    continue
+                active_until = active_payload.get("claim_until")
+                if isinstance(active_until, str):
+                    try:
+                        parsed_until = datetime.fromisoformat(active_until)
+                        parsed_until = parsed_until if parsed_until.tzinfo is not None else parsed_until.replace(tzinfo=UTC)
+                        if now >= parsed_until:
+                            continue
+                    except ValueError:
+                        pass
+                if active_payload.get("execution_mode") == "build":
+                    active_builds += 1
+                else:
+                    active_pulls += 1
             for operation in rows:
                 payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+                if not self._retry_due(payload, now):
+                    continue
                 if operation.state == "running":
                     claimed_until = payload.get("claim_until")
                     if isinstance(claimed_until, str):
@@ -571,6 +627,11 @@ class RecipeImageAvailabilityService:
                                 continue
                         except ValueError:
                             pass
+                mode = payload.get("execution_mode")
+                if mode == "build" and active_builds >= self._max_parallel_builds:
+                    continue
+                if mode != "build" and active_pulls >= self._max_parallel:
+                    continue
                 operation.state = "running"
                 operation.current_attempt = int(operation.current_attempt) + 1
                 operation.updated_at = now
@@ -583,8 +644,8 @@ class RecipeImageAvailabilityService:
                         operation_id=operation.id,
                         recipe_revision_id=str(payload.get("recipe_revision_id", "")),
                         image_identity=(
-                            str(payload.get("recipe_content_sha256"))
-                            if payload.get("recipe_content_sha256") is not None
+                            str(payload.get("image_identity"))
+                            if payload.get("image_identity") is not None
                             else None
                         ),
                         build_input_sha256=(
@@ -595,6 +656,10 @@ class RecipeImageAvailabilityService:
                         claim_owner=owner_id,
                     )
                 )
+                if mode == "build":
+                    active_builds += 1
+                else:
+                    active_pulls += 1
                 if len(claims) >= limit:
                     break
         return tuple(claims)
@@ -603,6 +668,42 @@ class RecipeImageAvailabilityService:
         """Execute one claim; callers may run claims in their own bounded pool."""
 
         self._run(claim.operation_id, owner_id=claim.claim_owner)
+
+    def _identity_lock(self, identity_key: str | None) -> threading.Lock:
+        if not identity_key:
+            return threading.Lock()
+        with self._identity_locks_guard:
+            lock = self._identity_locks.get(identity_key)
+            if lock is None:
+                lock = threading.Lock()
+                self._identity_locks[identity_key] = lock
+            return lock
+
+    def _stored_build_receipt(self, build_input_sha256: str) -> Mapping[str, object] | None:
+        with self._sessions() as session:
+            build = session.scalar(
+                select(RecipeBuild)
+                .where(
+                    RecipeBuild.build_input_sha256 == build_input_sha256,
+                    RecipeBuild.state == "succeeded",
+                )
+                .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
+                .limit(1)
+            )
+            if (
+                build is None
+                or build.image_digest is None
+                or build.oci_layout_sha256 is None
+                or build.image_bytes is None
+            ):
+                return None
+            return {
+                "state": "succeeded",
+                "build_id": build.id,
+                "image_digest": build.image_digest,
+                "oci_layout_sha256": build.oci_layout_sha256,
+                "image_bytes": build.image_bytes,
+            }
 
     def _eligible(self, operation_id: str) -> bool:
         with self._sessions() as session:
@@ -621,6 +722,18 @@ class RecipeImageAvailabilityService:
             eligible_at = eligible_at if eligible_at.tzinfo is not None else eligible_at.replace(tzinfo=UTC)
             return now >= eligible_at
 
+    @staticmethod
+    def _retry_due(payload: Mapping[str, object], now: datetime) -> bool:
+        value = payload.get("retry_after_at")
+        if not isinstance(value, str):
+            return True
+        try:
+            eligible_at = datetime.fromisoformat(value)
+        except ValueError:
+            return True
+        eligible_at = eligible_at if eligible_at.tzinfo is not None else eligible_at.replace(tzinfo=UTC)
+        return now >= eligible_at
+
     def _run(self, operation_id: str, *, owner_id: str | None = None) -> None:
         with self._sessions.begin() as session:
             operation = session.get(Job, operation_id, with_for_update=True)
@@ -635,48 +748,25 @@ class RecipeImageAvailabilityService:
                 operation.current_attempt = int(operation.current_attempt) + 1
             operation.updated_at = self._clock()
             self._set_progress(operation, "prepare", total_bytes=_known_total(payload.get("runtime", {})))
+        heartbeat_stop = threading.Event()
+        heartbeat = None
+        if owner_id is not None:
+            heartbeat = threading.Thread(
+                target=self._renew_claim_loop,
+                args=(operation_id, owner_id, heartbeat_stop),
+                name=f"recipe-image-lease-{operation_id[:8]}",
+                daemon=True,
+            )
+            heartbeat.start()
         try:
             recipe = _canonical_recipe(payload["recipe"])
             runtime = payload["runtime"]
             if not isinstance(runtime, Mapping):
                 raise RecipeImageAvailabilityError("recipe_image.runtime_invalid", "runtime projection is invalid")
-            force_download = payload.get("force_download") is True
-            force_rebuild = payload.get("force_rebuild") is True
-            if recipe.execution.mode == "build":
-                if self._builder is None:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.build_unavailable", "no canonical recipe build executor is configured"
-                    )
-                with self._build_slots:
-                    if self._builder_admission is not None:
-                        self._builder_admission(recipe, runtime)
-                    self._update_progress(operation_id, "build", total_bytes=None)
-                    def report(value: Mapping[str, object]) -> None:
-                        self._update_progress(operation_id, "build", detail=value)
-                    build_receipt = self._builder(
-                        recipe, runtime,
-                        build_input_sha256=str(payload["build_input_sha256"]),
-                        force=force_rebuild,
-                        progress=report,
-                    )
-                if not isinstance(build_receipt, Mapping):
-                    raise RecipeImageAvailabilityError("recipe_image.build_invalid", "builder returned no receipt")
-                self._update_progress(operation_id, "verify")
-                receipt = prepare_runtime_image(
-                    recipe, runtime=runtime, storage=self._storage,
-                    transport=self._transport, build_receipt=build_receipt,
-                    now=self._clock(), force=False,
-                )
-            else:
-                total = _known_total(runtime)
-                with self._pull_slots:
-                    self._update_progress(operation_id, "download", total_bytes=total)
-                    receipt = prepare_runtime_image(
-                        recipe, runtime=runtime, storage=self._storage,
-                        transport=self._transport, now=self._clock(), force=force_download,
-                    )
-                self._update_progress(operation_id, "verify", total_bytes=receipt.image_bytes,
-                                      completed_bytes=receipt.image_bytes)
+            identity_key = payload.get("identity_key")
+            identity = identity_key if isinstance(identity_key, str) else None
+            with self._identity_lock(identity):
+                receipt = self._prepare_claimed_image(operation_id, payload, recipe, runtime)
             self._persist_receipt(operation_id, payload, receipt)
             result = {
                 "schema_version": SCHEMA_VERSION,
@@ -708,6 +798,98 @@ class RecipeImageAvailabilityService:
                                        completed_bytes=receipt.image_bytes)
         except Exception as error:
             self._fail(operation_id, error)
+        finally:
+            if heartbeat is not None:
+                heartbeat_stop.set()
+                heartbeat.join(timeout=max(1.0, self._claim_lease_seconds / 2))
+
+    def _prepare_claimed_image(
+        self,
+        operation_id: str,
+        payload: Mapping[str, object],
+        recipe: RecipeDefinition,
+        runtime: Mapping[str, object],
+    ) -> RuntimeImageReceipt:
+        force_download = payload.get("force_download") is True
+        force_rebuild = payload.get("force_rebuild") is True
+        if recipe.execution.mode == "build":
+            if self._builder is None:
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.build_unavailable", "no canonical recipe build executor is configured"
+                )
+            build_input_sha256 = payload.get("build_input_sha256")
+            if not isinstance(build_input_sha256, str):
+                raise RecipeImageAvailabilityError(
+                    "recipe_image.build_input_missing", "exact build input digest is missing"
+                )
+            with self._build_slots:
+                if self._builder_admission is not None:
+                    self._builder_admission(recipe, runtime)
+                self._update_progress(operation_id, "build", total_bytes=None)
+                build_receipt = None if force_rebuild else self._stored_build_receipt(build_input_sha256)
+                if build_receipt is None:
+                    def report(value: Mapping[str, object]) -> None:
+                        self._update_progress(operation_id, "build", detail=value)
+
+                    build_receipt = self._builder(
+                        recipe,
+                        runtime,
+                        build_input_sha256=build_input_sha256,
+                        force=force_rebuild,
+                        progress=report,
+                    )
+            if not isinstance(build_receipt, Mapping):
+                raise RecipeImageAvailabilityError("recipe_image.build_invalid", "builder returned no receipt")
+            self._update_progress(operation_id, "verify")
+            return prepare_runtime_image(
+                recipe,
+                runtime=runtime,
+                storage=self._storage,
+                transport=self._transport,
+                build_receipt=build_receipt,
+                now=self._clock(),
+                force=False,
+            )
+        total = _known_total(runtime)
+        with self._pull_slots:
+            self._update_progress(operation_id, "download", total_bytes=total)
+            receipt = prepare_runtime_image(
+                recipe,
+                runtime=runtime,
+                storage=self._storage,
+                transport=self._transport,
+                now=self._clock(),
+                force=force_download,
+            )
+        self._update_progress(
+            operation_id,
+            "verify",
+            total_bytes=receipt.image_bytes,
+            completed_bytes=receipt.image_bytes,
+        )
+        return receipt
+
+    def _renew_claim_loop(self, operation_id: str, owner_id: str, stop: threading.Event) -> None:
+        interval = max(1.0, self._claim_lease_seconds / 3)
+        while not stop.wait(interval):
+            if not self._renew_claim(operation_id, owner_id):
+                return
+
+    def _renew_claim(self, operation_id: str, owner_id: str) -> bool:
+        now = self._clock()
+        now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        with self._sessions.begin() as session:
+            operation = session.get(Job, operation_id, with_for_update=True)
+            if operation is None or operation.state != "running":
+                return False
+            payload = operation.payload if isinstance(operation.payload, Mapping) else {}
+            if payload.get("claim_owner") != owner_id:
+                return False
+            operation.payload = dict(payload) | {
+                "claim_until": _iso(now + timedelta(seconds=self._claim_lease_seconds)),
+            }
+            operation.updated_at = now
+            return True
 
     def _persist_receipt(self, operation_id: str, payload: Mapping[str, object], receipt: RuntimeImageReceipt) -> None:
         execution_key = payload.get("effective_execution_key")
@@ -805,10 +987,16 @@ class RecipeImageAvailabilityService:
             required_bytes = getattr(error, "required_bytes", None)
             free_bytes = getattr(error, "free_bytes", None)
             shortfall_bytes = getattr(error, "shortfall_bytes", None)
+            if required_bytes is None:
+                required_bytes = getattr(error, "disk_required_bytes", None)
+            if free_bytes is None:
+                free_bytes = getattr(error, "disk_free_bytes", None)
+            if shortfall_bytes is None and type(required_bytes) is int and type(free_bytes) is int:
+                shortfall_bytes = max(0, required_bytes - free_bytes)
             failure: dict[str, object] = {
                 "code": str(code)[:64],
-                "detail": str(detail)[:1024],
-                "recovery_actions": ["retry"] if retryable else ["inspect"],
+                "detail": str(detail)[:512],
+                "recovery_actions": _recovery_actions(operation.payload, str(code), retryable),
                 "retryable": retryable,
                 "retry_time": (
                     _iso(now + timedelta(seconds=retry_after))

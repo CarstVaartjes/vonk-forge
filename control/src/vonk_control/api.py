@@ -500,6 +500,7 @@ def create_app(
     agent_upgrades: Any | None = None,
     browser_auth: BrowserAuthService | None = None,
     model_cache: Any | None = None,
+    recipe_image_availability: Any | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Vonk Forge Control", version="1.0", docs_url=None, redoc_url=None
@@ -779,6 +780,13 @@ def create_app(
         service=model_cache,
         audits=audits,
         cursors=cursor_codec,
+    )
+    from .recipe_image_availability_api import install_recipe_image_availability_routes
+
+    install_recipe_image_availability_routes(
+        app,
+        actor_dependency=authenticated_actor,
+        service=recipe_image_availability,
     )
 
     @app.get("/api/v1/healthz")
