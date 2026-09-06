@@ -16,11 +16,14 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.models import Base, CatalogDocumentRevision
+from vonk_control.recipe_builds import _canonical_build, _source_policy_document
 from vonk_control.recipe_packages import (
     PACKAGE_MEDIA_TYPE,
     RecipePackageClient,
     RecipePackageError,
 )
+from vonk_control.source_bundles import SourceBundleStore
+from vonk_control.source_policy import inspect_build_source_policy
 
 from tests.recipe_library_source import recipe_library_root
 
@@ -109,6 +112,17 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
     assert item.source_path == row["source_path"]
     assert item.package_handle is not None
     assert item.package_handle.package_sha256 == row["package"]["sha256"]
+    bundles = SourceBundleStore(tmp_path / "sources")
+    bundles.put(item.source_bundle_sha256, io.BytesIO(item.source_bundle))
+    bundle = bundles.get(item.source_bundle_sha256)
+    build = _canonical_build(item.document)
+    assert build["dockerfile"] == "Dockerfile"
+    assert bundle.files[build["dockerfile"]] == _archive_files(package)[
+        item.document["execution"]["build"]["dockerfile"]
+    ]
+    assert inspect_build_source_policy(
+        _source_policy_document(item.document, build, bundle.sha256), bundle
+    ).passed
     client.close()
 
 

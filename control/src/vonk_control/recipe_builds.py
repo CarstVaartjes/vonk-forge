@@ -229,7 +229,18 @@ def _canonical_build(document: Mapping[str, object]) -> Mapping[str, object]:
     build = execution.get("build")
     if not isinstance(build, Mapping):
         raise RecipeBuildError("build.contract_invalid", "canonical execution.build is unavailable")
-    return build
+    return {**build, "dockerfile": _bundle_dockerfile_path(build)}
+
+
+def _bundle_dockerfile_path(build: Mapping[str, object]) -> object:
+    """Project the repository path into the verified build-context archive."""
+
+    context = build.get("context")
+    path = context.get("path") if isinstance(context, Mapping) else None
+    dockerfile = build.get("dockerfile")
+    if isinstance(path, str) and isinstance(dockerfile, str):
+        return dockerfile.removeprefix(path.rstrip("/") + "/")
+    return dockerfile
 
 
 def _source_bundle_handle(revision: CatalogDocumentRevision) -> str:
