@@ -543,6 +543,15 @@ fn accepted_docker_archive_is_loaded_and_receipted_by_exact_digest() {
         program == std::path::Path::new("/usr/bin/docker")
             && arguments == &["load", "--input", archive.to_str().unwrap()]
     }));
+    assert!(calls.iter().any(|(program, arguments)| {
+        program == std::path::Path::new("/usr/bin/docker")
+            && arguments
+                == &[
+                    "tag",
+                    "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest",
+                    "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002",
+                ]
+    }));
 }
 
 fn assert_archive_import_accepts_load_output(load_output: Vec<u8>) {

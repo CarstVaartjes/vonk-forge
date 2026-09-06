@@ -1022,7 +1022,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let expected_archive = archive_root.join(archive_sha256);
         let canonical_archive =
             fs::canonicalize(&expected_archive).map_err(|_| OperationError::InvalidArtifact)?;
-        let (_local_image, embedded_digest) = parse_local_image_reference(image_reference)?;
+        let (local_image, embedded_digest) = parse_local_image_reference(image_reference)?;
         if !archive.is_absolute()
             || archive != expected_archive
             || canonical_archive.parent() != Some(canonical_archive_root.as_path())
@@ -1057,6 +1057,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // benefit.
         if !loaded.success {
             return Err(OperationError::RuntimeImageLoadFailed);
+        }
+        // Docker archives retain the source tag that the producer exported.
+        // Bind that verified loaded object to the controller-derived local
+        // reference before inspecting it. Some Docker versions omit the
+        // human-readable load line; inspection below remains authoritative.
+        if let Some(source_image) = loaded_image_source(&loaded.stdout) {
+            let tagged = self
+                .run_docker(&["tag".to_owned(), source_image, local_image])
+                .map_err(|error| match error {
+                    OperationError::CommandFailed => OperationError::RuntimeImageInspectFailed,
+                    other => other,
+                })?;
+            if !tagged.success {
+                return Err(OperationError::RuntimeImageInspectFailed);
+            }
         }
         let inspected =
             self.inspect_runtime_image(image_reference)
@@ -2626,6 +2641,23 @@ fn valid_local_image_reference(value: &str) -> bool {
         .is_some_and(|(image, digest)| valid_local_image(image) && valid_oci_digest(digest))
 }
 
+fn loaded_image_source(stdout: &[u8]) -> Option<String> {
+    std::str::from_utf8(stdout)
+        .ok()?
+        .lines()
+        .find_map(|line| line.strip_prefix("Loaded image: "))
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty()
+                && value.len() <= 256
+                && !value.starts_with('-')
+                && value
+                    .bytes()
+                    .all(|byte| !byte.is_ascii_control() && !byte.is_ascii_whitespace())
+        })
+        .map(str::to_owned)
+}
+
 fn valid_entrypoint(value: &str) -> bool {
     value.starts_with("/opt/vonk/bin/")
         && value.len() <= 256
@@ -2698,7 +2730,8 @@ mod tests {
     use super::{
         CommandOutput, CommandRunner, JobCancellationFence, ManagedRoots, OperationError,
         OperationExecutor, RuntimeImageReceipt, bounded_container_exit_code, finish_timed_out_job,
-        hex_sha256, parse_publication, parse_runtime_stop, validate_docker_run,
+        hex_sha256, loaded_image_source, parse_publication, parse_runtime_stop,
+        validate_docker_run,
     };
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
@@ -2754,6 +2787,25 @@ mod tests {
                 exit_code: Some(0),
             })
         }
+    }
+
+    #[test]
+    fn loaded_image_source_accepts_only_a_single_safe_load_line() {
+        assert_eq!(
+            loaded_image_source(
+                b"Loaded image: localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest\n"
+            ),
+            Some(
+                "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002:latest"
+                    .to_owned()
+            )
+        );
+        assert_eq!(
+            loaded_image_source(b"Loaded image ID: sha256:deadbeef\n"),
+            None
+        );
+        assert_eq!(loaded_image_source(b"Loaded image: unsafe tag\n"), None);
+        assert_eq!(loaded_image_source(b"Loaded image: --help\n"), None);
     }
 
     #[test]
