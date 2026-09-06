@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from cluster_profiles import cli
+from cluster_profiles.control_client import ControlForbidden
 
 
 class _Client:
@@ -86,6 +87,38 @@ class _Client:
             "sha256": expected_sha256,
             "size_bytes": expected_size,
         }
+
+
+def test_availability_error_json_uses_shared_failure_fields() -> None:
+    error = ControlForbidden(
+        403,
+        "Hugging Face access is required",
+        code="access_required",
+        recovery=("open_model_access", "configure_hf_token", "check_access_and_resume"),
+        retryable=True,
+        retry_time="2026-09-06T13:45:00+00:00",
+        retry_after_seconds=30,
+        preserved="12 MiB of verified bytes retained",
+        required_bytes=100,
+        free_bytes=40,
+        shortfall_bytes=60,
+        log_excerpt="safe provider detail",
+    )
+
+    payload = cli._control_error(error)
+
+    assert payload["code"] == "access_required"
+    assert payload["detail"] == "Hugging Face access is required"
+    assert payload["recovery_actions"] == [
+        "open_model_access",
+        "configure_hf_token",
+        "check_access_and_resume",
+    ]
+    assert payload["retryable"] is True
+    assert payload["retry_time"] == "2026-09-06T13:45:00+00:00"
+    assert payload["retry_after_seconds"] == 30
+    assert payload["preserved"] == "12 MiB of verified bytes retained"
+    assert payload["shortfall_bytes"] == 60
 
 
 class _StrictTaskClient(_Client):
