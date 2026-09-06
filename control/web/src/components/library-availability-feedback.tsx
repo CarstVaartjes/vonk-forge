@@ -4,6 +4,7 @@ export type AvailabilityFailure = {
   code: string;
   detail: string;
   recovery: string[];
+  recoveryCodes: string[];
   retryAt?: string;
   retryAfterSeconds?: number;
   operationId?: string;
@@ -49,12 +50,11 @@ function objectValue(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function stringList(value: unknown): string[] {
+function recoveryList(value: unknown): {codes: string[]; labels: string[]} {
   const values = Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
     : typeof value === "string" && value.trim() ? [value] : [];
-  if (values.length > 0) return values.map(item => RECOVERY_ACTION_LABELS[item] ?? "Review the operation recovery guidance");
-  return [];
+  return {codes: values, labels: values.map(item => RECOVERY_ACTION_LABELS[item] ?? "Review the operation recovery guidance")};
 }
 
 /**
@@ -75,7 +75,7 @@ export function availabilityFailure(value: unknown, fallbackDetail = "The availa
     ? boundedText(nested?.retry_time ?? nested?.retry_at ?? nested?.next_retry_at, "")
     : undefined;
   const progress = objectValue(nested?.progress) ?? objectValue(root?.progress);
-  const recovery = stringList(nested?.recovery ?? nested?.recovery_actions ?? nested?.next_actions ?? nested?.actions);
+  const recovery = recoveryList(nested?.recovery ?? nested?.recovery_actions ?? nested?.next_actions ?? nested?.actions);
   const progressBytes = progress?.completed_bytes ?? progress?.downloaded_bytes;
   const preserved = boundedText(nested?.preserved ?? nested?.retained ?? progress?.preserved, "", 256)
     || (typeof progressBytes === "number" && progressBytes > 0 ? `${progressBytes} bytes of progress retained.` : undefined);
@@ -85,7 +85,7 @@ export function availabilityFailure(value: unknown, fallbackDetail = "The availa
     const raw = nested?.[key];
     return typeof raw === "number" && Number.isFinite(raw) && raw >= 0 ? raw : undefined;
   };
-  return {code, detail, recovery, retryAt, retryAfterSeconds, operationId, preserved, logExcerpt, requiredBytes: bytes("required_bytes"), freeBytes: bytes("free_bytes"), shortfallBytes: bytes("shortfall_bytes")};
+  return {code, detail, recovery: recovery.labels, recoveryCodes: recovery.codes, retryAt, retryAfterSeconds, operationId, preserved, logExcerpt, requiredBytes: bytes("required_bytes"), freeBytes: bytes("free_bytes"), shortfallBytes: bytes("shortfall_bytes")};
 }
 
 /** Return the shared retry decision without exposing the API DTO in UI code. */
@@ -102,8 +102,9 @@ function retryLabel(seconds: number): string {
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
-export function LibraryAvailabilityFeedback({failure, onRetry, retryLabel: actionLabel = "Retry", title = "Availability needs attention"}: {
+export function LibraryAvailabilityFeedback({failure, modelAccessUrl, onRetry, retryLabel: actionLabel = "Retry", title = "Availability needs attention"}: {
   failure: AvailabilityFailure;
+  modelAccessUrl?: string;
   onRetry?: () => void;
   retryLabel?: string;
   title?: string;
@@ -123,7 +124,8 @@ export function LibraryAvailabilityFeedback({failure, onRetry, retryLabel: actio
     {failure.preserved && <p className="library-availability-preserved"><strong>Preserved:</strong> {failure.preserved}</p>}
     {failure.retryAt && <p className="library-availability-retry-time">Next retry: <time dateTime={failure.retryAt}>{failure.retryAt}</time></p>}
     {(failure.requiredBytes !== undefined || failure.freeBytes !== undefined || failure.shortfallBytes !== undefined) && <dl className="library-availability-capacity"><div><dt>Required</dt><dd>{failure.requiredBytes ?? "Unknown"} bytes</dd></div><div><dt>Free</dt><dd>{failure.freeBytes ?? "Unknown"} bytes</dd></div>{failure.shortfallBytes !== undefined && <div><dt>Shortfall</dt><dd>{failure.shortfallBytes} bytes</dd></div>}</dl>}
-    {failure.recovery.length > 0 && <ul aria-label="Recovery steps">{failure.recovery.map((step, index) => <li key={`${index}-${step}`}>{step}</li>)}</ul>}
+    {failure.recovery.length > 0 && <ul aria-label="Recovery steps">{failure.recovery.map((step, index) => <li key={`${index}-${step}`}>{step}{failure.recoveryCodes[index] === "open_model_access" && modelAccessUrl && <> · <a href={modelAccessUrl} target="_blank" rel="noreferrer">Open Model access page</a></>}</li>)}</ul>}
+    {failure.recoveryCodes.includes("configure_hf_token") && <p className="library-availability-token-help">Use the existing protected HF token secret file configured for the Controller. Tokens are never entered or displayed here.</p>}
     <div className="library-availability-actions">{onRetry && <button type="button" className="button secondary" disabled={retryDisabled} onClick={onRetry}>{retryText}</button>}<details><summary>Technical details</summary><dl><div><dt>Code</dt><dd>{failure.code}</dd></div>{failure.operationId && <div><dt>Operation</dt><dd>{failure.operationId}</dd></div>}</dl>{failure.logExcerpt && <pre>{failure.logExcerpt}</pre>}</details></div>
   </section>;
 }

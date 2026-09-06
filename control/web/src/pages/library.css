@@ -3730,6 +3730,7 @@
 .library-availability-feedback p, .library-availability-feedback ul, .library-availability-feedback dl { margin: 0; }
 .library-availability-feedback ul { padding-left: 1.25rem; }
 .library-availability-preserved { color: var(--text-muted, #abb5a7); }
+.library-availability-token-help { color: var(--text-muted, #abb5a7); }
 .library-availability-capacity { display: flex; gap: 1rem; flex-wrap: wrap; }
 .library-availability-capacity div { display: grid; gap: .1rem; }
 .library-availability-capacity dt { color: var(--text-muted, #abb5a7); font-size: .72rem; }

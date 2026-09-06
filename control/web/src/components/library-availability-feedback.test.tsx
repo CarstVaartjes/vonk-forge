@@ -42,6 +42,17 @@ test("renders preserved progress, recovery, and a retryable terminal action", ()
   expect(screen.getByText("op-2")).toBeInTheDocument();
 });
 
+test("keeps model access and token-file recovery actionable without exposing secrets", () => {
+  render(<LibraryAvailabilityFeedback modelAccessUrl="https://huggingface.co/acme/model" failure={availabilityFailure({
+    code: "access_required",
+    detail: "Hugging Face access is required.",
+    recovery_actions: ["open_model_access", "configure_hf_token", "check_access_and_resume"],
+  })}/>);
+  expect(screen.getByRole("link", {name: "Open Model access page"})).toHaveAttribute("href", "https://huggingface.co/acme/model");
+  expect(screen.getByText(/existing protected HF token secret file/)).toBeInTheDocument();
+  expect(screen.queryByText(/token=|Bearer /i)).not.toBeInTheDocument();
+});
+
 test("shows known NAS capacity shortfall without turning unknown values into zero", () => {
   const failure = availabilityFailure({
     code: "model_cache.capacity_insufficient",
