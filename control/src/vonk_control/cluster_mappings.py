@@ -356,6 +356,33 @@ def _effective_parameters(
     supplied: Mapping[str, object],
 ) -> dict[str, object]:
     raw_parameters = document.get("parameters")
+    if raw_parameters is None:
+        # Canonical RecipeDefinition v2 carries launch-affecting settings in
+        # ``settings``.  Mapping identity must bind those values directly;
+        # the retired schema-one parameter list is not an authority for a
+        # canonical recipe.
+        raw_settings = document.get("settings")
+        if not isinstance(raw_settings, Mapping):
+            raise ClusterMappingError(
+                "mapping.parameters_invalid", "recipe settings are invalid"
+            )
+        effective: dict[str, object] = {}
+        for name in ("context_tokens", "concurrency", "max_batch_tokens"):
+            setting = raw_settings.get(name)
+            if isinstance(setting, Mapping) and "value" in setting:
+                effective[name] = copy.deepcopy(setting["value"])
+        knobs = raw_settings.get("knobs")
+        if isinstance(knobs, Mapping):
+            for name, setting in knobs.items():
+                if isinstance(setting, Mapping) and "value" in setting:
+                    effective[str(name)] = copy.deepcopy(setting["value"])
+        unknown = set(supplied) - set(effective)
+        if unknown:
+            raise ClusterMappingError(
+                "mapping.parameter_unknown", "mapping contains an unknown setting"
+            )
+        effective.update(copy.deepcopy(dict(supplied)))
+        return effective
     if not isinstance(raw_parameters, list):
         raise ClusterMappingError(
             "mapping.parameters_invalid", "recipe parameters are invalid"

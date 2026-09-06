@@ -654,7 +654,19 @@ class InstallAdmissionService:
 
 
 def _primary_model_sha256(document: Mapping[str, object]) -> str:
-    model = document.get("model")
+    selections = document.get("models")
+    model_selection = (
+        selections[0]
+        if isinstance(selections, Sequence)
+        and not isinstance(selections, (str, bytes))
+        and selections
+        else None
+    )
+    model = (
+        model_selection.get("model")
+        if isinstance(model_selection, Mapping)
+        else None
+    )
     digest = model.get("content_sha256") if isinstance(model, Mapping) else None
     if (
         not isinstance(digest, str)

@@ -599,6 +599,7 @@ class WorkerSettings:
     direct_fabric_cidrs: str
     operator_jurisdiction: str | None
     state_path: Path
+    agent_artifact_root: Path
     artifact_job_storage_max_bytes: int
     artifact_job_retention_seconds: int
     artifact_job_reconcile_interval_seconds: int
@@ -731,6 +732,9 @@ class WorkerSettings:
             direct_fabric_cidrs=direct_fabric_cidrs,
             operator_jurisdiction=configured_jurisdiction,
             state_path=_absolute_root("VONK_STATE_PATH", "/srv/vonk-forge/state"),
+            agent_artifact_root=_absolute_root(
+                "VONK_AGENT_ARTIFACT_ROOT", "/state/agent-artifacts"
+            ),
             artifact_job_storage_max_bytes=artifact_job_storage_max_bytes,
             artifact_job_retention_seconds=artifact_job_retention_seconds,
             artifact_job_reconcile_interval_seconds=(

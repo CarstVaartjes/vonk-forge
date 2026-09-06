@@ -125,7 +125,7 @@ class RecordingArtifactExecutor:
 
     def execute(
         self,
-        _plan,
+        plan,
         phase,
         *,
         item_index,
@@ -143,14 +143,15 @@ class RecordingArtifactExecutor:
             )
         if phase.kind == "verify":
             digests = ["d" * 64] if self.bad_verify else [MODEL_ARTIFACT]
+            runtime_image = getattr(getattr(plan, "preparation", None), "runtime_image", None)
+            image_digest = getattr(runtime_image, "image_digest", "sha256:" + "1" * 64)
+            archive_sha256 = getattr(runtime_image, "oci_layout_sha256", "3" * 64)
             return PhaseExecution(
                 result={
                     "verified": True,
                     "verified_digests": digests,
-                    "verified_image_digest": (
-                        "sha256:" + "1" * 64
-                    ),
-                    "verified_oci_layout_sha256": "3" * 64,
+                    "verified_image_digest": image_digest,
+                    "verified_oci_layout_sha256": archive_sha256,
                 }
             )
         if phase.kind == "cleanup":
@@ -293,7 +294,7 @@ def _request(sessions, node_id: str, *, action: str = "run", retention: str = "r
             select(LocalRecipeRevision).where(LocalRecipeRevision.lifecycle == "resolved")
         )
         assert revision is not None
-        model = revision.document["model"]
+        model = revision.document["models"][0]["model"]
         model_digest = model["content_sha256"]
     return RunSwitchPreviewRequest(
         model_version_sha256=model_digest,
@@ -958,7 +959,7 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
             "verified_digests": [MODEL_ARTIFACT],
             "verified_image_digest": "sha256:" + "1" * 64,
             "imported_image_digest": "sha256:" + "1" * 64,
-            "verified_oci_layout_sha256": "3" * 64,
+            "verified_oci_layout_sha256": plan.preparation.runtime_image.oci_layout_sha256,
         }],
     }
     assert restarted.tick() is True

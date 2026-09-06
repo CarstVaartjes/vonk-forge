@@ -4,19 +4,29 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import DistributionAssignment, DistributionObject, canonical_message
+from vonk_agent_protocol import (
+    DistributionAssignment,
+    DistributionObject,
+    canonical_message,
+)
 
 from .agent_jobs import AgentJobService
 from .distribution import DistributionError, DistributionService
-from .models import AgentOperation, AgentOperationAttempt, Job, RecipeBuild
 from .model_cache import ModelCacheNotFound
+from .models import (
+    AgentOperation,
+    AgentOperationAttempt,
+    CatalogDocumentRevision,
+    Job,
+    RecipeBuild,
+)
 from .run_switch_contract import RunSwitchPhase, RunSwitchPlan
 from .run_switch_operations import PhaseExecution
 
@@ -337,6 +347,9 @@ class DurableDistributionPhaseExecutor:
                 candidate = raw.get("result") if isinstance(raw.get("result"), Mapping) else raw
                 if not isinstance(candidate, Mapping):
                     continue
+                runtime_receipt = candidate.get("runtime_image")
+                if isinstance(runtime_receipt, Mapping):
+                    candidate = {**candidate, **runtime_receipt}
                 image_digest = image_digest or candidate.get("image_digest")
                 layout_digest = layout_digest or candidate.get("oci_layout_sha256")
                 image_bytes = image_bytes or candidate.get("image_bytes")
@@ -536,9 +549,16 @@ class DurableDistributionPhaseExecutor:
 class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
     """Run the Controller cache child before Spark target distribution."""
 
-    def __init__(self, *args: Any, model_cache: object, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        model_cache: object,
+        runtime_image_preparer: Callable[..., object] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._model_cache = model_cache
+        self._runtime_image_preparer = runtime_image_preparer
 
     def execute(
         self,
@@ -550,14 +570,32 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
         request_key: str,
         progress: Mapping[str, object],
     ) -> PhaseExecution:
+        runtime_result: Mapping[str, object] | None = None
+        effective_progress = progress
+        if phase.kind == "transfer" and phase.subphase == "target-copy":
+            runtime_result = self._prepare_runtime_image(plan)
+            if runtime_result is not None:
+                effective_progress = dict(progress)
+                phase_results = list(progress.get("phase_results", []))
+                phase_results.append(dict(runtime_result))
+                effective_progress["phase_results"] = phase_results
         if phase.subphase != "model-download":
-            return super().execute(
+            execution = super().execute(
                 plan,
                 phase,
                 item_index=item_index,
                 actor=actor,
                 request_key=request_key,
-                progress=progress,
+                progress=effective_progress,
+            )
+            if runtime_result is None:
+                return execution
+            result = dict(execution.result or {})
+            result.update(runtime_result)
+            return PhaseExecution(
+                operation_id=execution.operation_id,
+                result=result,
+                waiting=execution.waiting,
             )
         if phase.kind != "transfer" or item_index != 0:
             raise RuntimeError("invalid model-download phase")
@@ -627,6 +665,84 @@ class CompositeDistributionPhaseExecutor(DurableDistributionPhaseExecutor):
             **pins,
         )
         return PhaseExecution(operation_id=view.id, result=self._cache_result(view))
+
+    def _prepare_runtime_image(
+        self, plan: RunSwitchPlan
+    ) -> Mapping[str, object] | None:
+        """Prepare one Controller image before target distribution.
+
+        This callback is deliberately supplied only to the durable worker
+        executor.  API preview, admission, and agent spec reads use the
+        read-only receipt resolver in ``ControllerExecutionPlanService``.
+        """
+
+        if self._runtime_image_preparer is None:
+            return None
+        if plan.recipe_revision_id is None or not plan.spark_group.nodes:
+            raise RuntimeError("runtime image preparation identity is unavailable")
+        from .recipe_runtime_specs import compile_runtime_spec, resolve_recipe_entities
+
+        node = min(plan.spark_group.nodes, key=lambda item: (item.rank, item.node_id))
+        with self._sessions() as session:
+            revision = session.get(CatalogDocumentRevision, plan.recipe_revision_id)
+            if revision is None:
+                raise RuntimeError("runtime image preparation recipe revision is unavailable")
+            build = (
+                session.get(RecipeBuild, plan.recipe_build_id)
+                if plan.recipe_build_id is not None
+                else None
+            )
+            package_handle = None
+            execution = revision.document.get("execution")
+            if isinstance(execution, Mapping) and execution.get("mode") == "build":
+                if build is None or build.state != "succeeded":
+                    raise RuntimeError("runtime image preparation build receipt is unavailable")
+                package_handle = {
+                    "image_digest": build.image_digest,
+                    "image_reference": f"localhost/vonk/recipe-build@{build.image_digest}",
+                    "build_input_sha256": build.build_input_sha256,
+                    "platform": "linux/arm64",
+                }
+            entities = resolve_recipe_entities(session, revision.document)
+            parameters = (
+                dict(plan.mapping.parameters)
+                if plan.mapping is not None
+                else {}
+            )
+            runtime_spec = compile_runtime_spec(
+                revision.document,
+                resolved_entities=entities,
+                parameters=parameters,
+                role=node.role,
+                rank=node.rank,
+                package_handle=package_handle,
+            )
+        receipt = self._runtime_image_preparer(
+            revision.document,
+            runtime_spec,
+            build,
+        )
+        to_mapping = getattr(receipt, "to_mapping", None)
+        raw = to_mapping() if callable(to_mapping) else receipt
+        if not isinstance(raw, Mapping):
+            raise RuntimeError("runtime image preparation returned invalid evidence")
+        image_digest = raw.get("image_digest")
+        layout_digest = raw.get("oci_layout_sha256", raw.get("oci_archive_sha256"))
+        image_bytes = raw.get("image_bytes")
+        if (
+            not isinstance(image_digest, str)
+            or not isinstance(layout_digest, str)
+            or type(image_bytes) is not int
+            or image_bytes < 1
+        ):
+            raise RuntimeError("runtime image preparation returned incomplete evidence")
+        return {
+            "runtime_image": dict(raw),
+            "image_digest": image_digest,
+            "oci_layout_sha256": layout_digest,
+            "image_bytes": image_bytes,
+            "build_id": raw.get("build_id"),
+        }
 
     def get(self, operation_id: str) -> Any:
         getter = getattr(self._model_cache, "get_operation", None)

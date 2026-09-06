@@ -91,6 +91,11 @@ class SkopeoOCIImageTransport:
         expected_architecture: str,
         expected_runtime_interface: str,
     ) -> PulledImageEvidence:
+        # Recipe/runtime projections carry the Controller wire contract
+        # (``vonk.runtime.v1``), while the OCI label stores its short value
+        # (``v1``).  Keep that translation at the OCI boundary so callers
+        # cannot accidentally compare unlike identities.
+        expected_runtime_interface = _runtime_interface_label(expected_runtime_interface)
         source = f"docker://{reference}"
         expected_manifest = _reference_digest(reference)
         observed_digest = _run_text(
@@ -147,6 +152,7 @@ class SkopeoOCIImageTransport:
         expected_archive_sha256: str,
         expected_archive_bytes: int,
     ) -> PulledImageEvidence:
+        expected_runtime_interface = _runtime_interface_label(expected_runtime_interface)
         source = f"oci-archive:{archive}"
         observed_digest = _run_text(
             [self.executable, "inspect", *_platform_args(expected_architecture), "--format", "{{.Digest}}", source]
@@ -210,6 +216,10 @@ class RuntimeImageReceipt:
     archive_path: str
     recorded_at: str
     build_id: str | None = None
+    # The wire runtime contract and the OCI label are deliberately separate
+    # observations.  Older persisted receipts may omit the label; newly
+    # prepared receipts always record it.
+    runtime_interface_label: str | None = None
 
     @property
     def oci_layout_sha256(self) -> str:
@@ -235,6 +245,24 @@ class RuntimeImageStorage(Protocol):
         self, archive_sha256: str, expected_bytes: int
     ) -> Path:
         """Return an existing verified archive or raise."""
+
+    def find_published(
+        self,
+        registry_manifest_digest: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> RuntimeImageReceipt | None:
+        """Find and verify a previously published image by immutable identity."""
+
+    def find_verified(
+        self,
+        image_digest: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> RuntimeImageReceipt | None:
+        """Find and verify a prepared image without invoking a transport."""
 
 
 class FilesystemRuntimeImageStorage:
@@ -304,6 +332,113 @@ class FilesystemRuntimeImageStorage:
                 "runtime_image.archive_mismatch", "stored OCI archive failed content verification"
             )
         return path
+
+    def find_published(
+        self,
+        registry_manifest_digest: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> RuntimeImageReceipt | None:
+        """Read the atomic receipt index before starting another OCI export.
+
+        Receipt files are the content-addressed index: the archive is still
+        re-hashed before reuse, so a partial or corrupt object fails loudly
+        and cannot be mistaken for a cache hit.
+        """
+
+        expected_architecture = _wire_architecture(expected_architecture)
+        expected_interface = expected_runtime_interface
+        expected_label = _runtime_interface_label(expected_interface)
+        for receipt_path in sorted(self.root.glob("*.receipt.json")):
+            try:
+                value = json.loads(receipt_path.read_text(encoding="utf-8"))
+                if not isinstance(value, Mapping):
+                    raise TypeError
+                receipt = RuntimeImageReceipt(**dict(value))
+            except (OSError, TypeError, ValueError, KeyError) as error:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.receipt_unavailable",
+                    "runtime image receipt index is malformed",
+                ) from error
+            if (
+                receipt.source != "published"
+                or receipt.registry_manifest_digest != registry_manifest_digest
+                or receipt.architecture != expected_architecture
+                or receipt.runtime_interface != expected_interface
+                or receipt.runtime_interface_label not in {None, expected_label}
+            ):
+                continue
+            if (
+                _IMAGE_DIGEST.fullmatch(receipt.registry_manifest_digest or "") is None
+                or _IMAGE_DIGEST.fullmatch(receipt.platform_manifest_digest) is None
+                or receipt.platform_manifest_digest != receipt.image_digest
+                or _IMAGE_DIGEST.fullmatch(receipt.local_image_config_id or "") is None
+            ):
+                raise RuntimeImagePreparationError(
+                    "runtime_image.receipt_invalid",
+                    "published runtime image receipt identity is malformed",
+                )
+            self.verify_existing(receipt.oci_archive_sha256, receipt.image_bytes)
+            return receipt
+        return None
+
+    def find_verified(
+        self,
+        image_digest: str,
+        *,
+        expected_architecture: str,
+        expected_runtime_interface: str,
+    ) -> RuntimeImageReceipt | None:
+        """Resolve a verified receipt without invoking an image transport.
+
+        Preview, admission, and agent spec reads use this read-only side of
+        the image boundary.  The durable worker is responsible for calling
+        :func:`prepare_runtime_image` when the receipt is absent.  Published
+        parent manifests and Controller-built platform images are both valid
+        lookup identities, while the archive is re-hashed before reuse.
+        """
+
+        if _IMAGE_DIGEST.fullmatch(image_digest) is None:
+            raise RuntimeImagePreparationError(
+                "runtime_image.digest_invalid", "runtime image identity is invalid"
+            )
+        expected_architecture = _wire_architecture(expected_architecture)
+        expected_label = _runtime_interface_label(expected_runtime_interface)
+        for receipt_path in sorted(self.root.glob("*.receipt.json")):
+            try:
+                value = json.loads(receipt_path.read_text(encoding="utf-8"))
+                if not isinstance(value, Mapping):
+                    raise TypeError
+                receipt = RuntimeImageReceipt(**dict(value))
+            except (OSError, TypeError, ValueError, KeyError) as error:
+                raise RuntimeImagePreparationError(
+                    "runtime_image.receipt_unavailable",
+                    "runtime image receipt index is malformed",
+                ) from error
+            if receipt.source == "published":
+                matches = receipt.registry_manifest_digest == image_digest
+            elif receipt.source == "controller-build":
+                matches = receipt.image_digest == image_digest
+            else:
+                matches = False
+            if not matches:
+                continue
+            if (
+                receipt.architecture != expected_architecture
+                or receipt.runtime_interface != expected_runtime_interface
+                or receipt.runtime_interface_label not in {None, expected_label}
+                or _IMAGE_DIGEST.fullmatch(receipt.platform_manifest_digest) is None
+                or receipt.platform_manifest_digest != receipt.image_digest
+                or _IMAGE_DIGEST.fullmatch(receipt.local_image_config_id or "") is None
+            ):
+                raise RuntimeImagePreparationError(
+                    "runtime_image.receipt_invalid",
+                    "runtime image receipt does not prove the requested platform identity",
+                )
+            self.verify_existing(receipt.oci_archive_sha256, receipt.image_bytes)
+            return receipt
+        return None
 
     def read_receipt(self, archive_sha256: str) -> RuntimeImageReceipt:
         path = self.root / f"{archive_sha256}.receipt.json"
@@ -389,23 +524,30 @@ def _prepare_from_registry(
     expected_interface: str,
     now: datetime | None,
 ) -> RuntimeImageReceipt:
+    cached = storage.find_published(
+        expected_manifest,
+        expected_architecture=expected_architecture,
+        expected_runtime_interface=expected_interface,
+    )
+    if cached is not None:
+        return cached
     staged = storage.prepare_path()
+    expected_interface_label = _runtime_interface_label(expected_interface)
     try:
         evidence = transport.pull_and_export(
             reference,
             staged,
             expected_architecture=expected_architecture,
-            expected_runtime_interface=expected_interface,
+            expected_runtime_interface=expected_interface_label,
         )
         _validate_evidence(
             evidence,
             expected_manifest,
             expected_architecture,
-            expected_interface,
+            expected_interface_label,
             expected_requested_manifest=expected_manifest,
         )
         image_bytes, archive_sha = evidence.archive_bytes, evidence.archive_sha256
-        interface = evidence.runtime_interface
         receipt = RuntimeImageReceipt(
             schema_version=2,
             source="published",
@@ -418,9 +560,13 @@ def _prepare_from_registry(
             oci_archive_sha256=archive_sha,
             image_bytes=image_bytes,
             local_image_config_id=evidence.config_id,
-            local_image_reference=evidence.local_reference,
-            architecture=evidence.architecture,
-            runtime_interface=interface,
+            # The OCI transport reference is a registry/archive source.  It
+            # is not a post-import Spark start reference; the helper derives
+            # that only after inspecting the imported config digest.
+            local_image_reference=None,
+            architecture=_wire_architecture(evidence.architecture),
+            runtime_interface=expected_interface,
+            runtime_interface_label=evidence.runtime_interface,
             archive_path=str(staged),
             recorded_at=_timestamp(now),
         )
@@ -464,10 +610,11 @@ def _prepare_from_build(
             "runtime_image.receipt_invalid", "source-build image bytes are invalid"
         )
     existing = storage.verify_existing(archive_sha, image_bytes)
+    expected_interface_label = _runtime_interface_label(expected_interface)
     observed = transport.inspect_archive(
         existing,
         expected_architecture=expected_architecture,
-        expected_runtime_interface=expected_interface,
+        expected_runtime_interface=expected_interface_label,
         expected_archive_sha256=archive_sha,
         expected_archive_bytes=image_bytes,
     )
@@ -475,7 +622,7 @@ def _prepare_from_build(
         observed,
         image_digest,
         expected_architecture,
-        expected_interface,
+        expected_interface_label,
         expected_requested_manifest=None,
     )
     receipt = RuntimeImageReceipt(
@@ -490,9 +637,12 @@ def _prepare_from_build(
         oci_archive_sha256=archive_sha,
         image_bytes=image_bytes,
         local_image_config_id=observed.config_id,
-        local_image_reference=observed.local_reference,
-        architecture=observed.architecture,
-        runtime_interface=observed.runtime_interface,
+        # ``oci-archive:...`` is a Controller transport path, never a
+        # runnable Spark image reference.
+        local_image_reference=None,
+        architecture=_wire_architecture(observed.architecture),
+        runtime_interface=expected_interface,
+        runtime_interface_label=observed.runtime_interface,
         archive_path=str(getattr(storage, "root", Path("")) / archive_sha),
         recorded_at=_timestamp(now),
         build_id=_optional_string(value.get("build_id"), None),
@@ -531,6 +681,24 @@ def _runtime_projection(value: Mapping[str, object] | object) -> dict[str, str]:
             "runtime_image.runtime_invalid", "runtime projection lacks observed architecture/interface expectations"
         )
     return {"architecture": architecture, "interface": interface}
+
+
+def _runtime_interface_label(value: str) -> str:
+    """Map the Controller runtime contract to the OCI label value.
+
+    ``vonk.runtime.v1`` identifies the wire/runtime contract while images
+    carry the compact ``v1`` label.  Keeping the two values separate avoids
+    treating an inspected label as the launch protocol identity.
+    """
+
+    prefix = "vonk.runtime."
+    return value.removeprefix(prefix) if value.startswith(prefix) else value
+
+
+def _wire_architecture(value: str) -> str:
+    if value in {"linux/arm64", "linux-aarch64", "arm64", "aarch64"}:
+        return "linux-arm64"
+    return value
 
 
 def _recipe_image(recipe: RecipeDefinition) -> tuple[str, str]:

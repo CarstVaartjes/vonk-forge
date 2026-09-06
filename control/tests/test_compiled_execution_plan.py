@@ -13,6 +13,11 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control.agent_api import AgentApiServices
+from vonk_control.agent_jobs import AgentJobService
+from vonk_control.api import create_app
+from vonk_control.audit import MemoryAuditStore
+from vonk_control.auth import TokenCodec
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
     CompiledExecutionPlan,
@@ -24,11 +29,6 @@ from vonk_control.compiled_execution_plan import (
     materialized_model_path,
     validate_compiled_launch_payload,
 )
-from vonk_control.agent_api import AgentApiServices
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.api import create_app
-from vonk_control.audit import MemoryAuditStore
-from vonk_control.auth import TokenCodec
 from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.models import (
     AgentCertificate,
@@ -57,7 +57,7 @@ def _spec(
             "interface": "vonk.runtime.v1",
             "adapter": "vllm",
             "adapter_version": 1,
-            "image": "registry.example/vonk/vllm@sha256:" + "1" * 64,
+            "image": "registry.example/vonk/vllm@sha256:" + "0" * 64,
             "architecture": "linux/arm64",
             "entrypoint": ["/opt/vonk/bin/vllm", "serve"],
             "arguments": [],
@@ -166,6 +166,12 @@ def _image(
         "image_bytes": 4096,
         "architecture": "linux-arm64",
         "runtime_interface": "vonk.runtime.v1",
+        "registry_manifest_digest": (
+            "sha256:" + "0" * 64 if source == "published" else None
+        ),
+        "platform_manifest_digest": "sha256:" + "1" * 64,
+        "local_image_config_id": "sha256:" + "2" * 64,
+        "runtime_interface_label": "v1",
         "source": source,
         "build_id": build_id,
         "distribution_object": {
@@ -182,11 +188,26 @@ def _compile(
     *,
     image: dict[str, object] | None = None,
 ) -> CompiledExecutionPlan:
+    selected_image = _image() if image is None else image
+    selected_spec = _spec() if spec is None else spec
+    runtime = selected_spec.get("runtime")
+    if selected_image.get("source") == "controller-build" and isinstance(runtime, dict):
+        selected_spec = dict(selected_spec)
+        selected_spec["runtime"] = {
+            **runtime,
+            "image": "localhost/vonk/recipe-build@" + str(selected_image["image_digest"]),
+        }
+        identity = selected_spec.get("identity")
+        if isinstance(identity, dict):
+            selected_spec["identity"] = {
+                **identity,
+                "execution_sha256": execution_identity_sha256(selected_spec),
+            }
     return compile_verified_execution_plan(
-        _spec() if spec is None else spec,
+        selected_spec,
         model_artifact_set_sha256="d" * 64,
         model_objects=_model_objects(),
-        runtime_image=_image() if image is None else image,
+        runtime_image=selected_image,
     )
 
 
@@ -577,7 +598,32 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         oci_layout_sha256="f" * 64,
         image_bytes=4096,
     )
-    service = ControllerExecutionPlanService(Cache())
+    def runtime_receipt(
+        _document, image_digest: str, _runtime_spec: dict[str, object]
+    ) -> dict[str, object]:
+        return {
+            "image_digest": image_digest,
+            "oci_layout_sha256": "f" * 64,
+            "image_bytes": 4096,
+            "architecture": "linux-arm64",
+            "runtime_interface": "vonk.runtime.v1",
+            "runtime_interface_label": "v1",
+            "source": "controller-build",
+            "build_id": build.id,
+            "platform_manifest_digest": image_digest,
+            "local_image_config_id": "sha256:" + "2" * 64,
+            "local_image_reference": None,
+            "distribution_object": {
+                "name": "image.oci.tar",
+                "sha256": "f" * 64,
+                "bytes": 4096,
+                "kind": "oci-archive",
+            },
+        }
+
+    service = ControllerExecutionPlanService(
+        Cache(), runtime_image_resolver=runtime_receipt
+    )
     plans = service.compile_installation(
         None,
         revision=revision,
@@ -603,7 +649,10 @@ def test_controller_built_receipt_and_pulled_receipt_share_reusable_identity() -
     prebuilt = _compile()
     built = _compile(image=_image(source="controller-build", build_id="build-7"))
     assert built.runtime_image.build_id == "build-7"
-    assert built.reusable_identity_sha256 == prebuilt.reusable_identity_sha256
+    # The selected platform/archive/config facts are shared, while the
+    # published parent-manifest provenance remains distinct from a
+    # Controller-produced image receipt.
+    assert built.reusable_identity_sha256 != prebuilt.reusable_identity_sha256
 
     editorial = _compile(_spec(recipe_digest="9" * 64))
     assert editorial.recipe_revision_sha256 != prebuilt.recipe_revision_sha256
@@ -642,6 +691,13 @@ def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and
     assert empty["path"] == "__init__.py"
     assert validated["security"]["network_mode"] == "none"
     assert validated["security"]["host_network"] is False
+    runtime_image = validated["runtime_image"]
+    assert runtime_image["registry_manifest_digest"] != runtime_image["platform_manifest_digest"]
+    assert runtime_image["platform_manifest_digest"] == runtime_image["image_digest"]
+    assert runtime_image["local_image_config_id"] != runtime_image["image_digest"]
+    assert "local_image_reference" not in runtime_image
+    assert runtime_image["runtime_interface"] == "vonk.runtime.v1"
+    assert runtime_image["runtime_interface_label"] == "v1"
     argv = validated["runtime"]["argv"]
     assert "--served-model-name" in argv
     assert argv[argv.index("--served-model-name") + 1] == "qwen3-8-27b-collision"

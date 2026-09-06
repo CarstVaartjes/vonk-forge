@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
@@ -125,7 +125,14 @@ class RunAdmissionService:
                 resolved_entities = resolve_recipe_entities(session, revision.document)
             except RecipeRuntimeSpecError as error:
                 raise ValueError("exact recipe dependencies are unavailable") from error
-            model_version = resolved_entities.get("model_version")
+            resolved_models = resolved_entities.get("models")
+            model_version = (
+                resolved_models[0]
+                if isinstance(resolved_models, Sequence)
+                and not isinstance(resolved_models, (str, bytes))
+                and resolved_models
+                else None
+            )
             model_document = getattr(model_version, "document", None)
             if not isinstance(model_document, Mapping):
                 raise ValueError(  # noqa: TRY004

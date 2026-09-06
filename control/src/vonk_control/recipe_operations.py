@@ -702,6 +702,9 @@ class RecipeOperationService:
                         "schema_version": 2,
                         "run_id": run_id,
                         "installation_id": plan.installation_id,
+                        "recipe_revision_id": plan.recipe_revision_id,
+                        "recipe_content_sha256": recipe_digest,
+                        "image_digest": installation.image_digest,
                         "plan_digest": plan.plan_digest,
                         "alias": plan.alias,
                         "rank": node.rank,
@@ -2987,7 +2990,15 @@ def _lower_hex_digest(value: object) -> bool:
 
 
 def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str]:
-    model = document.get("model")
+    selections = document.get("models")
+    selection = (
+        selections[0]
+        if isinstance(selections, Sequence)
+        and not isinstance(selections, (str, bytes))
+        and selections
+        else None
+    )
+    model = selection.get("model") if isinstance(selection, Mapping) else None
     if not isinstance(model, Mapping):
         raise RecipeOperationConflict("recipe model authority is unavailable")
     digest = model.get("content_sha256")
@@ -3053,6 +3064,11 @@ def _distributed_start_deadline(
     timeout = (
         readiness.get("timeout_seconds") if isinstance(readiness, Mapping) else None
     )
+    if timeout is None:
+        # RecipeDefinition v2 keeps lifecycle bounded by the platform
+        # default; readiness evidence is an agent observation, not a recipe
+        # authoring field.
+        timeout = 60
     if type(timeout) is not int or not 1 <= timeout <= 3600:
         raise RecipeOperationConflict("distributed readiness timeout is invalid")
     return (_aware(now) + timedelta(seconds=timeout)).isoformat()
@@ -3346,17 +3362,27 @@ def _validate_rank_launch_evidence(
     )
     if revision is None or installation is None:
         raise RecipeOperationConflict("start evidence authority is unavailable")
-    artifacts = revision.document.get("artifacts")
-    first = artifacts[0] if isinstance(artifacts, list) and artifacts else None
-    if not isinstance(first, Mapping):
+    selections = revision.document.get("models")
+    selection = (
+        selections[0]
+        if isinstance(selections, Sequence)
+        and not isinstance(selections, (str, bytes))
+        and selections
+        else None
+    )
+    model = selection.get("model") if isinstance(selection, Mapping) else None
+    if not isinstance(model, Mapping):
         raise RecipeOperationConflict("start evidence authority is invalid")
+    model_identity = "{}/{}/{}".format(
+        model.get("publisher"), model.get("slug"), model.get("content_sha256")
+    )
     comparisons = {
         "phase": "rank-launch",
         "run_id": run_id,
         "recipe_revision_id": operation.payload.get("recipe_revision_id"),
         "recipe_content_sha256": operation.payload.get("recipe_content_sha256"),
         "image_digest": installation.image_digest.removeprefix("sha256:"),
-        "model_identity": f"{first.get('repository')}@{first.get('revision')}",
+        "model_identity": model_identity,
         "rank": operation.payload.get("rank"),
         "role": operation.payload.get("role"),
         "world_size": operation.payload.get("world_size"),
@@ -3444,12 +3470,21 @@ def _validate_start_evidence(
     )
     if revision is None:
         raise RecipeOperationConflict("start evidence authority is unavailable")
-    artifacts = revision.document.get("artifacts")
-    first = artifacts[0] if isinstance(artifacts, list) and artifacts else None
-    if not isinstance(first, Mapping):
+    selections = revision.document.get("models")
+    selection = (
+        selections[0]
+        if isinstance(selections, Sequence)
+        and not isinstance(selections, (str, bytes))
+        and selections
+        else None
+    )
+    model = selection.get("model") if isinstance(selection, Mapping) else None
+    if not isinstance(model, Mapping):
         raise RecipeOperationConflict("start evidence authority is invalid")
     image_digest = installation.image_digest.removeprefix("sha256:")
-    model_identity = f"{first.get('repository')}@{first.get('revision')}"
+    model_identity = "{}/{}/{}".format(
+        model.get("publisher"), model.get("slug"), model.get("content_sha256")
+    )
     endpoint_address = operation.payload.get("endpoint_address")
     port = operation.payload.get("port")
     try:

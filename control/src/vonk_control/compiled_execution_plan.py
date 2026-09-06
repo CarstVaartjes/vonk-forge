@@ -248,6 +248,14 @@ class CompiledRuntimeImage(_StrictModel):
     source: Literal["published", "controller-build"]
     build_id: str | None = Field(default=None, min_length=1, max_length=128)
     distribution_object: DistributionObjectReceipt
+    # These identities are intentionally distinct.  A multi-platform
+    # registry manifest, the selected linux-arm64 child manifest, the
+    # imported OCI config and the Controller archive are different objects.
+    registry_manifest_digest: ImageDigest | None = None
+    platform_manifest_digest: ImageDigest
+    local_image_config_id: ImageDigest
+    local_image_reference: str | None = Field(default=None, min_length=1, max_length=512)
+    runtime_interface_label: str = Field(min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def exact_archive_is_bound(self) -> CompiledRuntimeImage:
@@ -261,8 +269,16 @@ class CompiledRuntimeImage(_StrictModel):
             raise ValueError("OCI archive bytes do not match the image receipt")
         if self.source == "published" and self.build_id is not None:
             raise ValueError("published image receipts cannot claim a Controller build")
+        if self.source == "published" and self.registry_manifest_digest is None:
+            raise ValueError("published image receipts require a registry manifest")
         if self.source == "controller-build" and self.build_id is None:
             raise ValueError("Controller-built image receipts require a build id")
+        if self.source == "controller-build" and self.registry_manifest_digest is not None:
+            raise ValueError("Controller-built image receipts cannot claim a registry manifest")
+        if self.platform_manifest_digest != self.image_digest:
+            raise ValueError(
+                "runtime image digest must identify the selected platform manifest"
+            )
         return self
 
 
@@ -338,6 +354,11 @@ class CompiledExecutionPlan(_StrictModel):
                 "image_bytes": image.image_bytes,
                 "architecture": image.architecture,
                 "runtime_interface": image.runtime_interface,
+                "registry_manifest_digest": image.registry_manifest_digest,
+                "platform_manifest_digest": image.platform_manifest_digest,
+                "local_image_config_id": image.local_image_config_id,
+                "local_image_reference": image.local_image_reference,
+                "runtime_interface_label": image.runtime_interface_label,
                 "distribution_object": image.distribution_object.model_dump(
                     mode="json"
                 ),
@@ -377,6 +398,10 @@ class CompiledExecutionPlan(_StrictModel):
                 "image_bytes": self.runtime_image.image_bytes,
                 "architecture": self.runtime_image.architecture,
                 "runtime_interface": self.runtime_image.runtime_interface,
+                "registry_manifest_digest": self.runtime_image.registry_manifest_digest,
+                "platform_manifest_digest": self.runtime_image.platform_manifest_digest,
+                "local_image_config_id": self.runtime_image.local_image_config_id,
+                "runtime_interface_label": self.runtime_image.runtime_interface_label,
                 "distribution_object": self.runtime_image.distribution_object.model_dump(
                     mode="json"
                 ),
@@ -517,6 +542,10 @@ class CompiledExecutionPlan(_StrictModel):
             for item in self.artifacts
         ]
         runtime_image = self.runtime_image.model_dump(mode="json")
+        # A Controller transport/archive reference is evidence only.  The
+        # helper derives the runnable local reference after importing and
+        # re-inspecting the exact config digest.
+        runtime_image.pop("local_image_reference", None)
         payload: dict[str, object] = {
             "schema_version": 2,
             "identity": {
@@ -858,8 +887,9 @@ def compile_verified_execution_plan(
         ) from error
     runtime = _mapping(spec.get("runtime"), "runtime")
     runtime_image_reference = runtime.get("image")
+    expected_runtime_digest = image.registry_manifest_digest or image.image_digest
     if not isinstance(runtime_image_reference, str) or not runtime_image_reference.endswith(
-        f"@{image.image_digest}"
+        f"@{expected_runtime_digest}"
     ):
         raise CompiledExecutionPlanError(
             "verified runtime image does not match the compiled runtime projection"

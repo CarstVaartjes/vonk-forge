@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -195,6 +196,7 @@ def test_production_worker_settings_load_only_worker_authority_secrets(
     assert settings.internal_api_token == b"w" * 32
     assert settings.internal_api_url == "http://control-api:8000"
     assert settings.state_path == tmp_path / "state"
+    assert settings.agent_artifact_root == Path("/state/agent-artifacts")
     assert settings.artifact_job_storage_max_bytes == 16 * 1024**3
     assert settings.artifact_job_retention_seconds == 7 * 24 * 60 * 60
     assert settings.artifact_job_reconcile_interval_seconds == 3600

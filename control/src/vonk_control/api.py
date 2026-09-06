@@ -1478,11 +1478,11 @@ def production_app() -> FastAPI:
         DatabaseProposalService,
     )
     from .db import build_engine, session_factory
+    from .execution_plan_service import ControllerExecutionPlanService
     from .fleet_events import FleetEventRepository
     from .fleet_projection import FleetProjection
     from .fleet_stream import FleetStream
     from .install_admission import InstallAdmissionService
-    from .execution_plan_service import ControllerExecutionPlanService
     from .jobs import JobService
     from .library_projection import LibraryProjection
     from .logging import DatabaseJobLogStore
@@ -1494,6 +1494,7 @@ def production_app() -> FastAPI:
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
     from .route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from .run_admission import RunAdmissionService
+    from .runtime_image_preparation import FilesystemRuntimeImageStorage
     from .settings import Settings
     from .telemetry import TelemetryRepository
     from .worker_authority import WorkerAuthorityService
@@ -1559,7 +1560,38 @@ def production_app() -> FastAPI:
         current_revision=current_revision,
         model_cache=model_cache,
     )
-    execution_plans = ControllerExecutionPlanService(model_cache)
+    runtime_image_storage = FilesystemRuntimeImageStorage(
+        # RecipeBuildVerifiedObjectSource and direct-image preparation share
+        # the Controller's verified OCI root.  A successful build therefore
+        # needs no Spark hop or duplicate copy before it can be inspected.
+        settings.agent_artifact_root
+    )
+
+    def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
+        """Read an already prepared OCI receipt without pulling or exporting."""
+
+        runtime = runtime_spec.get("runtime") if isinstance(runtime_spec, Mapping) else None
+        if not isinstance(runtime, Mapping):
+            raise TypeError("runtime image preparation is required: runtime projection is unavailable")
+        architecture = runtime.get("architecture")
+        interface = runtime.get("interface", runtime.get("runtime_interface"))
+        if not isinstance(architecture, str) or not isinstance(interface, str):
+            raise TypeError("runtime image preparation is required: platform identity is unavailable")
+        receipt = runtime_image_storage.find_verified(
+            image_digest,
+            expected_architecture=architecture,
+            expected_runtime_interface=interface,
+        )
+        if receipt is None:
+            raise ValueError(
+                "runtime image preparation is required before compile/install"
+            )
+        return receipt
+
+    execution_plans = ControllerExecutionPlanService(
+        model_cache,
+        runtime_image_resolver=resolve_runtime_image_receipt,
+    )
 
     def reconciliation_authority_input(
         reconciliation_id: str,

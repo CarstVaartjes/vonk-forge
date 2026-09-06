@@ -1396,7 +1396,19 @@ class RunSwitchOperationService:
                         scope="recipe",
                     )
                 )
-            model_ref = revision.document.get("model")
+            selections = revision.document.get("models")
+            model_selection = (
+                selections[0]
+                if isinstance(selections, Sequence)
+                and not isinstance(selections, (str, bytes))
+                and selections
+                else None
+            )
+            model_ref = (
+                model_selection.get("model")
+                if isinstance(model_selection, Mapping)
+                else None
+            )
             recipe_model_digest = (
                 model_ref.get("content_sha256") if isinstance(model_ref, Mapping) else None
             )
@@ -1761,7 +1773,14 @@ class RunSwitchOperationService:
             )
         try:
             resolved = resolve_recipe_entities(session, revision.document)
-            resolved_model = resolved.get("model_version")
+            resolved_models = resolved.get("models")
+            resolved_model = (
+                resolved_models[0]
+                if isinstance(resolved_models, Sequence)
+                and not isinstance(resolved_models, (str, bytes))
+                and resolved_models
+                else None
+            )
             candidate = getattr(resolved_model, "document", None)
             if isinstance(candidate, Mapping):
                 model_document = candidate
@@ -1776,7 +1795,7 @@ class RunSwitchOperationService:
                     model_caps = _summary_capability_facts(summary)
                 except (KeyError, RuntimeError, TypeError, ValueError):
                     model_caps = []
-            if model_digest is None or getattr(resolved_model, "content_sha256", None) != model_digest:
+            if model_digest is None or getattr(resolved_model, "content_digest", None) != model_digest:
                 blockers.append(
                     _as_reason(
                         "run-switch.model_revision_unavailable",
@@ -2127,8 +2146,15 @@ class RunSwitchOperationService:
         blockers: list[RunSwitchReason] = []
         warnings: list[RunSwitchReason] = []
         document = revision.document if revision is not None else {}
-        raw_build = document.get("build") if isinstance(document, Mapping) else None
-        raw_platform = raw_build.get("platform") if isinstance(raw_build, Mapping) else None
+        execution = document.get("execution") if isinstance(document, Mapping) else None
+        raw_build = execution.get("build") if isinstance(execution, Mapping) else None
+        raw_platform = None
+        if isinstance(raw_build, Mapping):
+            base_image = raw_build.get("base_image")
+            if isinstance(base_image, Mapping):
+                raw_platform = base_image.get("platform")
+            if raw_platform is None:
+                raw_platform = raw_build.get("platform")
         expected_architecture = str(raw_platform) if isinstance(raw_platform, str) and raw_platform else "unknown"
         source_digest = (
             candidate.source_bundle_sha256
@@ -4481,7 +4507,15 @@ def _is_oci_digest(value: object) -> bool:
 def _primary_model_digest(document: object) -> str | None:
     if not isinstance(document, Mapping):
         return None
-    model = document.get("model")
+    selections = document.get("models")
+    selection = (
+        selections[0]
+        if isinstance(selections, Sequence)
+        and not isinstance(selections, (str, bytes))
+        and selections
+        else None
+    )
+    model = selection.get("model") if isinstance(selection, Mapping) else None
     value = model.get("content_sha256") if isinstance(model, Mapping) else None
     return value if _is_hex_digest(value) else None
 

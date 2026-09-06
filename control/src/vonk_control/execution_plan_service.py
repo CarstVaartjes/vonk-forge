@@ -22,7 +22,11 @@ from .compiled_execution_plan import (
 )
 from .distribution import ModelCacheVerifiedObjectSource
 from .models import ClusterMappingNode, LocalRecipeRevision, RecipeBuild
-from .recipe_runtime_specs import RecipeRuntimeSpecError, compile_runtime_spec, resolve_recipe_entities
+from .recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    compile_runtime_spec,
+    resolve_recipe_entities,
+)
 
 
 class ExecutionPlanCompilationError(ValueError):
@@ -38,16 +42,28 @@ class RuntimeImageReceipt:
     image_bytes: int
     source: str
     build_id: str | None
+    registry_manifest_digest: str | None
+    platform_manifest_digest: str
+    local_image_config_id: str
+    architecture: str
+    runtime_interface: str
+    runtime_interface_label: str
+    local_image_reference: str | None
 
     def as_mapping(self) -> dict[str, object]:
         return {
             "image_digest": self.image_digest,
             "oci_layout_sha256": self.oci_layout_sha256,
             "image_bytes": self.image_bytes,
-            "architecture": "linux-arm64",
-            "runtime_interface": "vonk.runtime.v1",
+            "architecture": self.architecture,
+            "runtime_interface": self.runtime_interface,
+            "runtime_interface_label": self.runtime_interface_label,
             "source": self.source,
             "build_id": self.build_id,
+            "registry_manifest_digest": self.registry_manifest_digest,
+            "platform_manifest_digest": self.platform_manifest_digest,
+            "local_image_config_id": self.local_image_config_id,
+            "local_image_reference": self.local_image_reference,
             "distribution_object": {
                 "name": "image.oci.tar",
                 "sha256": self.oci_layout_sha256,
@@ -58,7 +74,11 @@ class RuntimeImageReceipt:
 
 
 RuntimeImageResolver = Callable[
-    [Mapping[str, object], str], Mapping[str, object] | RuntimeImageReceipt
+    [Mapping[str, object], str, Mapping[str, object]],
+    Mapping[str, object] | RuntimeImageReceipt,
+]
+RuntimeImagePreparer = Callable[
+    [Mapping[str, object], Mapping[str, object], RecipeBuild], object
 ]
 
 
@@ -70,9 +90,11 @@ class ControllerExecutionPlanService:
         model_cache: object,
         *,
         runtime_image_resolver: RuntimeImageResolver | None = None,
+        runtime_image_preparer: RuntimeImagePreparer | None = None,
     ) -> None:
         self._model_cache = model_cache
         self._runtime_image_resolver = runtime_image_resolver
+        self._runtime_image_preparer = runtime_image_preparer
 
     def compile_installation(
         self,
@@ -106,8 +128,23 @@ class ControllerExecutionPlanService:
                 recipe_revision_sha256=revision.content_sha256,
             )
             artifact_set_sha256 = manifest.digest
-            model_source = ModelCacheVerifiedObjectSource.from_service(self._model_cache)
-            model_objects = model_source.verified_model_objects_for_set(artifact_set_sha256)
+            direct_receipts = getattr(
+                self._model_cache, "verified_model_objects_for_set", None
+            )
+            if callable(direct_receipts):
+                # The production ModelCacheService exposes the persisted
+                # manifest through ModelCacheVerifiedObjectSource.  A bound
+                # canonical cache adapter may expose the already validated
+                # receipt sequence directly; it is still required to carry
+                # selection/file identity and exact distribution objects.
+                model_objects = direct_receipts(artifact_set_sha256)
+            else:
+                model_source = ModelCacheVerifiedObjectSource.from_service(
+                    self._model_cache
+                )
+                model_objects = model_source.verified_model_objects_for_set(
+                    artifact_set_sha256
+                )
         except Exception as error:
             raise ExecutionPlanCompilationError(
                 "verified model artifact-set receipt is unavailable"
@@ -157,29 +194,12 @@ class ControllerExecutionPlanService:
         runtime = runtime_spec.get("runtime")
         runtime_image = runtime.get("image") if isinstance(runtime, Mapping) else None
         image_digest = _image_digest(runtime_image)
-        if self._runtime_image_resolver is not None:
-            receipt = self._runtime_image_resolver(document, image_digest)
-            if isinstance(receipt, RuntimeImageReceipt):
-                value = receipt.as_mapping()
-            elif isinstance(receipt, Mapping):
-                value = dict(receipt)
-            else:
-                raise ExecutionPlanCompilationError("runtime image receipt is invalid")
-        elif (
-            _is_source_build(document)
-            and build.state == "succeeded"
-            and build.image_digest == image_digest
-            and isinstance(build.oci_layout_sha256, str)
-            and type(build.image_bytes) is int
-            and build.image_bytes > 0
-        ):
-            value = RuntimeImageReceipt(
-                image_digest=image_digest,
-                oci_layout_sha256=build.oci_layout_sha256,
-                image_bytes=build.image_bytes,
-                source="controller-build",
-                build_id=build.id,
-            ).as_mapping()
+        if self._runtime_image_preparer is not None:
+            receipt = self._runtime_image_preparer(document, runtime_spec, build)
+            value = _runtime_receipt_mapping(receipt)
+        elif self._runtime_image_resolver is not None:
+            receipt = self._runtime_image_resolver(document, image_digest, runtime_spec)
+            value = _runtime_receipt_mapping(receipt)
         else:
             raise ExecutionPlanCompilationError(
                 "verified OCI archive receipt is unavailable for the selected runtime image"
@@ -188,11 +208,54 @@ class ControllerExecutionPlanService:
             image = CompiledRuntimeImage.model_validate(value)
         except Exception as error:
             raise ExecutionPlanCompilationError("verified runtime image receipt is invalid") from error
-        if image.image_digest != image_digest:
+        expected_digest = image.registry_manifest_digest or image.image_digest
+        if expected_digest != image_digest:
             raise ExecutionPlanCompilationError(
                 "runtime image receipt does not match the compiled runtime image"
             )
         return image
+
+
+def _runtime_receipt_mapping(receipt: object) -> dict[str, object]:
+    """Project a preparation receipt into the strict launch-image DTO.
+
+    Runtime-image preparation persists provenance and storage fields alongside
+    the portable launch identity.  The agent plan carries only the verified
+    schema-2 image receipt, so the projection is explicit and rejects
+    accidental leakage of the storage envelope.
+    """
+
+    if isinstance(receipt, RuntimeImageReceipt):
+        return receipt.as_mapping()
+    to_mapping = getattr(receipt, "to_mapping", None)
+    raw = to_mapping() if callable(to_mapping) else receipt
+    if not isinstance(raw, Mapping):
+        raise ExecutionPlanCompilationError("runtime image receipt is invalid")
+    value = dict(raw)
+    archive_sha256 = value.get("oci_archive_sha256")
+    if "oci_layout_sha256" not in value and isinstance(archive_sha256, str):
+        image_bytes = value.get("image_bytes")
+        value = {
+            "image_digest": value.get("image_digest"),
+            "oci_layout_sha256": archive_sha256,
+            "image_bytes": image_bytes,
+            "architecture": value.get("architecture"),
+            "runtime_interface": value.get("runtime_interface"),
+            "runtime_interface_label": value.get("runtime_interface_label"),
+            "source": value.get("source"),
+            "build_id": value.get("build_id"),
+            "registry_manifest_digest": value.get("registry_manifest_digest"),
+            "platform_manifest_digest": value.get("platform_manifest_digest"),
+            "local_image_config_id": value.get("local_image_config_id"),
+            "local_image_reference": value.get("local_image_reference"),
+            "distribution_object": {
+                "name": "image.oci.tar",
+                "sha256": archive_sha256,
+                "bytes": image_bytes,
+                "kind": "oci-archive",
+            },
+        }
+    return value
 
 
 def _is_source_build(document: Mapping[str, object]) -> bool:
