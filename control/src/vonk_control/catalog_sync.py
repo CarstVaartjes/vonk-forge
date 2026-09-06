@@ -155,12 +155,24 @@ class ManagedRecipeCatalogSyncService:
         snapshot = self._reader.list()
         with self._sessions() as session:
             current = session.scalar(
-                select(RecipeLibrarySyncRun).where(
+                select(RecipeLibrarySyncRun)
+                .where(
                     RecipeLibrarySyncRun.state == "succeeded",
                     RecipeLibrarySyncRun.observed_commit == snapshot.commit,
-                ).order_by(RecipeLibrarySyncRun.completed_at.desc()).limit(1)
+                )
+                .order_by(RecipeLibrarySyncRun.completed_at.desc())
+                .limit(1)
             )
-            if current is not None:
+            # Partial item-level syncs remain succeeded database rows for the
+            # schema-2 state constraint. Only a current result proves that the
+            # commit was completely applied; partial results must be retried so
+            # successful immutable imports are reused while failed entries are
+            # fetched again.
+            if (
+                current is not None
+                and isinstance(current.result, Mapping)
+                and current.result.get("state") == "current"
+            ):
                 return _view(current)
         return self.sync(request_key=str(uuid.uuid4()), trigger="automatic", actor="system:recipe-library-sync", expected_commit=snapshot.commit)
 
