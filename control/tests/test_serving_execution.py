@@ -78,6 +78,22 @@ def test_http_evaluator_rejects_output_cap() -> None:
         evaluate_http_response(HttpObservation(200, {}, json.dumps(response).encode()), check)
 
 
+@pytest.mark.parametrize(
+    "usage",
+    [{}, {"completion_tokens": -1}, {"completion_tokens": "1"}],
+)
+def test_output_cap_requires_nonnegative_integer_usage(usage: dict[str, object]) -> None:
+    check = {
+        "kind": "openai.chat",
+        "request": {"body": {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 2}},
+        "assertions": ["chat.nonempty", "chat.output-cap"],
+    }
+    response = {"choices": [{"message": {"content": "done"}}], "usage": usage}
+
+    with pytest.raises(ServingExecutionError, match="output cap"):
+        evaluate_http_response(HttpObservation(200, {}, json.dumps(response).encode()), check)
+
+
 def test_http_execution_rejects_oversized_content_length_before_read() -> None:
     class OversizedResponse:
         status = 200
@@ -111,7 +127,19 @@ def test_job_evaluator_requires_declared_output_slot() -> None:
         "assertions": ["inference.completed", "artifact.output"],
     }
 
-    observed = evaluate_job_result({"outputs": [{"slot": "result", "bytes": 1}]}, check)
+    observed = evaluate_job_result({"state": "succeeded", "outputs": [{"slot": "result", "bytes": 1}]}, check)
 
     assert observed["response_shape"] == "job.result"
     assert observed["output_count"] == 1
+
+
+@pytest.mark.parametrize("state", ["failed", "completed"])
+def test_job_evaluator_rejects_non_succeeded_completion_with_outputs(state: str) -> None:
+    check = {
+        "kind": "artifact-job.output",
+        "request": {"output_slot": "result"},
+        "assertions": ["inference.completed", "artifact.output"],
+    }
+
+    with pytest.raises(ServingExecutionError, match="successful completion"):
+        evaluate_job_result({"state": state, "outputs": [{"slot": "result", "bytes": 1}]}, check)

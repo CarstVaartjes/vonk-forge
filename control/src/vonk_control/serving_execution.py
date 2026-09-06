@@ -73,7 +73,7 @@ def _assert_output_cap(response: Mapping[str, object], check: Mapping[str, objec
         raise ServingExecutionError(f"{field} requires a positive max_tokens request")
     usage = response.get("usage")
     tokens = usage.get("completion_tokens") if isinstance(usage, Mapping) else None
-    if tokens is not None and (type(tokens) is not int or tokens > limit):
+    if type(tokens) is not int or tokens < 0 or tokens > limit:
         raise ServingExecutionError("serving response exceeds declared output cap")
 
 
@@ -152,6 +152,10 @@ def evaluate_job_result(result: Mapping[str, object], check: Mapping[str, object
             isinstance(item, Mapping) and item.get("slot") == output_slot for item in outputs
         ):
             raise ServingExecutionError("job result does not contain the declared output slot")
+    if "inference.completed" in assertions:
+        state = result.get("state", result.get("status"))
+        if state != "succeeded":
+            raise ServingExecutionError("job result does not show a successful completion")
     return {
         "response_shape": "job.result",
         "result_fields": sorted(str(key) for key in result),
