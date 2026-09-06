@@ -12,7 +12,7 @@ from vonk_control import availability_production, route_runtime
 from vonk_control.api import production_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.models import Base, CatalogDocument, CatalogDocumentRevision, Job
-from vonk_forge_contracts import RecipeDefinition, content_sha256
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 
 def test_production_app_recipe_availability_auth_status_and_retry(
@@ -31,6 +31,9 @@ def test_production_app_recipe_availability_auth_status_and_retry(
         .joinpath("examples", "model-definition.json")
         .read_text()
     )
+    model_definition = ModelDefinition.model_validate(model)
+    model_digest = content_sha256(model_definition)
+    assert recipe.models[0].model.content_sha256 == model_digest
     now = datetime.now(UTC)
     sessions = sessionmaker(bind=postgres_engine)
     with sessions.begin() as session:
@@ -69,8 +72,8 @@ def test_production_app_recipe_availability_auth_status_and_retry(
                         revision_number=1,
                         schema_version=2,
                         state="active",
-                        document=model,
-                        content_digest="7b5431cb5c3f062afa8cc3e7013610cd1fa52fad35c53b5dd0f57482649c4202",
+                        document=model_definition.model_dump(mode="json"),
+                        content_digest=model_digest,
                         artifact_key="b" * 64,
                         projected={},
                         created_by="test",
@@ -157,7 +160,7 @@ def test_production_app_recipe_availability_auth_status_and_retry(
                 "recipe_revision_id": "production-recipe-revision",
             },
         )
-        assert started.status_code == 202
+        assert started.status_code == 202, started.text
         operation_id = started.json()["id"]
         status = client.get(
             f"/api/v1/library/recipe-image-availability/{operation_id}",
