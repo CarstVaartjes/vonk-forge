@@ -14,7 +14,10 @@ from collections.abc import Mapping, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
-from vonk_forge_contracts.resolver import ContractResolutionError, validate_recipe_package_paths
+from vonk_forge_contracts.resolver import (
+    ContractResolutionError,
+    validate_recipe_package_paths,
+)
 
 from .harnesses.canonical import compile_canonical_harness
 from .harnesses.common import HarnessCompileError

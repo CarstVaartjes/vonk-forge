@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import hashlib
 import json
+from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
-from pydantic import StringConstraints
-
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[
@@ -87,14 +85,13 @@ class TargetAssetState(_StrictModel):
                 raise ValueError("target missing bytes do not match expected coverage")
         elif self.missing_bytes is not None:
             raise ValueError("target missing bytes require a known expected size")
-        if self.state == "ready":
-            if (
-                self.expected_bytes is None
-                or self.missing_bytes != 0
-                or self.verified_sha256 is None
-                or self.verified_at is None
-            ):
-                raise ValueError("ready target asset requires complete verification evidence")
+        if self.state == "ready" and (
+            self.expected_bytes is None
+            or self.missing_bytes != 0
+            or self.verified_sha256 is None
+            or self.verified_at is None
+        ):
+            raise ValueError("ready target asset requires complete verification evidence")
         if self.state in {"failed", "unsupported"} and self.reason is None:
             raise ValueError("failed or unsupported target asset requires a reason")
         return self
@@ -142,9 +139,12 @@ class ModelArtifactPreparation(_StrictModel):
                 and target.verified_sha256 != self.artifact_set_sha256
             ):
                 raise ValueError("target model digest does not match the exact artifact set")
-        if self.completeness == "complete" and self.controller.state == "ready":
-            if self.controller.verified_bytes != self.artifact_set_bytes:
-                raise ValueError("complete model set must verify every expected byte")
+        if (
+            self.completeness == "complete"
+            and self.controller.state == "ready"
+            and self.controller.verified_bytes != self.artifact_set_bytes
+        ):
+            raise ValueError("complete model set must verify every expected byte")
         return self
 
 

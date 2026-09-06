@@ -15,9 +15,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
     AgentNode,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
-    CatalogDocumentRevision,
     NodeInventorySnapshot,
 )
 from .recipe_contract import RecipeContractError, recipe_topology

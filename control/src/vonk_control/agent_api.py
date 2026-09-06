@@ -2703,7 +2703,7 @@ def install_agent_routes(
             start, length, code = 0, opened.size, status.HTTP_200_OK
         else:
             start, end = selected
-            start, length, code = start, end - start + 1, status.HTTP_206_PARTIAL_CONTENT
+            length, code = end - start + 1, status.HTTP_206_PARTIAL_CONTENT
         if start:
             opened.stream.seek(start)
 

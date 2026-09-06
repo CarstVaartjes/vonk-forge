@@ -13,8 +13,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .contracts import (
-    AgentProtocolError,
     MAX_DOCUMENT_BYTES,
+    AgentProtocolError,
     canonical_message,
     schema_validator,
 )
@@ -32,10 +32,7 @@ class TelemetryReport:
         errors = list(schema_validator("telemetry-report.schema.json").iter_errors(raw))
         if errors:
             raise AgentProtocolError(f"telemetry report schema is invalid: {errors[0].message}")
-        try:
-            encoded = canonical_message(raw)
-        except AgentProtocolError:
-            raise
+        encoded = canonical_message(raw)
         if len(encoded) > MAX_DOCUMENT_BYTES:
             raise AgentProtocolError("telemetry report is too large")
         document = json.loads(encoded)

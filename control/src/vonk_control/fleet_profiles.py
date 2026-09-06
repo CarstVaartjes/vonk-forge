@@ -15,12 +15,11 @@ from vonk_agent_protocol import canonical_message
 from .fleet_profile_contract import (
     FleetProfileApplicationView,
     FleetProfileAssignment,
-    FleetProfileAssignmentPreparation,
     FleetProfileAssignmentInput,
+    FleetProfileAssignmentPreparation,
     FleetProfileAssignmentPreview,
     FleetProfileChildOperation,
     FleetProfileChildProgress,
-    FleetProfileSwitchAdapter,
     FleetProfileInput,
     FleetProfileList,
     FleetProfileNode,
@@ -31,6 +30,7 @@ from .fleet_profile_contract import (
     FleetProfileScope,
     FleetProfileScopePreview,
     FleetProfileStatusView,
+    FleetProfileSwitchAdapter,
     FleetProfileView,
 )
 from .models import (
@@ -54,7 +54,6 @@ from .recipe_runtime_specs import resolve_recipe_entities
 from .run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchOperation,
-    RunSwitchPreviewRequest,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
     SparkGroup,

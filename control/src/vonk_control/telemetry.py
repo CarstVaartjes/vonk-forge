@@ -20,8 +20,8 @@ from .models import (
     NodeTelemetryRollupMetric,
     NodeTelemetrySample,
 )
-from .telemetry_maintenance import mark_rollup_dirty
 from .telemetry_contract import TelemetryMetrics, empty_telemetry_metrics
+from .telemetry_maintenance import mark_rollup_dirty
 
 _NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 _MAX_SIGNED_BIGINT = 9_223_372_036_854_775_807
@@ -351,13 +351,11 @@ def _row_values(value: TelemetrySampleInput) -> dict[str, object]:
 
 
 def _same_sample(row: NodeTelemetrySample, value: TelemetrySampleInput) -> bool:
-    for field, expected in _row_values(value).items():
-        actual = getattr(row, field)
-        if field == "observed_at":
+    for field_name, expected in _row_values(value).items():
+        actual = getattr(row, field_name)
+        if field_name == "observed_at":
             actual = _stored_utc(actual)
-        elif field == "details":
-            actual = dict(actual)
-        elif field == "metrics":
+        elif field_name in {"details", "metrics"}:
             actual = dict(actual)
         if actual != expected:
             return False

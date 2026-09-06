@@ -15,10 +15,10 @@ from .fleet_profile_contract import (
     FleetProfileDuplicateInput,
     FleetProfileInput,
     FleetProfileList,
-    FleetProfilePreview,
     FleetProfilePreparePreviewRequest,
-    FleetProfilePreviewRequest,
     FleetProfilePrepareRequest,
+    FleetProfilePreview,
+    FleetProfilePreviewRequest,
     FleetProfileStatusView,
     FleetProfileView,
 )

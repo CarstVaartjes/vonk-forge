@@ -17,10 +17,10 @@ from .inventory_repository import InventoryRepository
 from .legal_admission import territorial_admission
 from .models import (
     AgentNode,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
-    CatalogDocumentRevision,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,

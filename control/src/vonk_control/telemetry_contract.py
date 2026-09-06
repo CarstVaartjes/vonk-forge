@@ -105,9 +105,12 @@ class TelemetrySeries(TelemetryContractModel):
             not math.isfinite(value) or abs(value) > _MAX_RATE
         ):
             raise ValueError("telemetry series value is invalid")
-        if isinstance(value, int) and not isinstance(value, bool):
-            if abs(value) > 2**63 - 1:
-                raise ValueError("telemetry series value is invalid")
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and abs(value) > 2**63 - 1
+        ):
+            raise ValueError("telemetry series value is invalid")
         if isinstance(value, str) and len(value) > 256:
             raise ValueError("telemetry series text value is invalid")
         return value
