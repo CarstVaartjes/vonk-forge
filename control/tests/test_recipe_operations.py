@@ -162,11 +162,19 @@ NOW = datetime(2026, 8, 7, 12, tzinfo=UTC)
 RECEIPT_SIGNER = ed25519.Ed25519PrivateKey.from_private_bytes(b"r" * 32)
 
 
+def _synthetic_model_content_sha256() -> str:
+    document = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+    return content_sha256(ModelDefinition.model_validate(document))
+
+
 class _CanonicalModelCache:
     """Small exact cache authority used by the canonical operation fixture."""
 
     artifact_set_sha256 = "f" * 64
-    model_content_sha256 = "e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c"
     file_sha256 = "c" * 64
 
     def resolve_artifact_set(self, **_kwargs):
@@ -177,7 +185,7 @@ class _CanonicalModelCache:
             raise ValueError("unknown artifact set")
         return (
             {
-                "model_content_sha256": self.model_content_sha256,
+                "model_content_sha256": _synthetic_model_content_sha256(),
                 "file_id": "weights",
                 "path": "model.safetensors",
                 "sha256": self.file_sha256,
@@ -226,6 +234,9 @@ def signed_observation_receipt(
 
 
 def start_evidence(payload: dict[str, object]) -> dict[str, object]:
+    model_identity = (
+        "vonk-forge/synthetic-tiny-fp16/" + _synthetic_model_content_sha256()
+    )
     if payload.get("phase") == "rank-launch":
         identity = {
             "phase": "rank-launch",
@@ -234,7 +245,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
             "recipe_content_sha256": payload["recipe_content_sha256"],
             "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
             "artifact_set_digest": "b" * 64,
-            "model_identity": "vonk-forge/synthetic-tiny-fp16/e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+            "model_identity": model_identity,
             "rank": payload["rank"],
             "role": payload["role"],
             "world_size": payload["world_size"],
@@ -262,7 +273,7 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
         "recipe_content_sha256": payload["recipe_content_sha256"],
         "image_digest": str(payload["image_digest"]).removeprefix("sha256:"),
         "artifact_set_digest": "b" * 64,
-        "model_identity": "vonk-forge/synthetic-tiny-fp16/e1e9de42be3e14bdb392cba65c9bbcbec6a4ea5b448597e0c32d187c5840029c",
+        "model_identity": model_identity,
         "rank": payload["rank"],
         "world_size": payload["world_size"],
         "endpoint": f"http://{payload['endpoint_address']}:{payload['port']}",
@@ -441,6 +452,15 @@ def setup_services(
             document["topology"]["mode"] = "distributed"
             document["topology"]["parallelism"]["backend"] = "mp"
             document["runtime"]["lifecycle"] = {
+                "failure": {
+                    "rank_loss": "withdraw-endpoint",
+                    "recovery": "restart-worker-then-entrypoint",
+                },
+                "readiness": {
+                    "strategy": "endpoint-owner-after-all-ranks",
+                    "path": "/v1/models",
+                    "timeout_seconds": 60,
+                },
                 "pre_start": [],
                 "post_stop": [],
                 "stop_timeout_seconds": 30,
