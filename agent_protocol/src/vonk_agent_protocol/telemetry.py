@@ -8,6 +8,7 @@ the observation payload cannot be mistaken for an unversioned map.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -21,6 +22,33 @@ from .contracts import (
 # The sender batches toward a smaller soft target. This is an authenticated
 # transport memory safeguard, not a limit on a valid metrics inventory.
 MAX_TELEMETRY_REPORT_BYTES = 16 * 1024 * 1024
+MAX_TELEMETRY_SCALAR_STRING_CHARS = 256
+MIN_TELEMETRY_SCALAR_INTEGER = -(2**63)
+MAX_TELEMETRY_SCALAR_INTEGER = 2**63 - 1
+
+
+def validate_telemetry_scalar(value: Any) -> Any:
+    """Validate and return one value from a rich telemetry series.
+
+    The telemetry value is a JSON scalar.  Keep this validator independent of
+    Pydantic and JSON Schema so agent parsing and Controller validation share
+    exactly the same numeric and text contract.
+    """
+    if value is None or isinstance(value, bool):
+        return value
+    if type(value) is int:
+        if not MIN_TELEMETRY_SCALAR_INTEGER <= value <= MAX_TELEMETRY_SCALAR_INTEGER:
+            raise ValueError("telemetry scalar integer is outside signed64 range")
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("telemetry scalar float must be finite")
+        return value
+    if type(value) is str:
+        if len(value) > MAX_TELEMETRY_SCALAR_STRING_CHARS:
+            raise ValueError("telemetry scalar string is too long")
+        return value
+    raise ValueError("telemetry value must be a JSON scalar")
 
 
 @dataclass(frozen=True)
@@ -32,6 +60,25 @@ class TelemetryReport:
     def parse(cls, raw: Any) -> TelemetryReport:
         if not isinstance(raw, Mapping):
             raise AgentProtocolError("telemetry report must be an object")
+        samples = raw.get("samples")
+        if isinstance(samples, (list, tuple)):
+            for sample in samples:
+                if not isinstance(sample, Mapping):
+                    continue
+                metrics = sample.get("metrics")
+                if not isinstance(metrics, Mapping):
+                    continue
+                series_items = metrics.get("series")
+                if not isinstance(series_items, (list, tuple)):
+                    continue
+                for series in series_items:
+                    if isinstance(series, Mapping) and "value" in series:
+                        try:
+                            validate_telemetry_scalar(series["value"])
+                        except ValueError as error:
+                            raise AgentProtocolError(
+                                "telemetry metric value is invalid"
+                            ) from error
         errors = list(schema_validator("telemetry-report.schema.json").iter_errors(raw))
         if errors:
             raise AgentProtocolError(
@@ -60,4 +107,11 @@ class TelemetryReport:
         return {"schema_version": self.schema_version, "samples": list(self.samples)}
 
 
-__all__ = ["TelemetryReport"]
+__all__ = [
+    "MAX_TELEMETRY_REPORT_BYTES",
+    "MAX_TELEMETRY_SCALAR_INTEGER",
+    "MAX_TELEMETRY_SCALAR_STRING_CHARS",
+    "MIN_TELEMETRY_SCALAR_INTEGER",
+    "TelemetryReport",
+    "validate_telemetry_scalar",
+]
