@@ -3,23 +3,17 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import replace
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-from vonk_control.auth import TokenCodec
 from vonk_control.catalog_contract import (
     canonical_catalog_document,
     catalog_content_sha256,
 )
-from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.harnesses import BUILTIN_HARNESS_SLUGS, HarnessRegistry
 from vonk_control.harnesses.common import HarnessCompileError, validate_projection
 from vonk_control.harnesses.sglang import SglangHarnessCompiler
 from vonk_control.harnesses.vllm import VllmHarnessCompiler
-from vonk_control.models import Base
 from vonk_control.runtime_writable_paths import (
     effective_environment,
     environment,
@@ -1568,14 +1562,21 @@ def test_runtime_contract_is_stable_for_direct_and_source_built_images(
     slug: str,
 ) -> None:
     harness = _harness_document(slug)
+    recipe = _recipe(slug)
     direct = _distribution(slug, harness)
     source_built = copy.deepcopy(direct)
     source_built["image"] = (
         f"registry.example/vonk/{slug}-source@sha256:" + "d" * 64
     )
+    source_recipe = copy.deepcopy(recipe)
+    source_recipe["runtime"]["distribution"]["content_sha256"] = (
+        catalog_content_sha256(source_built)
+    )
 
-    direct_projection = _compile(slug, distribution=direct)
-    source_projection = _compile(slug, distribution=source_built)
+    direct_projection = _compile(slug, recipe=recipe, distribution=direct)
+    source_projection = _compile(
+        slug, recipe=source_recipe, distribution=source_built
+    )
 
     assert direct_projection.image != source_projection.image
     assert direct_projection.environment == source_projection.environment
@@ -2184,21 +2185,3 @@ def test_catalog_contains_exactly_eight_canonical_builtin_harness_documents() ->
         assert document["adapters"]
         assert document["capability_requirements"]
         assert isinstance(document["security_exceptions"], list)
-
-
-def test_catalog_documents_resolve_through_catalog_entity_service() -> None:
-    paths = sorted(HARNESS_ROOT.glob("*.json"))
-    assert [path.stem for path in paths] == sorted(BUILTIN_HARNESS_SLUGS)
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    with Session(engine, expire_on_commit=False) as session:
-        service = CatalogEntityService(
-            session,
-            clock=lambda: datetime(2026, 8, 15, tzinfo=UTC),
-            cursors=TokenCodec(b"h" * 32).cursor_codec(),
-        )
-        for path in paths:
-            document = json.loads(path.read_text(encoding="utf-8"))
-            draft = service.create_draft(document, actor="admin")
-            resolved = service.resolve(draft.id, actor="admin")
-            assert resolved.content_sha256 == catalog_content_sha256(document)

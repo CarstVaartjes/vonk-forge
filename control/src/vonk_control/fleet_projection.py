@@ -72,6 +72,12 @@ _MAX_TELEMETRY_WORKLOADS = 128
 
 
 def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | None:
+    if (
+        revision.kind != "recipe"
+        or revision.schema_version != 2
+        or revision.state != "active"
+    ):
+        return None
     try:
         recipe = RecipeDefinition.model_validate(revision.document)
     except (TypeError, ValueError):
