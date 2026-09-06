@@ -64,6 +64,7 @@ from vonk_control.models import (
     Reconciliation,
     RoutePublication,
     RunNode,
+    RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
@@ -2652,10 +2653,11 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
         response.json()["detail"] == "recipe specification execution receipts are stale"
     )
 
+    receipt_id = str(uuid.uuid4())
     with services.sessions.begin() as session:
         session.add(
             RuntimeImageReceipt(
-                id=str(uuid.uuid4()),
+                id=receipt_id,
                 recipe_revision_id=revision_id,
                 source=source,
                 original_content_digest=digest,
@@ -2671,6 +2673,23 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
                 build_id=build_id,
                 verified_at=clock.now,
                 state="verified",
+            )
+        )
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision_id,
+                receipt_id=receipt_id,
+                source=source,
+                original_content_digest=digest,
+                effective_execution_key=payload["identity"]["execution_sha256"],
+                registry_manifest_digest=image["registry_manifest_digest"],
+                platform_manifest_digest=image["platform_manifest_digest"],
+                local_image_config_id=image["local_image_config_id"],
+                oci_archive_sha256=image["oci_layout_sha256"],
+                image_bytes=image["image_bytes"],
+                build_id=build_id,
+                authorized_at=clock.now,
+                state="authorized",
             )
         )
 

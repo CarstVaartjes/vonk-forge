@@ -1521,9 +1521,10 @@ class RecipeBuild(Base):
 class RuntimeImageReceipt(Base):
     """Controller verified image identity used by install and run admission.
 
-    A receipt keeps the original recipe provenance beside the effective image
-    identity.  This permits notes-only recipe revisions to reuse an unchanged
-    execution while retaining the exact source revision that was verified.
+    This row is the immutable artifact receipt.  Its recipe revision is the
+    revision whose executable image/build was actually verified.  A current
+    recipe revision that reuses these bytes is represented by
+    :class:`RuntimeImageAuthorization`, never by rewriting this row.
     """
 
     __tablename__ = "runtime_image_receipts"
@@ -1625,6 +1626,98 @@ class RuntimeImageReceipt(Base):
     build_id: Mapped[str | None] = mapped_column(String(36), index=True)
     verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default="verified", index=True)
+
+
+class RuntimeImageAuthorization(Base):
+    """Authorize one current recipe revision to consume one verified receipt.
+
+    The receipt and this binding intentionally duplicate the effective image
+    identity.  Comparing both copies at every boundary prevents a changed
+    current recipe, a stale receipt, or a coincidentally matching build from
+    becoming an implicit fallback.
+    """
+
+    __tablename__ = "runtime_image_authorizations"
+    __table_args__ = (
+        UniqueConstraint(
+            "recipe_revision_id",
+            "receipt_id",
+            name="uq_runtime_image_authorization_revision_receipt",
+        ),
+        CheckConstraint(
+            _lower_hex("original_content_digest", 64),
+            name="ck_runtime_image_authorizations_original_digest",
+        ),
+        CheckConstraint(
+            _lower_hex("effective_execution_key", 64),
+            name="ck_runtime_image_authorizations_execution_key",
+        ),
+        CheckConstraint(
+            _prefixed_digest("platform_manifest_digest"),
+            name="ck_runtime_image_authorizations_platform_digest",
+        ),
+        CheckConstraint(
+            _prefixed_digest("local_image_config_id"),
+            name="ck_runtime_image_authorizations_config_digest",
+        ),
+        CheckConstraint(
+            _lower_hex("oci_archive_sha256", 64),
+            name="ck_runtime_image_authorizations_archive_digest",
+        ),
+        CheckConstraint(
+            "image_bytes > 0",
+            name="ck_runtime_image_authorizations_image_bytes",
+        ),
+        CheckConstraint(
+            "source IN ('published','controller-build')",
+            name="ck_runtime_image_authorizations_source",
+        ),
+        CheckConstraint(
+            "state IN ('authorized','revoked')",
+            name="ck_runtime_image_authorizations_state",
+        ),
+        ForeignKeyConstraint(
+            ["recipe_revision_id"],
+            ["catalog_document_revisions.id"],
+            name="fk_runtime_image_authorizations_recipe_revision",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["receipt_id"],
+            ["runtime_image_receipts.id"],
+            name="fk_runtime_image_authorizations_receipt",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["build_id"],
+            ["recipe_builds.id"],
+            name="fk_runtime_image_authorizations_build",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "ix_runtime_image_authorizations_effective_identity",
+            "effective_execution_key",
+            "platform_manifest_digest",
+            "local_image_config_id",
+            "oci_archive_sha256",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    recipe_revision_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    receipt_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    original_content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    effective_execution_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    registry_manifest_digest: Mapped[str | None] = mapped_column(String(71), index=True)
+    platform_manifest_digest: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
+    local_image_config_id: Mapped[str] = mapped_column(String(71), nullable=False, index=True)
+    oci_archive_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    image_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    build_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    authorized_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="authorized", index=True)
 
 
 class ClusterMapping(Base):

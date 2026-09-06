@@ -9,9 +9,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
-from vonk_control.models import Base
+from vonk_control.models import (
+    Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
+    RecipeBuild,
+    RuntimeImageAuthorization,
+)
 from vonk_control.models import RuntimeImageReceipt as RuntimeImageReceiptRow
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -22,7 +28,7 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
     resolve_persisted_runtime_image_receipt,
 )
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
 PLATFORM_IMAGE_DIGEST = "sha256:" + "e" * 64
@@ -38,6 +44,35 @@ def _recipe(name: str) -> RecipeDefinition:
 
 def _runtime() -> dict[str, str]:
     return {"architecture": "linux/arm64", "interface": "vonk.runtime.v1"}
+
+
+def _add_revision(
+    session: Session,
+    revision_id: str,
+    recipe: RecipeDefinition,
+    *,
+    number: int = 1,
+    state: str = "active",
+) -> None:
+    session.add(
+        CatalogDocumentRevision(
+            id=revision_id,
+            document_id="document-" + revision_id,
+            kind="recipe",
+            publisher=recipe.identity.publisher,
+            slug=recipe.identity.slug,
+            revision_number=number,
+            schema_version=2,
+            state=state,
+            document=recipe.model_dump(mode="json"),
+            content_digest=content_sha256(recipe),
+            artifact_key="b" * 64,
+            execution_key="a" * 64,
+            projected={},
+            created_by="test",
+            created_at=datetime.now(UTC),
+        )
+    )
 
 
 class TinyTransport:
@@ -327,6 +362,24 @@ def test_source_build_uses_same_normalized_receipt_and_preserves_provenance(
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     with Session(engine) as session:
+        _add_revision(session, "revision-source", _recipe("recipe-source-build.json"))
+        session.add(
+            RecipeBuild(
+                id="build-7",
+                recipe_revision_id="revision-source",
+                builder_node_id="builder",
+                source_bundle_sha256="c" * 64,
+                build_input_sha256="d" * 64,
+                state="succeeded",
+                policy_report={},
+                plan={},
+                image_digest=BUILT_IMAGE_DIGEST,
+                oci_layout_sha256=ARCHIVE_DIGEST,
+                image_bytes=len(ARCHIVE),
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            )
+        )
         row = persist_runtime_image_receipt(
             session,
             recipe_revision_id="revision-source",
@@ -432,6 +485,7 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
     execution_key = "f" * 64
     first_at = datetime.now(UTC)
     with Session(engine) as session:
+        _add_revision(session, revision_id, _recipe("recipe-image.json"))
         row = persist_runtime_image_receipt(
             session,
             recipe_revision_id=revision_id,
@@ -490,32 +544,280 @@ def test_persisted_receipt_resolver_requires_the_exact_filesystem_identity(
     )
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    kwargs = {
+    persist_kwargs = {
         "recipe_revision_id": "revision-direct",
         "original_content_digest": receipt.distribution_content_sha256,
         "effective_execution_key": "f" * 64,
         "receipt": receipt,
     }
+    resolve_kwargs = {
+        "recipe_revision_id": "revision-direct",
+        "current_content_digest": receipt.distribution_content_sha256,
+        "effective_execution_key": "f" * 64,
+        "receipt": receipt,
+    }
     session = Session(engine)
+    _add_revision(session, "revision-direct", _recipe("recipe-image.json"))
+    session.flush()
     with pytest.raises(ValueError, match="does not match"):
-        resolve_persisted_runtime_image_receipt(session, **kwargs)
+        resolve_persisted_runtime_image_receipt(session, **resolve_kwargs)
     persist_runtime_image_receipt(
         session,
-        **kwargs,
+        **persist_kwargs,
         verified_at=datetime.now(UTC),
     )
     session.commit()
     session.close()
     with Session(engine) as session:
-        assert resolve_persisted_runtime_image_receipt(session, **kwargs).source == "published"
+        assert resolve_persisted_runtime_image_receipt(session, **resolve_kwargs).source == "published"
         session.query(RuntimeImageReceiptRow).update({"local_image_config_id": "sha256:" + "d" * 64})
         session.commit()
     session = Session(engine)
     with pytest.raises(ValueError, match="does not match"):
-        resolve_persisted_runtime_image_receipt(session, **kwargs)
+        resolve_persisted_runtime_image_receipt(session, **resolve_kwargs)
     session.close()
 
 
+def test_notes_revision_reuses_original_receipt_with_separate_authorization(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    original = _recipe("recipe-image.json")
+    revised_raw = original.model_dump(mode="json")
+    revised_raw["metadata"]["description"] = "Editorial notes only"
+    revised = RecipeDefinition.model_validate(revised_raw)
+    receipt = prepare_runtime_image(original, runtime=_runtime(), storage=storage, transport=TinyTransport())
+    old_digest = content_sha256(original)
+    new_digest = content_sha256(revised)
+    old_id, new_id, document_id = "old-revision", "new-revision", "recipe-document"
+    now = datetime.now(UTC)
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            CatalogDocument(
+                id=document_id,
+                kind="recipe",
+                publisher=original.identity.publisher,
+                slug=original.identity.slug,
+                title=original.metadata.title,
+                created_by="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.flush()
+        session.add_all(
+            [
+                CatalogDocumentRevision(
+                    id=old_id,
+                    document_id=document_id,
+                    kind="recipe",
+                    publisher=original.identity.publisher,
+                    slug=original.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=original.model_dump(mode="json"),
+                    content_digest=old_digest,
+                    projected={
+                        "source_bundle_sha256": "c" * 64,
+                        "package_handle": {"sha256": "1" * 64},
+                    },
+                    artifact_key="b" * 64,
+                    execution_key="a" * 64,
+                    created_by="test",
+                    created_at=now,
+                ),
+                CatalogDocumentRevision(
+                    id=new_id,
+                    document_id=document_id,
+                    kind="recipe",
+                    publisher=revised.identity.publisher,
+                    slug=revised.identity.slug,
+                    revision_number=2,
+                    schema_version=2,
+                    state="active",
+                    document=revised.model_dump(mode="json"),
+                    content_digest=new_digest,
+                    projected={
+                        "source_bundle_sha256": "c" * 64,
+                        "package_handle": {"sha256": "2" * 64},
+                    },
+                    artifact_key="b" * 64,
+                    execution_key="a" * 64,
+                    created_by="test",
+                    created_at=now,
+                ),
+            ]
+        )
+        session.flush()
+        persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=old_id,
+            original_content_digest=old_digest,
+            effective_execution_key="a" * 64,
+            receipt=receipt,
+            verified_at=now,
+        )
+        persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=new_id,
+            original_content_digest=old_digest,
+            effective_execution_key="a" * 64,
+            receipt=receipt,
+            verified_at=now,
+        )
+        session.commit()
+        assert session.query(RuntimeImageReceiptRow).count() == 1
+        assert session.query(RuntimeImageAuthorization).count() == 2
+        assert (
+            resolve_persisted_runtime_image_receipt(
+                session,
+                recipe_revision_id=new_id,
+                current_content_digest=new_digest,
+                effective_execution_key="a" * 64,
+                receipt=receipt,
+            ).original_content_digest
+            == old_digest
+        )
+        with pytest.raises(ValueError, match="current recipe revision digest"):
+            resolve_persisted_runtime_image_receipt(
+                session,
+                recipe_revision_id=new_id,
+                current_content_digest=old_digest,
+                effective_execution_key="a" * 64,
+                receipt=receipt,
+            )
+        authorization = session.scalar(
+            select(RuntimeImageAuthorization).where(
+                RuntimeImageAuthorization.recipe_revision_id == new_id
+            )
+        )
+        assert authorization is not None
+        authorization.state = "revoked"
+        with pytest.raises(ValueError, match="not authorized"):
+            resolve_persisted_runtime_image_receipt(
+                session,
+                recipe_revision_id=new_id,
+                current_content_digest=new_digest,
+                effective_execution_key="a" * 64,
+                receipt=receipt,
+            )
+        with pytest.raises(RuntimeImagePreparationError, match="execution identity"):
+            persist_runtime_image_receipt(
+                session,
+                recipe_revision_id=new_id,
+                original_content_digest=old_digest,
+                effective_execution_key="b" * 64,
+                receipt=receipt,
+                verified_at=now,
+            )
+
+
+def test_runtime_image_authority_fails_closed_for_missing_or_revoked_bindings(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-image.json")
+    digest = content_sha256(recipe)
+    revision_id = "authority-revision"
+    now = datetime.now(UTC)
+    receipt = prepare_runtime_image(
+        recipe,
+        runtime=_runtime(),
+        storage=FilesystemRuntimeImageStorage(tmp_path / "authority-receipt"),
+        transport=TinyTransport(),
+    )
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        _add_revision(session, revision_id, recipe)
+        with pytest.raises(RuntimeImagePreparationError, match="unavailable or inactive"):
+            persist_runtime_image_receipt(
+                session,
+                recipe_revision_id="missing-revision",
+                original_content_digest=digest,
+                effective_execution_key="a" * 64,
+                receipt=receipt,
+                verified_at=now,
+            )
+        row = persist_runtime_image_receipt(
+            session,
+            recipe_revision_id=revision_id,
+            original_content_digest=digest,
+            effective_execution_key="a" * 64,
+            receipt=receipt,
+            verified_at=now,
+        )
+        authorization = session.scalar(
+            select(RuntimeImageAuthorization).where(
+                RuntimeImageAuthorization.recipe_revision_id == revision_id
+            )
+        )
+        assert authorization is not None
+        authorization.state = "revoked"
+        with pytest.raises(RuntimeImagePreparationError, match="not active"):
+            persist_runtime_image_receipt(
+                session,
+                recipe_revision_id=revision_id,
+                original_content_digest=digest,
+                effective_execution_key="a" * 64,
+                receipt=receipt,
+                verified_at=now,
+            )
+        authorization.state = "authorized"
+        row.state = "revoked"
+        with pytest.raises(RuntimeImagePreparationError, match="not verified"):
+            persist_runtime_image_receipt(
+                session,
+                recipe_revision_id=revision_id,
+                original_content_digest=digest,
+                effective_execution_key="a" * 64,
+                receipt=receipt,
+                verified_at=now,
+            )
+
+
+def test_runtime_image_authority_rejects_changed_current_execution_identity(
+    tmp_path: Path,
+) -> None:
+    original = _recipe("recipe-image.json")
+    revised_raw = original.model_dump(mode="json")
+    revised_raw["metadata"]["description"] = "Changed execution"
+    revised = RecipeDefinition.model_validate(revised_raw)
+    now = datetime.now(UTC)
+    receipt = prepare_runtime_image(
+        original,
+        runtime=_runtime(),
+        storage=FilesystemRuntimeImageStorage(tmp_path / "authority-execution"),
+        transport=TinyTransport(),
+    )
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        _add_revision(session, "original-execution", original)
+        _add_revision(
+            session,
+            "changed-execution",
+            revised,
+            number=2,
+            state="candidate",
+        )
+        session.flush()
+        current = session.get(CatalogDocumentRevision, "changed-execution")
+        assert current is not None
+        current.execution_key = "c" * 64
+        current.state = "active"
+        session.flush()
+        with pytest.raises(RuntimeImagePreparationError, match="execution or artifact identity changed"):
+            persist_runtime_image_receipt(
+                session,
+                recipe_revision_id="changed-execution",
+                original_content_digest=content_sha256(original),
+                effective_execution_key="a" * 64,
+                receipt=receipt,
+                verified_at=now,
+            )
 def test_receipt_persistence_failure_is_retryable_from_verified_filesystem_state(
     tmp_path: Path,
 ) -> None:

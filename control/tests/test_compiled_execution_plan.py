@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 from datetime import UTC, datetime, timedelta
+from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -34,8 +35,14 @@ from vonk_control.models import (
     AgentCertificate,
     AgentNode,
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
+    ClusterMapping,
+    ClusterMappingNode,
     InstallationNode,
     RecipeInstallation,
+    RuntimeImageAuthorization,
+    RuntimeImageReceipt,
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.recipe_operations import _compiled_plan_for_start
@@ -427,7 +434,20 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
         source_bundles=SourceBundleStore(tmp_path / "bundles"),
     )
     services.artifact_root.mkdir()
-    spec = _spec()
+    original_recipe = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-image.json")
+        .read_text()
+    )
+    from vonk_forge_contracts import RecipeDefinition, content_sha256
+
+    original = RecipeDefinition.model_validate(original_recipe)
+    revised_data = original.model_dump(mode="json")
+    revised_data["metadata"]["description"] = "Agent spec editorial revision"
+    revised = RecipeDefinition.model_validate(revised_data)
+    original_digest = content_sha256(original)
+    current_digest = content_sha256(revised)
+    spec = _spec(recipe_digest=current_digest)
     payload = _compile(spec).to_compiled_launch_payload(
         spec,
         placement={
@@ -443,6 +463,13 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
         },
     )
     installation_id = str(uuid4())
+    revision_id = str(uuid4())
+    original_revision_id = str(uuid4())
+    document_id = str(uuid4())
+    mapping_id = str(uuid4())
+    receipt_id = str(uuid4())
+    effective_execution_key = payload["identity"]["execution_sha256"]
+    runtime_image = payload["runtime_image"]
     with sessions.begin() as session:
         session.add(AgentNode(node_id=node_id, state="active", capabilities=[]))
         session.add(
@@ -457,12 +484,125 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
             )
         )
         session.add(
+            CatalogDocument(
+                id=document_id,
+                kind="recipe",
+                publisher=original.identity.publisher,
+                slug=original.identity.slug,
+                title=original.metadata.title,
+                created_by="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add_all(
+            [
+                CatalogDocumentRevision(
+                    id=original_revision_id,
+                    document_id=document_id,
+                    kind="recipe",
+                    publisher=original.identity.publisher,
+                    slug=original.identity.slug,
+                    revision_number=1,
+                    schema_version=2,
+                    state="active",
+                    document=original.model_dump(mode="json"),
+                    content_digest=original_digest,
+                    artifact_key="b" * 64,
+                    execution_key="c" * 64,
+                    projected={"source_bundle_sha256": "d" * 64},
+                    created_by="test",
+                    created_at=now,
+                ),
+                CatalogDocumentRevision(
+                    id=revision_id,
+                    document_id=document_id,
+                    kind="recipe",
+                    publisher=revised.identity.publisher,
+                    slug=revised.identity.slug,
+                    revision_number=2,
+                    schema_version=2,
+                    state="active",
+                    document=revised.model_dump(mode="json"),
+                    content_digest=current_digest,
+                    artifact_key="b" * 64,
+                    execution_key="c" * 64,
+                    projected={"source_bundle_sha256": "d" * 64},
+                    created_by="test",
+                    created_at=now,
+                ),
+            ]
+        )
+        session.add(
+            ClusterMapping(
+                id=mapping_id,
+                recipe_revision_id=revision_id,
+                topology_name="solo",
+                generation=1,
+                node_count=1,
+                state="ready",
+                parameters={},
+                placement_digest="e" * 64,
+                endpoint_owner_node_id=node_id,
+                created_by="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            ClusterMappingNode(
+                mapping_id=mapping_id,
+                node_id=node_id,
+                rank=0,
+                role="entrypoint",
+                endpoint_owner=True,
+                created_at=now,
+            )
+        )
+        session.add(
+            RuntimeImageReceipt(
+                id=receipt_id,
+                recipe_revision_id=original_revision_id,
+                source="published",
+                original_content_digest=original_digest,
+                effective_execution_key=effective_execution_key,
+                registry_manifest_digest=runtime_image["registry_manifest_digest"],
+                platform_manifest_digest=runtime_image["platform_manifest_digest"],
+                local_image_config_id=runtime_image["local_image_config_id"],
+                oci_archive_sha256=runtime_image["oci_layout_sha256"],
+                image_bytes=runtime_image["image_bytes"],
+                architecture=runtime_image["architecture"],
+                runtime_interface=runtime_image["runtime_interface"],
+                runtime_interface_label=runtime_image["runtime_interface_label"],
+                build_id=None,
+                verified_at=now,
+                state="verified",
+            )
+        )
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision_id,
+                receipt_id=receipt_id,
+                source="published",
+                original_content_digest=original_digest,
+                effective_execution_key=effective_execution_key,
+                registry_manifest_digest=runtime_image["registry_manifest_digest"],
+                platform_manifest_digest=runtime_image["platform_manifest_digest"],
+                local_image_config_id=runtime_image["local_image_config_id"],
+                oci_archive_sha256=runtime_image["oci_layout_sha256"],
+                image_bytes=runtime_image["image_bytes"],
+                build_id=None,
+                authorized_at=now,
+                state="authorized",
+            )
+        )
+        session.add(
             RecipeInstallation(
                 id=installation_id,
-                recipe_revision_id=str(uuid4()),
-                mapping_id=str(uuid4()),
+                recipe_revision_id=revision_id,
+                mapping_id=mapping_id,
                 mapping_generation=1,
-                recipe_build_id=str(uuid4()),
+                recipe_build_id=None,
                 image_digest=payload["runtime_image"]["image_digest"],
                 plan_digest="a" * 64,
                 plan={"compiled_execution_plans": {node_id: payload}},

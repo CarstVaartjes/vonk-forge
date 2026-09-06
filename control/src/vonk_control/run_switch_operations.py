@@ -40,6 +40,7 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
     RunNode,
+    RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
 from .preparation_contract import (
@@ -2261,6 +2262,30 @@ class RunSwitchOperationService:
                 and build.image_bytes is not None
             ):
                 return build
+        # A notes-only source-build revision may have a succeeded build whose
+        # original receipt belongs to an older revision.  Only reuse it when
+        # the current revision has an explicit authorization binding; this
+        # keeps execution/image changes from selecting a coincident build.
+        authorized_build_id = session.scalar(
+            select(RuntimeImageAuthorization.build_id)
+            .where(
+                RuntimeImageAuthorization.recipe_revision_id == revision_id,
+                RuntimeImageAuthorization.source == "controller-build",
+                RuntimeImageAuthorization.state == "authorized",
+                RuntimeImageAuthorization.build_id.is_not(None),
+            )
+            .order_by(RuntimeImageAuthorization.authorized_at.desc())
+            .limit(1)
+        )
+        if isinstance(authorized_build_id, str):
+            build = session.get(RecipeBuild, authorized_build_id)
+            if (
+                build is not None
+                and build.state == "succeeded"
+                and build.image_digest is not None
+                and build.image_bytes is not None
+            ):
+                return build
         return session.scalar(
             select(RecipeBuild)
             .where(
@@ -2473,10 +2498,15 @@ class RunSwitchOperationService:
             # resolves and persists the exact effective key before planning.
             direct_receipt = session.scalar(
                 select(RuntimeImageReceipt)
+                .join(
+                    RuntimeImageAuthorization,
+                    RuntimeImageAuthorization.receipt_id == RuntimeImageReceipt.id,
+                )
                 .where(
-                    RuntimeImageReceipt.recipe_revision_id == revision.id,
+                    RuntimeImageAuthorization.recipe_revision_id == revision.id,
+                    RuntimeImageAuthorization.source == "published",
+                    RuntimeImageAuthorization.state == "authorized",
                     RuntimeImageReceipt.source == "published",
-                    RuntimeImageReceipt.original_content_digest == revision.content_digest,
                     RuntimeImageReceipt.registry_manifest_digest == published_digest,
                     RuntimeImageReceipt.architecture == "linux-arm64",
                     RuntimeImageReceipt.runtime_interface == "vonk.runtime.v1",

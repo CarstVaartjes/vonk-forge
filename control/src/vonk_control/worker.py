@@ -416,7 +416,8 @@ if __name__ == "__main__":
     settings = WorkerSettings.from_env_and_secrets()
     wait_for_database(settings.database_url)
     sessions = session_factory(build_engine(settings.database_url))
-    clock = lambda: datetime.now(UTC)
+    def clock() -> datetime:
+        return datetime.now(UTC)
     jobs = JobService(sessions, clock=clock)
     address_policy = ManagementAddressPolicy.parse(
         settings.management_cidrs,
@@ -552,7 +553,7 @@ if __name__ == "__main__":
             resolve_persisted_runtime_image_receipt(
                 session,
                 recipe_revision_id=revision.id,
-                original_content_digest=recipe_digest,
+                current_content_digest=recipe_digest,
                 effective_execution_key=execution_key,
                 receipt=receipt,
             )
