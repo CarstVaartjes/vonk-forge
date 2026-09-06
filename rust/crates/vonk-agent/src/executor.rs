@@ -25,7 +25,7 @@ use crate::{
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
-    workloads::{Placement, image_digest},
+    workloads::Placement,
 };
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
@@ -486,16 +486,37 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     let _ = progress_client.heartbeat(&progress).await;
                 }
             });
-            let download = self
-                .client
-                .download_distribution_with_progress(
-                    &request.plan_digest,
-                    &destination,
-                    move |item| {
-                        let _ = progress_sender.send(item);
-                    },
-                )
-                .await;
+            let download = {
+                let mut result = None;
+                for attempt in 0..3_u32 {
+                    let progress_sender = progress_sender.clone();
+                    let current = self
+                        .client
+                        .download_distribution_with_progress(
+                            &request.plan_digest,
+                            &destination,
+                            move |item| {
+                                let _ = progress_sender.send(item);
+                            },
+                        )
+                        .await;
+                    match current {
+                        Ok(value) => {
+                            result = Some(Ok(value));
+                            break;
+                        }
+                        Err(error) if error.retryable() && attempt < 2 => {
+                            tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64))
+                                .await;
+                        }
+                        Err(error) => {
+                            result = Some(Err(error));
+                            break;
+                        }
+                    }
+                }
+                result.expect("bounded distribution retry always records a result")
+            };
             let _ = progress_task.await;
             return match download {
                 Ok(evidence) => {
@@ -604,16 +625,31 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                             Ok(path) => path,
                             Err(_) => return failed("image import staging is unavailable"),
                         };
-                        if self
-                            .client
-                            .download_artifact(
-                                &request.oci_layout_sha256,
-                                request.image_bytes,
-                                &staging,
-                            )
-                            .await
-                            .is_err()
-                        {
+                        let mut downloaded = false;
+                        for attempt in 0..3_u32 {
+                            match self
+                                .client
+                                .download_artifact(
+                                    &request.oci_layout_sha256,
+                                    request.image_bytes,
+                                    &staging,
+                                )
+                                .await
+                            {
+                                Ok(()) => {
+                                    downloaded = true;
+                                    break;
+                                }
+                                Err(error) if error.retryable() && attempt < 2 => {
+                                    tokio::time::sleep(Duration::from_millis(
+                                        100 * (attempt + 1) as u64,
+                                    ))
+                                    .await;
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        if !downloaded {
                             return failed("exact OCI image archive is unavailable");
                         }
                         match importer.retain_verified_archive(&request, &staging) {
@@ -709,8 +745,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     || request.timeout_seconds == 0
                     || request.timeout_seconds > job.timeout_seconds
                     || spec.endpoint.is_some()
-                    || image_digest(&spec.runtime.image)
-                        .is_none_or(|digest| format!("sha256:{digest}") != request.image_digest)
+                    || spec.runtime.image_digest != request.image_digest
                 {
                     return failed_job(
                         &request,
@@ -855,7 +890,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     }
                 };
                 for hook in plan.pre_start {
-                    let mut arguments = vec![plan.image_digest.clone()];
+                    let mut arguments = vec![
+                        plan.archive_sha256.clone(),
+                        plan.registry_index_digest.clone(),
+                        plan.platform_manifest_digest.clone(),
+                        plan.image_reference.clone(),
+                    ];
                     arguments.extend(hook);
                     if self
                         .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
@@ -872,7 +912,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 }
-                let mut arguments = vec![plan.image_digest];
+                let mut arguments = vec![
+                    plan.archive_sha256,
+                    plan.registry_index_digest,
+                    plan.platform_manifest_digest,
+                    plan.image_reference,
+                ];
                 arguments.extend(plan.main);
                 let outcome = run_interruptible_job(
                     self.execute_host_runtime_outcome(claim, HostRuntimeAction::Start, arguments),
@@ -1065,10 +1110,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if spec.identity.recipe_revision_sha256 != request.recipe_content_sha256
                     || spec.topology.role != request.role
                     || spec.topology.rank != request.rank
-                    || image_digest(&spec.runtime.image)
-                        .map(|value| format!("sha256:{value}"))
-                        .as_deref()
-                        != Some(request.image_digest.as_str())
+                    || spec.runtime.image_digest != request.image_digest
                 {
                     return failed("recipe specification does not match the accepted install");
                 }
@@ -1077,8 +1119,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         claim,
                         HostRuntimeAction::ImageInspect,
                         vec![
-                            spec.runtime.image.clone(),
-                            request.image_digest.clone(),
+                            spec.runtime_image.oci_layout_sha256.clone(),
+                            spec.runtime_image
+                                .registry_manifest_digest
+                                .clone()
+                                .unwrap_or_else(|| {
+                                    spec.runtime_image.platform_manifest_digest.clone()
+                                }),
+                            spec.runtime_image.platform_manifest_digest.clone(),
+                            spec.runtime_image.local_image_reference(),
                             spec.security.user.clone(),
                         ],
                     )
@@ -1223,7 +1272,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     return failed("retained workload unexpectedly contains start hooks");
                 }
                 for hook in plan.pre_start {
-                    let mut arguments = vec![plan.image_digest.clone()];
+                    let mut arguments = vec![
+                        plan.archive_sha256.clone(),
+                        plan.registry_index_digest.clone(),
+                        plan.platform_manifest_digest.clone(),
+                        plan.image_reference.clone(),
+                    ];
                     arguments.extend(hook);
                     if self
                         .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
@@ -1234,7 +1288,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         return failed("container runtime pre-start hook failed");
                     }
                 }
-                let mut arguments = vec![plan.image_digest];
+                let mut arguments = vec![
+                    plan.archive_sha256.clone(),
+                    plan.registry_index_digest.clone(),
+                    plan.platform_manifest_digest.clone(),
+                    plan.image_reference.clone(),
+                ];
                 arguments.extend(plan.main);
                 let runtime_guard_arguments = arguments.clone();
                 if collective_readiness {
@@ -1333,10 +1392,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "run_generation": request.run_generation,
                         "recipe_revision_id": request.recipe_revision_id.to_string(),
                         "recipe_content_sha256": request.recipe_content_sha256,
-                        "image_digest": image_digest(&spec.runtime.image).unwrap_or_default(),
+                        "image_digest": spec.runtime.image_digest,
                         "artifact_set_digest": artifact_set_digest,
                         "runtime_arguments_sha256": runtime_arguments_sha256,
-                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}@{}", artifact.repository, artifact.revision)).unwrap_or_default(),
+                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}/{}@{}", artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256)).unwrap_or_default(),
                         "rank": request.rank,
                         "role": request.role,
                         "world_size": request.world_size,
@@ -1440,10 +1499,10 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         "run_generation": request.run_generation,
                         "recipe_revision_id": request.recipe_revision_id.to_string(),
                         "recipe_content_sha256": request.recipe_content_sha256,
-                        "image_digest": image_digest(&spec.runtime.image).unwrap_or_default(),
+                        "image_digest": spec.runtime.image_digest,
                         "artifact_set_digest": artifact_set_digest,
                         "runtime_arguments_sha256": runtime_arguments_sha256,
-                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}@{}", artifact.repository, artifact.revision)).unwrap_or_default(),
+                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}/{}@{}", artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256)).unwrap_or_default(),
                         "rank": request.rank,
                         "role": request.role,
                         "world_size": request.world_size,
@@ -1467,9 +1526,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let evidence = HealthEvidence {
                     recipe_revision_id: request.recipe_revision_id.to_string(),
                     recipe_content_sha256: request.recipe_content_sha256,
-                    image_digest: image_digest(&spec.runtime.image)
-                        .unwrap_or_default()
-                        .to_owned(),
+                    image_digest: spec.runtime.image_digest.clone(),
                     artifact_set_digest: self
                         .runtime
                         .artifact_set_digest(&installation_id)
@@ -1477,7 +1534,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     model_identity: spec
                         .artifacts
                         .first()
-                        .map(|artifact| format!("{}@{}", artifact.repository, artifact.revision))
+                        .map(|artifact| {
+                            format!(
+                                "{}/{}@{}",
+                                artifact.model.publisher,
+                                artifact.model.slug,
+                                artifact.model.content_sha256
+                            )
+                        })
                         .unwrap_or_default(),
                     rank: request.rank,
                     world_size: request.world_size,
@@ -1524,9 +1588,24 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     failed("container runtime could not stop the workload")
                 } else {
-                    if let Some(image_digest) = plan.image_digest {
+                    if let (
+                        Some(archive_sha256),
+                        Some(registry_index_digest),
+                        Some(platform_manifest_digest),
+                        Some(image_reference),
+                    ) = (
+                        plan.archive_sha256,
+                        plan.registry_index_digest,
+                        plan.platform_manifest_digest,
+                        plan.image_reference,
+                    ) {
                         for hook in plan.post_stop {
-                            let mut arguments = vec![image_digest.clone()];
+                            let mut arguments = vec![
+                                archive_sha256.clone(),
+                                registry_index_digest.clone(),
+                                platform_manifest_digest.clone(),
+                                image_reference.clone(),
+                            ];
                             arguments.extend(hook);
                             if self
                                 .execute_host_runtime(claim, HostRuntimeAction::Stop, arguments)
@@ -1562,17 +1641,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 }
-                let removed_model_bytes = match request.cleanup_model_version_sha256 {
-                    Some(model_version_sha256) => self.runtime.uninstall_with_model_cleanup(
-                        &installation_id,
-                        &request.recipe_content_sha256,
-                        &model_version_sha256,
-                    ),
-                    None => self
-                        .runtime
-                        .uninstall(&installation_id, &request.recipe_content_sha256)
-                        .map(|()| 0),
-                };
+                if request.cleanup_model_version_sha256.is_some() {
+                    return failed("legacy model cleanup authority is not accepted");
+                }
+                let removed_model_bytes = self
+                    .runtime
+                    .uninstall(&installation_id, &request.recipe_content_sha256)
+                    .map(|()| 0);
                 if removed_model_bytes.is_err() {
                     failed("installed recipe could not be safely removed")
                 } else {
@@ -1586,29 +1661,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::ModelUninstall(request) => {
-                let installations = request
-                    .installations
-                    .into_iter()
-                    .map(|installation| {
-                        (
-                            installation.installation_id.to_string(),
-                            installation.recipe_content_sha256,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                match self
-                    .runtime
-                    .uninstall_model(&installations, &request.model_version_sha256)
-                {
-                    Ok(removed_model_bytes) => ExecutionResult {
-                        state: "succeeded",
-                        body: json!({
-                            "uninstalled_installations": installations.len(),
-                            "removed_model_bytes": removed_model_bytes,
-                        }),
-                    },
-                    Err(_) => failed("model dependencies could not be safely removed"),
-                }
+                let _ = request;
+                failed("legacy model uninstall authority is not accepted")
             }
         }
     }

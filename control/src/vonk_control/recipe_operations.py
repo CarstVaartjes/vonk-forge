@@ -3168,6 +3168,13 @@ def _compiled_plan_for_start(
             "reserved_memory_bytes": reserved,
         }
     )
+    security = payload.get("security")
+    if isinstance(security, dict):
+        security["network_mode"] = (
+            "bridge"
+            if endpoint_address is not None or master_port is not None
+            else "none"
+        )
     topology = payload.get("topology")
     if isinstance(topology, dict):
         topology.update({"rank": rank, "role": role, "world_size": world_size})

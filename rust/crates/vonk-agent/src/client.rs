@@ -21,7 +21,7 @@ use crate::{
     pair::{IssuedResponse, verify_ca_pin},
     runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
-    workloads::WorkloadSpec,
+    workloads::CompiledExecutionPlan,
 };
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
@@ -485,7 +485,10 @@ impl AgentHttpClient {
         Ok(response.grant)
     }
 
-    pub async fn recipe_spec(&self, installation_id: &str) -> Result<WorkloadSpec, ClientError> {
+    pub async fn recipe_spec(
+        &self,
+        installation_id: &str,
+    ) -> Result<CompiledExecutionPlan, ClientError> {
         if uuid::Uuid::parse_str(installation_id).is_err() {
             return Err(ClientError::Protocol);
         }
@@ -498,7 +501,7 @@ impl AgentHttpClient {
             .await?;
         classify_status(response.status())?;
         let body = bounded_body(response).await?;
-        let spec: WorkloadSpec =
+        let spec: CompiledExecutionPlan =
             serde_json::from_slice(&body).map_err(|_| ClientError::Protocol)?;
         spec.validate().map_err(|_| ClientError::Protocol)?;
         Ok(spec)

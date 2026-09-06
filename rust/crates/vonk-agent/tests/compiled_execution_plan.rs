@@ -3,170 +3,142 @@ use std::path::Path;
 use serde_json::{Value, json};
 use vonk_agent::workloads::{CompiledExecutionPlan, WorkloadError, materialized_model_path};
 
-fn plan() -> Value {
-    json!({
-        "schema_version": 2,
-        "recipe_revision_sha256": "a".repeat(64),
-        "harness_sha256": "b".repeat(64),
-        "execution_sha256": "c".repeat(64),
-        "model_artifact_set_sha256": "d".repeat(64),
-        "model_artifact_set_bytes": 7,
-        "artifacts": [{
-            "id": "config",
-            "selection_id": "primary",
-            "file_id": "config",
-            "path": "text_encoder/config.json",
-            "sha256": "e".repeat(64),
-            "bytes": 7,
-            "roles": ["entrypoint"],
-            "mount": {
-                "source": "/run/vonk/models/primary",
-                "target": "/models",
-                "read_only": true
-            },
-            "materialized_path": "/run/vonk/models/primary/text_encoder/config.json",
-            "model": {
-                "publisher": "vonk-forge",
-                "slug": "synthetic-model",
-                "content_sha256": "f".repeat(64)
-            },
-            "distribution_object": {
-                "name": "text_encoder/config.json",
-                "sha256": "e".repeat(64),
-                "bytes": 7,
-                "kind": "model"
-            }
-        }],
-        "runtime_image": {
-            "image_digest": format!("sha256:{}", "1".repeat(64)),
-            "oci_layout_sha256": "2".repeat(64),
-            "image_bytes": 4096,
-            "architecture": "linux-arm64",
-            "runtime_interface": "vonk.runtime.v1",
-            "source": "published",
-            "build_id": null,
-            "distribution_object": {
-                "name": "image.oci.tar",
-                "sha256": "2".repeat(64),
-                "bytes": 4096,
-                "kind": "oci-archive"
-            }
-        }
-    })
+fn fixture() -> Value {
+    serde_json::from_str(include_str!(
+        "../../../../control/tests/fixtures/compiled_workload_v2.json"
+    ))
+    .unwrap()
 }
 
 #[test]
-fn python_receipt_shape_round_trips_and_validates() {
-    let parsed: CompiledExecutionPlan = serde_json::from_value(plan()).unwrap();
-    parsed.validate().unwrap();
-    let round_trip = serde_json::to_value(parsed).unwrap();
-    assert_eq!(
-        round_trip["artifacts"][0]["materialized_path"],
-        "/run/vonk/models/primary/text_encoder/config.json"
+fn generated_python_workload_fixture_round_trips_through_rust() {
+    let value = fixture();
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    plan.validate().unwrap();
+    assert_eq!(plan.schema_version, 2);
+    assert_eq!(plan.runtime.executable, "/opt/vonk/bin/vllm");
+    assert_eq!(plan.artifacts.len(), 3);
+    assert_eq!(plan.artifacts[0].path, "config.json");
+    assert_eq!(plan.artifacts[1].path, "config.json");
+    assert_ne!(plan.artifacts[0].model, plan.artifacts[1].model);
+    assert_eq!(plan.artifacts[2].roles, ["entrypoint"]);
+    assert!(
+        plan.runtime
+            .argv
+            .contains(&"--served-model-name".to_owned())
     );
-    assert!(round_trip["artifacts"][0].get("repository").is_none());
+    assert_eq!(serde_json::to_value(plan).unwrap(), value);
 }
 
 #[test]
-fn materialization_preserves_nested_model_path() {
-    let parsed: CompiledExecutionPlan = serde_json::from_value(plan()).unwrap();
-    let path =
-        materialized_model_path(Path::new("/run/vonk/models"), &parsed.artifacts[0]).unwrap();
+fn endpoint_and_job_are_required_one_of_wire_keys() {
+    let mut value = fixture();
+    value.as_object_mut().unwrap().remove("endpoint");
+    assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_err());
+
+    let mut value = fixture();
+    value.as_object_mut().unwrap().remove("job");
+    assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_err());
+
+    let mut value = fixture();
+    value["job"] = json!({
+        "interface": "batch",
+        "input": null,
+        "output_path": "/outputs/result.json",
+        "timeout_seconds": 30
+    });
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    assert!(plan.validate().is_err());
+}
+
+#[test]
+fn materialized_paths_remain_selection_scoped() {
+    let plan: CompiledExecutionPlan = serde_json::from_value(fixture()).unwrap();
+    let primary =
+        materialized_model_path(Path::new("/run/vonk/models"), &plan.artifacts[0]).unwrap();
+    let draft = materialized_model_path(Path::new("/run/vonk/models"), &plan.artifacts[1]).unwrap();
+    assert_eq!(primary, Path::new("/run/vonk/models/primary/config.json"));
     assert_eq!(
-        path,
-        Path::new("/run/vonk/models/primary/text_encoder/config.json")
+        draft,
+        Path::new("/run/vonk/models/dependency-qwen3-8-27b-dspark-b3c99101/config.json")
     );
-    assert_eq!(parsed.artifacts[0].mount.source, "/run/vonk/models/primary");
+    assert_ne!(primary, draft);
 }
 
 #[test]
-fn empty_support_file_is_valid_but_empty_weight_is_rejected() {
-    let mut value = plan();
-    value["model_artifact_set_bytes"] = json!(0);
-    let artifact = &mut value["artifacts"][0];
-    artifact["path"] = json!("tokenizer_config.json");
-    artifact["file_id"] = json!("tokenizer-config");
-    artifact["id"] = json!("tokenizer-config");
-    artifact["sha256"] = json!(vonk_agent::workloads::EMPTY_SHA256);
-    artifact["bytes"] = json!(0);
-    artifact["materialized_path"] = json!("/run/vonk/models/primary/tokenizer_config.json");
-    artifact["distribution_object"]["name"] = json!("tokenizer_config.json");
-    artifact["distribution_object"]["sha256"] = json!(vonk_agent::workloads::EMPTY_SHA256);
-    artifact["distribution_object"]["bytes"] = json!(0);
-    let parsed: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
-    parsed.validate().unwrap();
-
-    value["artifacts"][0]["roles"] = json!(["weights"]);
-    let parsed: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+fn duplicate_selection_file_or_materialized_path_is_rejected() {
+    let mut value = fixture();
+    let duplicate = value["artifacts"][0].clone();
+    value["artifacts"] = serde_json::json!([duplicate.clone(), duplicate]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     assert!(matches!(
-        parsed.validate(),
+        plan.validate(),
+        Err(WorkloadError::Invalid("compiled model artifact identity"))
+    ));
+}
+
+#[test]
+fn valid_empty_support_file_is_admitted_and_empty_weight_is_rejected() {
+    let mut value = fixture();
+    value["identity"]["model_artifact_bytes"] = serde_json::json!(0);
+    let artifact = &mut value["artifacts"][0];
+    artifact["file_id"] = serde_json::json!("tokenizer-config");
+    artifact["path"] = serde_json::json!("tokenizer_config.json");
+    artifact["sha256"] = serde_json::json!(vonk_agent::workloads::EMPTY_SHA256);
+    artifact["size_bytes"] = serde_json::json!(0);
+    artifact["roles"] = serde_json::json!(["tokenizer"]);
+    artifact["distribution_object"] = serde_json::json!({
+        "name": "tokenizer_config.json",
+        "sha256": vonk_agent::workloads::EMPTY_SHA256,
+        "bytes": 0,
+        "kind": "model"
+    });
+    value["artifacts"] = serde_json::json!([artifact.clone()]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    plan.validate().unwrap();
+
+    value["artifacts"][0]["roles"] = serde_json::json!(["weights"]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    assert!(matches!(
+        plan.validate(),
         Err(WorkloadError::Invalid("compiled model artifact"))
     ));
 }
 
 #[test]
-fn retired_authority_and_duplicate_materialized_paths_are_rejected() {
-    let mut value = plan();
-    value["artifacts"][0]["repository"] = json!("huggingface/private");
+fn retired_upstream_authority_is_rejected_by_strict_serde() {
+    let mut value = fixture();
+    value["artifacts"][0]["repository"] = serde_json::json!("huggingface/private");
     assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_err());
-
-    let mut value = plan();
-    let duplicate_artifact = value["artifacts"][0].clone();
-    value["artifacts"]
-        .as_array_mut()
-        .unwrap()
-        .push(duplicate_artifact);
-    assert!(serde_json::from_value::<CompiledExecutionPlan>(value).is_ok());
-    let parsed: CompiledExecutionPlan = serde_json::from_value(plan()).unwrap();
-    let mut duplicate = serde_json::to_value(parsed).unwrap();
-    let duplicate_artifact = duplicate["artifacts"][0].clone();
-    duplicate["artifacts"]
-        .as_array_mut()
-        .unwrap()
-        .push(duplicate_artifact);
-    let parsed: CompiledExecutionPlan = serde_json::from_value(duplicate).unwrap();
-    assert!(parsed.validate().is_err());
 }
 
 #[test]
-fn model_files_with_the_same_relative_name_remain_selection_scoped() {
-    let mut value = plan();
-    value["model_artifact_set_bytes"] = json!(14);
-    value["artifacts"][0]["path"] = json!("config.json");
-    value["artifacts"][0]["materialized_path"] = json!("/run/vonk/models/primary/config.json");
-    value["artifacts"][0]["model"]["slug"] = json!("qwen3-8-27b");
-    value["artifacts"][0]["distribution_object"]["name"] = json!("config.json");
-    let mut second = value["artifacts"][0].clone();
-    second["id"] = json!("secondary-config");
-    second["selection_id"] = json!("secondary");
-    second["file_id"] = json!("config");
-    second["path"] = json!("config.json");
-    second["sha256"] = json!("1".repeat(64));
-    second["mount"]["source"] = json!("/run/vonk/models/secondary");
-    second["materialized_path"] = json!("/run/vonk/models/secondary/config.json");
-    second["model"]["slug"] = json!("qwen3-8-flash-next");
-    second["model"]["content_sha256"] = json!("2".repeat(64));
-    second["distribution_object"]["name"] = json!("config.json");
-    second["distribution_object"]["sha256"] = json!("1".repeat(64));
-    value["artifacts"].as_array_mut().unwrap().push(second);
-    let parsed: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    parsed.validate().unwrap();
-    assert_ne!(
-        parsed.artifacts[0].materialized_path,
-        parsed.artifacts[1].materialized_path
-    );
+fn opaque_argv_preserves_large_json_and_unicode_byte_boundaries() {
+    let mut value = fixture();
+    let compact_json = format!("{{\"payload\":\"{}\"}}", "x".repeat(4_090));
+    assert!(compact_json.len() > 4_096);
+    assert!(compact_json.len() <= 65_536);
+    let exact_unicode = "🙂".repeat(16_384);
+    assert_eq!(exact_unicode.len(), 65_536);
+    value["runtime"]["argv"] = json!(["serve", compact_json, exact_unicode]);
+
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    plan.validate().unwrap();
+    assert_eq!(serde_json::to_value(plan).unwrap(), value);
 }
 
 #[test]
-fn controller_built_image_receipt_requires_its_build_identity() {
-    let mut value = plan();
-    value["runtime_image"]["source"] = json!("controller-build");
-    value["runtime_image"]["build_id"] = json!("build-7");
-    let parsed: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    parsed.validate().unwrap();
+fn opaque_argv_rejects_nul_and_token_or_total_overflow() {
+    let mut value = fixture();
+    value["runtime"]["argv"] = json!([format!("{}x", "🙂".repeat(16_384))]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    assert!(plan.validate().is_err());
 
-    let mut invalid = serde_json::to_value(parsed).unwrap();
-    invalid["runtime_image"]["build_id"] = Value::Null;
-    let parsed: CompiledExecutionPlan = serde_json::from_value(invalid).unwrap();
-    assert!(parsed.validate().is_err());
+    value["runtime"]["argv"] = json!(["value\u{0000}"]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    assert!(plan.validate().is_err());
+
+    value["runtime"]["argv"] = json!(vec!["x".repeat(65_536); 17]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    assert!(plan.validate().is_err());
 }

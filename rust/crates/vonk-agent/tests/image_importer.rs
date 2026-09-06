@@ -40,7 +40,8 @@ fn exact_layout_is_verified_before_requesting_host_import() {
             request.oci_layout_sha256.clone(),
             "16".to_owned(),
             request.image_digest.clone(),
-            "localhost/vonk/recipe-build-00000000-0000-4000-8000-000000000001".to_owned(),
+            request.image_digest.clone(),
+            "localhost/vonk/recipe-build-00000000-0000-4000-8000-000000000001@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd".to_owned(),
         ]
     );
 }

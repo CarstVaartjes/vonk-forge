@@ -4,6 +4,7 @@ pub mod agent_upgrade;
 mod base_images;
 pub mod build_source;
 pub mod client;
+pub mod compiled_oci;
 pub mod config;
 pub mod executor;
 pub mod health;
