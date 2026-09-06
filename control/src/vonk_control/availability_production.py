@@ -140,6 +140,8 @@ def build_recipe_image_availability(
 
     def authority(
         revision_id: str,
+        *,
+        force: bool = False,
     ) -> tuple[RecipeDefinition, Mapping[str, object]]:
         with sessions() as session:
             revision = session.scalar(
@@ -165,55 +167,80 @@ def build_recipe_image_availability(
             package_handle: Mapping[str, object] | None = None
             builder_node_id: str | None = None
             if recipe.execution.mode == "build":
-                candidates = tuple(
-                    candidate
-                    for candidate in session.scalars(
-                        select(AgentNode)
-                        .where(AgentNode.state == "active")
-                        .order_by(AgentNode.id)
-                    )
-                    if candidate.architecture == "linux-arm64"
-                    and "recipe.build.v1" in (candidate.capabilities or ())
-                )
-                plans: list[tuple[int, str, Any]] = []
-                active_jobs = tuple(
-                    session.scalars(
-                        select(Job).where(
-                            Job.state.in_({"queued", "running", "partial"}),
-                            Job.kind.in_({"recipe.build.v1", "recipe.image.availability.v2"}),
-                        )
-                    )
-                )
-                for candidate in candidates:
+                resolution = None
+                resolve = getattr(recipe_builds, "resolve", None)
+                if callable(resolve):
                     try:
-                        candidate_plan = recipe_builds.plan(
-                            revision_id, candidate.id, now=clock()
+                        resolution = resolve(revision_id)
+                    except Exception as error:
+                        raise RecipeImageAvailabilityError(
+                            str(getattr(error, "code", "recipe_image.build_unavailable")),
+                            str(error)[:512],
+                            retryable=True,
+                            recovery_actions=("retry",),
+                        ) from error
+                if resolution is not None and resolution.cached and not force:
+                    if not isinstance(resolution.build_input_sha256, str):
+                        raise RecipeImageAvailabilityError(
+                            "recipe_image.build_input_missing",
+                            "cached Recipe build has no exact input identity",
                         )
-                    except Exception:
-                        continue
-                    active_work = 0
-                    for job in active_jobs:
-                        if job.kind == "recipe.build.v1" and candidate.id in (job.targets or ()):
-                            active_work += 1
-                        elif job.kind == "recipe.image.availability.v2":
-                            job_payload = job.payload if isinstance(job.payload, Mapping) else {}
-                            job_runtime = job_payload.get("runtime")
-                            if (
-                                job_payload.get("builder_node_id") == candidate.id
-                                or (
-                                    isinstance(job_runtime, Mapping)
-                                    and job_runtime.get("builder_node_id") == candidate.id
-                                )
-                            ):
-                                active_work += 1
-                    plans.append((active_work, candidate.id, candidate_plan))
-                if not plans:
-                    raise RecipeImageAvailabilityError(
-                        "recipe_image.build_unavailable",
-                        "no active compatible Recipe builder is available",
+                    package_handle = {"build_input_sha256": resolution.build_input_sha256}
+                else:
+                    # A new build still binds its final input identity only
+                    # after a compatible builder plan is admitted.
+                    plans: list[tuple[int, str, Any]] = []
+                    active_jobs = tuple(
+                        session.scalars(
+                            select(Job).where(
+                                Job.state.in_({"queued", "running", "partial"}),
+                                Job.kind.in_({"recipe.build.v1", "recipe.image.availability.v2"}),
+                            )
+                        )
                     )
-                _, builder_node_id, plan = min(plans, key=lambda item: (item[0], item[1]))
-                package_handle = {"build_input_sha256": plan.build_input_sha256}
+                    candidates = tuple(
+                        candidate
+                        for candidate in session.scalars(
+                            select(AgentNode)
+                            .where(AgentNode.state == "active")
+                            .order_by(AgentNode.id)
+                        )
+                        if candidate.architecture == "linux-arm64"
+                        and "recipe.build.v1" in (candidate.capabilities or ())
+                    )
+                    for candidate in candidates:
+                        try:
+                            try:
+                                candidate_plan = recipe_builds.plan(
+                                    revision_id, candidate.id, now=clock(), resolution=resolution
+                                )
+                            except TypeError:
+                                candidate_plan = recipe_builds.plan(
+                                    revision_id, candidate.id, now=clock()
+                                )
+                        except Exception:
+                            continue
+                        active_work = sum(
+                            1 for job in active_jobs
+                            if (
+                                job.kind == "recipe.build.v1"
+                                and candidate.id in (job.targets or ())
+                            )
+                            or (
+                                job.kind == "recipe.image.availability.v2"
+                                and isinstance(job.payload, Mapping)
+                                and isinstance(job.payload.get("runtime"), Mapping)
+                                and job.payload["runtime"].get("builder_node_id") == candidate.id
+                            )
+                        )
+                        plans.append((active_work, candidate.id, candidate_plan))
+                    if not plans:
+                        raise RecipeImageAvailabilityError(
+                            "recipe_image.build_unavailable",
+                            "no active compatible Recipe builder is available",
+                        )
+                    _, builder_node_id, plan = min(plans, key=lambda item: (item[0], item[1]))
+                    package_handle = {"build_input_sha256": plan.build_input_sha256}
             try:
                 runtime = _compile_consistent_runtime(
                     recipe,
@@ -233,7 +260,7 @@ def build_recipe_image_availability(
             result = dict(runtime) | {"recipe_revision_id": revision.id}
             if builder_node_id is not None:
                 result["builder_node_id"] = builder_node_id
-                assert package_handle is not None
+            if package_handle is not None and isinstance(package_handle.get("build_input_sha256"), str):
                 result["build_input_sha256"] = package_handle["build_input_sha256"]
             return recipe, result
 

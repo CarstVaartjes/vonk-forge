@@ -111,7 +111,7 @@ class RecipeAuthorityResolver(Protocol):
     """Refresh and resolve the selected canonical Recipe in one operation."""
 
     def __call__(
-        self, recipe_revision_id: str
+        self, recipe_revision_id: str, *, force: bool = False
     ) -> tuple[RecipeDefinition | Mapping[str, object], Mapping[str, object]]: ...
 
 
@@ -403,7 +403,12 @@ class RecipeImageAvailabilityService:
                 "recipe_image.metadata_refresh_unavailable", "latest recipe metadata could not be refreshed"
             )
         try:
-            raw_recipe, runtime = self._authority(recipe_revision_id)
+            try:
+                raw_recipe, runtime = self._authority(recipe_revision_id, force=force)
+            except TypeError:
+                # Preserve compatibility with test and plugin resolvers that
+                # predate the force-aware production seam.
+                raw_recipe, runtime = self._authority(recipe_revision_id)
         except RecipeImageAvailabilityError:
             raise
         except Exception as error:
@@ -880,6 +885,8 @@ class RecipeImageAvailabilityService:
                 active_payload = active.payload if isinstance(active.payload, Mapping) else {}
                 if active.state != "running":
                     continue
+                if isinstance(active_payload.get("image_result"), Mapping):
+                    continue
                 active_until = active_payload.get("claim_until")
                 if isinstance(active_until, str):
                     try:
@@ -908,9 +915,10 @@ class RecipeImageAvailabilityService:
                         except ValueError:
                             pass
                 mode = payload.get("execution_mode")
-                if mode == "build" and active_builds >= self._max_parallel_builds:
+                coordination_only = isinstance(payload.get("image_result"), Mapping)
+                if not coordination_only and mode == "build" and active_builds >= self._max_parallel_builds:
                     continue
-                if mode != "build" and active_pulls >= self._max_parallel:
+                if not coordination_only and mode != "build" and active_pulls >= self._max_parallel:
                     continue
                 operation.state = "running"
                 operation.current_attempt = int(operation.current_attempt) + 1
@@ -936,9 +944,9 @@ class RecipeImageAvailabilityService:
                         claim_owner=owner_id,
                     )
                 )
-                if mode == "build":
+                if not coordination_only and mode == "build":
                     active_builds += 1
-                else:
+                elif not coordination_only:
                     active_pulls += 1
                 if len(claims) >= limit:
                     break
