@@ -11,6 +11,7 @@ accept a similar-looking dictionary.
 | Published Model and Recipe | `vonk_forge_contracts.ModelDefinition` and `RecipeDefinition`, in `vonk-forge-recipes/contracts/src` | Catalog importer, Controller, compiler, authoring tools |
 | Controller API requests and responses | Controller Pydantic request/response models, including the `*_contract.py` modules | FastAPI, generated OpenAPI, web and CLI clients |
 | Controller–Spark messages | Shared `agent_protocol` wire contract | Controller and Rust `vonk-agent-protocol` |
+| Run artifact verification | `ArtifactVerificationResult` in `run_switch_contract.py` | Cached/distributed artifact verification producers and Run/Switch consumer |
 | Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
 
 Model and Recipe are the two **authoring** contracts. Operations, progress,
@@ -72,6 +73,13 @@ serialized identifiers, persisted progress, and the actual runtime importer.
 Do not substitute matching hand-written fixtures for the producer's output.
 For example, Docker's imported image ID, an archive config ID, and a registry
 manifest digest describe different objects and must not be assumed equal.
+
+An artifact verification result must include `verified_build_id`. A source
+build supplies the exact Controller build UUID; a published image supplies
+explicit `null`. Omitting the field is malformed, and a different build UUID
+cannot satisfy the requested run. The producer constructs
+`ArtifactVerificationResult`, and the consumer validates the serialized result
+through the same model before advancing the operation.
 
 A passing model validation test proves document structure. A passing connected
 lifecycle test proves the tested orchestration. Neither alone proves that every
