@@ -2459,7 +2459,13 @@ fn canonical_model_root(
     {
         return Err(OperationError::UnsafePath);
     }
-    for path in [agent_data, &installations, &model_root] {
+    let installation = model_root.parent().ok_or(OperationError::UnsafePath)?;
+    for path in [
+        agent_data.as_path(),
+        installations.as_path(),
+        installation,
+        model_root.as_path(),
+    ] {
         require_safe_directory(path, agent_data_owner_uid)?;
     }
     let canonical_agent_data = agent_data
@@ -2468,12 +2474,15 @@ fn canonical_model_root(
     let canonical_installations = installations
         .canonicalize()
         .map_err(|_| OperationError::UnsafePath)?;
+    let canonical_installation = installation
+        .canonicalize()
+        .map_err(|_| OperationError::UnsafePath)?;
     let canonical_models = model_root
         .canonicalize()
         .map_err(|_| OperationError::UnsafePath)?;
     if canonical_installations.parent() != Some(canonical_agent_data.as_path())
-        || canonical_models.parent().and_then(Path::parent)
-            != Some(canonical_installations.as_path())
+        || canonical_installation.parent() != Some(canonical_installations.as_path())
+        || canonical_models.parent() != Some(canonical_installation.as_path())
     {
         return Err(OperationError::UnsafePath);
     }
@@ -3008,6 +3017,19 @@ mod tests {
     fn runtime_fixture() -> (TempDir, ManagedRoots) {
         let temp = tempfile::tempdir().unwrap();
         let roots = ManagedRoots::under(&temp.path().join("data"));
+        initialize_runtime_fixture(&roots);
+        (temp, roots)
+    }
+
+    fn runtime_fixture_with_separate_agent_data() -> (TempDir, ManagedRoots) {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(&temp.path().join("data"))
+            .with_agent_data(&temp.path().join("agent-data"));
+        initialize_runtime_fixture(&roots);
+        (temp, roots)
+    }
+
+    fn initialize_runtime_fixture(roots: &ManagedRoots) {
         fs::create_dir_all(runtime_models(&roots).join("sha256")).unwrap();
         fs::create_dir_all(
             roots
@@ -3022,7 +3044,6 @@ mod tests {
         let metadata = roots.agent_data.join("run-metadata").join(RUN_ID);
         fs::create_dir_all(&metadata).unwrap();
         fs::write(metadata.join("runtime.json"), b"{}").unwrap();
-        (temp, roots)
     }
 
     fn artifact_path(roots: &ManagedRoots, key: char) -> PathBuf {
@@ -3778,7 +3799,7 @@ mod tests {
 
     #[test]
     fn runtime_accepts_installation_model_root_and_rejects_legacy_model_root() {
-        let (_temp, roots) = runtime_fixture();
+        let (_temp, roots) = runtime_fixture_with_separate_agent_data();
         let current_model = artifact_path(&roots, 'a');
         fs::create_dir_all(&current_model).unwrap();
         assert!(
@@ -3836,6 +3857,34 @@ mod tests {
             assert!(
                 validate_docker_run(
                     &runtime_arguments(&roots, &[(mount, "/models", true)]),
+                    &roots,
+                    None,
+                )
+                .is_err()
+            );
+        }
+
+        {
+            let (_temp, roots) = runtime_fixture_with_separate_agent_data();
+            let installation = roots
+                .agent_data
+                .join("installations")
+                .join("installation-1");
+            let sibling = roots
+                .agent_data
+                .join("installations")
+                .join("installation-2");
+            fs::create_dir_all(sibling.join("models").join("sha256")).unwrap();
+            fs::remove_dir_all(&installation).unwrap();
+            symlink(&sibling, &installation).unwrap();
+            let model = installation
+                .join("models")
+                .join("sha256")
+                .join("a".repeat(64));
+            fs::create_dir_all(&model).unwrap();
+            assert!(
+                validate_docker_run(
+                    &runtime_arguments(&roots, &[(model, "/models", true)]),
                     &roots,
                     None,
                 )
