@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
@@ -145,6 +147,7 @@ class LibraryModelIdentity(_StrictModel):
 
 
 class LibraryRecipeSummary(LibraryRecipeIdentity):
+    recipe_document: RecipeDefinition
     capabilities: list[Text64] = Field(max_length=64)
     topology_name: Text64 | None
     installations: list[LibraryInstallationSummary] = Field(max_length=64)
@@ -163,6 +166,7 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
 
 class LibraryModel(_StrictModel):
     model: LibraryModelIdentity
+    model_document: ModelDefinition
     page_local: Literal[True] = True
     recipes: list[LibraryRecipeSummary] = Field(
         min_length=0, max_length=_MAX_PAGE_RECIPES
@@ -173,7 +177,7 @@ class LibraryModel(_StrictModel):
 
 
 class LibrarySnapshot(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     generated_at: datetime
     models: list[LibraryModel] = Field(max_length=_MAX_PAGE_RECIPES)
     unlinked_recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
@@ -184,77 +188,11 @@ class LibrarySnapshot(_StrictModel):
 class LibraryRecipeList(_StrictModel):
     """Read-only overview of active canonical Recipe revisions."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     generated_at: datetime
     recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
     freshness_policy: FreshnessPolicy
-
-
-
-
-class RecipeDiskRequirements(_StrictModel):
-    image_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    artifact_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    staging_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    cache_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    rollback_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    safety_margin_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class RecipeMemoryRequirements(_StrictModel):
-    kind: Literal["unified", "host", "accelerator"]
-    startup_peak_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    steady_state_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    runtime_growth_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-    system_reserve_bytes: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class RecipeRole(_StrictModel):
-    name: Text64
-    count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    endpoint_owner: bool
-    artifacts: list[Text64] = Field(max_length=128)
-    disk: RecipeDiskRequirements
-    memory: RecipeMemoryRequirements
-
-
-class RecipeFabric(_StrictModel):
-    connectivity: Literal["none", "connected", "full_mesh", "switch"]
-    minimum_bandwidth_mbps: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
-
-
-class RecipeParallelism(_StrictModel):
-    tensor: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    pipeline: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    data: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    backend: Text64
-
-
-class RecipeTopology(_StrictModel):
-    name: Text64
-    mode: Text64
-    node_count: int = Field(ge=1, le=_MAX_SIGNED_BIGINT)
-    parallelism: RecipeParallelism
-    roles: list[RecipeRole] = Field(min_length=1, max_length=32)
-    fabric: RecipeFabric
-    start_order: list[Text64] = Field(max_length=32)
-    stop_order: list[Text64] = Field(max_length=32)
-
-
-class LibraryRecipeDefinition(_StrictModel):
-    """Canonical RecipeDefinition fields projected without legacy visual DTOs."""
-
-    execution: dict[str, object]
-    models: list[dict[str, object]] = Field(max_length=32)
-    runtime: dict[str, object]
-    interfaces: list[dict[str, object]] = Field(max_length=64)
-    settings: dict[str, object]
-    validation: dict[str, object]
-    release: dict[str, object]
-    provenance: dict[str, object]
-
-
 class OperationalBuild(_StrictModel):
     recipe_build_id: UuidId
     recipe_revision_id: UuidId
@@ -481,16 +419,21 @@ class TopologyPlacement(_StrictModel):
     reasons: list[ProjectionReason] = Field(max_length=16)
 
 
+class LibraryRecipeModel(_StrictModel):
+    selection: RecipeModelSelection
+    model_document: ModelDefinition
+
+
 class LibraryRecipeDetail(_StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     generated_at: datetime
     recipe: LibraryRecipeIdentity
-    definition: LibraryRecipeDefinition
+    definition: RecipeDefinition
     topology: RecipeTopology | None
     operational_state: OperationalState
     placement: list[TopologyPlacement] = Field(max_length=1)
     reasons: list[ProjectionReason] = Field(max_length=16)
-    model: LibraryModelIdentity | None = None
+    model_documents: list[LibraryRecipeModel] = Field(max_length=32)
     model_capabilities: LibraryCapabilityInventory = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )

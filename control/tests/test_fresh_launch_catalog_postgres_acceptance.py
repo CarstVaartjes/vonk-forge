@@ -553,14 +553,20 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
         detail = LibraryRecipeDetail.model_validate_json(detail_response.content)
         assert detail.recipe.content_sha256 == digest
         assert detail.recipe.slug == row["document"]["identity"]["slug"]
-        reference = row["document"]["models"][0]["model"]
-        assert detail.model is not None
-        assert detail.model.model_dump() == {
-            "kind": "model",
-            "publisher": reference["publisher"],
-            "slug": reference["slug"],
-            "content_sha256": reference["content_sha256"],
-        }
+        assert [entry.selection.model_dump() for entry in detail.model_documents] == row[
+            "document"
+        ]["models"]
+        assert [
+            entry.model_document.model_dump(mode="json")
+            for entry in detail.model_documents
+        ] == [
+            next(
+                model["document"]
+                for model in corpus.index["catalog_entities"]
+                if model["content_sha256"] == selection["model"]["content_sha256"]
+            )
+            for selection in row["document"]["models"]
+        ]
 
     from vonk_control.catalog_api import CATALOG_OPERATION_IDS
 

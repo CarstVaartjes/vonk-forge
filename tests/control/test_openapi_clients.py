@@ -72,6 +72,7 @@ def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None
     library_model = components["LibraryModel"]
     assert set(library_model["properties"]) == {
         "model",
+        "model_document",
         "model_capabilities",
         "page_local",
         "recipes",
@@ -79,18 +80,27 @@ def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None
     assert library_model["properties"]["model"] == {
         "$ref": "#/components/schemas/LibraryModelIdentity"
     }
+    assert library_model["properties"]["model_document"] == {
+        "$ref": "#/components/schemas/ModelDefinition"
+    }
     assert library_model["properties"]["model_capabilities"] == {
         "$ref": "#/components/schemas/LibraryCapabilityInventory"
     }
     assert components["LibraryRecipeSummary"]["properties"][
         "recipe_capabilities"
     ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
+    assert components["LibraryRecipeSummary"]["properties"]["recipe_document"] == {
+        "$ref": "#/components/schemas/RecipeDefinition"
+    }
     assert components["LibraryRecipeDetail"]["properties"][
         "model_capabilities"
     ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
     assert components["LibraryRecipeDetail"]["properties"][
         "recipe_capabilities"
     ] == {"$ref": "#/components/schemas/LibraryCapabilityInventory"}
+    assert components["LibraryRecipeDetail"]["properties"]["definition"] == {
+        "$ref": "#/components/schemas/RecipeDefinition"
+    }
     assert components["LibraryCapabilityInventory"]["properties"]["schema_version"][
         "const"
     ] == 2
@@ -117,6 +127,7 @@ def test_library_contract_uses_direct_canonical_model_and_recipe_facts() -> None
     assert "ModelVersionIdentity" not in components
     assert "LibraryModelVersionFacts" not in components
     assert "RecipeRevisionSummary" not in components
+    assert "LibraryRecipeDefinition" not in components
 
 
 def test_repair_manifest_is_v2_while_upgrade_package_remains_v1() -> None:
@@ -379,12 +390,40 @@ def test_generated_library_contract_has_one_recipe_topology_and_strict_identitie
     schema = json.loads(OPENAPI.read_text())["components"]["schemas"]
     detail = schema["LibraryRecipeDetail"]
 
-    assert set(detail["properties"]) >= {"topology", "placement", "definition"}
+    assert set(detail["properties"]) >= {
+        "topology",
+        "placement",
+        "definition",
+        "model_documents",
+    }
+    assert "model" not in detail["properties"]
+    assert "model_document" not in detail["properties"]
+    model_documents = detail["properties"]["model_documents"]
+    assert model_documents["type"] == "array"
+    assert model_documents["items"] == {
+        "$ref": "#/components/schemas/LibraryRecipeModel"
+    }
+    assert model_documents["maxItems"] == 32
+    assert set(schema["LibraryRecipeModel"]["properties"]) == {
+        "selection",
+        "model_document",
+    }
+    assert schema["LibraryRecipeModel"]["properties"]["selection"] == {
+        "$ref": "#/components/schemas/RecipeModelSelection"
+    }
+    assert schema["LibraryRecipeModel"]["properties"]["model_document"] == {
+        "$ref": "#/components/schemas/ModelDefinition"
+    }
     assert "profiles" not in detail["properties"]
-    definition = schema["LibraryRecipeDefinition"]
+    assert detail["properties"]["definition"] == {
+        "$ref": "#/components/schemas/RecipeDefinition"
+    }
+    definition = schema["RecipeDefinition"]
     assert set(definition["properties"]) >= {
-        "execution",
+        "identity",
+        "metadata",
         "models",
+        "execution",
         "runtime",
         "interfaces",
         "settings",
@@ -411,6 +450,27 @@ def test_generated_openapi_removes_retired_catalog_recipe_operations() -> None:
     assert "listPublicRecipes" not in operations
     assert "previewPublicRecipeImport" not in operations
     assert "importPublicRecipe" not in operations
+
+
+def test_generated_library_schema_uses_shared_authority_documents() -> None:
+    components = json.loads(OPENAPI.read_text())["components"]["schemas"]
+    forbidden = (
+        "PublicRecipe",
+        "LibraryRecipeDefinition",
+        "ModelVersion",
+        "Qualification",
+        "Readiness",
+        "RuntimeDistribution",
+    )
+    assert not any(
+        any(token in name for token in forbidden) for name in components
+    )
+    assert components["LibraryModel"]["properties"]["model_document"] == {
+        "$ref": "#/components/schemas/ModelDefinition"
+    }
+    assert components["LibraryRecipeSummary"]["properties"]["recipe_document"] == {
+        "$ref": "#/components/schemas/RecipeDefinition"
+    }
 
 
 def test_generated_library_contract_drops_legacy_visual_artifact_identity() -> None:

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from pydantic import ValidationError
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .auth import CursorCodec
 from .library_contract import (
@@ -15,121 +17,106 @@ from .library_contract import (
     LibraryCapabilityInventory,
     LibraryModel,
     LibraryModelIdentity,
-    LibraryRecipeDefinition,
     LibraryRecipeDetail,
     LibraryRecipeList,
+    LibraryRecipeModel,
     LibraryRecipeSummary,
     LibrarySnapshot,
     OperationalState,
-    RecipeDiskRequirements,
-    RecipeFabric,
-    RecipeMemoryRequirements,
-    RecipeParallelism,
-    RecipeRole,
-    RecipeTopology,
-    _bounded_text,
-    _saturating_nonnegative,
     _utc,
 )
 from .models import CatalogDocumentRevision
 
 
-def _topology(value: Mapping[str, object]) -> RecipeTopology:
-    roles: list[RecipeRole] = []
-    raw_roles = value.get("roles", [])
-    if not isinstance(raw_roles, list):
-        raise TypeError("recipe topology roles are invalid")
-    for raw_role in raw_roles:
-        if not isinstance(raw_role, Mapping):
-            raise TypeError("recipe topology role is invalid")
-        resources = raw_role.get("resources")
-        if not isinstance(resources, Mapping):
-            raise TypeError("recipe topology resources are invalid")
-        raw_disk = resources.get("disk")
-        raw_memory = resources.get("memory")
-        if not isinstance(raw_disk, Mapping) or not isinstance(raw_memory, Mapping):
-            raise TypeError("recipe topology resource dimensions are invalid")
-        roles.append(
-            RecipeRole(
-                name=_bounded_text(raw_role.get("name", ""), 64),
-                count=max(1, _saturating_nonnegative(raw_role.get("count", 1))),
-                endpoint_owner=bool(raw_role.get("endpoint_owner", False)),
-                artifacts=[
-                    _bounded_text(item, 64)
-                    for item in raw_role.get("artifacts", [])
-                    if isinstance(item, str)
-                ][:128],
-                disk=RecipeDiskRequirements(
-                    **{
-                        key: _saturating_nonnegative(item)
-                        for key, item in raw_disk.items()
-                        if key in RecipeDiskRequirements.model_fields
-                    }
-                ),
-                memory=RecipeMemoryRequirements(
-                    **{
-                        key: (
-                            item
-                            if key == "kind"
-                            else _saturating_nonnegative(item)
-                        )
-                        for key, item in raw_memory.items()
-                        if key in RecipeMemoryRequirements.model_fields
-                    }
-                ),
-            )
+class LibraryProjectionError(RuntimeError):
+    """The active catalog contains a document outside the public authority."""
+
+
+_MODEL_RESOURCE = "canonical-library-models"
+_RECIPE_RESOURCE = "canonical-library-recipes"
+_ORDER = "publisher/slug/content-digest-asc/v1"
+
+
+def _after_boundary(boundary: object) -> tuple[str, str, str]:
+    if (
+        not isinstance(boundary, list)
+        or len(boundary) != 3
+        or not all(isinstance(value, str) for value in boundary)
+    ):
+        raise ValueError("canonical library cursor is invalid")
+    return boundary[0], boundary[1], boundary[2]
+
+
+def _after_clause(boundary: tuple[str, str, str]):
+    publisher, slug, digest = boundary
+    return or_(
+        CatalogDocumentRevision.publisher > publisher,
+        and_(
+            CatalogDocumentRevision.publisher == publisher,
+            CatalogDocumentRevision.slug > slug,
+        ),
+        and_(
+            CatalogDocumentRevision.publisher == publisher,
+            CatalogDocumentRevision.slug == slug,
+            CatalogDocumentRevision.content_digest > digest,
+        ),
+    )
+
+
+def _canonical_document(
+    revision: CatalogDocumentRevision,
+    document_type: type[ModelDefinition | RecipeDefinition],
+) -> ModelDefinition | RecipeDefinition:
+    try:
+        document = document_type.model_validate(revision.document)
+    except ValidationError as error:
+        raise LibraryProjectionError(
+            f"active {revision.kind} document is not canonical"
+        ) from error
+    if content_sha256(document) != revision.content_digest:
+        raise LibraryProjectionError(
+            f"active {revision.kind} document digest does not match catalog authority"
         )
-    parallelism = value.get("parallelism")
-    fabric = value.get("fabric")
-    if not isinstance(parallelism, Mapping) or not isinstance(fabric, Mapping):
-        raise TypeError("recipe topology execution dimensions are invalid")
-    return RecipeTopology(
-        name=_bounded_text(value.get("name", ""), 64),
-        mode=_bounded_text(value.get("mode", ""), 64),
-        node_count=max(1, _saturating_nonnegative(value.get("node_count", 1))),
-        parallelism=RecipeParallelism(
-            tensor=max(1, _saturating_nonnegative(parallelism.get("tensor", 1))),
-            pipeline=max(1, _saturating_nonnegative(parallelism.get("pipeline", 1))),
-            data=max(1, _saturating_nonnegative(parallelism.get("data", 1))),
-            backend=_bounded_text(parallelism.get("backend", "unknown"), 64),
-        ),
-        roles=roles,
-        fabric=RecipeFabric(
-            connectivity=str(fabric.get("connectivity", "none")),
-            minimum_bandwidth_mbps=_saturating_nonnegative(
-                fabric.get("minimum_bandwidth_mbps", 0)
-            ),
-        ),
-        start_order=[
-            _bounded_text(item, 64)
-            for item in value.get("start_order", [])
-            if isinstance(item, str)
-        ][:32],
-        stop_order=[
-            _bounded_text(item, 64)
-            for item in value.get("stop_order", [])
-            if isinstance(item, str)
-        ][:32],
+    return document
+
+
+def _canonical_model(revision: CatalogDocumentRevision) -> ModelDefinition:
+    document = _canonical_document(revision, ModelDefinition)
+    assert isinstance(document, ModelDefinition)
+    return document
+
+
+def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition:
+    document = _canonical_document(revision, RecipeDefinition)
+    assert isinstance(document, RecipeDefinition)
+    return document
+
+
+def _model_identity(
+    revision: CatalogDocumentRevision, document: ModelDefinition
+) -> LibraryModelIdentity:
+    return LibraryModelIdentity(
+        kind="model",
+        publisher=document.identity.publisher,
+        slug=document.identity.slug,
+        content_sha256=revision.content_digest,
     )
 
 
 def _canonical_recipe_summary(
     revision: CatalogDocumentRevision,
+    document: RecipeDefinition,
 ) -> LibraryRecipeSummary:
-    document = revision.document if isinstance(revision.document, Mapping) else {}
-    metadata = document.get("metadata")
-    metadata = metadata if isinstance(metadata, Mapping) else {}
-    topology = document.get("topology")
-    topology = topology if isinstance(topology, Mapping) else {}
     return LibraryRecipeSummary(
         recipe_id=revision.document_id,
-        publisher=revision.publisher,
-        slug=revision.slug,
+        publisher=document.identity.publisher,
+        slug=document.identity.slug,
         content_sha256=revision.content_digest,
-        title=_bounded_text(metadata.get("title", revision.slug), 200),
-        description=_bounded_text(metadata.get("description", ""), 4_096),
+        title=document.metadata.title,
+        description=document.metadata.description,
+        recipe_document=document,
         capabilities=[],
-        topology_name=_bounded_text(topology.get("name", ""), 64) or None,
+        topology_name=document.topology.name,
         installations=[],
         installation_total_count=0,
         installation_returned_count=0,
@@ -180,22 +167,34 @@ class LibraryProjection:
     def list(self, *, limit: int = 100, cursor: str | None = None) -> LibrarySnapshot:
         if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
             raise ValueError("library limit is invalid")
+        context = {"limit": limit}
+        boundary = None
         if cursor is not None:
-            raise ValueError("canonical library pagination cursor is unsupported")
+            try:
+                boundary = _after_boundary(
+                    self._cursors.decode(
+                        cursor,
+                        resource=_MODEL_RESOURCE,
+                        order=_ORDER,
+                        context=context,
+                    )
+                )
+            except (TypeError, ValueError):
+                raise ValueError("canonical library cursor is invalid") from None
         with self._sessions() as session:
+            model_query = select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.state == "active",
+            )
+            if boundary is not None:
+                model_query = model_query.where(_after_clause(boundary))
             models = list(
                 session.scalars(
-                    select(CatalogDocumentRevision)
-                    .where(
-                        CatalogDocumentRevision.kind == "model",
-                        CatalogDocumentRevision.state == "active",
-                    )
-                    .order_by(
+                    model_query.order_by(
                         CatalogDocumentRevision.publisher,
                         CatalogDocumentRevision.slug,
                         CatalogDocumentRevision.content_digest,
-                    )
-                    .limit(limit)
+                    ).limit(limit + 1)
                 )
             )
             recipes = list(
@@ -212,37 +211,46 @@ class LibraryProjection:
                     )
                 )
             )
+        has_more = len(models) > limit
+        models = models[:limit]
+        next_cursor = None
+        if has_more:
+            last = models[-1]
+            next_cursor = self._cursors.encode(
+                resource=_MODEL_RESOURCE,
+                order=_ORDER,
+                context=context,
+                boundary=[last.publisher, last.slug, last.content_digest],
+            )
+        model_documents = {
+            revision.id: _canonical_model(revision) for revision in models
+        }
+        recipe_documents = {
+            revision.id: _canonical_recipe(revision) for revision in recipes
+        }
         grouped: dict[tuple[str, str, str], list[LibraryRecipeSummary]] = {}
         unlinked: list[LibraryRecipeSummary] = []
         for revision in recipes:
-            summary = _canonical_recipe_summary(revision)
-            document = revision.document
-            references = document.get("models", []) if isinstance(document, Mapping) else []
+            document = recipe_documents[revision.id]
+            summary = _canonical_recipe_summary(revision, document)
             linked = False
-            if isinstance(references, list):
-                for selection in references:
-                    reference = selection.get("model") if isinstance(selection, Mapping) else None
-                    if not isinstance(reference, Mapping):
-                        continue
-                    key = (
-                        str(reference.get("publisher", "")),
-                        str(reference.get("slug", "")),
-                        str(reference.get("content_sha256", "")),
-                    )
-                    grouped.setdefault(key, []).append(summary)
-                    linked = True
+            for selection in document.models:
+                reference = selection.model
+                key = (
+                    reference.publisher,
+                    reference.slug,
+                    reference.content_sha256,
+                )
+                grouped.setdefault(key, []).append(summary)
+                linked = True
             if not linked:
                 unlinked.append(summary)
         return LibrarySnapshot(
             generated_at=_utc(self._clock()),
             models=[
                 LibraryModel(
-                    model=LibraryModelIdentity(
-                        kind="model",
-                        publisher=revision.publisher,
-                        slug=revision.slug,
-                        content_sha256=revision.content_digest,
-                    ),
+                    model=_model_identity(revision, model_documents[revision.id]),
+                    model_document=model_documents[revision.id],
                     recipes=grouped.get(
                         (revision.publisher, revision.slug, revision.content_digest), []
                     ),
@@ -250,7 +258,7 @@ class LibraryProjection:
                 for revision in models
             ],
             unlinked_recipes=unlinked,
-            next_cursor=None,
+            next_cursor=next_cursor,
             freshness_policy=self._freshness,
         )
 
@@ -263,44 +271,57 @@ class LibraryProjection:
                     CatalogDocumentRevision.state == "active",
                 )
             )
+            model_revisions: list[CatalogDocumentRevision] = []
+            if revision is not None:
+                recipe_document = _canonical_recipe(revision)
+                references = [selection.model for selection in recipe_document.models]
+                if references:
+                    active_models = list(
+                        session.scalars(
+                            select(CatalogDocumentRevision).where(
+                                CatalogDocumentRevision.kind == "model",
+                                CatalogDocumentRevision.state == "active",
+                            )
+                        )
+                    )
+                    model_by_key = {
+                        (model.publisher, model.slug, model.content_digest): model
+                        for model in active_models
+                    }
+                    for reference in references:
+                        model_revision = model_by_key.get(
+                            (
+                                reference.publisher,
+                                reference.slug,
+                                reference.content_sha256,
+                            )
+                        )
+                        if model_revision is None:
+                            raise LibraryProjectionError(
+                                "active recipe references a missing active Model document"
+                            )
+                        model_revisions.append(model_revision)
         if revision is None:
             raise KeyError(recipe_id)
-        document = revision.document
-        model = None
-        if isinstance(document, Mapping) and isinstance(document.get("models"), list):
-            selection = document["models"][0] if document["models"] else None
-            reference = selection.get("model") if isinstance(selection, Mapping) else None
-            if isinstance(reference, Mapping):
-                model = LibraryModelIdentity(
-                    kind="model",
-                    publisher=str(reference["publisher"]),
-                    slug=str(reference["slug"]),
-                    content_sha256=str(reference["content_sha256"]),
-                )
-        topology = None
-        if isinstance(document, Mapping) and isinstance(document.get("topology"), Mapping):
-            try:
-                topology = _topology(document["topology"])
-            except (KeyError, TypeError, ValueError):
-                topology = None
+        document = recipe_document
+        model_documents = [
+            LibraryRecipeModel(
+                selection=selection,
+                model_document=_canonical_model(model_revision),
+            )
+            for selection, model_revision in zip(
+                document.models, model_revisions, strict=True
+            )
+        ]
         return LibraryRecipeDetail(
             generated_at=_utc(self._clock()),
-            recipe=_canonical_recipe_summary(revision),
-            definition=LibraryRecipeDefinition(
-                execution=document.get("execution", {}),
-                models=document.get("models", []),
-                runtime=document.get("runtime", {}),
-                interfaces=document.get("interfaces", []),
-                settings=document.get("settings", {}),
-                validation=document.get("validation", {}),
-                release=document.get("release", {}),
-                provenance=document.get("provenance", {}),
-            ),
-            topology=topology,
+            recipe=_canonical_recipe_summary(revision, document),
+            definition=document,
+            topology=document.topology,
             operational_state=OperationalState(builds=[], mappings=[], installations=[], runs=[]),
             placement=[],
             reasons=[],
-            model=model,
+            model_documents=model_documents,
             model_capabilities=LibraryCapabilityInventory(),
             recipe_capabilities=LibraryCapabilityInventory(),
         )
@@ -310,27 +331,53 @@ class LibraryProjection:
     ) -> LibraryRecipeList:
         if type(limit) is not int or not 1 <= limit <= _MAX_PAGE_RECIPES:
             raise ValueError("library recipe limit is invalid")
+        context = {"limit": limit}
+        boundary = None
         if cursor is not None:
-            raise ValueError("canonical library recipe cursor is unsupported")
+            try:
+                boundary = _after_boundary(
+                    self._cursors.decode(
+                        cursor,
+                        resource=_RECIPE_RESOURCE,
+                        order=_ORDER,
+                        context=context,
+                    )
+                )
+            except (TypeError, ValueError):
+                raise ValueError("canonical library recipe cursor is invalid") from None
         with self._sessions() as session:
+            recipe_query = select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
+            if boundary is not None:
+                recipe_query = recipe_query.where(_after_clause(boundary))
             revisions = list(
                 session.scalars(
-                    select(CatalogDocumentRevision)
-                    .where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                    )
-                    .order_by(
+                    recipe_query.order_by(
                         CatalogDocumentRevision.publisher,
                         CatalogDocumentRevision.slug,
                         CatalogDocumentRevision.content_digest,
-                    )
-                    .limit(limit)
+                    ).limit(limit + 1)
                 )
+            )
+        has_more = len(revisions) > limit
+        revisions = revisions[:limit]
+        next_cursor = None
+        if has_more:
+            last = revisions[-1]
+            next_cursor = self._cursors.encode(
+                resource=_RECIPE_RESOURCE,
+                order=_ORDER,
+                context=context,
+                boundary=[last.publisher, last.slug, last.content_digest],
             )
         return LibraryRecipeList(
             generated_at=_utc(self._clock()),
-            recipes=[_canonical_recipe_summary(revision) for revision in revisions],
-            next_cursor=None,
+            recipes=[
+                _canonical_recipe_summary(revision, _canonical_recipe(revision))
+                for revision in revisions
+            ],
+            next_cursor=next_cursor,
             freshness_policy=self._freshness,
         )
