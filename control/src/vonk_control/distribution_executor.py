@@ -573,6 +573,7 @@ class DurableDistributionPhaseExecutor:
         expected_image = plan.image_digest or (
             preparation.runtime_image.image_digest if preparation is not None else None
         )
+        expected_registry = plan.image_digest
         expected_layout = plan.build.oci_layout_sha256 or (
             preparation.runtime_image.oci_layout_sha256 if preparation is not None else None
         )
@@ -592,6 +593,9 @@ class DurableDistributionPhaseExecutor:
             if isinstance(candidate_image, str) and isinstance(candidate_layout, str):
                 expected_image = candidate_image
                 expected_layout = candidate_layout
+                candidate_registry = runtime_receipt.get("registry_manifest_digest")
+                if isinstance(candidate_registry, str):
+                    expected_registry = candidate_registry
                 break
         # A preview may have planned the build and left plan image fields
         # empty. Only a strict assignment emitted by this executor can supply
@@ -665,6 +669,7 @@ class DurableDistributionPhaseExecutor:
             "verified": True,
             "verified_digests": sorted(expected_digests),
             "verified_image_digest": expected_image,
+            "verified_registry_manifest_digest": expected_registry,
             "verified_oci_layout_sha256": expected_layout,
             "cached_nodes": sorted(cached_nodes),
             "evidence": [dict(receipts[node_id]) for node_id in sorted(receipts)],
