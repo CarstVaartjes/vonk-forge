@@ -44,9 +44,6 @@ EXPECTED_BASELINE_TABLES = {
     "job_attempts",
     "job_log_entries",
     "jobs",
-    "local_recipe_revisions",
-    "local_recipes",
-    "managed_recipe_library_links",
     "model_cache_artifacts",
     "model_cache_operations",
     "model_cache_set_artifacts",
@@ -61,16 +58,13 @@ EXPECTED_BASELINE_TABLES = {
     "node_telemetry_samples",
     "observations",
     "recipe_builds",
-    "recipe_global_links",
-    "recipe_import_items",
-    "recipe_imports",
     "recipe_installations",
     "recipe_library_sync_runs",
     "recipe_run_observation_grants",
     "recipe_runs",
     "recipe_source_bundles",
     "source_bundle_archives",
-    "recipe_test_reports",
+    "runtime_image_receipts",
     "reconciliation_cancellations",
     "reconciliation_completion_generation",
     "reconciliation_operations",
@@ -134,6 +128,13 @@ def test_fresh_baseline_creates_retained_metadata_with_inert_legacy_storage(
     assert set(Base.metadata.tables) == EXPECTED_BASELINE_TABLES
     assert "agent_node_profiles" in tables
     assert not any(table.startswith("package_") for table in tables)
+    assert not {
+        "managed_recipe_library_links",
+        "recipe_imports",
+        "recipe_import_items",
+        "recipe_global_links",
+        "recipe_test_reports",
+    } & tables
     with engine.connect() as connection:
         assert _metadata_differences_without_retained_legacy(connection) == []
         assert connection.execute(
@@ -161,6 +162,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
     versions = Path(__file__).resolve().parents[1] / "migrations/versions"
 
     assert sorted(path.name for path in versions.glob("*.py")) == [
+        "0000_canonical_catalog_baseline.py",
         "0001_fleet_library_baseline.py",
         "0002_fleet_node_profile_events.py",
         "0003_agent_reenrollment_grants.py",
@@ -180,6 +182,7 @@ def test_fresh_install_has_an_ordered_forward_migration_chain() -> None:
         "0017_artifact_distribution_assignments.py",
         "0018_canonical_catalog_documents.py",
         "0019_recipe_builds_canonical_revision.py",
+        "0020_runtime_image_receipts.py",
     ]
 
 
@@ -205,6 +208,111 @@ def test_fresh_baseline_binds_recipe_builds_to_canonical_recipe_revision(
         foreign_key["referred_table"] != "local_recipe_revisions"
         for foreign_key in recipe_revision_keys
     )
+
+
+def test_runtime_image_receipt_uses_production_identity_fields(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'runtime-image-receipts.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    inspector = inspect(engine)
+
+    assert [column["name"] for column in inspector.get_columns("runtime_image_receipts")] == [
+        "id",
+        "recipe_revision_id",
+        "source",
+        "original_content_digest",
+        "effective_execution_key",
+        "registry_manifest_digest",
+        "platform_manifest_digest",
+        "local_image_config_id",
+        "oci_archive_sha256",
+        "image_bytes",
+        "architecture",
+        "runtime_interface",
+        "runtime_interface_label",
+        "build_id",
+        "verified_at",
+        "state",
+    ]
+    checks = {
+        check["name"] for check in inspector.get_check_constraints("runtime_image_receipts")
+    }
+    assert checks >= {
+        "ck_runtime_image_receipts_source",
+        "ck_runtime_image_receipts_registry_digest",
+        "ck_runtime_image_receipts_platform_digest",
+        "ck_runtime_image_receipts_config_digest",
+        "ck_runtime_image_receipts_archive_digest",
+        "ck_runtime_image_receipts_archive_pair",
+        "ck_runtime_image_receipts_source_build",
+        "ck_runtime_image_receipts_runtime_identity",
+    }
+
+
+def test_runtime_image_receipt_rejects_inconsistent_provenance_and_digests(
+    tmp_path: Path,
+) -> None:
+    url = f"sqlite:///{tmp_path / 'runtime-image-receipts-checks.sqlite'}"
+    config = _config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+    insert = text(
+        """
+        INSERT INTO runtime_image_receipts
+          (id, recipe_revision_id, source, original_content_digest,
+           effective_execution_key, registry_manifest_digest,
+           platform_manifest_digest, local_image_config_id, oci_archive_sha256,
+           image_bytes, architecture, runtime_interface, runtime_interface_label,
+           build_id, verified_at, state)
+        VALUES
+          (:id, :recipe_revision_id, :source, :original_content_digest,
+           :effective_execution_key, :registry_manifest_digest,
+           :platform_manifest_digest, :local_image_config_id, :oci_archive_sha256,
+           :image_bytes, :architecture, :runtime_interface, :runtime_interface_label,
+           :build_id, :verified_at, :state)
+        """
+    )
+    base = {
+        "id": "receipt",
+        "recipe_revision_id": "revision",
+        "source": "published",
+        "original_content_digest": "a" * 64,
+        "effective_execution_key": "b" * 64,
+        "registry_manifest_digest": "sha256:" + "c" * 64,
+        "platform_manifest_digest": "sha256:" + "d" * 64,
+        "local_image_config_id": "sha256:" + "e" * 64,
+        "oci_archive_sha256": "f" * 64,
+        "image_bytes": 1,
+        "architecture": "linux-arm64",
+        "runtime_interface": "vonk.runtime.v1",
+        "runtime_interface_label": "v1",
+        "build_id": None,
+        "verified_at": "2026-09-06 12:00:00",
+        "state": "verified",
+    }
+    invalid = (
+        {"registry_manifest_digest": None},
+        {"build_id": "build"},
+        {"source": "controller-build", "build_id": "build"},
+        {"source": "controller-build", "registry_manifest_digest": None},
+        {"oci_archive_sha256": None},
+        {"image_bytes": None},
+        {"original_content_digest": "g" * 64},
+        {"effective_execution_key": "G" * 64},
+        {"oci_archive_sha256": "z" * 64},
+        {"platform_manifest_digest": "sha256:" + "z" * 64},
+        {"architecture": "linux-amd64"},
+        {"runtime_interface": "other.runtime.v1"},
+        {"runtime_interface_label": "v2"},
+    )
+    for number, overrides in enumerate(invalid, start=1):
+        values = {**base, **overrides, "id": f"receipt-{number}"}
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(insert, values)
 
 
 def test_existing_compatibility_recovery_revision_upgrades_without_operational_model(
@@ -340,7 +448,7 @@ def test_existing_compatibility_recovery_revision_upgrades_without_operational_m
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            == "0019_recipe_builds_revision_fk"
+                == "0020_runtime_image_receipts"
         )
         assert "agent_upgrade_compatibility_recoveries" in set(
             inspect(connection).get_table_names()
@@ -470,7 +578,7 @@ def test_existing_baseline_is_upgraded_to_accept_node_profile_events(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0019_recipe_builds_revision_fk"
+                == "0020_runtime_image_receipts"
         )
 
 
@@ -552,7 +660,7 @@ def test_existing_database_missing_fleet_profile_tables_is_repaired(
             connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-            == "0019_recipe_builds_revision_fk"
+                == "0020_runtime_image_receipts"
         )
 
 
@@ -587,11 +695,13 @@ def test_existing_database_is_upgraded_to_accept_reenrollment_grants(
         )
 
 
-def test_fresh_baseline_is_reversible(tmp_path: Path) -> None:
+def test_fresh_baseline_is_forward_only_and_canonical(tmp_path: Path) -> None:
     url = f"sqlite:///{tmp_path / 'control.sqlite'}"
     config = _config(url)
     command.upgrade(config, "head")
-    command.downgrade(config, "base")
 
     tables = set(inspect(create_engine(url)).get_table_names())
-    assert tables <= {"alembic_version"}
+    assert "local_recipes" not in tables
+    assert "local_recipe_revisions" not in tables
+    assert "catalog_documents" in tables
+    assert "runtime_image_receipts" in tables

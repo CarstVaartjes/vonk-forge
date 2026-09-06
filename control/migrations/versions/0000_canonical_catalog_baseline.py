@@ -1,21 +1,22 @@
-"""Create the greenfield canonical model/recipe catalog projection."""
+"""Create the canonical Model/Recipe catalog identities before the fleet baseline.
+
+This revision is part of the greenfield path.  The later ``0018`` migration
+remains available for databases that already started at the old ``0017``
+lineage, but a fresh database never needs a legacy local-catalog table.
+"""
+
 from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0018_canonical_catalog_documents"
-down_revision = "0017_dist_assignments"
+revision = "0000_canonical_catalog_baseline"
+down_revision = None
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
-    # Fresh databases already receive these tables from the pre-baseline
-    # canonical revision.  Existing databases at 0017 still need this
-    # additive creation path; never drop or rewrite their live data here.
-    if "catalog_documents" in sa.inspect(op.get_bind()).get_table_names():
-        return
     op.create_table(
         "catalog_documents",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -35,10 +36,11 @@ def upgrade() -> None:
     )
     for column in ("kind", "publisher", "slug", "updated_at"):
         op.create_index(f"ix_catalog_documents_{column}", "catalog_documents", [column])
+
     op.create_table(
         "catalog_document_revisions",
         sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("document_id", sa.String(36), sa.ForeignKey("catalog_documents.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("document_id", sa.String(36), nullable=False),
         sa.Column("kind", sa.String(16), nullable=False),
         sa.Column("publisher", sa.String(63), nullable=False),
         sa.Column("slug", sa.String(63), nullable=False),
@@ -54,6 +56,7 @@ def upgrade() -> None:
         sa.Column("projected", sa.JSON, nullable=False),
         sa.Column("created_by", sa.String(200), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(["document_id"], ["catalog_documents.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(
             ["document_id", "kind", "publisher", "slug"],
             ["catalog_documents.id", "catalog_documents.kind", "catalog_documents.publisher", "catalog_documents.slug"],
@@ -70,16 +73,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("id", "kind", "publisher", "slug", "content_digest", name="uq_catalog_document_revision_fk_target"),
         sa.UniqueConstraint("id", "kind", name="uq_catalog_document_revision_kind"),
     )
-    for column in (
-        "document_id",
-        "kind",
-        "publisher",
-        "slug",
-        "content_digest",
-        "artifact_key",
-        "execution_key",
-    ):
+    for column in ("document_id", "kind", "publisher", "slug", "content_digest", "artifact_key", "execution_key"):
         op.create_index(f"ix_catalog_document_revisions_{column}", "catalog_document_revisions", [column])
+
     op.create_table(
         "catalog_document_heads",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -89,17 +85,18 @@ def upgrade() -> None:
         sa.Column("active_revision_id", sa.String(36), sa.ForeignKey("catalog_document_revisions.id", ondelete="RESTRICT")),
         sa.Column("candidate_revision_id", sa.String(36), sa.ForeignKey("catalog_document_revisions.id", ondelete="RESTRICT")),
         sa.Column("generation", sa.Integer, nullable=False),
-        sa.CheckConstraint("kind IN ('model','recipe')", name="ck_catalog_document_head_kind"),
         sa.ForeignKeyConstraint(
             ["kind", "publisher", "slug"],
             ["catalog_documents.kind", "catalog_documents.publisher", "catalog_documents.slug"],
             name="fk_catalog_document_head_identity",
             ondelete="RESTRICT",
         ),
+        sa.CheckConstraint("kind IN ('model','recipe')", name="ck_catalog_document_head_kind"),
         sa.UniqueConstraint("kind", "publisher", "slug", name="uq_catalog_document_head_identity"),
     )
     op.create_index("ix_catalog_document_heads_active_revision_id", "catalog_document_heads", ["active_revision_id"])
     op.create_index("ix_catalog_document_heads_candidate_revision_id", "catalog_document_heads", ["candidate_revision_id"])
+
     op.create_table(
         "catalog_recipe_model_references",
         sa.Column("id", sa.String(36), primary_key=True),
@@ -111,20 +108,10 @@ def upgrade() -> None:
         sa.Column("model_publisher", sa.String(63), nullable=False),
         sa.Column("model_slug", sa.String(63), nullable=False),
         sa.Column("model_content_digest", sa.String(64), nullable=False),
+        sa.ForeignKeyConstraint(["recipe_revision_id", "recipe_kind"], ["catalog_document_revisions.id", "catalog_document_revisions.kind"], name="fk_catalog_recipe_revision_kind", ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["model_revision_id", "model_kind", "model_publisher", "model_slug", "model_content_digest"], ["catalog_document_revisions.id", "catalog_document_revisions.kind", "catalog_document_revisions.publisher", "catalog_document_revisions.slug", "catalog_document_revisions.content_digest"], name="fk_catalog_recipe_model_exact_revision", ondelete="RESTRICT"),
         sa.CheckConstraint("model_kind = 'model'", name="ck_catalog_recipe_model_kind"),
         sa.CheckConstraint("recipe_kind = 'recipe'", name="ck_catalog_recipe_revision_kind"),
-        sa.ForeignKeyConstraint(
-            ["recipe_revision_id", "recipe_kind"],
-            ["catalog_document_revisions.id", "catalog_document_revisions.kind"],
-            name="fk_catalog_recipe_revision_kind",
-            ondelete="CASCADE",
-        ),
-        sa.ForeignKeyConstraint(
-            ["model_revision_id", "model_kind", "model_publisher", "model_slug", "model_content_digest"],
-            ["catalog_document_revisions.id", "catalog_document_revisions.kind", "catalog_document_revisions.publisher", "catalog_document_revisions.slug", "catalog_document_revisions.content_digest"],
-            name="fk_catalog_recipe_model_exact_revision",
-            ondelete="RESTRICT",
-        ),
         sa.UniqueConstraint("recipe_revision_id", "selection_id", name="uq_catalog_recipe_model_selection"),
     )
     op.create_index("ix_catalog_recipe_model_references_recipe_revision_id", "catalog_recipe_model_references", ["recipe_revision_id"])
@@ -132,6 +119,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Canonical tables are now part of the maintained baseline.  Keep this
-    # historical revision non-destructive for both fresh and upgraded DBs.
-    pass
+    op.drop_index("ix_catalog_recipe_model_references_model_revision_id", table_name="catalog_recipe_model_references")
+    op.drop_index("ix_catalog_recipe_model_references_recipe_revision_id", table_name="catalog_recipe_model_references")
+    op.drop_table("catalog_recipe_model_references")
+    op.drop_index("ix_catalog_document_heads_candidate_revision_id", table_name="catalog_document_heads")
+    op.drop_index("ix_catalog_document_heads_active_revision_id", table_name="catalog_document_heads")
+    op.drop_table("catalog_document_heads")
+    for column in ("document_id", "kind", "publisher", "slug", "content_digest", "artifact_key", "execution_key"):
+        op.drop_index(f"ix_catalog_document_revisions_{column}", table_name="catalog_document_revisions")
+    op.drop_table("catalog_document_revisions")
+    for column in ("kind", "publisher", "slug", "updated_at"):
+        op.drop_index(f"ix_catalog_documents_{column}", table_name="catalog_documents")
+    op.drop_table("catalog_documents")
