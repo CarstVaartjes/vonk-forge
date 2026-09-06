@@ -37,10 +37,6 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import merge_operation_providers
 from vonk_control.run_switch_operations import RunSwitchOperationService
-from vonk_control.runtime_image_preparation import (
-    FilesystemRuntimeImageStorage,
-    RuntimeImageReceipt,
-)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
@@ -839,11 +835,14 @@ def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
     recipe_digest = content_sha256(recipe)
     registry_digest = "sha256:" + "d" * 64
     image_digest = "sha256:" + "e" * 64
+    assert registry_digest != image_digest
+    assert recipe_document["execution"]["image"]["digest"] == registry_digest.removeprefix("sha256:")
     archive_payload = b"coincident build archive"
     archive_digest = hashlib.sha256(archive_payload).hexdigest()
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
     build_id = str(uuid.uuid4())
+    plan_digest = "f" * 64
     with services.sessions.begin() as session:
         session.add(
             CatalogDocument(
@@ -890,34 +889,34 @@ def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
                     created_at=clock.now,
                     updated_at=clock.now,
                 ),
+                Job(
+                    id=str(uuid.uuid4()),
+                    request_id=str(uuid.uuid4()),
+                    kind="recipe.run-switch.v2",
+                    state="running",
+                    actor="test",
+                    authority_revision=plan_digest,
+                    targets=[NODE_A],
+                    payload_digest="a" * 64,
+                    payload={
+                        "plan_digest": plan_digest,
+                        "plan": {
+                            "recipe_revision_id": revision_id,
+                            "recipe_build_id": None,
+                        },
+                    },
+                    result={},
+                    created_at=clock.now,
+                    updated_at=clock.now,
+                ),
             ]
         )
-    runtime_storage = FilesystemRuntimeImageStorage(services.artifact_root)
-    staged = runtime_storage.prepare_path()
-    staged.write_bytes(archive_payload)
-    runtime_storage.commit(
-        staged,
-        receipt=RuntimeImageReceipt(
-            schema_version=2,
-            source="published",
-            distribution_publisher=recipe.identity.publisher,
-            distribution_slug=recipe.identity.slug,
-            distribution_content_sha256=recipe_digest,
-            registry_manifest_digest=registry_digest,
-            platform_manifest_digest=image_digest,
-            image_digest=image_digest,
-            oci_archive_sha256=archive_digest,
-            image_bytes=len(archive_payload),
-            local_image_config_id="sha256:" + "c" * 64,
-            local_image_reference=None,
-            architecture="linux-arm64",
-            runtime_interface="vonk.runtime.v1",
-            runtime_interface_label="v1",
-            archive_path=str(staged),
-            recorded_at=clock.now.isoformat(),
-        ),
-    )
     source = ControllerRuntimeImageVerifiedObjectSource(
         services.sessions, services.artifact_root
     )
-    assert source.verify_runtime_image(image_digest, archive_digest) is False
+    assignment = SimpleNamespace(
+        plan_digest=plan_digest,
+        oci_image_digest=image_digest,
+        oci_archive_sha256=archive_digest,
+    )
+    assert source.verify_runtime_image_assignment(assignment) is False

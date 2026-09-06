@@ -29,6 +29,7 @@ from vonk_agent_protocol import (
 from .models import (
     ArtifactDistributionAssignment,
     CatalogDocumentRevision,
+    Job,
     RecipeBuild,
     RuntimeImageReceipt,
 )
@@ -330,6 +331,33 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
             return False
         return super().verify_runtime_image(image_digest, archive_sha256)
 
+    def verify_runtime_image_assignment(self, assignment: DistributionAssignment) -> bool:
+        """Verify an assignment with its durable Run/Switch source binding."""
+
+        with self.sessions() as session:
+            jobs = session.scalars(
+                select(Job).where(
+                    Job.kind == "recipe.run-switch.v2",
+                    Job.payload["plan_digest"].as_string() == assignment.plan_digest,
+                )
+            )
+            for job in jobs:
+                plan = job.payload.get("plan")
+                if not isinstance(plan, Mapping):
+                    continue
+                revision_id = plan.get("recipe_revision_id")
+                if plan.get("recipe_build_id") is None and isinstance(revision_id, str):
+                    # This assignment was issued for a direct published image;
+                    # its published receipt remains the only image authority.
+                    return self._published_receipt_authorizes(
+                        assignment.oci_image_digest,
+                        assignment.oci_archive_sha256,
+                    )
+        return self.verify_runtime_image(
+            assignment.oci_image_digest,
+            assignment.oci_archive_sha256,
+        )
+
     def open_verified(self, digest: str, expected_bytes: int) -> VerifiedObject:
         if self._published_archive_authorizes(digest, expected_bytes):
             return FilesystemVerifiedObjectSource.open_verified(self, digest, expected_bytes)
@@ -599,10 +627,15 @@ class DistributionService:
                 "distribution.model_set_mismatch",
                 "assignment model objects do not match a verified cache manifest",
             )
+        assignment_verifier = getattr(self.source, "verify_runtime_image_assignment", None)
         image_verifier = getattr(self.source, "verify_runtime_image", None)
-        if image_verifier is None or not image_verifier(
-            assignment.oci_image_digest, assignment.oci_archive_sha256
-        ):
+        image_verified = (
+            assignment_verifier(assignment)
+            if callable(assignment_verifier)
+            else image_verifier is not None
+            and image_verifier(assignment.oci_image_digest, assignment.oci_archive_sha256)
+        )
+        if not image_verified:
             raise DistributionError(
                 "distribution.runtime_image_mismatch",
                 "assignment OCI archive does not match the verified image identity",
