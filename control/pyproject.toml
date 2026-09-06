@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-vonk-agent-protocol = { path = "../agent_protocol" }
+vonk-agent-protocol = { path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" }
 vonk-cluster-profiles = { path = ".." }
 # Built from the frozen unpublished candidate recorded in packaging/public-contracts.lock;
 # the approved source ref remains recorded there until the v1.0.2 release is available.
