@@ -345,7 +345,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         spec.validate()?;
         let policy = runtime_policy()?;
         if spec.runtime_image.runtime_interface != policy.runtime_interface
-            || spec.runtime_image.architecture != policy.architecture
+            // Compiled plans use the Agent architecture identifier, while the
+            // image policy uses the OCI platform identifier. Match their one
+            // supported pair explicitly; neither contract accepts aliases.
+            || !matches!(
+                (spec.runtime_image.architecture.as_str(), policy.architecture.as_str()),
+                ("linux-arm64", "linux/arm64")
+            )
             || policy.required_image_label.name != "ai.vonkforge.runtime-interface"
             || spec.runtime_image.runtime_interface_label != policy.required_image_label.value
             || spec.runtime.image_digest != spec.runtime_image.image_digest
