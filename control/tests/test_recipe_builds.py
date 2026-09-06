@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
-import copy
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -46,6 +46,7 @@ from vonk_control.recipe_operations import (
     _record_build_evidence,
 )
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 
 class RecordingQueue:
@@ -312,16 +313,10 @@ def test_build_resolution_reuses_notes_only_revision_when_inputs_match(
         current = session.get(CatalogDocumentRevision, revision.id)
         assert current is not None
         document = copy.deepcopy(current.document)
-        document["identity"]["title"] = "Editorially renamed recipe"
-        content_digest = hashlib.sha256(
-            json.dumps(
-                document,
-                ensure_ascii=False,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        document["metadata"]["title"] = "Editorially renamed recipe"
+        canonical = RecipeDefinition.model_validate(document)
+        document = canonical.model_dump(mode="json")
+        content_digest = content_sha256(canonical)
         newer_revision = CatalogDocumentRevision(
             id="notes-revision-" + "1" * 19,
             document_id=current.document_id,
@@ -351,7 +346,7 @@ def test_build_resolution_reuses_notes_only_revision_when_inputs_match(
 def test_build_resolution_without_cache_returns_durable_intent_identity(
     tmp_path: Path,
 ) -> None:
-    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    sessions, bundles, _now, node_id, revision = setup(tmp_path)
     service = RecipeBuildService(sessions, bundles=bundles)
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
@@ -368,6 +363,45 @@ def test_build_resolution_without_cache_returns_durable_intent_identity(
     assert "builder_binary_digest" not in resolution.input_intent
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("build_input_sha256", "0" * 64),
+        ("image_digest", None),
+        ("oci_layout_sha256", None),
+        ("image_bytes", None),
+        ("builder_binary_digest", "2" * 64),
+    ],
+)
+def test_build_resolution_rejects_incomplete_or_mismatched_cache_receipts(
+    tmp_path: Path, field: str, value: object,
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    service = RecipeBuildService(sessions, bundles=bundles)
+    plan = service.plan(revision.id, node_id, now=now)
+    service.record_success(
+        plan.build_id,
+        build_input_sha256=plan.build_input_sha256,
+        image_digest="sha256:" + "b" * 64,
+        oci_layout_sha256="c" * 64,
+        image_bytes=500,
+        now=now,
+    )
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        if field == "builder_binary_digest":
+            build.policy_report = dict(build.policy_report) | {field: value}
+        else:
+            setattr(build, field, value)
+
+    resolution = service.resolve(revision.id)
+
+    assert not resolution.cached
+    assert resolution.build_input_sha256 is None
+    assert resolution.build_id is None
+
+
 def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
     tmp_path: Path,
 ) -> None:
@@ -378,16 +412,10 @@ def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
         current = session.get(CatalogDocumentRevision, revision.id)
         assert current is not None
         document = copy.deepcopy(current.document)
-        document["execution"]["build"]["arguments"] = {"changed": "yes"}
-        content_digest = hashlib.sha256(
-            json.dumps(
-                document,
-                ensure_ascii=False,
-                allow_nan=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        document["execution"]["build"]["arguments"] = [{"name": "changed", "value": "yes"}]
+        canonical = RecipeDefinition.model_validate(document)
+        document = canonical.model_dump(mode="json")
+        content_digest = content_sha256(canonical)
         newer_revision = CatalogDocumentRevision(
             id="new-revision-" + "1" * 25,
             document_id=current.document_id,
