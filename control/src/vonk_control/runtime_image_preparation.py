@@ -20,7 +20,7 @@ import re
 import subprocess
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -107,17 +107,14 @@ class SkopeoOCIImageTransport:
         observed_digest = _run_text(
             [self.executable, "inspect", *_platform_args(expected_architecture), "--format", "{{.Digest}}", source]
         ).strip()
-        raw_manifest = _run_text(
-            [self.executable, "inspect", *_platform_args(expected_architecture), "--raw", source]
-        )
         config = _run_json_text(
             _run_text(
                 [self.executable, "inspect", *_platform_args(expected_architecture), "--config", source]
             )
         )
-        if _IMAGE_DIGEST.fullmatch(observed_digest) is None:
+        if observed_digest != expected_manifest:
             raise RuntimeImagePreparationError(
-                "runtime_image.digest_mismatch", "skopeo resolved an invalid platform image digest"
+                "runtime_image.digest_mismatch", "skopeo resolved a different recipe image digest"
             )
         if not isinstance(config, Mapping):
             raise RuntimeImagePreparationError(
@@ -133,20 +130,25 @@ class SkopeoOCIImageTransport:
             raise RuntimeImagePreparationError(
                 "runtime_image.interface_mismatch", "OCI image runtime interface label does not match the recipe"
             )
-        config_id = _config_digest(raw_manifest)
         _run_text(
-            [self.executable, "copy", *_platform_args(expected_architecture), source, f"oci-archive:{destination}"]
+            [self.executable, "copy", *_platform_args(expected_architecture), source, f"docker-archive:{destination}"]
         )
         archive_bytes, archive_sha = _file_digest(destination, 16 * 1024**4)
-        return PulledImageEvidence(
-            manifest_digest=observed_digest,
+        # Registry pins may identify a multi-platform index. Docker's native
+        # archive conversion also changes manifest representation. Inspect the
+        # actual exported single-platform image instead of treating the source
+        # index digest as its runnable identity.
+        exported = self.inspect_archive(
+            destination,
+            expected_architecture=expected_architecture,
+            expected_runtime_interface=expected_runtime_interface,
+            expected_archive_sha256=archive_sha,
+            expected_archive_bytes=archive_bytes,
+        )
+        return replace(
+            exported,
             requested_manifest_digest=expected_manifest,
-            config_id=config_id,
             local_reference=reference,
-            architecture=architecture,
-            runtime_interface=interface,
-            archive_sha256=archive_sha,
-            archive_bytes=archive_bytes,
         )
 
     def inspect_archive(
@@ -159,7 +161,7 @@ class SkopeoOCIImageTransport:
         expected_archive_bytes: int,
     ) -> PulledImageEvidence:
         expected_runtime_interface = _runtime_interface_label(expected_runtime_interface)
-        source = f"oci-archive:{archive}"
+        source = f"docker-archive:{archive}"
         observed_digest = _run_text(
             [self.executable, "inspect", *_platform_args(expected_architecture), "--format", "{{.Digest}}", source]
         ).strip()
@@ -1120,7 +1122,7 @@ def _prepare_from_build(
         oci_archive_sha256=archive_sha,
         image_bytes=image_bytes,
         local_image_config_id=observed.config_id,
-        # ``oci-archive:...`` is a Controller transport path, never a
+        # ``docker-archive:...`` is a Controller transport path, never a
         # runnable Spark image reference.
         local_image_reference=None,
         architecture=_wire_architecture(observed.architecture),
@@ -1220,6 +1222,10 @@ def _validate_evidence(
     if _IMAGE_DIGEST.fullmatch(evidence.manifest_digest) is None:
         raise RuntimeImagePreparationError(
             "runtime_image.digest_mismatch", "OCI transport returned a different manifest digest"
+        )
+    if expected_requested_manifest is None and evidence.manifest_digest != expected_manifest:
+        raise RuntimeImagePreparationError(
+            "runtime_image.digest_mismatch", "stored archive differs from the source-build image digest"
         )
     if _IMAGE_DIGEST.fullmatch(evidence.config_id) is None or not evidence.local_reference:
         raise RuntimeImagePreparationError(

@@ -190,6 +190,13 @@ Installation maps a resolved recipe revision to exact node identities and ranks.
 The controller transfers that one verified Docker-loadable archive over the
 authenticated agent channel and each target re-verifies it before import, so a
 three-node recipe never rebuilds independently on the other two nodes. Model
+downloads are independent of recipes: the Controller can fill the NAS model
+cache before any runtime image or Spark assignment exists, and recipes reuse
+the same content-addressed model files. Published images and local builds both
+use Docker-save archives in the shared `oci-archives` directory. The original
+registry pin remains separate from the exported platform manifest, config ID,
+and archive checksum; the Controller inspects the exported image before use.
+Model
 weights and other declared artifacts are installed separately, with disk checks before
 installation and memory/VRAM, active-workload, and direct-fabric checks before
 start. Multi-node v1 uses ordinary TCP over the declared direct-fabric

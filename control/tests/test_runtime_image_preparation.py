@@ -115,7 +115,7 @@ class TinyTransport:
             manifest_digest=BUILT_IMAGE_DIGEST,
             requested_manifest_digest=None,
             config_id="sha256:" + "d" * 64,
-            local_reference="oci-archive:" + str(archive),
+            local_reference="docker-archive:" + str(archive),
             architecture=expected_architecture,
             runtime_interface=expected_runtime_interface,
             archive_sha256=expected_archive_sha256,
@@ -259,13 +259,13 @@ def test_non_schema_two_receipt_is_rejected_by_all_read_paths(tmp_path: Path) ->
 def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    destination = tmp_path / "export.oci.tar"
+    destination = tmp_path / "export.docker.tar"
     calls: list[list[str]] = []
 
     def fake_run(command: list[str], **_: object) -> SimpleNamespace:
         calls.append(command)
         if "--format" in command:
-            digest = BUILT_IMAGE_DIGEST if command[-1].startswith("oci-archive:") else PLATFORM_IMAGE_DIGEST
+            digest = PLATFORM_IMAGE_DIGEST if command[-1].startswith("docker-archive:") else IMAGE_DIGEST
             return SimpleNamespace(stdout=digest + "\n")
         if "--raw" in command:
             return SimpleNamespace(stdout=json.dumps({"config": {"digest": "sha256:" + "c" * 64}}))
@@ -290,6 +290,9 @@ def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
     assert evidence.requested_manifest_digest == IMAGE_DIGEST
     assert evidence.config_id == "sha256:" + "c" * 64
     assert evidence.archive_sha256 == ARCHIVE_DIGEST
+    assert any(command[-1] == f"docker-archive:{destination}" and command[1] == "copy" for command in calls)
+    assert any(command[-1] == f"docker-archive:{destination}" and command[1] == "inspect" for command in calls)
+    assert not any("--raw" in command and command[-1].startswith("docker://") for command in calls)
     assert any(command[1:3] == ["copy", "--override-os"] for command in calls)
     assert all(
         command[1:5] in (
@@ -298,6 +301,27 @@ def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
         )
         for command in calls
     )
+
+
+def test_built_archive_manifest_must_match_the_builder_receipt(tmp_path: Path) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    (storage.root / ARCHIVE_DIGEST).write_bytes(ARCHIVE)
+
+    class DifferentArchive(TinyTransport):
+        def inspect_archive(self, archive: Path, **kwargs: object) -> PulledImageEvidence:
+            return replace(super().inspect_archive(archive, **kwargs), manifest_digest=IMAGE_DIGEST)
+
+    with pytest.raises(RuntimeImagePreparationError, match="source-build image digest"):
+        prepare_runtime_image(
+            _recipe("recipe-source-build.json"),
+            runtime=_runtime(),
+            storage=storage,
+            transport=DifferentArchive(),
+            build_receipt={
+                "state": "succeeded", "image_digest": BUILT_IMAGE_DIGEST,
+                "oci_layout_sha256": ARCHIVE_DIGEST, "image_bytes": len(ARCHIVE),
+            },
+        )
 
 
 def test_packaged_skopeo_transport_rejects_unlabeled_image(
