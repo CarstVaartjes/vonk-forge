@@ -130,7 +130,6 @@ def _copy(tmp_path: Path) -> Path:
         "config/execution-harnesses",
         "config/runtime-distributions",
         "config/patch-bundles",
-        "config/recipes",
         "config/model-targets",
     ):
         shutil.copytree(ROOT / directory, target / directory)
