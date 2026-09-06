@@ -179,9 +179,11 @@ class ManagedRecipeCatalogSyncService:
     def _apply(self, run_id: str, snapshot: RecipeLibrarySnapshot, *, actor: str) -> dict[str, object]:
         result = _empty_result()
         self._catalog.import_catalog_models(actor, snapshot.catalog_entities)
-        local = self._catalog.recipe_catalog_local_revisions([item.slug for item in snapshot.items])
+        local = self._catalog.recipe_catalog_local_revisions(
+            [(item.publisher, item.slug) for item in snapshot.items]
+        )
         for item in snapshot.items:
-            previous = local.get(item.slug)
+            previous = local.get((item.publisher, item.slug))
             if previous is not None and (previous.publisher, previous.slug) != (item.publisher, item.slug):
                 self._record_problem(result, item, "catalog.sync_identity_changed", "canonical recipe identity changed")
             elif previous is not None and previous.content_sha256 == item.content_sha256:

@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime
 from typing import BinaryIO
 
 from jsonschema import Draft202012Validator, FormatChecker
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
@@ -183,33 +183,58 @@ class CatalogService:
             raise KeyError(recipe_id)
         return _view(revision)
 
-    def recipe_catalog_local_revisions(self, slugs: Sequence[str]) -> dict[str, RecipeCatalogLocalRevision]:
-        requested = sorted(set(slugs))
-        if len(requested) > 256 or any(not _SLUG.fullmatch(slug) for slug in requested):
+    def recipe_catalog_local_revisions(
+        self, identities: Sequence[tuple[str, str]]
+    ) -> dict[tuple[str, str], RecipeCatalogLocalRevision]:
+        requested = sorted(set(identities))
+        if (
+            any(
+                not isinstance(publisher, str)
+                or not isinstance(slug, str)
+                or not _SLUG.fullmatch(publisher)
+                or not _SLUG.fullmatch(slug)
+                for publisher, slug in requested
+            )
+        ):
             raise CatalogValidationError("catalog.identities", "catalog recipe identities are invalid")
         if not requested:
             return {}
-        with self._sessions() as session:
-            rows = list(
-                session.scalars(
-                    select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == "recipe",
-                        CatalogDocumentRevision.state == "active",
-                        CatalogDocumentRevision.slug.in_(requested),
+        result: dict[tuple[str, str], RecipeCatalogLocalRevision] = {}
+        requested_set = set(requested)
+        # Keep each statement small as the publication grows, while matching
+        # the full canonical identity rather than crossing publisher/slug IN
+        # lists or collapsing entries that happen to share a slug.
+        for offset in range(0, len(requested), 128):
+            batch = requested[offset : offset + 128]
+            predicates = [
+                and_(
+                    CatalogDocumentRevision.publisher == publisher,
+                    CatalogDocumentRevision.slug == slug,
+                )
+                for publisher, slug in batch
+            ]
+            with self._sessions() as session:
+                rows = list(
+                    session.scalars(
+                        select(CatalogDocumentRevision).where(
+                            CatalogDocumentRevision.kind == "recipe",
+                            CatalogDocumentRevision.state == "active",
+                            or_(*predicates),
+                        )
                     )
                 )
-            )
-        result: dict[str, RecipeCatalogLocalRevision] = {}
-        for row in rows:
-            result[row.slug] = RecipeCatalogLocalRevision(
-                recipe_id=row.document_id,
-                source_kind="recipe_library",
-                publisher=row.publisher,
-                slug=row.slug,
-                revision_number=row.revision_number,
-                content_sha256=row.content_digest,
-                release_version=_release_version(row.document),
-            )
+            for row in rows:
+                identity = (row.publisher, row.slug)
+                if identity in requested_set:
+                    result[identity] = RecipeCatalogLocalRevision(
+                        recipe_id=row.document_id,
+                        source_kind="recipe_library",
+                        publisher=row.publisher,
+                        slug=row.slug,
+                        revision_number=row.revision_number,
+                        content_sha256=row.content_digest,
+                        release_version=_release_version(row.document),
+                    )
         return result
 
     def import_catalog_models(self, actor: str, documents: Sequence[Mapping[str, object]]) -> int:
