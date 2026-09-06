@@ -79,7 +79,7 @@
       "path": "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf",
       "sha256": "1212121212121212121212121212121212121212121212121212121212121212",
       "size_bytes": 11,
-      "roles": [],
+      "roles": ["model"],
       "mount": {"target": "/models/primary", "read_only": true},
       "model": {
         "publisher": "vonk-forge",
@@ -99,7 +99,7 @@
       "path": "LICENSE",
       "sha256": "1313131313131313131313131313131313131313131313131313131313131313",
       "size_bytes": 7,
-      "roles": [],
+      "roles": ["model"],
       "mount": {"target": "/models/support", "read_only": true},
       "model": {
         "publisher": "vonk-forge",
@@ -133,6 +133,7 @@
     "devices": [],
     "capabilities": [],
     "host_network": false,
+    "network_mode": "none",
     "privileged": false,
     "user": "10001:10001",
     "mounts": [
