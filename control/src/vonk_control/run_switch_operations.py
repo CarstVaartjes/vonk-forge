@@ -27,11 +27,11 @@ from .cluster_mappings import (
 )
 from .models import (
     AgentNode,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
     Job,
-    CatalogDocumentRevision,
     NodeArtifact,
     NodeInventorySnapshot,
     RecipeBuild,
@@ -40,6 +40,7 @@ from .models import (
     RecipeSourceBundle,
     ResourceReservation,
     RunNode,
+    RuntimeImageReceipt,
 )
 from .preparation_contract import (
     ControllerAssetState,
@@ -931,10 +932,6 @@ class RecipeLifecyclePhaseExecutor:
                 )
             if mapping_id is None:
                 return PhaseExecution(result={"prepared": True})
-            if plan.recipe_build_id is None:
-                raise RunSwitchOperationConflict(
-                    "run-switch.recipe-build-unavailable"
-                )
             try:
                 install_plan = self._lifecycle.preview_install(
                     mapping_id, plan.recipe_build_id
@@ -959,11 +956,28 @@ class RecipeLifecyclePhaseExecutor:
                 raise RunSwitchOperationConflict(
                     f"run-switch.install-preparation-failed: {error}"
                 ) from error
+            compiled = install_plan.compiled_plan_by_node
+            first_compiled = next(iter(compiled.values()), {})
+            identity = (
+                first_compiled.get("identity")
+                if isinstance(first_compiled, Mapping)
+                else None
+            )
             return PhaseExecution(
                 result={
                     "installation_id": installation_id,
                     "mapping_id": mapping_id,
                     "install_plan_digest": install_plan.plan_digest,
+                    "model_artifact_set_sha256": (
+                        identity.get("model_artifact_set_sha256")
+                        if isinstance(identity, Mapping)
+                        else None
+                    ),
+                    "model_artifact_set_bytes": (
+                        identity.get("model_artifact_bytes")
+                        if isinstance(identity, Mapping)
+                        else None
+                    ),
                     "compiled_plan_persisted": True,
                 }
             )
@@ -1225,7 +1239,7 @@ class RunSwitchOperationService:
             )
             build = (
                 session.get(RecipeBuild, installation.recipe_build_id)
-                if installation is not None
+                if installation is not None and installation.recipe_build_id is not None
                 else None
             )
             build_candidate = build or (
@@ -1618,7 +1632,11 @@ class RunSwitchOperationService:
                 and build_candidate.state in {"planned", "building"}
                 else None
             )
-            image_digest = build.image_digest if build is not None else None
+            image_digest = (
+                build.image_digest
+                if build is not None
+                else runtime_storage.image_digest
+            )
             if installation is None:
                 if self._phase_executor is None:
                     blockers.append(
@@ -2035,8 +2053,15 @@ class RunSwitchOperationService:
         revision_id: str,
         installation: RecipeInstallation | None,
     ) -> RecipeBuild | None:
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        if revision is not None and not _is_source_build(revision.document):
+            return None
         if installation is not None:
-            build = session.get(RecipeBuild, installation.recipe_build_id)
+            build = (
+                session.get(RecipeBuild, installation.recipe_build_id)
+                if installation.recipe_build_id is not None
+                else None
+            )
             if (
                 build is not None
                 and build.recipe_revision_id == revision_id
@@ -2087,6 +2112,12 @@ class RunSwitchOperationService:
         receipt; bytes are produced by ``recipe.build.v1`` during apply.
         """
 
+        if not _is_source_build(revision.document):
+            # Published images are selected by the canonical recipe and a
+            # verified RuntimeImageReceipt.  Creating a synthetic RecipeBuild
+            # would change the authority boundary and make a direct install
+            # depend on source availability.
+            return _BuildSelection(build=None, candidate=None)
         if build is not None:
             return _BuildSelection(build=build, candidate=build)
 
@@ -2241,6 +2272,28 @@ class RunSwitchOperationService:
         warnings: list[RunSwitchReason] = []
         document = revision.document if revision is not None else {}
         execution = document.get("execution") if isinstance(document, Mapping) else None
+        source_build = _is_source_build(document)
+        published_digest = _published_manifest_digest(document)
+        direct_receipt = None
+        if not source_build and revision is not None and published_digest is not None:
+            # Preview has not yet compiled mapping parameters into the
+            # effective execution key. Reuse the same immutable published
+            # image identity across parameter-only keys; compile/install
+            # resolves and persists the exact effective key before planning.
+            direct_receipt = session.scalar(
+                select(RuntimeImageReceipt)
+                .where(
+                    RuntimeImageReceipt.recipe_revision_id == revision.id,
+                    RuntimeImageReceipt.source == "published",
+                    RuntimeImageReceipt.original_content_digest == revision.content_digest,
+                    RuntimeImageReceipt.registry_manifest_digest == published_digest,
+                    RuntimeImageReceipt.architecture == "linux-arm64",
+                    RuntimeImageReceipt.runtime_interface == "vonk.runtime.v1",
+                    RuntimeImageReceipt.state == "verified",
+                )
+                .order_by(RuntimeImageReceipt.verified_at.desc(), RuntimeImageReceipt.id.desc())
+                .limit(1)
+            )
         raw_build = execution.get("build") if isinstance(execution, Mapping) else None
         raw_platform = None
         if isinstance(raw_build, Mapping):
@@ -2249,7 +2302,13 @@ class RunSwitchOperationService:
                 raw_platform = base_image.get("platform")
             if raw_platform is None:
                 raw_platform = raw_build.get("platform")
-        expected_architecture = str(raw_platform) if isinstance(raw_platform, str) and raw_platform else "unknown"
+        expected_architecture = (
+            str(raw_platform)
+            if isinstance(raw_platform, str) and raw_platform
+            else "linux/arm64"
+            if not source_build
+            else "unknown"
+        )
         source_digest = (
             candidate.source_bundle_sha256
             if candidate is not None
@@ -2266,6 +2325,8 @@ class RunSwitchOperationService:
             else None
         )
         source_state = "available" if source_row is not None else "missing"
+        if not source_build:
+            source_state = "available"
         source = BuildSourceEvidence(
             state=source_state,
             source_bundle_sha256=(
@@ -2289,6 +2350,8 @@ class RunSwitchOperationService:
                 builder = session.get(AgentNode, candidate.builder_node_id)
                 if builder is not None and isinstance(builder.architecture, str):
                     observed_architecture = _normalise_architecture(builder.architecture)
+        elif direct_receipt is not None:
+            observed_architecture = _normalise_architecture(direct_receipt.architecture)
         node_architectures = tuple(
             _normalise_architecture(node.architecture)
             for node in session.scalars(
@@ -2334,9 +2397,27 @@ class RunSwitchOperationService:
                 else "The built image or selected Spark group does not match the recipe platform."
             ),
         )
-        image_digest = build.image_digest if build is not None else None
-        image_bytes = build.image_bytes if build is not None else None
-        oci_layout = build.oci_layout_sha256 if build is not None else None
+        image_digest = (
+            build.image_digest
+            if build is not None
+            else direct_receipt.platform_manifest_digest
+            if direct_receipt is not None
+            else published_digest
+        )
+        image_bytes = (
+            build.image_bytes
+            if build is not None
+            else direct_receipt.image_bytes
+            if direct_receipt is not None
+            else None
+        )
+        oci_layout = (
+            build.oci_layout_sha256
+            if build is not None
+            else direct_receipt.oci_archive_sha256
+            if direct_receipt is not None
+            else None
+        )
         runtime_reused = 0
         runtime_missing = 0
         runtime_reclaimable = 0
@@ -2382,6 +2463,7 @@ class RunSwitchOperationService:
                 else None
             ),
             image_digest=image_digest,
+            oci_layout_sha256=oci_layout,
             image_bytes=image_bytes,
             required_bytes=(
                 image_bytes * len(group.nodes)
@@ -2400,7 +2482,13 @@ class RunSwitchOperationService:
             reclaimable_bytes=runtime_reclaimable,
             reclaimable_digests=sorted(runtime_reclaimable_digests),
         )
-        state = "missing" if candidate is None else str(candidate.state)
+        state = (
+            "available"
+            if direct_receipt is not None
+            else "missing"
+            if candidate is None
+            else str(candidate.state)
+        )
         detail: str | None = None
         if build is not None:
             state = "available"
@@ -2409,10 +2497,12 @@ class RunSwitchOperationService:
                 detail = "The successful build has no verified OCI layout identity."
         elif candidate is not None:
             detail = candidate.error
+        elif not source_build and direct_receipt is None:
+            detail = "No verified published runtime image receipt is available for this recipe revision."
         if compatibility_state == "incompatible":
             state = "incompatible"
         if require_available:
-            if build is None:
+            if source_build and build is None:
                 pending = candidate is not None and candidate.state in {
                     "planned",
                     "building",
@@ -2440,6 +2530,16 @@ class RunSwitchOperationService:
                             node_ids=[node.node_id for node in group.nodes],
                         )
                     )
+            elif not source_build and direct_receipt is None:
+                warnings.append(
+                    _as_reason(
+                        "run-switch.runtime-image-preparation-required",
+                        detail or "The pinned published image will be pulled and verified before install admission.",
+                        scope="operation",
+                        severity="warning",
+                        node_ids=[node.node_id for node in group.nodes],
+                    )
+                )
             if compatibility_state == "incompatible":
                 blockers.append(
                     _as_reason(
@@ -2504,9 +2604,12 @@ class RunSwitchOperationService:
     ) -> RolloutPreparation | None:
         """Normalize model and runtime asset readiness for shared callers."""
 
-        if revision is None or build is None:
+        if revision is None or (
+            build is None and runtime_storage.image_digest is None
+        ):
             # There is no honest immutable runtime image identity to place in
-            # RolloutPreparation until a successful build receipt exists.
+            # RolloutPreparation until a successful build or published receipt
+            # exists.
             return None
         primary_model_digest = _primary_model_digest(revision.document)
         if primary_model_digest is None:
@@ -2603,9 +2706,13 @@ class RunSwitchOperationService:
             controller=model_controller,
             targets=model_targets,
         )
-        image_digest = build.image_digest
-        image_bytes = build.image_bytes
-        layout_digest = build.oci_layout_sha256
+        image_digest = build.image_digest if build is not None else runtime_storage.image_digest
+        image_bytes = build.image_bytes if build is not None else runtime_storage.image_bytes
+        layout_digest = (
+            build.oci_layout_sha256
+            if build is not None
+            else runtime_storage.oci_layout_sha256
+        )
         if (
             not _is_oci_digest(image_digest)
             or image_bytes is None
@@ -2619,7 +2726,7 @@ class RunSwitchOperationService:
             missing_bytes=0,
             verified_sha256=layout_digest,
             verified_at=now,
-            source="controller-build",
+            source=("controller-build" if build is not None else "published"),
         )
         runtime_targets = [
             TargetAssetState(
@@ -2669,7 +2776,7 @@ class RunSwitchOperationService:
             image_bytes=image_bytes,
             architecture="linux-arm64",
             runtime_interface=_runtime_interface(revision.document),
-            build_id=build.id,
+            build_id=build.id if build is not None else None,
             controller=runtime_controller,
             targets=runtime_targets,
         )
@@ -3192,6 +3299,11 @@ class RunSwitchOperationService:
             or (
                 runtime_storage is not None
                 and runtime_storage.missing_image_distribution_bytes not in (None, 0)
+            )
+            or (
+                runtime_storage is not None
+                and runtime_storage.image_digest is not None
+                and runtime_storage.oci_layout_sha256 is None
             )
         )
         needs_prepare = (
@@ -4508,7 +4620,12 @@ def _validate_artifact_execution(
             raise RunSwitchOperationConflict(
                 "run-switch.runtime-image-preparation-evidence-invalid"
             )
-        if plan.image_digest is not None and image_digest != plan.image_digest:
+        registry_digest = receipt.get("registry_manifest_digest")
+        if (
+            plan.image_digest is not None
+            and image_digest != plan.image_digest
+            and registry_digest != plan.image_digest
+        ):
             raise RunSwitchOperationConflict(
                 "run-switch.runtime-image-preparation-digest-mismatch"
             )
@@ -4578,7 +4695,12 @@ def _validate_artifact_execution(
                     "run-switch.artifact-digest-verification-mismatch"
                 )
         if plan.image_digest is not None:
-            if result.get("verified_image_digest") != plan.image_digest:
+            verified_image = result.get("verified_image_digest")
+            verified_registry = result.get("verified_registry_manifest_digest")
+            if (
+                verified_image != plan.image_digest
+                and verified_registry != plan.image_digest
+            ):
                 raise RunSwitchOperationConflict(
                     "run-switch.runtime-image-verification-mismatch"
                 )
@@ -4666,6 +4788,22 @@ def _is_hex_digest(value: object) -> bool:
 
 def _is_oci_digest(value: object) -> bool:
     return isinstance(value, str) and value.startswith("sha256:") and _is_hex_digest(value[7:])
+
+
+def _is_source_build(document: Mapping[str, object]) -> bool:
+    execution = document.get("execution")
+    return isinstance(execution, Mapping) and execution.get("mode") == "build"
+
+
+def _published_manifest_digest(document: Mapping[str, object]) -> str | None:
+    execution = document.get("execution")
+    image = execution.get("image") if isinstance(execution, Mapping) else None
+    digest = image.get("digest") if isinstance(image, Mapping) else None
+    if isinstance(digest, str) and _is_oci_digest(digest):
+        return digest
+    if isinstance(digest, str) and _is_hex_digest(digest):
+        return f"sha256:{digest}"
+    return None
 
 
 def _primary_model_digest(document: object) -> str | None:

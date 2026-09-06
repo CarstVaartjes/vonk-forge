@@ -21,7 +21,7 @@ from .compiled_execution_plan import (
     execution_identity_sha256,
 )
 from .distribution import ModelCacheVerifiedObjectSource
-from .models import ClusterMappingNode, CatalogDocumentRevision, RecipeBuild
+from .models import CatalogDocumentRevision, ClusterMappingNode, RecipeBuild
 from .recipe_runtime_specs import (
     RecipeRuntimeSpecError,
     compile_runtime_spec,
@@ -78,7 +78,7 @@ RuntimeImageResolver = Callable[
     Mapping[str, object] | RuntimeImageReceipt,
 ]
 RuntimeImagePreparer = Callable[
-    [Mapping[str, object], Mapping[str, object], RecipeBuild], object
+    [Mapping[str, object], Mapping[str, object], RecipeBuild | None], object
 ]
 
 
@@ -101,7 +101,7 @@ class ControllerExecutionPlanService:
         session: Session,
         *,
         revision: CatalogDocumentRevision,
-        build: RecipeBuild,
+        build: RecipeBuild | None,
         mapping_nodes: Sequence[ClusterMappingNode],
         parameters: Mapping[str, object] | None,
         mapping: object | None = None,
@@ -192,7 +192,7 @@ class ControllerExecutionPlanService:
     def _runtime_image(
         self,
         document: Mapping[str, object],
-        build: RecipeBuild,
+        build: RecipeBuild | None,
         runtime_spec: Mapping[str, object],
     ) -> CompiledRuntimeImage:
         runtime = runtime_spec.get("runtime")

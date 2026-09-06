@@ -393,10 +393,14 @@ if __name__ == "__main__":
     from datetime import UTC, datetime
     from pathlib import Path
 
+    from sqlalchemy import select
+    from vonk_forge_contracts import RecipeDefinition, content_sha256
+
     from .agent_jobs import AgentJobService
     from .db import build_engine, session_factory, wait_for_database
     from .execution_plan_service import ControllerExecutionPlanService
     from .model_cache import ModelCacheService
+    from .models import CatalogDocumentRevision
     from .presence import AgentPresenceService, ManagementAddressPolicy
     from .route_runtime import (
         AtomicRouteBundlePublisher,
@@ -405,7 +409,9 @@ if __name__ == "__main__":
     from .runtime_image_preparation import (
         FilesystemRuntimeImageStorage,
         SkopeoOCIImageTransport,
+        persist_runtime_image_receipt,
         prepare_runtime_image,
+        resolve_persisted_runtime_image_receipt,
     )
     from .settings import WorkerSettings
     from .worker_authority import HttpWorkerAuthority
@@ -467,6 +473,8 @@ if __name__ == "__main__":
         build_receipt = None
         execution = document.get("execution")
         if isinstance(execution, Mapping) and execution.get("mode") == "build":
+            if build is None:
+                raise ValueError("source build receipt is unavailable")
             build_receipt = {
                 "state": build.state,
                 "build_id": build.id,
@@ -474,6 +482,36 @@ if __name__ == "__main__":
                 "oci_layout_sha256": build.oci_layout_sha256,
                 "image_bytes": build.image_bytes,
             }
+        identity = runtime_spec.get("identity")
+        effective_execution_key = (
+            identity.get("execution_sha256")
+            if isinstance(identity, Mapping)
+            else None
+        )
+        if not isinstance(effective_execution_key, str):
+            raise TypeError("compiled runtime execution identity is unavailable")
+
+        def write_receipt(receipt):
+            recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
+            with sessions.begin() as session:
+                revision = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.content_digest == recipe_digest,
+                    )
+                )
+                if revision is None or revision.content_digest is None:
+                    raise ValueError("active recipe revision for runtime receipt is unavailable")
+                persist_runtime_image_receipt(
+                    session,
+                    recipe_revision_id=revision.id,
+                    original_content_digest=revision.content_digest,
+                    effective_execution_key=effective_execution_key,
+                    receipt=receipt,
+                    verified_at=clock(),
+                )
+
         return prepare_runtime_image(
             document,
             runtime=runtime,
@@ -481,6 +519,7 @@ if __name__ == "__main__":
             transport=runtime_image_transport,
             build_receipt=build_receipt,
             now=clock(),
+            receipt_writer=write_receipt,
         )
 
     def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
@@ -498,6 +537,30 @@ if __name__ == "__main__":
         )
         if receipt is None:
             raise ValueError("runtime image preparation is required before compile/install")
+        identity = runtime_spec.get("identity")
+        execution_key = identity.get("execution_sha256") if isinstance(identity, Mapping) else None
+        recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
+        if not isinstance(execution_key, str):
+            raise TypeError("runtime image preparation execution identity is unavailable")
+        with sessions() as session:
+            revision = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.content_digest == recipe_digest,
+                )
+            )
+            if revision is None:
+                raise ValueError("durable runtime image receipt is unavailable before compile/install")
+            resolve_persisted_runtime_image_receipt(
+                session,
+                recipe_revision_id=revision.id,
+                original_content_digest=recipe_digest,
+                effective_execution_key=execution_key,
+                receipt=receipt,
+            )
+        if revision is None:
+            raise ValueError("durable runtime image receipt is unavailable before compile/install")
         return receipt
 
     execution_plans = ControllerExecutionPlanService(

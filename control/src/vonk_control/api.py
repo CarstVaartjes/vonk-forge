@@ -1462,6 +1462,7 @@ def create_app(
 
 def production_app() -> FastAPI:
     from sqlalchemy import func, select
+    from vonk_forge_contracts import RecipeDefinition, content_sha256
 
     from .agent_reconciliation import (
         bind_reconciliation_result_consumer,
@@ -1487,13 +1488,19 @@ def production_app() -> FastAPI:
     from .logging import DatabaseJobLogStore
     from .metrics import MetricsRegistry, OperationalMetricsCollector
     from .model_cache import ModelCacheService
-    from .models import Job
+    from .models import CatalogDocumentRevision, Job
     from .operation_api import durable_operation_services
     from .presence import ManagementAddressPolicy
     from .recipe_routes import AtomicRecipeRoutePublisher, RecipeRouteService
     from .route_runtime import AtomicRouteBundlePublisher, FileSupervisorAcknowledger
     from .run_admission import RunAdmissionService
-    from .runtime_image_preparation import FilesystemRuntimeImageStorage
+    from .runtime_image_preparation import (
+        FilesystemRuntimeImageStorage,
+        SkopeoOCIImageTransport,
+        persist_runtime_image_receipt,
+        prepare_runtime_image,
+        resolve_persisted_runtime_image_receipt,
+    )
     from .settings import Settings
     from .telemetry import TelemetryRepository
     from .worker_authority import WorkerAuthorityService
@@ -1565,6 +1572,63 @@ def production_app() -> FastAPI:
         # needs no Spark hop or duplicate copy before it can be inspected.
         settings.agent_artifact_root
     )
+    runtime_image_transport = SkopeoOCIImageTransport()
+
+    def prepare_runtime_image_receipt(document, runtime_spec, build):
+        runtime = runtime_spec.get("runtime")
+        if not isinstance(runtime, Mapping):
+            raise TypeError("compiled runtime projection is unavailable")
+        identity = runtime_spec.get("identity")
+        effective_execution_key = (
+            identity.get("execution_sha256")
+            if isinstance(identity, Mapping)
+            else None
+        )
+        if not isinstance(effective_execution_key, str):
+            raise TypeError("compiled runtime execution identity is unavailable")
+        build_receipt = None
+        execution = document.get("execution")
+        if isinstance(execution, Mapping) and execution.get("mode") == "build":
+            if build is None:
+                raise ValueError("source build receipt is unavailable")
+            build_receipt = {
+                "state": build.state,
+                "build_id": build.id,
+                "image_digest": build.image_digest,
+                "oci_layout_sha256": build.oci_layout_sha256,
+                "image_bytes": build.image_bytes,
+            }
+
+        def write_receipt(receipt):
+            recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
+            with sessions.begin() as session:
+                revision = session.scalar(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.state == "active",
+                        CatalogDocumentRevision.content_digest == recipe_digest,
+                    )
+                )
+                if revision is None or revision.content_digest is None:
+                    raise ValueError("active recipe revision for runtime receipt is unavailable")
+                persist_runtime_image_receipt(
+                    session,
+                    recipe_revision_id=revision.id,
+                    original_content_digest=revision.content_digest,
+                    effective_execution_key=effective_execution_key,
+                    receipt=receipt,
+                    verified_at=clock(),
+                )
+
+        return prepare_runtime_image(
+            document,
+            runtime=runtime,
+            storage=runtime_image_storage,
+            transport=runtime_image_transport,
+            build_receipt=build_receipt,
+            now=clock(),
+            receipt_writer=write_receipt,
+        )
 
     def resolve_runtime_image_receipt(document, image_digest, runtime_spec):
         """Read an already prepared OCI receipt without pulling or exporting."""
@@ -1585,6 +1649,30 @@ def production_app() -> FastAPI:
             raise ValueError(
                 "runtime image preparation is required before compile/install"
             )
+        identity = runtime_spec.get("identity")
+        execution_key = identity.get("execution_sha256") if isinstance(identity, Mapping) else None
+        recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
+        if not isinstance(execution_key, str):
+            raise TypeError("runtime image preparation execution identity is unavailable")
+        with sessions() as session:
+            revision = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                    CatalogDocumentRevision.content_digest == recipe_digest,
+                )
+            )
+            if revision is None:
+                raise ValueError("durable runtime image receipt is unavailable before compile/install")
+            resolve_persisted_runtime_image_receipt(
+                session,
+                recipe_revision_id=revision.id,
+                original_content_digest=recipe_digest,
+                effective_execution_key=execution_key,
+                receipt=receipt,
+            )
+        if revision is None:
+            raise ValueError("durable runtime image receipt is unavailable before compile/install")
         return receipt
 
     execution_plans = ControllerExecutionPlanService(
@@ -1683,6 +1771,7 @@ def production_app() -> FastAPI:
             agent_services.operations,
             agent_services.distribution,
             model_cache=model_cache,
+            runtime_image_preparer=prepare_runtime_image_receipt,
             clock=clock,
         ),
     )

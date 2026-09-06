@@ -30,6 +30,7 @@ from .models import (
     ArtifactDistributionAssignment,
     CatalogDocumentRevision,
     RecipeBuild,
+    RuntimeImageReceipt,
 )
 from .runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
@@ -225,12 +226,37 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                     return False
                 execution = revision.document.get("execution")
                 image = execution.get("image") if isinstance(execution, Mapping) else None
+                raw_registry = image.get("digest") if isinstance(image, Mapping) else None
                 expected_registry = (
-                    f"sha256:{image.get('digest')}"
-                    if isinstance(image, Mapping) and isinstance(image.get("digest"), str)
+                    raw_registry
+                    if isinstance(raw_registry, str) and raw_registry.startswith("sha256:")
+                    else f"sha256:{raw_registry}"
+                    if isinstance(raw_registry, str)
                     else None
                 )
                 if expected_registry != receipt.registry_manifest_digest:
+                    return False
+                durable = session.scalar(
+                    select(RuntimeImageReceipt).where(
+                        RuntimeImageReceipt.recipe_revision_id == revision.id,
+                        RuntimeImageReceipt.source == "published",
+                        RuntimeImageReceipt.original_content_digest
+                        == receipt.distribution_content_sha256,
+                        RuntimeImageReceipt.state == "verified",
+                        RuntimeImageReceipt.registry_manifest_digest
+                        == receipt.registry_manifest_digest,
+                        RuntimeImageReceipt.platform_manifest_digest == image_digest,
+                        RuntimeImageReceipt.local_image_config_id
+                        == receipt.local_image_config_id,
+                        RuntimeImageReceipt.oci_archive_sha256 == archive_sha256,
+                        RuntimeImageReceipt.image_bytes == receipt.image_bytes,
+                        RuntimeImageReceipt.architecture == receipt.architecture,
+                        RuntimeImageReceipt.runtime_interface == receipt.runtime_interface,
+                        RuntimeImageReceipt.runtime_interface_label
+                        == receipt.runtime_interface_label,
+                    )
+                )
+                if durable is None:
                     return False
             self._runtime_storage.verify_existing(archive_sha256, receipt.image_bytes)
             return True
