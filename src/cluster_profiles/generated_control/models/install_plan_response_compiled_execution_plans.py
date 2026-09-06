@@ -6,10 +6,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from typing import cast
 
-if TYPE_CHECKING:
-  from ..models.install_plan_response_compiled_execution_plans_additional_property import InstallPlanResponseCompiledExecutionPlansAdditionalProperty
 
 
 
@@ -24,19 +21,16 @@ class InstallPlanResponseCompiledExecutionPlans:
     """
      """
 
-    additional_properties: dict[str, 'InstallPlanResponseCompiledExecutionPlansAdditionalProperty'] = _attrs_field(init=False, factory=dict)
+    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.install_plan_response_compiled_execution_plans_additional_property import InstallPlanResponseCompiledExecutionPlansAdditionalProperty
 
         field_dict: dict[str, Any] = {}
-        for prop_name, prop in self.additional_properties.items():
-            field_dict[prop_name] = prop.to_dict()
-
+        field_dict.update(self.additional_properties)
 
         return field_dict
 
@@ -44,31 +38,22 @@ class InstallPlanResponseCompiledExecutionPlans:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.install_plan_response_compiled_execution_plans_additional_property import InstallPlanResponseCompiledExecutionPlansAdditionalProperty
         d = dict(src_dict)
         install_plan_response_compiled_execution_plans = cls(
         )
 
 
-        additional_properties = {}
-        for prop_name, prop_dict in d.items():
-            additional_property = InstallPlanResponseCompiledExecutionPlansAdditionalProperty.from_dict(prop_dict)
-
-
-
-            additional_properties[prop_name] = additional_property
-
-        install_plan_response_compiled_execution_plans.additional_properties = additional_properties
+        install_plan_response_compiled_execution_plans.additional_properties = d
         return install_plan_response_compiled_execution_plans
 
     @property
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> 'InstallPlanResponseCompiledExecutionPlansAdditionalProperty':
+    def __getitem__(self, key: str) -> Any:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: 'InstallPlanResponseCompiledExecutionPlansAdditionalProperty') -> None:
+    def __setitem__(self, key: str, value: Any) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:

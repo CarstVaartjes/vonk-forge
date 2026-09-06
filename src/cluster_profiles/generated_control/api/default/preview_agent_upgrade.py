@@ -8,8 +8,9 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.agent_upgrade_preview_request import AgentUpgradePreviewRequest
+from ...models.agent_upgrade_preview_response import AgentUpgradePreviewResponse
+from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.http_validation_error import HTTPValidationError
-from ...models.preview_agent_upgrade_response_preview_agent_upgrade_api_v1_agents_upgrades_preview_post import PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost
 from typing import cast
 
 
@@ -41,13 +42,34 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]]:
     if response.status_code == 200:
-        response_200 = PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost.from_dict(response.json())
+        response_200 = AgentUpgradePreviewResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 401:
+        response_401 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 403:
+        response_403 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_403
+
+    if response.status_code == 409:
+        response_409 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_409
 
     if response.status_code == 422:
         response_422 = HTTPValidationError.from_dict(response.json())
@@ -56,13 +78,20 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
         return response_422
 
+    if response.status_code == 503:
+        response_503 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_503
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -76,7 +105,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: AgentUpgradePreviewRequest,
 
-) -> Response[Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]]:
+) -> Response[Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]]:
     """ Preview Agent Upgrade
 
     Args:
@@ -87,7 +116,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]]
+        Response[Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]]
      """
 
 
@@ -107,7 +136,7 @@ def sync(
     client: AuthenticatedClient,
     body: AgentUpgradePreviewRequest,
 
-) -> Optional[Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]]:
+) -> Optional[Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]]:
     """ Preview Agent Upgrade
 
     Args:
@@ -118,7 +147,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]
+        Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]
      """
 
 
@@ -133,7 +162,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: AgentUpgradePreviewRequest,
 
-) -> Response[Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]]:
+) -> Response[Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]]:
     """ Preview Agent Upgrade
 
     Args:
@@ -144,7 +173,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]]
+        Response[Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]]
      """
 
 
@@ -164,7 +193,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: AgentUpgradePreviewRequest,
 
-) -> Optional[Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]]:
+) -> Optional[Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]]:
     """ Preview Agent Upgrade
 
     Args:
@@ -175,7 +204,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, PreviewAgentUpgradeResponsePreviewAgentUpgradeApiV1AgentsUpgradesPreviewPost]
+        Union[AgentUpgradePreviewResponse, BoundedErrorResponse, HTTPValidationError]
      """
 
 

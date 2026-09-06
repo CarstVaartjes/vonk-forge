@@ -6,6 +6,7 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from typing import cast, Union
 
 
 
@@ -21,7 +22,7 @@ class MappingRequestParameters:
     """
      """
 
-    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+    additional_properties: dict[str, Union[bool, int, str]] = _attrs_field(init=False, factory=dict)
 
 
 
@@ -30,7 +31,10 @@ class MappingRequestParameters:
     def to_dict(self) -> dict[str, Any]:
 
         field_dict: dict[str, Any] = {}
-        field_dict.update(self.additional_properties)
+        for prop_name, prop in self.additional_properties.items():
+
+            field_dict[prop_name] = prop
+
 
         return field_dict
 
@@ -43,17 +47,26 @@ class MappingRequestParameters:
         )
 
 
-        mapping_request_parameters.additional_properties = d
+        additional_properties = {}
+        for prop_name, prop_dict in d.items():
+            def _parse_additional_property(data: object) -> Union[bool, int, str]:
+                return cast(Union[bool, int, str], data)
+
+            additional_property = _parse_additional_property(prop_dict)
+
+            additional_properties[prop_name] = additional_property
+
+        mapping_request_parameters.additional_properties = additional_properties
         return mapping_request_parameters
 
     @property
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> Union[bool, int, str]:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value: Union[bool, int, str]) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:

@@ -69,12 +69,14 @@
             "items": {
               "type": "string"
             },
+            "maxItems": 128,
             "title": "Capabilities",
             "type": "array"
           },
           "certificate_expires_at": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -98,6 +100,7 @@
           "last_seen_at": {
             "anyOf": [
               {
+                "maxLength": 64,
                 "type": "string"
               },
               {
@@ -140,6 +143,8 @@
             "type": "boolean"
           },
           "state": {
+            "maxLength": 80,
+            "minLength": 1,
             "title": "State",
             "type": "string"
           }
@@ -148,9 +153,7 @@
           "node_id",
           "state",
           "capabilities",
-          "last_seen_at",
-          "stale",
-          "certificate_expires_at"
+          "stale"
         ],
         "title": "AgentSummary",
         "type": "object"
@@ -213,6 +216,29 @@
           "plan_digest"
         ],
         "title": "AgentUpgradeApplyRequest",
+        "type": "object"
+      },
+      "AgentUpgradeApplyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "state": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ],
+        "title": "AgentUpgradeApplyResponse",
         "type": "object"
       },
       "AgentUpgradeDiagnosticsResponse": {
@@ -424,6 +450,59 @@
           }
         },
         "title": "AgentUpgradePreviewRequest",
+        "type": "object"
+      },
+      "AgentUpgradePreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Authority Revision",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "package": {
+            "$ref": "#/components/schemas/AgentUpgradePackageRequest"
+          },
+          "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Plan Digest",
+            "type": "string"
+          },
+          "repair_manifest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRepairManifestRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strategy": {
+            "enum": [
+              "one-at-a-time",
+              "all-at-once"
+            ],
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authority_revision",
+          "node_ids",
+          "package",
+          "plan_digest",
+          "strategy"
+        ],
+        "title": "AgentUpgradePreviewResponse",
         "type": "object"
       },
       "AgentUpgradeTargetDiagnosticsResponse": {
@@ -1118,6 +1197,89 @@
         "title": "ArtifactStorageImpact",
         "type": "object"
       },
+      "AuditEventResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Action",
+            "type": "string"
+          },
+          "actor": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Actor",
+            "type": "string"
+          },
+          "authority_revision": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authority Revision"
+          },
+          "occurred_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occurred At"
+          },
+          "request_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          },
+          "targets": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "request_id",
+          "actor",
+          "action",
+          "targets"
+        ],
+        "title": "AuditEventResponse",
+        "type": "object"
+      },
+      "AuditResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEventResponse"
+            },
+            "maxItems": 100,
+            "title": "Events",
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "title": "AuditResponse",
+        "type": "object"
+      },
       "AuthSession": {
         "additionalProperties": false,
         "properties": {
@@ -1144,6 +1306,42 @@
           "expires_at"
         ],
         "title": "AuthSession",
+        "type": "object"
+      },
+      "AuthorityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "dependencies": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "maxProperties": 256,
+            "title": "Dependencies",
+            "type": "object"
+          },
+          "documents": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 256,
+            "title": "Documents",
+            "type": "object"
+          },
+          "revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Revision",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "documents",
+          "dependencies"
+        ],
+        "title": "AuthorityResponse",
         "type": "object"
       },
       "AvailabilityOperationFailure": {
@@ -1445,26 +1643,32 @@
         "additionalProperties": false,
         "properties": {
           "build_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Build Id",
             "type": "string"
           },
           "build_input_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Build Input Sha256",
             "type": "string"
           },
           "builder_node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Builder Node Id",
             "type": "string"
           },
           "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Recipe Content Sha256",
             "type": "string"
           },
           "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
             "type": "string"
           },
           "source_bundle_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Source Bundle Sha256",
             "type": "string"
           }
@@ -2092,6 +2296,39 @@
         "title": "ChangeRequest",
         "type": "object"
       },
+      "ChangeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Authority Revision",
+            "type": "string"
+          },
+          "mode": {
+            "const": "database",
+            "title": "Mode",
+            "type": "string"
+          },
+          "previous_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Previous Revision",
+            "type": "string"
+          },
+          "proposal_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Proposal Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_digest",
+          "previous_revision",
+          "authority_revision",
+          "mode"
+        ],
+        "title": "ChangeResponse",
+        "type": "object"
+      },
       "CompatibilityIdentity": {
         "additionalProperties": false,
         "description": "Immutable inputs for an exceptional reusable preparation artifact.",
@@ -2470,15 +2707,20 @@
         "additionalProperties": false,
         "properties": {
           "alias": {
+            "maxLength": 63,
             "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$",
             "title": "Alias",
             "type": "string"
           },
           "api_base": {
+            "maxLength": 512,
+            "minLength": 1,
             "title": "Api Base",
             "type": "string"
           },
           "expires_at": {
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Expires At",
             "type": "string"
           },
@@ -2493,6 +2735,8 @@
             "type": "string"
           },
           "observed_at": {
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Observed At",
             "type": "string"
           },
@@ -4255,6 +4499,106 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "IdentityHistoryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_state": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Agent State",
+            "type": "string"
+          },
+          "certificate_fingerprint": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate Fingerprint"
+          },
+          "certificate_generation": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate Generation"
+          },
+          "certificate_serial": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate Serial"
+          },
+          "enrolled_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enrolled At"
+          },
+          "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "node_id",
+          "agent_state"
+        ],
+        "title": "IdentityHistoryItem",
+        "type": "object"
+      },
+      "IdentityHistoryResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityHistoryItem"
+            },
+            "maxItems": 100,
+            "title": "Identities",
+            "type": "array"
+          }
+        },
+        "required": [
+          "identities"
+        ],
+        "title": "IdentityHistoryResponse",
+        "type": "object"
+      },
       "ImageDistributionPlanResponse": {
         "additionalProperties": false,
         "properties": {
@@ -4275,6 +4619,7 @@
           },
           "node_ids": {
             "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
             "maxItems": 1024,
@@ -4474,6 +4819,7 @@
             "title": "Inventory Observed At"
           },
           "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
             "type": "string"
           },
@@ -4494,6 +4840,8 @@
             "type": "integer"
           },
           "role": {
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Role",
             "type": "string"
           },
@@ -4532,22 +4880,27 @@
             "type": "boolean"
           },
           "compiled_execution_plans": {
-            "additionalProperties": {
-              "additionalProperties": true,
-              "type": "object"
+            "patternProperties": {
+              "^spk_[0-9a-f]{32}$": {
+                "additionalProperties": true,
+                "type": "object"
+              }
             },
             "title": "Compiled Execution Plans",
             "type": "object"
           },
           "image_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Image Digest",
             "type": "string"
           },
           "mapping_generation": {
+            "minimum": 1.0,
             "title": "Mapping Generation",
             "type": "integer"
           },
           "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Mapping Id",
             "type": "string"
           },
@@ -4559,12 +4912,14 @@
             "type": "array"
           },
           "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Plan Digest",
             "type": "string"
           },
           "recipe_build_id": {
             "anyOf": [
               {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
                 "type": "string"
               },
               {
@@ -4574,10 +4929,12 @@
             "title": "Recipe Build Id"
           },
           "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Recipe Content Sha256",
             "type": "string"
           },
           "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
             "type": "string"
           }
@@ -5038,12 +5395,16 @@
         "properties": {
           "digests": {
             "items": {
+              "pattern": "^[0-9a-f]{64}$",
               "type": "string"
             },
+            "maxItems": 100,
             "title": "Digests",
             "type": "array"
           },
           "job_id": {
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Job Id",
             "type": "string"
           }
@@ -5074,14 +5435,12 @@
           "checkpoint": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/OperationCheckpoint"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Checkpoint"
+            ]
           },
           "completed_bytes": {
             "anyOf": [
@@ -5311,6 +5670,8 @@
         "additionalProperties": false,
         "properties": {
           "id": {
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Id",
             "type": "string"
           },
@@ -7245,6 +7606,7 @@
             "type": "boolean"
           },
           "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
             "type": "string"
           },
@@ -7253,6 +7615,8 @@
             "type": "integer"
           },
           "role": {
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Role",
             "type": "string"
           }
@@ -7270,6 +7634,7 @@
         "additionalProperties": false,
         "properties": {
           "generation": {
+            "minimum": 1.0,
             "title": "Generation",
             "type": "integer"
           },
@@ -7281,23 +7646,45 @@
             "type": "array"
           },
           "parameters": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
+            "maxProperties": 128,
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
             "title": "Parameters",
             "type": "object"
           },
           "placement_digest": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Placement Digest",
             "type": "string"
           },
           "recipe_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Recipe Content Sha256",
             "type": "string"
           },
           "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
             "type": "string"
           },
           "topology_name": {
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Topology Name",
             "type": "string"
           }
@@ -7368,6 +7755,7 @@
         "properties": {
           "node_ids": {
             "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
             "maxItems": 1024,
@@ -7376,8 +7764,24 @@
             "type": "array"
           },
           "parameters": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
             "maxProperties": 128,
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
             "title": "Parameters",
             "type": "object"
           },
@@ -7418,6 +7822,7 @@
         "properties": {
           "node_ids": {
             "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
             "maxItems": 1024,
@@ -7426,8 +7831,24 @@
             "type": "array"
           },
           "parameters": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                }
+              ]
+            },
             "maxProperties": 128,
+            "propertyNames": {
+              "maxLength": 64,
+              "minLength": 1
+            },
             "title": "Parameters",
             "type": "object"
           },
@@ -7460,14 +7881,17 @@
         "additionalProperties": false,
         "properties": {
           "generation": {
+            "minimum": 1.0,
             "title": "Generation",
             "type": "integer"
           },
           "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Mapping Id",
             "type": "string"
           },
           "placement_digest": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Placement Digest",
             "type": "string"
           }
@@ -9002,6 +9426,7 @@
           },
           "node_ids": {
             "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
             "maxItems": 1024,
@@ -9041,6 +9466,7 @@
         "properties": {
           "installation_ids": {
             "items": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
               "type": "string"
             },
             "maxItems": 512,
@@ -9060,6 +9486,7 @@
           },
           "recipe_ids": {
             "items": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
               "type": "string"
             },
             "maxItems": 512,
@@ -10610,6 +11037,7 @@
         "additionalProperties": false,
         "properties": {
           "id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Id",
             "type": "string"
           },
@@ -10619,6 +11047,7 @@
           },
           "nodes": {
             "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
             "title": "Nodes",
@@ -10629,6 +11058,7 @@
             "type": "string"
           },
           "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Plan Digest",
             "type": "string"
           },
@@ -11661,6 +12091,53 @@
           "document"
         ],
         "title": "ProposalChangeRequest",
+        "type": "object"
+      },
+      "ProposalPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "affected_documents": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Affected Documents",
+            "type": "array"
+          },
+          "base_revision": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Base Revision",
+            "type": "string"
+          },
+          "digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          },
+          "patch": {
+            "maxLength": 16777216,
+            "minLength": 1,
+            "title": "Patch",
+            "type": "string"
+          },
+          "validation_results": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Validation Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_revision",
+          "digest",
+          "patch",
+          "affected_documents",
+          "validation_results"
+        ],
+        "title": "ProposalPreviewResponse",
         "type": "object"
       },
       "ProposalRequest": {
@@ -14727,6 +15204,7 @@
             "type": "string"
           },
           "node_id": {
+            "pattern": "^spk_[0-9a-f]{32}$",
             "title": "Node Id",
             "type": "string"
           },
@@ -14754,6 +15232,8 @@
             "type": "integer"
           },
           "role": {
+            "maxLength": 64,
+            "minLength": 1,
             "title": "Role",
             "type": "string"
           },
@@ -14801,14 +15281,17 @@
             "type": "boolean"
           },
           "installation_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Installation Id",
             "type": "string"
           },
           "mapping_generation": {
+            "minimum": 1.0,
             "title": "Mapping Generation",
             "type": "integer"
           },
           "mapping_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Mapping Id",
             "type": "string"
           },
@@ -14820,10 +15303,12 @@
             "type": "array"
           },
           "plan_digest": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Plan Digest",
             "type": "string"
           },
           "recipe_revision_id": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
             "type": "string"
           }
@@ -16624,6 +17109,7 @@
             "type": "boolean"
           },
           "source_bundle_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Source Bundle Sha256",
             "type": "string"
           }
@@ -19179,6 +19665,7 @@
         "properties": {
           "cleanup_node_ids": {
             "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
             "maxItems": 1024,
@@ -19187,6 +19674,7 @@
           },
           "dependent_recipe_ids": {
             "items": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
               "type": "string"
             },
             "maxItems": 512,
@@ -19211,6 +19699,7 @@
           },
           "retained_node_ids": {
             "items": {
+              "pattern": "^spk_[0-9a-f]{32}$",
               "type": "string"
             },
             "maxItems": 1024,
@@ -19892,13 +20381,41 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Apply Agent Upgrade Api V1 Agents Upgrades Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentUpgradeApplyResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -19909,6 +20426,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -19927,13 +20454,41 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Current Agent Upgrade Api V1 Agents Upgrades Candidate Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentUpgradePackageRequest"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -19962,13 +20517,41 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Preview Agent Upgrade Api V1 Agents Upgrades Preview Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AgentUpgradePreviewResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -19979,6 +20562,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -20703,13 +21296,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Audit View Api V1 Audit Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AuditResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
           }
         },
         "security": [
@@ -20824,13 +21425,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Authority View Api V1 Authority Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/AuthorityResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
           },
           "422": {
             "content": {
@@ -20841,6 +21450,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -21157,23 +21776,71 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Submit Change Api V1 Changes Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ChangeResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -22644,13 +23311,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Listidentityhistory",
-                  "type": "object"
+                  "$ref": "#/components/schemas/IdentityHistoryResponse"
                 }
               }
             },
             "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
           }
         },
         "security": [
@@ -26154,23 +26829,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Proposal Preview Api V1 Proposals Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/ProposalPreviewResponse"
                 }
               }
             },
             "description": "Successful Response"
           },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
           "422": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
                 }
               }
             },
-            "description": "Validation Error"
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

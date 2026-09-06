@@ -7,7 +7,8 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.list_audit_events_response_audit_view_api_v1_audit_get import ListAuditEventsResponseAuditViewApiV1AuditGet
+from ...models.audit_response import AuditResponse
+from ...models.bounded_error_response import BoundedErrorResponse
 from typing import cast
 
 
@@ -31,13 +32,20 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[ListAuditEventsResponseAuditViewApiV1AuditGet]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[AuditResponse, BoundedErrorResponse]]:
     if response.status_code == 200:
-        response_200 = ListAuditEventsResponseAuditViewApiV1AuditGet.from_dict(response.json())
+        response_200 = AuditResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 401:
+        response_401 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -45,7 +53,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[ListAuditEventsResponseAuditViewApiV1AuditGet]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[AuditResponse, BoundedErrorResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -58,7 +66,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[ListAuditEventsResponseAuditViewApiV1AuditGet]:
+) -> Response[Union[AuditResponse, BoundedErrorResponse]]:
     """ Audit View
 
     Raises:
@@ -66,7 +74,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ListAuditEventsResponseAuditViewApiV1AuditGet]
+        Response[Union[AuditResponse, BoundedErrorResponse]]
      """
 
 
@@ -84,7 +92,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[ListAuditEventsResponseAuditViewApiV1AuditGet]:
+) -> Optional[Union[AuditResponse, BoundedErrorResponse]]:
     """ Audit View
 
     Raises:
@@ -92,7 +100,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ListAuditEventsResponseAuditViewApiV1AuditGet
+        Union[AuditResponse, BoundedErrorResponse]
      """
 
 
@@ -105,7 +113,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[ListAuditEventsResponseAuditViewApiV1AuditGet]:
+) -> Response[Union[AuditResponse, BoundedErrorResponse]]:
     """ Audit View
 
     Raises:
@@ -113,7 +121,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ListAuditEventsResponseAuditViewApiV1AuditGet]
+        Response[Union[AuditResponse, BoundedErrorResponse]]
      """
 
 
@@ -131,7 +139,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[ListAuditEventsResponseAuditViewApiV1AuditGet]:
+) -> Optional[Union[AuditResponse, BoundedErrorResponse]]:
     """ Audit View
 
     Raises:
@@ -139,7 +147,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ListAuditEventsResponseAuditViewApiV1AuditGet
+        Union[AuditResponse, BoundedErrorResponse]
      """
 
 

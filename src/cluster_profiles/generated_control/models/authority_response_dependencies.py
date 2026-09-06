@@ -6,22 +6,23 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
+from typing import cast
 
 
 
 
 
 
-T = TypeVar("T", bound="PreviewProposalResponseProposalPreviewApiV1ProposalsPost")
+T = TypeVar("T", bound="AuthorityResponseDependencies")
 
 
 
 @_attrs_define
-class PreviewProposalResponseProposalPreviewApiV1ProposalsPost:
+class AuthorityResponseDependencies:
     """
      """
 
-    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+    additional_properties: dict[str, list[str]] = _attrs_field(init=False, factory=dict)
 
 
 
@@ -30,7 +31,11 @@ class PreviewProposalResponseProposalPreviewApiV1ProposalsPost:
     def to_dict(self) -> dict[str, Any]:
 
         field_dict: dict[str, Any] = {}
-        field_dict.update(self.additional_properties)
+        for prop_name, prop in self.additional_properties.items():
+            field_dict[prop_name] = prop
+
+
+
 
         return field_dict
 
@@ -39,21 +44,27 @@ class PreviewProposalResponseProposalPreviewApiV1ProposalsPost:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        preview_proposal_response_proposal_preview_api_v1_proposals_post = cls(
+        authority_response_dependencies = cls(
         )
 
 
-        preview_proposal_response_proposal_preview_api_v1_proposals_post.additional_properties = d
-        return preview_proposal_response_proposal_preview_api_v1_proposals_post
+        additional_properties = {}
+        for prop_name, prop_dict in d.items():
+            additional_property = cast(list[str], prop_dict)
+
+            additional_properties[prop_name] = additional_property
+
+        authority_response_dependencies.additional_properties = additional_properties
+        return authority_response_dependencies
 
     @property
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> list[str]:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value: list[str]) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:

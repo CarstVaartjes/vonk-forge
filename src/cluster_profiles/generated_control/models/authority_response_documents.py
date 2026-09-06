@@ -12,16 +12,16 @@ from ..types import UNSET, Unset
 
 
 
-T = TypeVar("T", bound="ListAuditEventsResponseAuditViewApiV1AuditGet")
+T = TypeVar("T", bound="AuthorityResponseDocuments")
 
 
 
 @_attrs_define
-class ListAuditEventsResponseAuditViewApiV1AuditGet:
+class AuthorityResponseDocuments:
     """
      """
 
-    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
+    additional_properties: dict[str, str] = _attrs_field(init=False, factory=dict)
 
 
 
@@ -39,21 +39,21 @@ class ListAuditEventsResponseAuditViewApiV1AuditGet:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        list_audit_events_response_audit_view_api_v1_audit_get = cls(
+        authority_response_documents = cls(
         )
 
 
-        list_audit_events_response_audit_view_api_v1_audit_get.additional_properties = d
-        return list_audit_events_response_audit_view_api_v1_audit_get
+        authority_response_documents.additional_properties = d
+        return authority_response_documents
 
     @property
     def additional_keys(self) -> list[str]:
         return list(self.additional_properties.keys())
 
-    def __getitem__(self, key: str) -> Any:
+    def __getitem__(self, key: str) -> str:
         return self.additional_properties[key]
 
-    def __setitem__(self, key: str, value: Any) -> None:
+    def __setitem__(self, key: str, value: str) -> None:
         self.additional_properties[key] = value
 
     def __delitem__(self, key: str) -> None:
