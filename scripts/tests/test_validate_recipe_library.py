@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -33,7 +34,7 @@ _VALIDATOR_SPEC.loader.exec_module(_VALIDATOR)
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(SCRIPT), *args],
+        [sys.executable, str(SCRIPT), *args],
         cwd=ROOT,
         text=True,
         capture_output=True,
