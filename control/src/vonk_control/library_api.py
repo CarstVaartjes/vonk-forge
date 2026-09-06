@@ -6,7 +6,12 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, Query
 
-from .library_contract import LibraryRecipeDetail, LibraryRecipeList, LibrarySnapshot
+from .library_contract import (
+    _MAX_PAGE_RECIPES,
+    LibraryRecipeDetail,
+    LibraryRecipeList,
+    LibrarySnapshot,
+)
 from .operation_api import bounded_error_responses
 
 LIBRARY_OPERATION_IDS = {
@@ -47,7 +52,7 @@ def install_library_routes(
         operation_id="listLibrary",
     )
     def list_library(
-        limit: Annotated[int, Query(ge=1, le=100)] = 100,
+        limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_RECIPES)] = 100,
         cursor: Annotated[str | None, Query(max_length=1024)] = None,
         _actor: Any = authenticated,
     ) -> LibrarySnapshot:
@@ -69,7 +74,7 @@ def install_library_routes(
         operation_id="listLibraryRecipes",
     )
     def list_library_recipes(
-        limit: Annotated[int, Query(ge=1, le=100)] = 100,
+        limit: Annotated[int, Query(ge=1, le=_MAX_PAGE_RECIPES)] = 100,
         cursor: Annotated[str | None, Query(max_length=1024)] = None,
         _actor: Any = authenticated,
     ) -> LibraryRecipeList:

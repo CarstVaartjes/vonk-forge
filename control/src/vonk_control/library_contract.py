@@ -15,7 +15,7 @@ _UUID_PATTERN = (
 _NODE_PATTERN = r"^spk_[0-9a-f]{32}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 _IMAGE_DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
-_MAX_PAGE_RECIPES = 100
+_MAX_PAGE_RECIPES = 512
 _MAX_OPERATIONAL_ROWS = 512
 _MAX_OPERATIONAL_MEMBERS = 16_384
 _MAX_AGENT_ROWS = 500
@@ -164,7 +164,9 @@ class LibraryRecipeSummary(LibraryRecipeIdentity):
 class LibraryModel(_StrictModel):
     model: LibraryModelIdentity
     page_local: Literal[True] = True
-    recipes: list[LibraryRecipeSummary] = Field(max_length=100)
+    recipes: list[LibraryRecipeSummary] = Field(
+        min_length=0, max_length=_MAX_PAGE_RECIPES
+    )
     model_capabilities: LibraryCapabilityInventory = Field(
         default_factory=lambda: LibraryCapabilityInventory()
     )
@@ -173,8 +175,8 @@ class LibraryModel(_StrictModel):
 class LibrarySnapshot(_StrictModel):
     schema_version: Literal[1] = 1
     generated_at: datetime
-    models: list[LibraryModel] = Field(max_length=100)
-    unlinked_recipes: list[LibraryRecipeSummary] = Field(max_length=100)
+    models: list[LibraryModel] = Field(max_length=_MAX_PAGE_RECIPES)
+    unlinked_recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
     freshness_policy: FreshnessPolicy
 
@@ -184,7 +186,7 @@ class LibraryRecipeList(_StrictModel):
 
     schema_version: Literal[1] = 1
     generated_at: datetime
-    recipes: list[LibraryRecipeSummary] = Field(max_length=100)
+    recipes: list[LibraryRecipeSummary] = Field(max_length=_MAX_PAGE_RECIPES)
     next_cursor: Annotated[str, StringConstraints(max_length=1024)] | None
     freshness_policy: FreshnessPolicy
 

@@ -25,6 +25,26 @@ ROOT = Path(
 
 def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path: Path) -> None:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    expected_model_count = len(index["catalog_entities"])
+    expected_recipe_count = len(index["recipes"])
+    expected_model_keys = {
+        (
+            entry["document"]["identity"]["publisher"],
+            entry["document"]["identity"]["slug"],
+            entry["content_sha256"],
+        )
+        for entry in index["catalog_entities"]
+    }
+    expected_linked_model_keys = {
+        (
+            reference["model"]["publisher"],
+            reference["model"]["slug"],
+            reference["model"]["content_sha256"],
+        )
+        for row in index["recipes"]
+        for reference in row["document"].get("models", [])
+    }
+    expected_linked_model_count = len(expected_model_keys & expected_linked_model_keys)
     engine = create_engine(f"sqlite:///{tmp_path / 'library.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
@@ -49,17 +69,19 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
         clock=clock,
     )
     snapshot = projection.list(limit=100)
-    assert len(snapshot.models) == 92
+    assert len(snapshot.models) == expected_model_count
     assert len(snapshot.unlinked_recipes) == 0
-    assert sum(bool(model.recipes) for model in snapshot.models) == 79
-    assert sum(not model.recipes for model in snapshot.models) == 13
+    assert sum(bool(model.recipes) for model in snapshot.models) == expected_linked_model_count
+    assert sum(not model.recipes for model in snapshot.models) == (
+        expected_model_count - expected_linked_model_count
+    )
     assert {
         recipe.recipe_id
         for model in snapshot.models
         for recipe in model.recipes
     } == recipe_ids
     recipe_overview = projection.recipes(limit=100)
-    assert len(recipe_overview.recipes) == 85
+    assert len(recipe_overview.recipes) == expected_recipe_count
 
     app = FastAPI()
     install_library_routes(
@@ -71,9 +93,11 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     response = client.get("/api/v1/library")
     assert response.status_code == 200
     payload = response.json()
-    assert len(payload["models"]) == 92
-    assert sum(bool(model["recipes"]) for model in payload["models"]) == 79
-    assert sum(not model["recipes"] for model in payload["models"]) == 13
+    assert len(payload["models"]) == expected_model_count
+    assert sum(bool(model["recipes"]) for model in payload["models"]) == expected_linked_model_count
+    assert sum(not model["recipes"] for model in payload["models"]) == (
+        expected_model_count - expected_linked_model_count
+    )
     assert any(model["recipes"] == [] for model in payload["models"])
     assert {model["model"]["kind"] for model in payload["models"]} == {"model"}
     assert all(
@@ -84,10 +108,13 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
         for recipe in model["recipes"]
     )
     library_model_schema = app.openapi()["components"]["schemas"]["LibraryModel"]
-    assert "minItems" not in library_model_schema["properties"]["recipes"]
+    assert library_model_schema["properties"]["recipes"]["minItems"] == 0
+    assert library_model_schema["properties"]["recipes"]["maxItems"] == 512
     recipe_response = client.get("/api/v1/library/recipes")
     assert recipe_response.status_code == 200
-    assert len(recipe_response.json()["recipes"]) == 85
+    recipe_payload = recipe_response.json()
+    assert len(recipe_payload["recipes"]) == expected_recipe_count
+    assert {recipe["recipe_id"] for recipe in recipe_payload["recipes"]} == recipe_ids
     recipe_id = payload["models"][0]["recipes"][0]["recipe_id"]
     detail = client.get(f"/api/v1/library/recipes/{recipe_id}")
     assert detail.status_code == 200
