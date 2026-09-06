@@ -119,6 +119,7 @@ def test_canonical_job_recipe_declares_a_read_only_input_contract(
         "media_types": ["image/png"],
         "max_bytes": 1024,
     }
+    raw["validation"]["serving"]["checks"][0]["request"]["input_path"] = "/inputs"
     recipe = RecipeDefinition.model_validate(raw)
     spec = _compile(recipe, model)
 

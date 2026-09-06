@@ -182,7 +182,6 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         "control/migrations/versions/0002_fleet_node_profile_events.py",
         "control/migrations/versions/0003_agent_reenrollment_grants.py",
         "scripts/qualify-recipe",
-        "scripts/import-recipe-library",
         "scripts/validate-recipe-library",
         "config/recipe-library-manifest.json",
     ]
@@ -193,7 +192,6 @@ def recipe_execution_supply_chain_inputs(root: Path) -> tuple[str, ...]:
         "config/execution-harnesses",
         "config/runtime-distributions",
         "config/patch-bundles",
-        "config/model-targets",
     ):
         directory = root / relative
         if directory.is_dir():

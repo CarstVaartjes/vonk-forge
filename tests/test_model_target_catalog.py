@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -17,8 +16,7 @@ def test_platform_has_no_shadow_model_target_or_recipe_library_authority() -> No
         "schema_version": 2,
         "kind": "recipe-library-authority",
         "repository": "https://github.com/CarstVaartjes/vonk-forge-recipes.git",
-        "development_ref": "main",
-        "production_ref": "approved immutable release tag",
+        "tracking_ref": "main",
         "validation_workflow": "CarstVaartjes/vonk-forge/.github/workflows/validate-recipe-library.yml",
         "authority": {
             "models": "recipe-library-commit",

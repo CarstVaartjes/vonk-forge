@@ -264,6 +264,7 @@ def test_artifact_harness_projects_an_isolated_read_only_input(
         "media_types": ["image/png"],
         "max_bytes": 32 * 1024 * 1024,
     }
+    raw["validation"]["serving"]["checks"][0]["request"]["input_path"] = "/inputs"
     recipe = RecipeDefinition.model_validate(raw)
     projection = _projection("diffusers", recipe=recipe, model=model)
 
