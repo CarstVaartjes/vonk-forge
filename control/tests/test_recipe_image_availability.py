@@ -10,8 +10,6 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_forge_contracts import RecipeDefinition, content_sha256
-
 from vonk_control.models import Base, CatalogDocumentRevision, Job
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityError,
@@ -23,6 +21,7 @@ from vonk_control.runtime_image_preparation import (
     RuntimeImagePreparationError,
     prepare_runtime_image,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
 PLATFORM_DIGEST = "sha256:" + "e" * 64

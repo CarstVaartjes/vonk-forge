@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-
 from vonk_control.recipe_image_availability import RecipeImageAvailabilityView
 from vonk_control.recipe_image_availability_api import (
     _progress,

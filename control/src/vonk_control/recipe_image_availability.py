@@ -31,8 +31,8 @@ from .operation_contract import normalize_operation_progress, sanitize_failure_e
 from .runtime_image_preparation import (
     RuntimeImageReceipt,
     RuntimeImageStorage,
-    prepare_runtime_image,
     persist_runtime_image_receipt,
+    prepare_runtime_image,
 )
 
 SCHEMA_VERSION = 2
