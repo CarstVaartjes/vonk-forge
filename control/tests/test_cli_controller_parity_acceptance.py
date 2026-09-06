@@ -531,7 +531,7 @@ def test_cli_and_api_share_operation_identity_progress_and_replay() -> None:
         recipe_operations=recipes,
         operations=OperationApiServices(
             endpoint=lambda _alias: {},
-            agents=lambda: [],
+            agents=list,
             job_operations=lambda *_args: None,
             resume_job=lambda _job_id: None,
             operation_providers=(ledger.provider(),),
@@ -647,10 +647,6 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     # is imported lazily because this acceptance is run on the integrated
     # branch, while the CLI branch intentionally has no backend dependency.
     from sqlalchemy import select
-
-    from .test_recipe_operations import NOW as fixture_now
-    from .test_recipe_operations import setup_services
-
     from vonk_control.cluster_mappings import ClusterMappingService
     from vonk_control.fleet_profiles import (
         FleetProfileService,
@@ -658,12 +654,15 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     )
     from vonk_control.model_cache import ModelCacheService
     from vonk_control.model_cache_api import register_model_cache_operation_provider
-    from vonk_control.models import LocalRecipeRevision
+    from vonk_control.models import CatalogDocumentRevision
     from vonk_control.run_switch_operations import (
         ArtifactInspection,
         PhaseExecution,
         RunSwitchOperationService,
     )
+
+    from .test_recipe_operations import NOW as fixture_now
+    from .test_recipe_operations import setup_services
 
     sessions, lifecycle, _queue, _mapping, _build, node_ids = setup_services(tmp_path)
     now = fixture_now
@@ -713,7 +712,7 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     activity_services = register_model_cache_operation_provider(
         OperationApiServices(
             endpoint=lambda _alias: {},
-            agents=lambda: [],
+            agents=list,
             job_operations=lambda *_args: None,
             resume_job=lambda _job_id: None,
             operation_providers=(
@@ -742,10 +741,13 @@ def test_production_services_share_cache_run_and_profile_state(tmp_path: Any) ->
     transport = _AppTransport(api, headers)
     with sessions() as session:
         revision = session.scalar(
-            select(LocalRecipeRevision).where(LocalRecipeRevision.lifecycle == "resolved")
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+            )
         )
         assert revision is not None
-        model_digest = str(revision.document["model"]["content_sha256"])
+        model_digest = str(revision.document["models"][0]["model"]["content_sha256"])
         revision_id = str(revision.id)
     node_id = str(node_ids[0])
 

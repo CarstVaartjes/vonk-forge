@@ -25,7 +25,7 @@ from vonk_control.models import (
     AgentOperation,
     ArtifactJob,
     ArtifactJobBlob,
-    LocalRecipeRevision,
+    CatalogDocumentRevision,
     RecipeInstallation,
     RecipeRun,
 )
@@ -52,7 +52,7 @@ def running_artifact_service(tmp_path):
     with sessions.begin() as session:
         installation = session.get(RecipeInstallation, installed.owner_id)
         revision = session.get(
-            LocalRecipeRevision,
+            CatalogDocumentRevision,
             installation.recipe_revision_id,
         )
         document = dict(revision.document)
@@ -104,8 +104,8 @@ def running_artifact_service(tmp_path):
             },
         ]
         session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision.id)
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
             .values(document=document)
         )
     run_plan = recipe_operations.preview_run(installed.owner_id, "image-job")
@@ -281,12 +281,12 @@ def test_artifact_job_create_rejects_replay_after_compiled_contract_drift(
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         installation = session.get(RecipeInstallation, run.installation_id)
-        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         document = copy.deepcopy(revision.document)
         document["parameters"][1]["maximum"] = 99
         session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision.id)
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
             .values(document=document)
         )
 
@@ -546,14 +546,14 @@ def test_artifact_job_dispatches_exact_signed_output_mapping(
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         installation = session.get(RecipeInstallation, run.installation_id)
-        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         document = copy.deepcopy(revision.document)
         slot = document["interfaces"][0]["output"]["slots"][0]
         slot["media_types"] = [media_type]
         slot["extensions"] = [extension]
         session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision.id)
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
             .values(document=document)
         )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000130")
@@ -598,14 +598,14 @@ def test_artifact_job_rejects_unrepresentable_output_media_mapping(tmp_path) -> 
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         installation = session.get(RecipeInstallation, run.installation_id)
-        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         document = copy.deepcopy(revision.document)
         slot = document["interfaces"][0]["output"]["slots"][0]
         slot["media_types"] = ["image/avif", "image/png"]
         slot["extensions"] = [".avif", ".png"]
         session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision.id)
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
             .values(document=document)
         )
 
@@ -622,7 +622,7 @@ def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) ->
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         installation = session.get(RecipeInstallation, run.installation_id)
-        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         document = copy.deepcopy(revision.document)
         duplicate = copy.deepcopy(document["interfaces"][0]["output"]["slots"][0])
         duplicate.update(
@@ -635,8 +635,8 @@ def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) ->
         )
         document["interfaces"][0]["output"]["slots"].append(duplicate)
         session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision.id)
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
             .values(document=document)
         )
 
@@ -656,7 +656,7 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         installation = session.get(RecipeInstallation, run.installation_id)
-        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
         document = copy.deepcopy(revision.document)
         output = document["interfaces"][0]["output"]
         short = output["slots"][0]
@@ -680,8 +680,8 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
         )
         output["slots"].append(detailed)
         session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision.id)
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == revision.id)
             .values(document=document)
         )
     request = artifact_create_request(run_id, "00000000-0000-4000-8000-000000000134")
