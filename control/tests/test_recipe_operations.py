@@ -5,6 +5,7 @@ import json
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from importlib import resources
@@ -311,6 +312,8 @@ def setup_services(
     endpoint_owner_rank_one: bool = False,
     distributed_lifecycle: bool = False,
     start_order: tuple[str, ...] | None = None,
+    recipe_transform: Callable[[dict[str, object]], None] | None = None,
+    model_transform: Callable[[dict[str, object]], None] | None = None,
     engine=None,
     route_withdrawer=None,
 ):
@@ -456,23 +459,20 @@ def setup_services(
                     "rank_loss": "withdraw-endpoint",
                     "recovery": "restart-worker-then-entrypoint",
                 },
-                "readiness": {
-                    "strategy": "endpoint-owner-after-all-ranks",
-                    "path": "/v1/models",
-                    "timeout_seconds": 60,
-                },
                 "pre_start": [],
                 "post_stop": [],
                 "stop_timeout_seconds": 30,
             }
-    recipe_digest = content_sha256(RecipeDefinition.model_validate(document))
-    model_digest = content_sha256(ModelDefinition.model_validate(model_document))
-    canonical_recipe_document = RecipeDefinition.model_validate(document).model_dump(
-        mode="json"
-    )
-    canonical_model_document = ModelDefinition.model_validate(model_document).model_dump(
-        mode="json"
-    )
+    if recipe_transform is not None:
+        recipe_transform(document)
+    if model_transform is not None:
+        model_transform(model_document)
+    recipe_definition = RecipeDefinition.model_validate(document)
+    model_definition = ModelDefinition.model_validate(model_document)
+    recipe_digest = content_sha256(recipe_definition)
+    model_digest = content_sha256(model_definition)
+    canonical_recipe_document = recipe_definition.model_dump(mode="json")
+    canonical_model_document = model_definition.model_dump(mode="json")
     recipe_revision_id = str(uuid.uuid4())
     with sessions.begin() as session:
         recipe_catalog = CatalogDocument(

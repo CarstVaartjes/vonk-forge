@@ -17,7 +17,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
-from .distributed_lifecycle import DistributedLifecycleError
+from .distributed_lifecycle import (
+    DistributedLifecycleError,
+    canonical_distributed_readiness,
+)
 from .distributed_recovery import enforce_recovery_deadline, recovery_start_plan
 from .install_admission import InstallAdmissionService, InstallPlan
 from .models import (
@@ -25,9 +28,9 @@ from .models import (
     AgentOperation,
     AgentPresence,
     ArtifactJob,
+    CatalogDocumentRevision,
     InstallationNode,
     Job,
-    CatalogDocumentRevision,
     NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
@@ -863,7 +866,14 @@ class RecipeOperationService:
                 )
             start_order = _topology_order(revision.document, "start_order")
             topology = recipe_topology(revision.document)
-            two_phase_start = world_size > 1 and topology.get("mode") == "distributed"
+            distributed_readiness = _canonical_distributed_readiness(
+                revision.document
+            )
+            two_phase_start = (
+                world_size > 1
+                and topology.get("mode") == "distributed"
+                and distributed_readiness is not None
+            )
             start_deadline = (
                 _distributed_start_deadline(revision.document, now=now)
                 if two_phase_start
@@ -3248,20 +3258,31 @@ def _topology_order(document: Mapping[str, object], key: str) -> tuple[str, ...]
 def _distributed_start_deadline(
     document: Mapping[str, object], *, now: datetime
 ) -> str:
+    readiness = _canonical_distributed_readiness(document)
+    if readiness is None:
+        raise RecipeOperationConflict("distributed readiness policy is unavailable")
+    timeout = readiness["timeout_seconds"]
+    assert type(timeout) is int
+    return (_aware(now) + timedelta(seconds=timeout)).isoformat()
+
+
+def _canonical_distributed_readiness(
+    document: Mapping[str, object],
+) -> dict[str, object] | None:
     runtime = document.get("runtime")
     lifecycle = runtime.get("lifecycle") if isinstance(runtime, Mapping) else None
-    readiness = lifecycle.get("readiness") if isinstance(lifecycle, Mapping) else None
-    timeout = (
-        readiness.get("timeout_seconds") if isinstance(readiness, Mapping) else None
-    )
-    if timeout is None:
-        # RecipeDefinition v2 keeps lifecycle bounded by the platform
-        # default; readiness evidence is an agent observation, not a recipe
-        # authoring field.
-        timeout = 60
-    if type(timeout) is not int or not 1 <= timeout <= 3600:
+    interfaces = document.get("interfaces")
+    if not isinstance(lifecycle, Mapping) or not isinstance(interfaces, Sequence):
         raise RecipeOperationConflict("distributed readiness timeout is invalid")
-    return (_aware(now) + timedelta(seconds=timeout)).isoformat()
+    try:
+        readiness = canonical_distributed_readiness(
+            topology=recipe_topology(document),
+            interfaces=interfaces,
+            lifecycle=lifecycle,
+        )
+    except DistributedLifecycleError as error:
+        raise RecipeOperationConflict(str(error)) from error
+    return readiness
 
 
 def _enforce_start_deadline(payload: Mapping[str, object], *, now: datetime) -> bool:

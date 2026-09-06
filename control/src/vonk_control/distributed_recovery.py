@@ -14,7 +14,10 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
-from .distributed_lifecycle import DistributedLifecycleError
+from .distributed_lifecycle import (
+    DistributedLifecycleError,
+    canonical_distributed_readiness,
+)
 from .models import (
     AgentNode,
     AgentOperation,
@@ -254,13 +257,20 @@ def _recovery_authority(
     lifecycle = runtime.get("lifecycle")
     if topology.get("mode") != "distributed" or not isinstance(lifecycle, Mapping):
         return None
+    readiness = canonical_distributed_readiness(
+        topology=topology,
+        interfaces=[
+            interface.model_dump(mode="json") for interface in recipe.interfaces
+        ],
+        lifecycle=lifecycle,
+    )
+    if readiness is None:
+        return None
     failure = lifecycle.get("failure")
-    readiness = lifecycle.get("readiness")
     if (
         not isinstance(failure, Mapping)
         or failure.get("rank_loss") != "withdraw-endpoint"
         or failure.get("recovery") != "restart-worker-then-entrypoint"
-        or not isinstance(readiness, Mapping)
         or readiness.get("strategy") != "endpoint-owner-after-all-ranks"
     ):
         return None
