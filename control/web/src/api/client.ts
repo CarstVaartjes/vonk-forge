@@ -46,8 +46,6 @@ import type {
   JobsResponse,
   ProposalInput,
   ProposalPreview,
-  WorkloadRunApplied,
-  WorkloadRunPreview,
   TelemetryHistory,
   TelemetryCurrentResponse,
   TelemetryCapabilitiesResponse,
@@ -212,14 +210,6 @@ export class ApiClient implements ControlApi {
     const response = await fetch("/api/v1/auth/logout", {method: "POST", headers, credentials: "same-origin"});
     this.requireAuthentication(response);
     if (response.status !== 204) throw new ApiError(response.status, `Control API returned ${response.status}`);
-  }
-
-  previewWorkloadRun(sourceYaml: string): Promise<WorkloadRunPreview> {
-    return this.request("/api/v1/catalog/imports/workload_run/preview", {method: "POST", body: JSON.stringify({source_yaml: sourceYaml})});
-  }
-
-  applyWorkloadRun(sourceYaml: string, sourceSha256: string, reportDigest: string): Promise<WorkloadRunApplied> {
-    return this.request("/api/v1/catalog/imports/workload_run", {method: "POST", body: JSON.stringify({source_yaml: sourceYaml, source_sha256: sourceSha256, report_digest: reportDigest})});
   }
 
   async visualFleet(signal?: AbortSignal): Promise<VisualFleetSnapshot> {

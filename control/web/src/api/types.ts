@@ -198,14 +198,6 @@ export type LibraryPlacementApplication = components["schemas"]["LibraryPlacemen
 export type LibraryModelDeletionPlan = components["schemas"]["ModelDeletionPlanResponse"];
 export interface CatalogApi {
 }
-export type ImportDisposition = "imported" | "transformed" | "resolution_required" | "overlay_required" | "unsupported_blocking" | "dropped_redundant";
-export type ImportReportItem = {source_path: string; disposition: ImportDisposition; destination_path: string | null; reason_code: string; detail: string; blocking: boolean};
-export type WorkloadRunPreview = {draft_document: Record<string, unknown>; report: ImportReportItem[]; source_sha256: string; report_digest: string; redacted_source: Record<string, unknown>; runnable: boolean};
-export type WorkloadRunApplied = {recipe_id: string; revision_number: number; lifecycle: string};
-export interface WorkloadRunApi {
-  previewWorkloadRun(sourceYaml: string): Promise<WorkloadRunPreview>;
-  applyWorkloadRun(sourceYaml: string, sourceSha256: string, reportDigest: string): Promise<WorkloadRunApplied>;
-}
 export interface LibraryApi {
   librarySnapshot(cursor?: string, signal?: AbortSignal): Promise<LibrarySnapshot>;
   libraryRecipe(recipeId: string, signal?: AbortSignal): Promise<LibraryRecipeDetail>;

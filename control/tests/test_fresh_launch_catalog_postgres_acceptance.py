@@ -605,6 +605,12 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
     assert not forbidden_paths.intersection(
         path for _method, path in CATALOG_OPERATION_IDS
     )
+    canonical_library_paths = {
+        "/api/v1/library",
+        "/api/v1/library/recipes",
+        "/api/v1/library/recipes/{recipe_id}",
+    }
+    assert canonical_library_paths <= set(api.app.openapi()["paths"])
     operation_ids = {
         operation.get("operationId")
         for methods in api.app.openapi()["paths"].values()

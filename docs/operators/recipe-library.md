@@ -38,11 +38,10 @@ re-importing the same recipe digest is idempotent. The checkout is never mounted
 into a running workload.
 
 Managed synchronization only owns recipes whose source is
-`recipe_library`. Local drafts, WorkloadRun imports, forks, and other custom
-recipes are never overwritten. A slug collision is reported as a conflict for
-operator review. If a managed recipe disappears remotely, its immutable local
-history and any installation remain intact. It is surfaced as withdrawn only
-while it is installed or running; synchronization never stops or uninstalls it.
+`recipe_library`. A slug collision is reported as a conflict for operator
+review. If a managed recipe disappears remotely, its immutable local history
+and any installation remain intact. It is surfaced as withdrawn only while it
+is installed or running; synchronization never stops or uninstalls it.
 When a newer revision is imported, existing installations and runs remain bound
 to their old immutable revision and are reported as stale until the operator
 reviews an update.
