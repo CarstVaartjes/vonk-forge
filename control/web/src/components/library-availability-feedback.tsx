@@ -102,9 +102,10 @@ function retryLabel(seconds: number): string {
   return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
-export function LibraryAvailabilityFeedback({failure, modelAccessUrl, onRetry, retryLabel: actionLabel = "Retry", title = "Availability needs attention"}: {
+export function LibraryAvailabilityFeedback({failure, modelAccessUrl, onCheckAccessAndResume, onRetry, retryLabel: actionLabel = "Retry", title = "Availability needs attention"}: {
   failure: AvailabilityFailure;
   modelAccessUrl?: string;
+  onCheckAccessAndResume?: () => void;
   onRetry?: () => void;
   retryLabel?: string;
   title?: string;
@@ -126,6 +127,6 @@ export function LibraryAvailabilityFeedback({failure, modelAccessUrl, onRetry, r
     {(failure.requiredBytes !== undefined || failure.freeBytes !== undefined || failure.shortfallBytes !== undefined) && <dl className="library-availability-capacity"><div><dt>Required</dt><dd>{failure.requiredBytes ?? "Unknown"} bytes</dd></div><div><dt>Free</dt><dd>{failure.freeBytes ?? "Unknown"} bytes</dd></div>{failure.shortfallBytes !== undefined && <div><dt>Shortfall</dt><dd>{failure.shortfallBytes} bytes</dd></div>}</dl>}
     {failure.recovery.length > 0 && <ul aria-label="Recovery steps">{failure.recovery.map((step, index) => <li key={`${index}-${step}`}>{step}{failure.recoveryCodes[index] === "open_model_access" && modelAccessUrl && <> · <a href={modelAccessUrl} target="_blank" rel="noreferrer">Open Model access page</a></>}</li>)}</ul>}
     {failure.recoveryCodes.includes("configure_hf_token") && <p className="library-availability-token-help">Use the existing protected HF token secret file configured for the Controller. Tokens are never entered or displayed here.</p>}
-    <div className="library-availability-actions">{onRetry && <button type="button" className="button secondary" disabled={retryDisabled} onClick={onRetry}>{retryText}</button>}<details><summary>Technical details</summary><dl><div><dt>Code</dt><dd>{failure.code}</dd></div>{failure.operationId && <div><dt>Operation</dt><dd>{failure.operationId}</dd></div>}</dl>{failure.logExcerpt && <pre>{failure.logExcerpt}</pre>}</details></div>
+    <div className="library-availability-actions">{onRetry && <button type="button" className="button secondary" disabled={retryDisabled} onClick={onRetry}>{retryText}</button>}{onCheckAccessAndResume && failure.recoveryCodes.includes("check_access_and_resume") && <button type="button" className="button secondary" onClick={onCheckAccessAndResume}>Check access and resume</button>}<details><summary>Technical details</summary><dl><div><dt>Code</dt><dd>{failure.code}</dd></div>{failure.operationId && <div><dt>Operation</dt><dd>{failure.operationId}</dd></div>}</dl>{failure.logExcerpt && <pre>{failure.logExcerpt}</pre>}</details></div>
   </section>;
 }

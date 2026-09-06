@@ -3731,6 +3731,15 @@
 .library-availability-feedback ul { padding-left: 1.25rem; }
 .library-availability-preserved { color: var(--text-muted, #abb5a7); }
 .library-availability-token-help { color: var(--text-muted, #abb5a7); }
+.library-availability-operation { display: grid; gap: .75rem; }
+.library-availability-operation-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; }
+.library-availability-operation-heading div, .library-availability-operation-heading small { display: grid; gap: .2rem; }
+.library-availability-operation-heading small, .library-availability-operation-heading > span, .library-availability-member > div > span { color: var(--text-muted, #abb5a7); font-size: .78rem; }
+.library-availability-members { display: grid; gap: .55rem; list-style: none; margin: 0; padding: 0; }
+.library-availability-member { display: grid; gap: .3rem; padding: .55rem .7rem; border-left: 2px solid color-mix(in srgb, var(--accent, #92b4a1) 55%, transparent); }
+.library-availability-member > div { display: flex; justify-content: space-between; gap: .75rem; }
+.library-availability-receipt ul { margin: .45rem 0 0; padding-left: 1.25rem; }
+.library-availability-operation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
 .library-availability-capacity { display: flex; gap: 1rem; flex-wrap: wrap; }
 .library-availability-capacity div { display: grid; gap: .1rem; }
 .library-availability-capacity dt { color: var(--text-muted, #abb5a7); font-size: .72rem; }
