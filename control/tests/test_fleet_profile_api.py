@@ -250,21 +250,21 @@ def test_profile_json_input_rejects_extra_fields_and_type_coercion() -> None:
     assert malformed_response.status_code == 422
 
 
-def test_profile_preview_contract_rejects_unsorted_or_out_of_scope_nodes() -> None:
+def test_profile_preview_contract_rejects_duplicate_or_out_of_scope_nodes() -> None:
     from pydantic import ValidationError
     from vonk_control.fleet_profile_contract import (
         FleetProfileAssignmentPreview,
         FleetProfileScopePreview,
     )
 
-    with pytest.raises(ValidationError, match="sorted and unique"):
+    with pytest.raises(ValidationError, match="must be unique"):
         FleetProfileAssignmentPreview(
             assignment_id=PROFILE,
             recipe_revision_id=REVISION,
             recipe_title="Recipe",
             desired_state="running",
             current_state="running",
-            node_ids=[NODE, "spk_" + "0" * 32],
+            node_ids=[NODE, NODE],
             actions=["keep"],
             reasons=[],
         )
