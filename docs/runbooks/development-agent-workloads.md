@@ -53,7 +53,7 @@ Run one node at a time until the synthetic lifecycle is green, then widen to
 the intended topology:
 
 1. Confirm Fleet inventory is fresh and the planned resource reservation fits.
-2. Import or create an immutable recipe revision.
+2. Select an immutable canonical Model and Recipe revision synchronized into Library.
 3. Preview installation and placement on the selected Spark set.
 4. Install and require exact build, transfer, import, and runtime evidence.
 5. Start the recipe and require route publication only after the workload is
@@ -67,11 +67,41 @@ For multi-node recipes, also prove rank failure withdraws the route, recovery
 does not silently change the accepted recipe or artifact digest, and a full NAS
 or Spark restart restores only persisted authority—not stale readiness.
 
-The contributor harness `scripts/run-development-slices` automates the same API
-lifecycle when authenticated test endpoints are deliberately available. It is
-acceptance tooling, not an installation path; it never generates deployment
-secrets, publishes a NAS project, installs an agent, or replaces the two curl
-commands above.
+Before physical work, run `scripts/qualify-recipe --level structural` against
+the exact recipe-library checkout and retain its package and compiler evidence.
+Container qualification remains unavailable until the production
+`CompiledExecutionPlan` materializer is linked; do not treat the current
+`environment-limited` result as a pass. Execute the physical lifecycle through
+Controller Run/Switch, or the equivalent normal CLI command:
+
+```sh
+cat > run-request.json <<'JSON'
+{
+  "schema_version": 2,
+  "model_version_sha256": "<MODEL_CONTENT_SHA256>",
+  "recipe_revision_id": "<RECIPE_REVISION_UUID>",
+  "spark_group": {
+    "nodes": [
+      {
+        "node_id": "<SPK_NODE_ID>",
+        "rank": 0,
+        "role": "entrypoint",
+        "endpoint_owner": true
+      }
+    ]
+  },
+  "alias": "<MODEL_ALIAS>",
+  "action": "run",
+  "retention": "retain-cached"
+}
+JSON
+vonkctl models run --input-file run-request.json --json
+```
+
+The resulting Controller operation is the authority for preparation, install,
+start, route, stop, and cleanup progress. Once the route is active, run the
+Recipe's declared HTTP serving checks with `scripts/qualify-recipe --serving-url
+URL --evidence-ledger PATH` and retain the bounded serving result separately.
 
 ## Upgrade and recovery
 
