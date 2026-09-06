@@ -53,6 +53,8 @@ cat > "$fixture_dir/Dockerfile" <<'DOCKERFILE'
 FROM --platform=linux/arm64 busybox:1.36.1
 RUN addgroup -g 10001 vonk \
     && adduser -D -H -u 10001 -G vonk vonk \
+    && mkdir -p /opt/vonk/bin \
+    && ln -s /bin/sh /opt/vonk/bin/vllm \
     && mkdir -p /outputs/cache/home /outputs/tmp \
     && chown -R 10001:10001 /outputs
 USER 10001:10001
@@ -202,7 +204,7 @@ grep -q '"--read-only"' "$report_root/start.log"
 grep -q '"--cap-drop=ALL"' "$report_root/start.log"
 grep -q '"--security-opt=no-new-privileges"' "$report_root/start.log"
 grep -q '"--user","10001:10001"' "$report_root/start.log"
-grep -q '"--entrypoint","/bin/sh"' "$report_root/start.log"
+grep -q '"--entrypoint","/opt/vonk/bin/vllm"' "$report_root/start.log"
 if grep -q '"--device"' "$report_root/start.log"; then
   echo 'unexpected device flag in the GPU-free proof' >&2
   exit 1

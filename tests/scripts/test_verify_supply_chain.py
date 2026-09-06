@@ -74,7 +74,7 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/distribution_executor.py",
         "control/src/vonk_control/runtime_image_preparation.py",
         "control/src/vonk_control/recipe_operation_worker.py",
-        "control/src/vonk_control/serving_execution.py",
+        "src/cluster_profiles/serving_execution.py",
         "control/migrations/versions/0000_canonical_catalog_baseline.py",
         "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/migrations/versions/0002_fleet_node_profile_events.py",
@@ -138,7 +138,6 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/select-workload-runtime-manifest",
         "scripts/validate-workload-dockerfile",
         "scripts/qualify-recipe",
-        "scripts/import-recipe-library",
         "scripts/validate-recipe-library",
         "scripts/workload-artifact-metadata",
         "config/recipe-library-manifest.json",
@@ -153,7 +152,6 @@ def _copy(tmp_path: Path) -> Path:
         "config/execution-harnesses",
         "config/runtime-distributions",
         "config/patch-bundles",
-        "config/model-targets",
     ):
         shutil.copytree(ROOT / directory, target / directory)
     shutil.copytree(
@@ -403,7 +401,6 @@ def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
         "control/migrations/versions/0002_fleet_node_profile_events.py",
         "control/migrations/versions/0003_agent_reenrollment_grants.py",
         "scripts/qualify-recipe",
-        "scripts/import-recipe-library",
         "config/recipe-library-manifest.json",
     ):
         assert path in manifest["inputs"]

@@ -100,6 +100,7 @@ RUN python -m pip install --no-cache-dir --prefix=/install \
     /vonk-cluster-profiles .
 
 FROM ${PYTHON_IMAGE} AS runtime-root
+ARG TARGETARCH
 ARG SKOPEO_INDEX_DIGEST
 ARG SKOPEO_AMD64_DIGEST
 ARG SKOPEO_ARM64_DIGEST
@@ -110,22 +111,26 @@ RUN groupadd --gid 10001 control \
     && install -d -o 10001 -g 10001 -m 1777 /var/tmp
 COPY --from=build /install /usr/local
 COPY --from=build /config /usr/local/lib/config
-COPY --from=skopeo /usr/bin/skopeo /usr/bin/skopeo
+COPY --from=skopeo /usr/bin/skopeo /usr/local/lib/skopeo/skopeo.real
 COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo
 COPY --from=skopeo /etc/containers /etc/containers
 COPY --from=skopeo /etc/pki /etc/pki
 COPY --from=skopeo /etc/ssl /etc/ssl
 COPY --from=skopeo /usr/share/pki /usr/share/pki
 COPY --from=skopeo /usr/share/containers /usr/share/containers
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends patchelf \
-    && skopeo_loader="$(find /usr/local/lib/skopeo -maxdepth 1 -type f -name 'ld-linux-*.so*' -print -quit)" \
-    && test -n "$skopeo_loader" \
-    && patchelf --set-interpreter "$skopeo_loader" \
-        --force-rpath --set-rpath /usr/local/lib/skopeo /usr/bin/skopeo \
-    && apt-get purge --yes patchelf \
-    && apt-get autoremove --yes \
-    && rm -rf /var/lib/apt/lists/* \
+RUN case "$TARGETARCH" in \
+        amd64) skopeo_loader=ld-linux-x86-64.so.2 ;; \
+        arm64) skopeo_loader=ld-linux-aarch64.so.1 ;; \
+        *) echo "unsupported target architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && test -x "/usr/local/lib/skopeo/$skopeo_loader" \
+    && printf '%s\n' \
+        '#!/bin/sh' \
+        'set -eu' \
+        'exec /usr/local/lib/skopeo/'"$skopeo_loader"' --library-path /usr/local/lib/skopeo /usr/local/lib/skopeo/skopeo.real "$@"' \
+        > /usr/bin/skopeo \
+    && chmod 0755 /usr/bin/skopeo \
+    && test -x /usr/local/lib/skopeo/skopeo.real \
     && test -x /usr/bin/skopeo \
     && /usr/bin/skopeo --version \
     && test -f /etc/containers/policy.json \

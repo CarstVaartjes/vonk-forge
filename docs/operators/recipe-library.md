@@ -90,25 +90,13 @@ Structural output is repository evidence only. Container qualification remains
 an environment-dependent native `linux/arm64` gate, and Spark acceptance
 requires the designated physical lane.
 
-To preview the recipes that a fresh local control plane would receive:
-
-```bash
-./scripts/import-recipe-library \
-  --library-root ../vonk-forge-recipes \
-  --platform-root .
-```
-
-Applying the plan additionally requires an administrator token file and the
-control-plane URL:
-
-```bash
-./scripts/import-recipe-library \
-  --library-root ../vonk-forge-recipes \
-  --platform-root . \
-  --control-url https://forge.example.test \
-  --token-file .dev/admin-token \
-  --apply
-```
+The Controller is the only import path. It resolves the configured library
+branch to one immutable commit, validates the package index and dependency
+closure, and records the durable result through
+`POST /api/v1/catalog/managed-recipes/sync`. Use the matching
+`GET /api/v1/catalog/managed-recipes/sync-status` response to inspect the
+commit, counts, conflicts, and withdrawn revisions. There is no platform-local
+Model or Recipe ledger to edit or import around the Controller.
 
 Container and Spark qualification still require the native ARM64/NVIDIA
 environment and exact artifact cache described in the acceptance runbook.

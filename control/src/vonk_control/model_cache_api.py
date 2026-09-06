@@ -21,6 +21,7 @@ from .model_cache_contract import (
     ModelCacheDownloadPreviewRequest,
     ModelCacheDownloadPreviewResponse,
     ModelCacheDownloadRequest,
+    ModelCacheAccessResumeRequest,
     ModelCacheEvictionPreviewRequest,
     ModelCacheEvictionPreviewResponse,
     ModelCacheEvictRequest,
@@ -35,7 +36,6 @@ from .model_cache_contract import (
 )
 from .operation_api import bounded_error_responses
 from .operation_contract import AvailabilityOperationFailure
-from .logging import redact_text
 
 MODEL_CACHE_OPERATION_IDS = {
     ("get", "/api/v1/model-cache"): "getModelCacheInventory",
@@ -55,6 +55,8 @@ MODEL_CACHE_OPERATION_IDS = {
         "getModelCacheOperation",
     ("post", "/api/v1/model-cache/operations/{operation_id}/retry"):
         "retryModelCacheOperation",
+    ("post", "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume"):
+        "checkModelCacheAccessAndResume",
 }
 
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -116,58 +118,7 @@ def install_model_cache_routes(
         failure = None
         raw_failure = getattr(operation, "failure", None)
         if isinstance(raw_failure, Mapping):
-            semantic_codes = {
-                "model_cache.credentials_missing": "access_required",
-                "model_cache.credentials_denied": "access_denied",
-                "model_cache.credentials_invalid": "credentials_invalid",
-                "model_cache.rate_limited": "rate_limited",
-                "model_cache.digest_mismatch": "integrity_mismatch",
-                "model_cache.source_size_mismatch": "integrity_mismatch",
-                "model_cache.capacity": "capacity",
-                "model_cache.interrupted": "interrupted",
-            }
-            code = semantic_codes.get(
-                str(raw_failure.get("code", "model_cache.operation_failed")),
-                str(raw_failure.get("code", "model_cache.operation_failed")),
-            )
-            recovery = raw_failure.get("recovery")
-            recovery_actions = {
-                "access_required": [
-                    "open_model_access",
-                    "configure_hf_token",
-                    "check_access_and_resume",
-                ],
-                "access_denied": ["open_model_access", "check_access_and_resume"],
-                "credentials_invalid": [
-                    "configure_hf_token",
-                    "check_access_and_resume",
-                ],
-                "resume": ["resume"],
-                "download_again": ["download_again"],
-                "retry": ["retry"],
-                "capacity": ["free_space", "resume"],
-            }
-            actions = (
-                recovery_actions.get(recovery, ["inspect"])
-                if isinstance(recovery, str) and recovery
-                else ["inspect"]
-            )
-            failure = AvailabilityOperationFailure.model_validate(
-                {
-                    "code": code,
-                    "detail": raw_failure.get("detail") or operation.last_error or "model cache operation failed",
-                    "recovery_actions": actions,
-                    "retryable": bool(raw_failure.get("retryable", False)),
-                    "retry_time": raw_failure.get("retry_time"),
-                    "retry_after_seconds": raw_failure.get("retry_after_seconds"),
-                    "log_excerpt": redact_text(raw_failure.get("detail"))[:1024]
-                    if raw_failure.get("detail")
-                    else None,
-                    "required_bytes": raw_failure.get("required_bytes"),
-                    "free_bytes": raw_failure.get("free_bytes"),
-                    "shortfall_bytes": raw_failure.get("shortfall_bytes"),
-                }
-            )
+            failure = AvailabilityOperationFailure.model_validate(raw_failure)
         return ModelCacheOperationResponse.model_validate(
             {
                 "schema_version": 2,
@@ -558,6 +509,45 @@ def install_model_cache_routes(
         except (OSError, RuntimeError, TypeError, ValueError) as exc:
             raise error(exc, "model cache operation retry unavailable") from None
         audit(request, actor, "model-cache.retry", operation_id, result.id)
+        return operation_response(result)
+
+    @app.post(
+        "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
+        response_model=ModelCacheOperationResponse,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="checkModelCacheAccessAndResume",
+    )
+    def check_access_and_resume(
+        body: ModelCacheAccessResumeRequest,
+        request: Request,
+        operation_id: Annotated[str, Path(pattern=_UUID)],
+        actor: Actor = authenticated,
+    ) -> ModelCacheOperationResponse:
+        require_mutation(
+            actor,
+            "POST",
+            "/api/v1/model-cache/operations/{operation_id}/check-access-and-resume",
+        )
+        try:
+            result = cache().check_access_and_resume(
+                operation_id,
+                actor=actor.subject,
+                request_key=body.request_key,
+                artifact_set_sha256=body.artifact_set_sha256,
+                plan_digest=body.plan_digest,
+            )
+        except HTTPException:
+            raise
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise error(exc, "model cache access recheck unavailable") from None
+        audit(
+            request,
+            actor,
+            "model-cache.check-access-and-resume",
+            operation_id,
+            result.id,
+        )
         return operation_response(result)
 
 class ModelCacheOperationProvider:

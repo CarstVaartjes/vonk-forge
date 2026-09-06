@@ -39,6 +39,8 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
 )
+from .logging import redact_text
+from .operation_contract import AvailabilityOperationFailure
 from .runtime_init import RuntimeSecretError, read_runtime_secret
 
 SCHEMA_VERSION = 2
@@ -180,6 +182,14 @@ def _retry_after_seconds(headers: Mapping[str, str], *, now: datetime) -> int | 
         # Providers use both a delta and a Unix timestamp.  Values near the
         # current epoch are timestamps; small values are delays.
         values.append(max(0, reset - int(now.timestamp())) if reset > 1_000_000_000 else max(0, reset))
+    raw_rate_limit = headers.get("ratelimit") or headers.get("RateLimit")
+    if raw_rate_limit:
+        # RFC 9333 permits policy parameters such as `RateLimit:
+        # "resolvers";r=0;t=123`.  The `t` value is a delta in seconds.
+        values.extend(
+            int(match.group(1))
+            for match in re.finditer(r"(?:^|;)\s*t\s*=\s*(\d+)", raw_rate_limit)
+        )
     return max(values) if values else None
 
 
@@ -2370,12 +2380,14 @@ class ModelCacheService:
         set_digest: str,
         manifest: ArtifactSetManifest,
         error: BaseException,
+        failed_artifact_key: str | None = None,
     ) -> None:
         detail = (
             error.detail
             if isinstance(error, ModelCacheError)
             else f"{type(error).__name__}: {str(error)[:400]}"
         )
+        detail = redact_text(detail)[:512]
         now = self._clock()
         required_bytes = free_bytes = shortfall_bytes = None
         if isinstance(error, OSError) and error.errno == errno.ENOSPC:
@@ -2437,21 +2449,28 @@ class ModelCacheService:
                 provider_rate_limited = getattr(error, "code", None) == "model_cache.rate_limited"
                 if provider_rate_limited and self._manifest_has_huggingface_source(manifest):
                     self._record_huggingface_cooldown(next_retry)
+                failure_payload = {
+                    "code": failure_code,
+                    "detail": detail[:512],
+                    "retryable": retryable,
+                    "automatic_exhausted": retryable and not bounded_retry,
+                    "recovery": getattr(error, "recovery", None)
+                    or ("capacity" if failure_code == "model_cache.capacity" else None)
+                    or ("resume" if bounded_retry else "retry"),
+                    "retry_time": _iso(next_retry)
+                    if bounded_retry or provider_rate_limited
+                    else None,
+                    "retry_after_seconds": retry_delay
+                    if bounded_retry or provider_rate_limited
+                    else None,
+                    "required_bytes": required_bytes,
+                    "free_bytes": free_bytes,
+                    "shortfall_bytes": shortfall_bytes,
+                }
+                if isinstance(failed_artifact_key, str):
+                    failure_payload["artifact_key"] = failed_artifact_key
                 operation.payload = dict(operation.payload) | {
-                    "failure": {
-                        "code": failure_code,
-                        "detail": detail[:512],
-                        "retryable": retryable,
-                        "automatic_exhausted": retryable and not bounded_retry,
-                        "recovery": getattr(error, "recovery", None)
-                        or ("capacity" if failure_code == "model_cache.capacity" else None)
-                        or ("resume" if bounded_retry else "retry"),
-                        "retry_time": _iso(next_retry) if bounded_retry or provider_rate_limited else None,
-                        "retry_after_seconds": retry_delay if bounded_retry or provider_rate_limited else None,
-                        "required_bytes": required_bytes,
-                        "free_bytes": free_bytes,
-                        "shortfall_bytes": shortfall_bytes,
-                    },
+                    "failure": failure_payload,
                     "retry": retry,
                 }
                 if bounded_retry:
@@ -2547,6 +2566,246 @@ class ModelCacheService:
             session.add(operation)
             session.flush()
             return self._operation_view(operation)
+
+    def check_access_and_resume(
+        self,
+        operation_id: str,
+        *,
+        actor: str,
+        request_key: str,
+        artifact_set_sha256: str,
+        plan_digest: str,
+    ) -> CacheOperationView:
+        """Recheck terminal HF access, then queue the exact retained transfer.
+
+        Authentication failures are deliberately terminal for automatic
+        scheduling.  This action is the explicit operator boundary after the
+        configured token file or upstream access has changed.  It never
+        rebuilds a manifest or changes the pinned revision.
+        """
+
+        request_key = _request_key(request_key)
+        requested_set = _optional_digest(artifact_set_sha256)
+        requested_plan = _optional_digest(plan_digest)
+        assert requested_set is not None and requested_plan is not None
+        auth_codes = {
+            "model_cache.credentials_missing",
+            "model_cache.credentials_denied",
+            "model_cache.credentials_invalid",
+        }
+        with self._lock, self._session(write=True) as session:
+            previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            if previous is None:
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            if (
+                previous.artifact_set_sha256 != requested_set
+                or previous.plan_digest != requested_plan
+            ):
+                raise ModelCacheConflict(
+                    "model_cache.identity_mismatch",
+                    "access recheck identity does not match the persisted operation",
+                )
+            existing = session.scalar(
+                select(ModelCacheOperation).where(
+                    ModelCacheOperation.request_key == request_key
+                )
+            )
+            if existing is not None:
+                if existing.id == previous.id:
+                    raise ModelCacheConflict(
+                        "model_cache.request_key_reused",
+                        "access recheck requires a new operator request key",
+                    )
+                if (
+                    existing.kind == previous.kind
+                    and existing.artifact_set_sha256 == previous.artifact_set_sha256
+                    and existing.plan_digest == previous.plan_digest
+                ):
+                    return self._operation_view(existing)
+                raise ModelCacheConflict(
+                    "model_cache.request_key_reused",
+                    "request key was already used for another cache operation",
+                )
+            failure = previous.payload.get("failure", {})
+            if (
+                previous.kind not in {"download", "repair"}
+                or previous.state != "failed"
+                or not isinstance(failure, Mapping)
+                or failure.get("code") not in auth_codes
+            ):
+                raise ModelCacheConflict(
+                    "model_cache.access_recheck_unavailable",
+                    "the operation does not have a terminal Hugging Face access failure",
+                )
+            prior_check = previous.payload.get("access_recheck")
+            if (
+                isinstance(prior_check, Mapping)
+                and prior_check.get("request_key") == request_key
+            ):
+                return self._operation_view(previous)
+            manifest = ArtifactSetManifest.from_document(
+                previous.payload.get("manifest", {})
+            )
+            failed_artifact_key = (
+                failure.get("artifact_key")
+                if isinstance(failure.get("artifact_key"), str)
+                else previous.current_artifact_key
+            )
+
+        try:
+            self._check_huggingface_access(
+                manifest,
+                failed_artifact_key=(
+                    failed_artifact_key
+                    if isinstance(failed_artifact_key, str)
+                    else None
+                ),
+            )
+        except ModelCacheStorageError as error:
+            safe_detail = redact_text(error.detail)[:512]
+            now = self._clock()
+            failure_payload = {
+                "code": error.code,
+                "detail": safe_detail,
+                "retryable": False,
+                "automatic_exhausted": True,
+                "recovery": error.recovery or "check_access_and_resume",
+                "retry_time": None,
+                "retry_after_seconds": None,
+                "required_bytes": None,
+                "free_bytes": None,
+                "shortfall_bytes": None,
+            }
+            with self._lock, self._session(write=True) as session:
+                previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+                if previous is None:
+                    raise ModelCacheNotFound(
+                        "model_cache.operation_missing", "cache operation was not found"
+                    )
+                previous.state = "failed"
+                previous.last_error = safe_detail
+                previous.completed_at = now
+                previous.updated_at = now
+                previous.payload = dict(previous.payload) | {
+                    "failure": failure_payload,
+                    "access_recheck": {
+                        "request_key": request_key,
+                        "checked_at": _iso(now),
+                        "authorized": False,
+                    },
+                }
+                previous.payload.pop("claim", None)
+                return self._operation_view(previous)
+
+        now = self._clock()
+        with self._lock, self._session(write=True) as session:
+            previous = session.get(ModelCacheOperation, operation_id, with_for_update=True)
+            if previous is None:
+                raise ModelCacheNotFound(
+                    "model_cache.operation_missing", "cache operation was not found"
+                )
+            payload = dict(previous.payload)
+            payload.pop("failure", None)
+            payload.pop("result", None)
+            payload.pop("claim", None)
+            retry = payload.get("retry")
+            retry = dict(retry) if isinstance(retry, Mapping) else {}
+            retry.update(automatic_attempts=1, next_retry_at=None, retry_after_seconds=None)
+            payload["retry"] = retry
+            payload["resume_of"] = previous.id
+            payload["access_recheck"] = {
+                "request_key": request_key,
+                "checked_at": _iso(now),
+                "authorized": True,
+            }
+            total, received = self._transfer_totals(payload)
+            prior_progress = previous.progress if isinstance(previous.progress, Mapping) else {}
+            progress = self._progress(
+                manifest,
+                phase="queued",
+                completed_artifacts=(
+                    int(prior_progress.get("completed_artifacts", 0))
+                    if type(prior_progress.get("completed_artifacts")) is int
+                    else 0
+                ),
+                downloaded_bytes=received,
+                expected_bytes=total,
+                current_artifact_key=(
+                    previous.current_artifact_key
+                    if isinstance(previous.current_artifact_key, str)
+                    else None
+                ),
+                transfer=(
+                    payload.get("transfer")
+                    if isinstance(payload.get("transfer"), Mapping)
+                    else None
+                ),
+            )
+            operation = ModelCacheOperation(
+                request_key=request_key,
+                schema_version=SCHEMA_VERSION,
+                kind=previous.kind,
+                state="queued",
+                attempt=1,
+                artifact_set_sha256=previous.artifact_set_sha256,
+                plan_digest=previous.plan_digest,
+                payload=payload,
+                progress=progress,
+                actor=actor,
+                current_artifact_key=previous.current_artifact_key,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(operation)
+            session.flush()
+            return self._operation_view(operation)
+
+    def _check_huggingface_access(
+        self,
+        manifest: ArtifactSetManifest,
+        *,
+        failed_artifact_key: str | None = None,
+    ) -> None:
+        unique_specs = _unique_artifacts(manifest.artifacts)
+        exact = next(
+            (
+                spec
+                for spec in unique_specs.values()
+                if failed_artifact_key in {spec.key, spec.artifact_id}
+            ),
+            None,
+        ) if failed_artifact_key else None
+        if exact is not None and _is_hf_canonical_url(exact.source):
+            specs = [exact]
+        else:
+            # A missing key can occur after an interrupted/recovered worker.
+            # Probe one representative per model repository rather than every
+            # shard while still checking public and gated dependencies.
+            by_repository: dict[str, ArtifactSpec] = {}
+            for spec in unique_specs.values():
+                if _is_hf_canonical_url(spec.source):
+                    by_repository.setdefault(_huggingface_access_url(spec.source), spec)
+            specs = list(by_repository.values())
+        if not specs:
+            raise ModelCacheConflict(
+                "model_cache.access_recheck_unavailable",
+                "the persisted operation has no canonical Hugging Face source to check",
+            )
+        client = self._http
+        owns_client = client is None
+        if client is None:
+            client = httpx.Client(follow_redirects=False)
+        try:
+            for spec in specs:
+                response = self._open_http_response(
+                    client, spec.source, {"Range": "bytes=0-0"}
+                )
+                response.close()
+        finally:
+            if owns_client:
+                client.close()
 
     def _set_operation_state(
         self,
@@ -2696,6 +2955,7 @@ class ModelCacheService:
     @staticmethod
     def _operation_view(operation: ModelCacheOperation) -> CacheOperationView:
         result = operation.payload.get("result") if isinstance(operation.payload, Mapping) else None
+        failure = ModelCacheService._canonical_failure(operation)
         return CacheOperationView(
             id=operation.id,
             request_key=operation.request_key,
@@ -2711,17 +2971,82 @@ class ModelCacheService:
             updated_at=_iso(operation.updated_at) or "",
             completed_at=_iso(operation.completed_at),
             retryable=(
-                isinstance(operation.payload, Mapping)
-                and isinstance(operation.payload.get("failure"), Mapping)
-                and operation.payload["failure"].get("retryable") is True
+                failure is not None and failure["retryable"] is True
             ),
-            failure=(
-                dict(operation.payload["failure"])
-                if isinstance(operation.payload, Mapping)
-                and isinstance(operation.payload.get("failure"), Mapping)
-                else None
-            ),
+            failure=failure,
         )
+
+    @staticmethod
+    def _canonical_failure(
+        operation: ModelCacheOperation,
+    ) -> Mapping[str, object] | None:
+        raw = operation.payload.get("failure") if isinstance(operation.payload, Mapping) else None
+        if not isinstance(raw, Mapping):
+            return None
+        semantic_codes = {
+            "model_cache.credentials_missing": "access_required",
+            "model_cache.credentials_denied": "access_denied",
+            "model_cache.credentials_invalid": "credentials_invalid",
+            "model_cache.rate_limited": "rate_limited",
+            "model_cache.digest_mismatch": "integrity_mismatch",
+            "model_cache.source_size_mismatch": "integrity_mismatch",
+            "model_cache.capacity": "capacity",
+            "model_cache.interrupted": "interrupted",
+        }
+        code = semantic_codes.get(
+            str(raw.get("code", "model_cache.operation_failed")),
+            str(raw.get("code", "model_cache.operation_failed")),
+        )
+        recovery = raw.get("recovery")
+        recovery_actions = {
+            "access_required": [
+                "open_model_access",
+                "configure_hf_token",
+                "check_access_and_resume",
+            ],
+            "access_denied": ["open_model_access", "check_access_and_resume"],
+            "credentials_invalid": [
+                "configure_hf_token",
+                "check_access_and_resume",
+            ],
+            "resume": ["resume"],
+            "download_again": ["download_again"],
+            "retry": ["retry"],
+            "capacity": ["free_space", "resume"],
+            "check_access_and_resume": ["check_access_and_resume"],
+        }
+        actions = (
+            recovery_actions.get(recovery, ["inspect"])
+            if isinstance(recovery, str) and recovery
+            else ["inspect"]
+        )
+        retry_time = raw.get("retry_time")
+        retry_after = raw.get("retry_after_seconds")
+        if not isinstance(retry_time, str):
+            retry_time = None
+            retry_after = None
+        capacity = {
+            key: raw.get(key)
+            for key in ("required_bytes", "free_bytes", "shortfall_bytes")
+        }
+        if not all(type(capacity[key]) is int and capacity[key] >= 0 for key in capacity):
+            capacity = {key: None for key in capacity}
+        return AvailabilityOperationFailure.model_validate(
+            {
+                "code": code,
+                "detail": redact_text(
+                    raw.get("detail") or operation.last_error or "model cache operation failed"
+                )[:512],
+                "recovery_actions": actions,
+                "retryable": raw.get("retryable") is True,
+                "retry_time": retry_time,
+                "retry_after_seconds": retry_after,
+                "log_excerpt": redact_text(raw.get("detail"))[:1024]
+                if raw.get("detail")
+                else None,
+                **capacity,
+            }
+        ).model_dump(mode="json")
 
     def resume_operations(self, *, limit: int = 16) -> int:
         """Return durable cache work for the Controller worker to resume.
@@ -2884,6 +3209,7 @@ class ModelCacheService:
             "next_index": 0,
             "completed": 0,
             "futures": [],
+            "future_specs": {},
             "planned_total": planned_total,
         }
         self._background_operations[operation_id] = record
@@ -2923,6 +3249,9 @@ class ModelCacheService:
                 interrupt_after_bytes=None,
             )
             futures.append(future)
+            future_specs = record.get("future_specs")
+            if isinstance(future_specs, dict):
+                future_specs[future] = spec.key
             pending += 1
 
     def _advance_background_operations(self) -> int:
@@ -2933,16 +3262,20 @@ class ModelCacheService:
             if not isinstance(futures, list):
                 futures = []
             done = [future for future in futures if isinstance(future, Future) and future.done()]
+            future_specs = record.get("future_specs")
+            future_specs = future_specs if isinstance(future_specs, dict) else {}
             first_error = record.get("failure")
             for future in done:
                 if future in futures:
                     futures.remove(future)
+                failed_artifact_key = future_specs.pop(future, None)
                 try:
                     future.result()
                 except BaseException as error:
                     if first_error is None:
                         first_error = error
                         record["failure"] = error
+                        record["failure_artifact_key"] = failed_artifact_key
                     for other in futures:
                         if isinstance(other, Future):
                             other.cancel()
@@ -2968,6 +3301,11 @@ class ModelCacheService:
                             str(record["set_digest"]),
                             manifest,
                             first_error,
+                            failed_artifact_key=(
+                                record.get("failure_artifact_key")
+                                if isinstance(record.get("failure_artifact_key"), str)
+                                else None
+                            ),
                         )
                 self._background_operations.pop(operation_id, None)
                 finished += 1

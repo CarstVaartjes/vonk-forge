@@ -1,8 +1,8 @@
 # Launch implementation and evidence
 
 Updated 2026-09-06. This replaces the earlier status snapshot. Platform
-integration is `codex/interface-integration` at
-`559703eb` (latest checked remote main `0ab88b4f` is included). Local checks, publication,
+integration is `codex/interface-integration`
+(latest checked remote main `0ab88b4f` is included). Local checks, publication,
 Controller deployment and physical Spark execution remain separate results.
 No local result below claims a deployed Controller or NVIDIA workload.
 
@@ -13,7 +13,7 @@ No local result below claims a deployed Controller or NVIDIA workload.
 | Recipes | [PR73](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/73) merged at `48b00c1f5f1bbd46ea7141d491b63f2697271923`; [v1.0.3](https://github.com/CarstVaartjes/vonk-forge-recipes/releases/tag/v1.0.3) published with 92 Models, 85 Recipes and 85 archives. Thirteen packages changed; 72 retain their bytes. |
 | Recipe checks | PR workflow `34025493486` and publication workflow `34025838414` succeeded. Producer, public contracts, catalog and independent platform validation passed. Local full producer suite: 420 passed, one skipped. Independent validator authority: `26a2dfa804d80a02a39cd42e6deae5f3b0ecc529`. |
 | Canonical acceptance fixture | [PR74](https://github.com/CarstVaartjes/vonk-forge-recipes/pull/74) merged at `807957c9bae653f618d98fb27620f69bf736fe37` after workflow `34029444031` passed. It adds a test-only Model/Recipe/package outside the public catalog. Four focused tests, including actual HTTP serving and production source resolution, passed; a real public download verified the declared 51-byte SHA-256. |
-| Public website | PR58 merged at `7eb783d63c5ea87d2efea8834467ddcda52decfd`; workflow `33985962484` deployed canonical compact lists and documentation to `https://abd3b57b.vonk-forge-web.pages.dev`. |
+| Public website | [PR59](https://github.com/CarstVaartjes/vonk-forge-web/pull/59) merged at `5cb2008c` and deployed in workflow `34032392542`; main CI `34032392537` passed. The live `vonkforge.ai` bundle contains the frontier-AI story and both global-to-local explanations. Both live product screenshots match the reviewed bytes. Fourteen affected unit tests, build, three browser journeys and desktop/mobile review passed before publication. |
 | Controller / Spark packages | Current platform integration is not yet published or deployed. |
 
 The v1.0.3 annotated tag binds the exact main commit above. GitHub reports
@@ -58,7 +58,10 @@ The approved supply-chain verifier update `c05fbf7` and its whole cleanup branch
 are integrated. All 39 previously covered active inputs remain; only the two
 deleted runners were removed, and 37 current inputs plus contract-wheel
 integrity verification were added. Final generated evidence must be refreshed
-after the remaining implementation merges.
+after the remaining implementation merges. The pure serving evaluator now lives
+in the shared `cluster_profiles` package, with its verifier coverage retained.
+The subsequently discovered obsolete local importer and model-target ledger
+are retired; the managed canonical catalog remains the only consumer path.
 
 Root UI repair: `f8ee3122`. Route cleanup: `d6e7e188`, integrated at
 `a251a7b5`; generated clients: `56e7d955`. Artifact settings and finite-number
@@ -143,11 +146,32 @@ Spark count. The sync lookup now uses publisher/slug and bounded query chunks,
 including a 257-identity regression. Creator attribution is visible in compact
 Recipe rows/details; a same-Model fixture preserves all four Recipe choices.
 
-Remaining source cleanup is explicitly owned: remove the platform's duplicate
-DS4/MIA definitions/adapters, retire development entrypoints that still read
-old public authorities, and bind supply-chain verification to current inputs.
-The signed helper-process harness is merged and awaits native ARM64 CI; its
-fixture projection is not a live Controller-to-Spark distribution observation.
+The duplicate DS4/MIA definitions, adapters, development entrypoints and local
+model-target importer have been removed. Tests now consume the canonical
+producer examples and production compiler directly. The full Controller run
+reported 1,773 passed, 14 skipped and two missing required-input bindings in
+the replacement test fixtures. Those bindings were corrected, and all 77 tests
+in the affected modules then passed. The focused repository suite passed 120
+tests; its two skipped validator cases were made portable and independently
+passed as part of seven validator tests against all 85 Recipes and 92 Models.
+
+CI at `6cafc480` passed all repository shards, Rust, generated clients, Admin
+web, Compose, and repair/upgrade acceptance. Two Controller image tests failed
+because modifying the pinned Skopeo ELF caused an AMD64 startup fault. The
+integrated fix `55cceafe` preserves the original binary and invokes its private
+loader. Actual ARM64 and AMD64 images passed non-root version, TLS inspect,
+archive copy/inspect, and security checks in OrbStack; root independently
+rechecked both images as UID10001. Updated supply-chain verification passed.
+
+Native ARM64 CI proved signed image import through the real helper, but Start
+remains incomplete. Review found mismatched probe identity/installation paths
+and a production filename check that incorrectly reused lowercase, 64-character
+identity rules. A lexical comparison of all 85 compiled Recipe projections
+found 717 selected paths across 57 Recipes that fail that rule, including
+legitimate DeepSeek filenames. This comparison used a synthetic image receipt
+solely to inspect paths; it does not establish builds or execution. The helper
+owner is correcting these issues and running a composed OrbStack proof before
+integration. No live Controller-to-Spark distribution is claimed.
 
 ## Remaining runtime and deployment checks
 

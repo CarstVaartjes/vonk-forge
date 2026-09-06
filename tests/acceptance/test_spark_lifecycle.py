@@ -26,14 +26,13 @@ from typing import NamedTuple, Protocol, Self
 
 import yaml
 
-sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
-sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2] / "control/src"))
-
-from vonk_control.serving_execution import (
+from cluster_profiles.serving_execution import (
     HttpObservation,
     ServingExecutionError,
     evaluate_http_response,
 )
+
+sys.path.insert(0, os.fspath(Path(__file__).resolve().parents[2]))
 
 from scripts.development_slice_client import (
     MAXIMUM_RESPONSE_BYTES,
