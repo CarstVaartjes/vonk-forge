@@ -37,6 +37,10 @@ from vonk_control.models import (
 )
 from vonk_control.operation_api import merge_operation_providers
 from vonk_control.run_switch_operations import RunSwitchOperationService
+from vonk_control.runtime_image_preparation import (
+    FilesystemRuntimeImageStorage,
+    RuntimeImageReceipt,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .test_agent_api import NODE_A, NODE_B, agent_headers, agent_system  # noqa: F401
@@ -833,7 +837,8 @@ def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
     recipe_document["identity"]["slug"] = "published-fallback-guard"
     recipe = RecipeDefinition.model_validate(recipe_document)
     recipe_digest = content_sha256(recipe)
-    image_digest = "sha256:" + "d" * 64
+    registry_digest = "sha256:" + "d" * 64
+    image_digest = "sha256:" + "e" * 64
     archive_payload = b"coincident build archive"
     archive_digest = hashlib.sha256(archive_payload).hexdigest()
     recipe_id = str(uuid.uuid4())
@@ -887,7 +892,31 @@ def test_published_recipe_receipt_failure_does_not_fall_back_to_build_archive(
                 ),
             ]
         )
-    (services.artifact_root / archive_digest).write_bytes(archive_payload)
+    runtime_storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    staged = runtime_storage.prepare_path()
+    staged.write_bytes(archive_payload)
+    runtime_storage.commit(
+        staged,
+        receipt=RuntimeImageReceipt(
+            schema_version=2,
+            source="published",
+            distribution_publisher=recipe.identity.publisher,
+            distribution_slug=recipe.identity.slug,
+            distribution_content_sha256=recipe_digest,
+            registry_manifest_digest=registry_digest,
+            platform_manifest_digest=image_digest,
+            image_digest=image_digest,
+            oci_archive_sha256=archive_digest,
+            image_bytes=len(archive_payload),
+            local_image_config_id="sha256:" + "c" * 64,
+            local_image_reference=None,
+            architecture="linux-arm64",
+            runtime_interface="vonk.runtime.v1",
+            runtime_interface_label="v1",
+            archive_path=str(staged),
+            recorded_at=clock.now.isoformat(),
+        ),
+    )
     source = ControllerRuntimeImageVerifiedObjectSource(
         services.sessions, services.artifact_root
     )

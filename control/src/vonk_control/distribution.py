@@ -264,15 +264,16 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
             return False
 
     def _published_recipe_requests(self, image_digest: str) -> bool:
-        """Return whether an active Recipe claims this digest as a published image."""
+        """Return whether an active published Recipe claims this image identity."""
 
         with self.sessions() as session:
-            revisions = session.scalars(
+            revisions = tuple(session.scalars(
                 select(CatalogDocumentRevision).where(
                     CatalogDocumentRevision.kind == "recipe",
                     CatalogDocumentRevision.state == "active",
                 )
-            )
+            ))
+            registry_digests: set[str] = set()
             for revision in revisions:
                 execution = revision.document.get("execution")
                 image = execution.get("image") if isinstance(execution, Mapping) else None
@@ -284,8 +285,38 @@ class ControllerRuntimeImageVerifiedObjectSource(RecipeBuildVerifiedObjectSource
                     if isinstance(raw_digest, str)
                     else None
                 )
-                if expected == image_digest:
-                    return True
+                if expected is not None:
+                    registry_digests.add(expected)
+            if image_digest in registry_digests:
+                return True
+            revision_ids = [revision.id for revision in revisions]
+            if revision_ids and session.scalar(
+                select(RuntimeImageReceipt.id).where(
+                    RuntimeImageReceipt.recipe_revision_id.in_(revision_ids),
+                    RuntimeImageReceipt.source == "published",
+                    RuntimeImageReceipt.state == "verified",
+                    RuntimeImageReceipt.registry_manifest_digest.in_(registry_digests),
+                    RuntimeImageReceipt.platform_manifest_digest == image_digest,
+                ).limit(1)
+            ) is not None:
+                return True
+
+        # The filesystem receipt preserves the parent/platform relationship
+        # even when its SQL row has been deleted or tampered with.  Use it only
+        # to suppress an unsafe build fallback; SQL remains required for use.
+        for receipt_path in sorted(self._runtime_storage.root.glob("*.receipt.json")):
+            try:
+                receipt = self._runtime_storage.read_receipt(
+                    receipt_path.name.removesuffix(".receipt.json")
+                )
+            except (RuntimeImagePreparationError, OSError, ValueError):
+                continue
+            if (
+                receipt.source == "published"
+                and receipt.registry_manifest_digest in registry_digests
+                and receipt.platform_manifest_digest == image_digest
+            ):
+                return True
         return False
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
