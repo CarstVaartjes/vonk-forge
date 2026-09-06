@@ -433,10 +433,13 @@ def compile_canonical_harness(
     # Trusted absolute entrypoints remain authored by the recipe repository.
     # Short names retain the platform wrapper fallback used by examples.
     command.insert(0, entry[0] if entry[0].startswith("/") else wrapper)
-    # Replace a model path with the declared target when the recipe uses the
-    # canonical /models root and preserve explicit subpaths.
+    # Built-in launchers receive the canonical mounted target directly when a
+    # recipe names /models. SGLang wrappers are a special case: their
+    # packaged entrypoint owns the /models -> target rewrite (some profiles
+    # need that wrapper boundary for a drafter or target-only layout).
     primary_target = mounts[0][1].target
-    command = [primary_target if value == "/models" else value for value in command]
+    if slug != "sglang":
+        command = [primary_target if value == "/models" else value for value in command]
     command = _distributed_args(recipe, command, role=role, rank=rank)
     interface = recipe.interfaces[0]
     if interface.adapter == "openai":
