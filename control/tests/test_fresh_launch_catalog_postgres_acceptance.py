@@ -236,7 +236,10 @@ def _transport(corpus: FrozenCorpus, calls: list[str]) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request.url.path)
         if request.url.path.endswith("index.json"):
-            headers = {"content-type": "application/json"}
+            # Raw GitHub serves generated catalog JSON as text/plain on some
+            # publication paths.  The production reader accepts both MIME
+            # types, so keep this acceptance transport representative.
+            headers = {"content-type": "text/plain"}
             if corpus.publication_commit:
                 headers["x-vonk-publication-commit"] = corpus.publication_commit
             return httpx.Response(200, headers=headers, content=index_bytes)
@@ -459,10 +462,16 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
     snapshot = reader.list()
     reader.prepare(snapshot)
     model_keys = {_model_key(row) for row in corpus.index["catalog_entities"]}
+    fetched_items = [reader.fetch(item.uri) for item in snapshot.items]
+    for item in fetched_items:
+        assert item.package_handle is not None
+        assert item.package_handle.source_commit == snapshot.commit
+        if corpus.publication_commit is not None:
+            assert item.package_handle.publication_commit == corpus.publication_commit
     package_model_keys = {
         identity
-        for item in snapshot.items
-        for identity in reader.fetch(item.uri).package_handle.model_identities
+        for item in fetched_items
+        for identity in item.package_handle.model_identities
     }
     assert package_model_keys <= model_keys
     assert _selected_model_keys(corpus.index) <= package_model_keys
@@ -524,6 +533,17 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
         sync=sync,
         sessions=sessions,
     )
+    public = api.get("/api/v1/catalog/public-recipes")
+    assert public.status_code == 200, public.text
+    public_by_slug = {row["slug"]: row for row in public.json()["recipes"]}
+    assert len(public_by_slug) == len(corpus.index["recipes"])
+    for row in corpus.index["recipes"]:
+        document = row["document"]
+        selected = document["models"][0]["model"]
+        projected = public_by_slug[document["identity"]["slug"]]
+        assert projected["model_version_publisher"] == selected["publisher"]
+        assert projected["model_version_slug"] == selected["slug"]
+
     library_models = _library_models(api)
     library_model_keys = {
         (item.model.publisher, item.model.slug, item.model.content_sha256)
@@ -605,6 +625,17 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
     assert not forbidden_paths.intersection(
         path for _method, path in CATALOG_OPERATION_IDS
     )
+    forbidden_fragments = (
+        "/entities",
+        "model-target",
+        "recipe-release",
+        "runtime-distribution",
+        "patch-bundle",
+    )
+    assert all(
+        not any(fragment in path for fragment in forbidden_fragments)
+        for _method, path in CATALOG_OPERATION_IDS
+    )
     canonical_library_paths = {
         "/api/v1/library",
         "/api/v1/library/recipes",
@@ -626,3 +657,26 @@ def test_fresh_orbstack_postgres_imports_typed_canonical_model_recipe_api(
     )
     api.close()
     reader.close()
+
+    # A new reader can continue from the durable snapshot and package objects
+    # with the publication endpoint unavailable.  The failed index request is
+    # visible in calls; no package request is hidden behind synthetic success.
+    offline_calls: list[str] = []
+
+    def offline(request: httpx.Request) -> httpx.Response:
+        offline_calls.append(request.url.path)
+        raise httpx.ConnectError("publication offline", request=request)
+
+    restarted = RecipePackageClient(
+        "http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx.MockTransport(offline),
+        publication_commit=corpus.publication_commit,
+    )
+    offline_snapshot = restarted.list()
+    restarted.prepare(offline_snapshot)
+    assert offline_snapshot.commit == snapshot.commit
+    assert len(offline_snapshot.items) == len(corpus.index["recipes"])
+    assert offline_calls == ["/v1/recipe-library/index.json"]
+    assert not (tmp_path / "packages" / "snapshot.candidate.json").exists()
+    restarted.close()
