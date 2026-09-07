@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     canonical_message,
     format_model_identity,
 )
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .compiled_execution_plan import (
@@ -1395,7 +1396,7 @@ class RecipeOperationService:
                                 ),
                                 "plan_digest": plan.original_plan_digest,
                                 "cleanup_model_content_sha256": (
-                                    plan.model_impact.model_version_sha256
+                                    plan.model_impact.model_content_sha256
                                     if node.node_id
                                     in plan.model_impact.cleanup_node_ids
                                     else None
@@ -1423,15 +1424,15 @@ class RecipeOperationService:
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
-    def preview_model_deletion(self, model_version_sha256: str) -> ModelDeletionPlan:
+    def preview_model_deletion(self, model_content_sha256: str) -> ModelDeletionPlan:
         with self._sessions() as session:
             return self._model_deletion_plan_in_session(
-                session, model_version_sha256, lock=False
+                session, model_content_sha256, lock=False
             )
 
     def delete_model(
         self,
-        model_version_sha256: str,
+        model_content_sha256: str,
         *,
         plan_digest: str,
         actor: str,
@@ -1442,8 +1443,8 @@ class RecipeOperationService:
             request_id,
             kind,
             plan_digest,
-            owner_kind="model-version",
-            owner_id=model_version_sha256,
+            owner_kind="model",
+            owner_id=model_content_sha256,
         )
         if existing is not None:
             return existing
@@ -1451,15 +1452,15 @@ class RecipeOperationService:
         try:
             with self._sessions.begin() as session:
                 plan = self._model_deletion_plan_in_session(
-                    session, model_version_sha256, lock=True
+                    session, model_content_sha256, lock=True
                 )
                 existing = self._idempotent_in_session(
                     session,
                     request_id,
                     kind,
                     plan_digest,
-                    owner_kind="model-version",
-                    owner_id=model_version_sha256,
+                    owner_kind="model",
+                    owner_id=model_content_sha256,
                 )
                 if existing is not None:
                     return existing
@@ -1477,7 +1478,7 @@ class RecipeOperationService:
                             node.node_id,
                             {
                                 "schema_version": 1,
-                                "model_content_sha256": model_version_sha256,
+                                "model_content_sha256": model_content_sha256,
                                 "plan_digest": plan.plan_digest,
                                 "installations": [
                                     {
@@ -1494,13 +1495,13 @@ class RecipeOperationService:
                 job = self._queue_in_session(
                     session,
                     kind=kind,
-                    owner_kind="model-version",
-                    owner_id=model_version_sha256,
+                    owner_kind="model",
+                    owner_id=model_content_sha256,
                     plan_digest=plan.plan_digest,
                     actor=actor,
                     request_id=request_id,
                     node_payloads=tuple(node_payloads),
-                    authority_digest=model_version_sha256,
+                    authority_digest=model_content_sha256,
                     now=now,
                     job_context={
                         "installation_ids": sorted(installations),
@@ -1511,8 +1512,8 @@ class RecipeOperationService:
                 request_id,
                 kind,
                 plan_digest,
-                owner_kind="model-version",
-                owner_id=model_version_sha256,
+                owner_kind="model",
+                owner_id=model_content_sha256,
             )
             if raced is not None:
                 return raced
@@ -2759,12 +2760,12 @@ class RecipeOperationService:
             == revision.content_digest
             and installation.plan.get("plan_digest") == installation.plan_digest
         )
-        model_version_sha256, model_title = _primary_model_identity(revision.document)
-        if installation.model_version_sha256 not in {None, model_version_sha256}:
+        model_content_sha256, model_title = _primary_model_identity(revision.document)
+        if installation.model_content_sha256 not in {None, model_content_sha256}:
             raise RecipeOperationConflict("installation model authority is invalid")
         dependent_recipe_ids_by_node = self._model_dependents_on_nodes(
             session,
-            model_version_sha256,
+            model_content_sha256,
             {node.node_id for node in nodes},
             exclude_installation_id=installation.id,
             lock=lock,
@@ -2802,7 +2803,7 @@ class RecipeOperationService:
             active_run_count=active_count,
             active_runs_truncated=active_count > _MAX_ACTIVE_RUNS,
             active_operation=active_operation,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             model_title=model_title,
             dependent_recipe_ids_by_node=dependent_recipe_ids_by_node,
         )
@@ -2810,7 +2811,7 @@ class RecipeOperationService:
     def _model_dependents_on_nodes(
         self,
         session: Session,
-        model_version_sha256: str,
+        model_content_sha256: str,
         node_ids: set[str],
         *,
         exclude_installation_id: str | None,
@@ -2851,11 +2852,11 @@ class RecipeOperationService:
                     "dependent recipe authority is unavailable"
                 )
             primary_digest, _title = _primary_model_identity(revision.document)
-            if installation.model_version_sha256 not in {None, primary_digest}:
+            if installation.model_content_sha256 not in {None, primary_digest}:
                 raise RecipeOperationConflict("dependent model authority is invalid")
             if any(
-                digest == model_version_sha256
-                for digest, _title in _recipe_model_identities(revision.document)
+                digest == model_content_sha256
+                for digest, _title in _recipe_model_identities(session, revision.document)
             ):
                 for node_id in member_nodes:
                     dependent_recipe_ids[node_id].add(revision.document_id)
@@ -2865,10 +2866,10 @@ class RecipeOperationService:
         }
 
     def _model_deletion_plan_in_session(
-        self, session: Session, model_version_sha256: str, *, lock: bool
+        self, session: Session, model_content_sha256: str, *, lock: bool
     ) -> ModelDeletionPlan:
-        if not _lower_hex_digest(model_version_sha256):
-            raise RecipeOperationConflict("model version identity is invalid")
+        if not _lower_hex_digest(model_content_sha256):
+            raise RecipeOperationConflict("model content identity is invalid")
         statement = select(RecipeInstallation).where(
             RecipeInstallation.state != "uninstalled"
         )
@@ -2876,7 +2877,7 @@ class RecipeOperationService:
             statement = statement.with_for_update(of=RecipeInstallation)
         candidates = tuple(session.scalars(statement))
         selected: list[tuple[RecipeInstallation, CatalogDocumentRevision, str]] = []
-        model_title = model_version_sha256[:12]
+        model_title = model_content_sha256[:12]
         for installation in candidates:
             revision = _active_recipe_revision(session, installation.recipe_revision_id)
             if revision is None or revision.content_digest is None:
@@ -2884,13 +2885,13 @@ class RecipeOperationService:
                     "recipe revision authority is unavailable"
                 )
             primary_digest, _primary_title = _primary_model_identity(revision.document)
-            if installation.model_version_sha256 not in {None, primary_digest}:
+            if installation.model_content_sha256 not in {None, primary_digest}:
                 raise RecipeOperationConflict("installation model authority is invalid")
             matched_title = next(
                 (
                     title
-                    for digest, title in _recipe_model_identities(revision.document)
-                    if digest == model_version_sha256
+                    for digest, title in _recipe_model_identities(session, revision.document)
+                    if digest == model_content_sha256
                 ),
                 None,
             )
@@ -2929,7 +2930,7 @@ class RecipeOperationService:
             .where(
                 Job.kind == "recipe.model-uninstall.v1",
                 Job.state.in_({"queued", "running"}),
-                Job.payload["owner_id"].as_string() == model_version_sha256,
+                Job.payload["owner_id"].as_string() == model_content_sha256,
             )
             .limit(1)
         )
@@ -2994,7 +2995,7 @@ class RecipeOperationService:
             for node_id, value in sorted(by_node.items())
         )
         return model_deletion_plan(
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             model_title=model_title,
             installations=installation_impacts,
             nodes=node_impacts,
@@ -3276,29 +3277,43 @@ def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str]:
 
 
 def _recipe_model_identities(
+    session: Session,
     document: Mapping[str, object],
 ) -> tuple[tuple[str, str], ...]:
-    primary = _primary_model_identity(document)
-    dependencies = document.get("dependencies", [])
-    if not isinstance(dependencies, list):
+    try:
+        recipe = RecipeDefinition.model_validate(document)
+    except (TypeError, ValueError) as error:
+        raise RecipeOperationConflict("recipe model dependencies are invalid") from error
+    if not recipe.models:
         raise RecipeOperationConflict("recipe model dependencies are invalid")
-    result = [primary]
-    for dependency in dependencies:
-        if not isinstance(dependency, Mapping):
-            raise RecipeOperationConflict("recipe model dependency is invalid")
-        digest = dependency.get("content_sha256")
-        publisher = dependency.get("publisher")
-        slug = dependency.get("slug")
-        if (
-            dependency.get("kind") != "model-version"
-            or not _lower_hex_digest(digest)
-            or not isinstance(publisher, str)
-            or not publisher
-            or not isinstance(slug, str)
-            or not slug
-        ):
-            raise RecipeOperationConflict("recipe model dependency is invalid")
-        result.append((digest, f"{publisher}/{slug}"))
+    result: list[tuple[str, str]] = []
+    pending = [selection.model for selection in recipe.models]
+    seen: set[tuple[str, str, str]] = set()
+    while pending:
+        reference = pending.pop(0)
+        key = (reference.publisher, reference.slug, reference.content_sha256)
+        if key in seen:
+            continue
+        seen.add(key)
+        revision = session.scalar(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.publisher == reference.publisher,
+                CatalogDocumentRevision.slug == reference.slug,
+                CatalogDocumentRevision.content_digest == reference.content_sha256,
+                CatalogDocumentRevision.state == "active",
+            )
+            .limit(1)
+        )
+        if revision is None or not isinstance(revision.document, Mapping):
+            raise RecipeOperationConflict("recipe model reference is unavailable")
+        try:
+            model = ModelDefinition.model_validate(revision.document)
+        except (TypeError, ValueError) as error:
+            raise RecipeOperationConflict("recipe model reference is invalid") from error
+        result.append((reference.content_sha256, f"{reference.publisher}/{reference.slug}"))
+        pending.extend(model.dependencies)
     if len({digest for digest, _title in result}) != len(result):
         raise RecipeOperationConflict("recipe model dependencies are duplicated")
     return tuple(result)

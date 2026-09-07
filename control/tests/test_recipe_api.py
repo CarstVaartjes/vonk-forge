@@ -239,10 +239,10 @@ class Recipes:
             warnings=(
                 ActionReason(
                     "model-delete.shared_cache_protected",
-                    "Unrelated immutable caches remain protected.",
+                    "Only affected installation copies are removed; reusable downloaded model cache remains retained.",
                 ),
             ),
-            shared_cache_policy="remove-unreferenced-model-artifacts-only",
+            shared_cache_policy="retain-shared-download-cache",
             plan_digest="6" * 64,
         )
         self.calls: list[tuple[str, object]] = []
@@ -774,7 +774,7 @@ def test_model_deletion_routes_are_digest_bound_admin_only_and_audited() -> None
     assert denied.status_code == 403
     assert preview.status_code == 200
     assert preview.json()["shared_cache_policy"] == (
-        "remove-unreferenced-model-artifacts-only"
+        "retain-shared-download-cache"
     )
     assert preview.json()["nodes"][0]["installation_ids"] == [INSTALLATION]
     assert applied.status_code == 202
