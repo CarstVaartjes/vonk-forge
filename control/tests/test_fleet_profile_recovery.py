@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -20,6 +21,7 @@ from vonk_control.models import (
     FleetProfileApplication,
     RecipeInstallation,
 )
+from vonk_control.operation_api import durable_operation_services
 
 from .test_fleet_profiles import (
     NOW,
@@ -157,7 +159,14 @@ def test_admitted_application_executes_immutable_assignment_after_profile_edit(
 
 
 def test_retry_http_deduplicates_and_enforces_authentication_and_body(tmp_path):
-    _sessions, _operations, service, _profile, original = setup_recovery(tmp_path)
+    from vonk_control.fleet_profile_contract import FleetProfileApplicationView
+
+    from cluster_profiles.control_client import _request_contract
+    from cluster_profiles.generated_control.models.fleet_profile_application_view import (
+        FleetProfileApplicationView as GeneratedApplication,
+    )
+
+    sessions, _operations, service, _profile, original = setup_recovery(tmp_path)
     codec = TokenCodec(b"r" * 32)
     audits = MemoryAuditStore()
     app = create_app(
@@ -166,6 +175,10 @@ def test_retry_http_deduplicates_and_enforces_authentication_and_body(tmp_path):
         audits=audits,
         now=lambda: 10,
         fleet_profiles=service,
+        operations=durable_operation_services(
+            sessions, tmp_path / "routes", clock=lambda: NOW,
+            cursors=codec.cursor_codec(), operation_providers=(service.operation_provider(),),
+        ),
     )
     client = TestClient(app)
 
@@ -176,6 +189,11 @@ def test_retry_http_deduplicates_and_enforces_authentication_and_body(tmp_path):
 
     route = f"/api/v1/fleet-profile-applications/{original.id}/retry"
     body = {"request_key": _uuid(801)}
+    _request_contract(route, "POST", body)
+    activity = client.get(f"/api/v1/operations/{original.id}", headers=headers()).json()
+    assert activity["failure"]["detail"] == "Runtime temporarily unavailable"
+    assert activity["failure"]["retryable"] is True
+    assert activity["recovery"]["actions"] == ["inspect", "retry"]
     assert client.post(route, json=body).status_code == 401
     assert client.post(route, headers=headers("viewer"), json=body).status_code == 403
     assert (
@@ -188,7 +206,17 @@ def test_retry_http_deduplicates_and_enforces_authentication_and_body(tmp_path):
     assert response.status_code == 202, response.text
     assert response.json()["attempt"] == 2
     assert response.json()["retry_of_application_id"] == original.id
+    generated = GeneratedApplication.from_dict(response.json())
+    assert generated.progress.intended_profile.profile_digest == original.profile_digest
+    assert FleetProfileApplicationView.model_validate_json(
+        json.dumps(generated.to_dict())
+    ) == service.application(generated.id)
     assert client.post(route, headers=headers(), json=body).json() == response.json()
+    linked = client.get(f"/api/v1/operations/{generated.id}", headers=headers()).json()
+    assert (linked["parent_id"], linked["attempt"]) == (original.id, 2)
+    historical = client.get(f"/api/v1/operations/{original.id}", headers=headers()).json()
+    assert historical["failure"]["detail"] == activity["failure"]["detail"]
+    assert historical["recovery"]["actions"] == ["inspect"]
 
 
 def test_retry_already_reconciled_fleet_returns_real_noop_receipt(tmp_path):

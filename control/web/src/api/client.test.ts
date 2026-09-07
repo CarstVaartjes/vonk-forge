@@ -1,5 +1,5 @@
 import {AuthenticationRequired} from "../auth";
-import type {AgentRepairManifest, AgentUpgradePlan, RunSwitchPreviewRequest} from "./types";
+import type {AgentRepairManifest, AgentUpgradePlan, FleetProfileApplication, LibraryPlacementApplication, OperationDetail, RunSwitchPreviewRequest} from "./types";
 import {ApiClient} from "./client";
 
 const REPAIR_NODE = `spk_${"a".repeat(32)}`;
@@ -41,6 +41,62 @@ afterEach(() => {
   document.cookie = "other_cookie=; Max-Age=0; path=/";
   document.cookie = "third_cookie=; Max-Age=0; path=/";
   vi.unstubAllGlobals();
+});
+
+it("uses canonical Activity and linked application retry endpoints with stable request keys", async () => {
+  const requests: Request[] = [];
+  const oldId = "11111111-1111-4111-8111-111111111111";
+  const newId = "22222222-2222-4222-8222-222222222222";
+  const requestKey = "33333333-3333-4333-8333-333333333333";
+  const operation = {
+    schema_version: 2, id: oldId, parent_id: null, node_ids: [REPAIR_NODE],
+    kind: "fleet-profile.apply", state: "failed", attempt: 1,
+    created_at: "2026-09-07T12:00:00Z", updated_at: "2026-09-07T12:01:00Z",
+    failure: {error_code: "fleet_profile_application_failed", summary: "Profile application failed", detail: "Spark is offline", retryable: true, uncertain: false},
+    recovery: {actions: ["inspect", "retry"], uncertain: false, explanation: null},
+  } satisfies OperationDetail;
+  const common = {
+    id: newId, retry_of_application_id: oldId, attempt: 2, state: "queued" as const,
+    plan_digest: "a".repeat(64), current_step: 0, total_steps: 1,
+    current_operation_id: null, status_reason: null, result: null,
+    progress: {attempt: 2, retry_of_application_id: oldId, completed_steps: 0, total_steps: 1},
+    created_at: "2026-09-07T12:02:00Z", updated_at: "2026-09-07T12:02:00Z",
+  };
+  const profileRetry = {
+    ...common, schema_version: 2, profile_id: requestKey, profile_digest: "b".repeat(64),
+  } satisfies FleetProfileApplication;
+  const placementRetry = {
+    ...common, schema_version: 1, recipe_id: requestKey, recipe_revision_id: oldId,
+    selected_node_ids: [REPAIR_NODE], desired_state: "running", alias: "chat",
+    locations: {installation_ids: [], run_ids: [], installed: false, running: false},
+  } satisfies LibraryPlacementApplication;
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const request = input as Request;
+    requests.push(request);
+    const path = new URL(request.url).pathname;
+    const result = path.endsWith("/retry")
+      ? path.includes("/placements/") ? placementRetry : profileRetry
+      : path.endsWith("/operations")
+        ? {schema_version: 2, operations: [operation], next_cursor: null, total: 1}
+        : operation;
+    return new Response(JSON.stringify(result), {headers: {"Content-Type": "application/json"}});
+  });
+  const api = new ApiClient();
+  expect((await api.operations("next-page")).operations[0]?.failure?.detail).toBe("Spark is offline");
+  expect((await api.operation(oldId)).id).toBe(oldId);
+  expect((await api.retryFleetProfileApplication(oldId, {request_key: requestKey})).id).toBe(newId);
+  const abort = new AbortController();
+  expect((await api.retryLibraryPlacement(oldId, {request_key: requestKey}, abort.signal)).retry_of_application_id).toBe(oldId);
+  expect(requests.map(request => [request.method, new URL(request.url).pathname])).toEqual([
+    ["GET", "/api/v1/operations"],
+    ["GET", `/api/v1/operations/${oldId}`],
+    ["POST", `/api/v1/fleet-profile-applications/${oldId}/retry`],
+    ["POST", `/api/v1/library/placements/${oldId}/retry`],
+  ]);
+  expect(new URL(requests[0]!.url).searchParams.get("cursor")).toBe("next-page");
+  for (const request of requests.slice(2)) expect(await request.clone().json()).toEqual({request_key: requestKey});
+  abort.abort();
+  expect(requests[3]!.signal.aborted).toBe(true);
 });
 
 it("formats FastAPI validation details with dotted locations and messages", async () => {

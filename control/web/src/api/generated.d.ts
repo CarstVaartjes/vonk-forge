@@ -429,6 +429,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fleet-profile-applications/{application_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Application */
+        post: operations["retryFleetProfileApplication"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/fleet-profiles": {
         parameters: {
             query?: never;
@@ -800,6 +817,23 @@ export interface paths {
         get: operations["getLibraryPlacement"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/placements/{placement_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Application */
+        post: operations["retryLibraryPlacement"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2974,6 +3008,11 @@ export interface components {
             assignments?: {
                 [key: string]: components["schemas"]["FleetProfileAssignmentContext"];
             };
+            /**
+             * Attempt
+             * @default 1
+             */
+            attempt: number;
             child_progress?: components["schemas"]["FleetProfileChildProgress"] | null;
             /** Child Source */
             child_source?: ("recipe" | "switch-adapter") | null;
@@ -2984,9 +3023,12 @@ export interface components {
             completed_steps: number;
             /** Current Label */
             current_label?: string | null;
+            intended_profile?: components["schemas"]["FleetProfileIntendedConfiguration"] | null;
             library_placement?: components["schemas"]["FleetProfileLibraryPlacementContext"] | null;
             /** Operation Kind */
             operation_kind?: ("fleet-profile.apply" | "fleet-profile.prepare") | null;
+            /** Retry Of Application Id */
+            retry_of_application_id?: string | null;
             /** Step Results */
             step_results?: {
                 [key: string]: components["schemas"]["FleetProfileStepResult"];
@@ -3011,6 +3053,11 @@ export interface components {
         /** FleetProfileApplicationView */
         FleetProfileApplicationView: {
             /**
+             * Attempt
+             * @default 1
+             */
+            attempt: number;
+            /**
              * Created At
              * Format: date-time
              */
@@ -3029,6 +3076,8 @@ export interface components {
             profile_id: string;
             progress: components["schemas"]["FleetProfileApplicationProgress"];
             result: components["schemas"]["FleetProfileApplicationResult"] | null;
+            /** Retry Of Application Id */
+            retry_of_application_id?: string | null;
             /**
              * Schema Version
              * @default 2
@@ -3218,6 +3267,22 @@ export interface components {
             scope: components["schemas"]["FleetProfileScope"];
         };
         /**
+         * FleetProfileIntendedConfiguration
+         * @description Immutable desired configuration captured when execution is admitted.
+         */
+        FleetProfileIntendedConfiguration: {
+            /** Assignments */
+            assignments: components["schemas"]["FleetProfileAssignment"][];
+            /**
+             * Installation Policy
+             * @enum {string}
+             */
+            installation_policy: "keep-cached" | "exact";
+            /** Profile Digest */
+            profile_digest: string;
+            scope: components["schemas"]["FleetProfileScope"];
+        };
+        /**
          * FleetProfileLibraryPlacementContext
          * @description Identity binding retained for replay of a direct Library placement.
          */
@@ -3377,6 +3442,11 @@ export interface components {
              * @enum {string}
              */
             severity: "info" | "warning" | "error";
+        };
+        /** FleetProfileRetryRequest */
+        FleetProfileRetryRequest: {
+            /** Request Key */
+            request_key: string;
         };
         /**
          * FleetProfileScope
@@ -4155,6 +4225,11 @@ export interface components {
             /** Alias */
             alias: string | null;
             /**
+             * Attempt
+             * @default 1
+             */
+            attempt: number;
+            /**
              * Created At
              * Format: date-time
              */
@@ -4178,6 +4253,9 @@ export interface components {
             recipe_id: string;
             /** Recipe Revision Id */
             recipe_revision_id: string;
+            result?: components["schemas"]["FleetProfileApplicationResult"] | null;
+            /** Retry Of Application Id */
+            retry_of_application_id?: string | null;
             /**
              * Schema Version
              * @default 1
@@ -11011,6 +11089,86 @@ export interface operations {
             };
         };
     };
+    retryFleetProfileApplication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                application_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetProfileRetryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetProfileApplicationView"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
     listFleetProfiles: {
         parameters: {
             query?: never;
@@ -12591,6 +12749,86 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+        };
+    };
+    retryLibraryPlacement: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                placement_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FleetProfileRetryRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryPlacementApplication"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -40,6 +40,9 @@ export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
 export type JobSummary = components["schemas"]["JobSummary"];
 export type JobsResponse = components["schemas"]["JobsResponse"];
+export type OperationDetail = components["schemas"]["OperationDetailResponse"];
+export type OperationsResponse = components["schemas"]["OperationsResponse"];
+export type FleetProfileRetryInput = components["schemas"]["FleetProfileRetryRequest"];
 export type ProposalInput = components["schemas"]["ProposalRequest"];
 export type ProposalPreview = components["schemas"]["ProposalPreviewResponse"];
 export type ChangeResponse = components["schemas"]["ChangeResponse"];
@@ -176,6 +179,7 @@ export interface LibraryApi {
   previewLibraryPlacement(input: LibraryPlacementPreviewInput, signal?: AbortSignal): Promise<LibraryPlacementPreview>;
   applyLibraryPlacement(input: LibraryPlacementApplyInput, signal?: AbortSignal): Promise<LibraryPlacementApplication>;
   libraryPlacement(placementId: string, signal?: AbortSignal): Promise<LibraryPlacementApplication>;
+  retryLibraryPlacement(placementId: string, input: FleetProfileRetryInput, signal?: AbortSignal): Promise<LibraryPlacementApplication>;
   previewLibraryModelDeletion(modelContentSha256: string, signal?: AbortSignal): Promise<LibraryModelDeletionPlan>;
   deleteLibraryModel(modelContentSha256: string, input: LibraryUninstallApplyInput, signal?: AbortSignal): Promise<LibraryOperation>;
   previewLibraryBuild(input: LibraryBuildPreviewInput, signal?: AbortSignal): Promise<LibraryBuildPlan>;
@@ -216,6 +220,7 @@ export interface ControlApi extends LibraryApi {
   previewFleetProfile(profileId: string, signal?: AbortSignal): Promise<FleetProfilePreview>;
   applyFleetProfile(profileId: string, input: FleetProfileApplyInput, signal?: AbortSignal): Promise<FleetProfileApplication>;
   fleetProfileApplication(applicationId: string, signal?: AbortSignal): Promise<FleetProfileApplication>;
+  retryFleetProfileApplication(applicationId: string, input: FleetProfileRetryInput, signal?: AbortSignal): Promise<FleetProfileApplication>;
   previewRecipeRunSwitch(input: RunSwitchPreviewRequest, signal?: AbortSignal): Promise<RunSwitchPlan>;
   applyRecipeRunSwitch(input: RunSwitchApplyRequest, signal?: AbortSignal): Promise<RunSwitchOperation>;
   getRecipeRunSwitchOperation(operationId: string, signal?: AbortSignal): Promise<RunSwitchOperation>;
@@ -247,6 +252,8 @@ export interface ControlApi extends LibraryApi {
   nodeTelemetryWorkloads(nodeId: string, runId?: string, state?: string, signal?: AbortSignal): Promise<TelemetryWorkloadsResponse>;
   updateNodeProfile(nodeId: string, input: NodeProfileUpdate, signal?: AbortSignal): Promise<FleetNodeIdentity>;
   jobs(cursor?: string): Promise<JobsResponse>;
+  operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse>;
+  operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail>;
   job(jobId: string, operationCursor?: string, targetCursor?: string): Promise<JobDetail>;
   resumeJob(jobId: string): Promise<JobResumeResponse>;
   audit(): Promise<AuditResponse>;

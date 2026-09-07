@@ -87,8 +87,8 @@ vonkctl fleet metrics export SPARK_ID --range 7d --file metrics.json --json
 
 ## Library placement
 
-Place a Library recipe on an exact Spark group using the same Controller plan
-as the browser. Save the preview intent in `placement.json`:
+Place a Library recipe on an exact Spark group through the Controller's durable
+placement API. Save the preview intent in `placement.json`:
 
 ```json
 {
@@ -165,9 +165,9 @@ vonkctl profiles show PROFILE_ID --json
 vonkctl profiles create --input-file profile.json --json
 vonkctl profiles update PROFILE_ID --stdin --json
 vonkctl profiles duplicate PROFILE_ID --name "Creative setup" \
-  --request-key REQUEST_UUID --apply --json
+  --apply --json
 vonkctl profiles capture-current --name "Current setup" \
-  --request-key REQUEST_UUID --apply --json
+  --apply --json
 vonkctl profiles preview PROFILE_ID --json
 vonkctl profiles switch PROFILE_ID --json
 vonkctl profiles switch PROFILE_ID --dry-run --json

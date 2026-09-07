@@ -141,6 +141,8 @@ from .fleet_profile_duplicate_input import FleetProfileDuplicateInput
 from .fleet_profile_input import FleetProfileInput
 from .fleet_profile_input_installation_policy import FleetProfileInputInstallationPolicy
 from .fleet_profile_input_labels import FleetProfileInputLabels
+from .fleet_profile_intended_configuration import FleetProfileIntendedConfiguration
+from .fleet_profile_intended_configuration_installation_policy import FleetProfileIntendedConfigurationInstallationPolicy
 from .fleet_profile_library_placement_context import FleetProfileLibraryPlacementContext
 from .fleet_profile_library_placement_context_desired_state import FleetProfileLibraryPlacementContextDesiredState
 from .fleet_profile_list import FleetProfileList
@@ -154,6 +156,7 @@ from .fleet_profile_preview import FleetProfilePreview
 from .fleet_profile_preview_request import FleetProfilePreviewRequest
 from .fleet_profile_reason import FleetProfileReason
 from .fleet_profile_reason_severity import FleetProfileReasonSeverity
+from .fleet_profile_retry_request import FleetProfileRetryRequest
 from .fleet_profile_scope import FleetProfileScope
 from .fleet_profile_scope_preview import FleetProfileScopePreview
 from .fleet_profile_status_view import FleetProfileStatusView
@@ -780,6 +783,8 @@ __all__ = (
     "FleetProfileInput",
     "FleetProfileInputInstallationPolicy",
     "FleetProfileInputLabels",
+    "FleetProfileIntendedConfiguration",
+    "FleetProfileIntendedConfigurationInstallationPolicy",
     "FleetProfileLibraryPlacementContext",
     "FleetProfileLibraryPlacementContextDesiredState",
     "FleetProfileList",
@@ -793,6 +798,7 @@ __all__ = (
     "FleetProfilePreviewRequest",
     "FleetProfileReason",
     "FleetProfileReasonSeverity",
+    "FleetProfileRetryRequest",
     "FleetProfileScope",
     "FleetProfileScopePreview",
     "FleetProfileStatusView",
