@@ -16,6 +16,168 @@ pub const MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES: usize =
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES;
 pub const RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY: &str = "vonk.recipe-run-observation-helper";
 const RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN: &[u8] = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\0";
+pub const HOST_HELPER_AUTHORITY: &str = "vonk.host-maintenance-helper";
+const HOST_HELPER_GRANT_DOMAIN: &[u8] = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\0";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostHelperManagedArea {
+    Models,
+    State,
+    Workloads,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostHelperRestartUnit {
+    Agent,
+    Helper,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum HostHelperContainerRuntimeAction {
+    ImageImport,
+    ImageInspect,
+    RunInspect,
+    Start,
+    Stop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum HostHelperOperation {
+    CreateManagedDirectory {
+        area: HostHelperManagedArea,
+        relative_path: String,
+    },
+    InstallVonkDeb {
+        package_sha256: String,
+        package_signature: String,
+    },
+    RestartVonkUnit {
+        unit: HostHelperRestartUnit,
+    },
+    ScheduleReboot {
+        delay_seconds: u16,
+    },
+    ExecuteContainerRuntimeRequest {
+        action: HostHelperContainerRuntimeAction,
+        job_id: Uuid,
+        operation_id: Uuid,
+        attempt: u32,
+        fence: Uuid,
+        request_sha256: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        observation_identity_sha256: Option<String>,
+    },
+}
+
+impl HostHelperOperation {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        let valid = match self {
+            Self::CreateManagedDirectory { relative_path, .. } => {
+                valid_host_helper_relative_path(relative_path)
+            }
+            Self::InstallVonkDeb {
+                package_sha256,
+                package_signature,
+            } => lower_hex(package_sha256, 64) && lower_hex(package_signature, 128),
+            Self::RestartVonkUnit { .. } => true,
+            Self::ScheduleReboot { delay_seconds } => (60..=3600).contains(delay_seconds),
+            Self::ExecuteContainerRuntimeRequest {
+                action,
+                job_id,
+                operation_id,
+                attempt,
+                fence,
+                request_sha256,
+                observation_identity_sha256,
+            } => {
+                job_id.get_version() == Some(uuid::Version::Random)
+                    && operation_id.get_version() == Some(uuid::Version::Random)
+                    && *attempt > 0
+                    && fence.get_version() == Some(uuid::Version::Random)
+                    && lower_hex(request_sha256, 64)
+                    && observation_identity_sha256.as_ref().is_none_or(|digest| {
+                        *action == HostHelperContainerRuntimeAction::RunInspect
+                            && lower_hex(digest, 64)
+                    })
+            }
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(ProtocolError::Identity("host helper operation"))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HostHelperGrantClaims {
+    pub schema_version: u8,
+    pub authority: String,
+    pub request_id: Uuid,
+    pub node_id: String,
+    pub issued_at: i64,
+    pub expires_at: i64,
+    pub operation: HostHelperOperation,
+}
+
+impl HostHelperGrantClaims {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.schema_version != 1
+            || self.authority != HOST_HELPER_AUTHORITY
+            || self.request_id.get_version() != Some(uuid::Version::Random)
+            || !valid_node_id(&self.node_id)
+            || self.issued_at <= 0
+            || !(1..=300).contains(&(self.expires_at - self.issued_at))
+        {
+            return Err(ProtocolError::Identity("host helper grant claims"));
+        }
+        self.operation.validate()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct HostHelperGrantSignature {
+    pub algorithm: String,
+    pub key_id: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SignedHostHelperGrant {
+    pub schema_version: u8,
+    pub claims: HostHelperGrantClaims,
+    pub signature: HostHelperGrantSignature,
+}
+
+impl SignedHostHelperGrant {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.claims.validate()?;
+        if self.schema_version != 1
+            || self.signature.algorithm != "ed25519"
+            || !lower_hex(&self.signature.key_id, 64)
+            || !lower_hex(&self.signature.value, 128)
+        {
+            return Err(ProtocolError::Identity("signed host helper grant"));
+        }
+        Ok(())
+    }
+}
+
+pub fn host_helper_grant_signing_bytes(
+    claims: &HostHelperGrantClaims,
+) -> Result<Vec<u8>, ProtocolError> {
+    claims.validate()?;
+    let mut value = HOST_HELPER_GRANT_DOMAIN.to_vec();
+    value.extend(canonical_json(claims)?);
+    Ok(value)
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -2017,6 +2179,20 @@ fn valid_node_id(value: &str) -> bool {
         && value[4..]
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn valid_host_helper_relative_path(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value.split('/').all(|component| {
+            !component.is_empty()
+                && component != "."
+                && component != ".."
+                && component.len() <= 128
+                && component
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        })
 }
 
 fn validate_attempt_identity(

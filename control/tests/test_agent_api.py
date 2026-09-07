@@ -26,8 +26,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
 from vonk_agent_protocol import (
-    HostHelperOperation,
-    HostOperationKind,
+    ExecuteContainerRuntimeRequestOperation,
+    HostHelperGrantClaims,
+    HostHelperSignature,
+    InstallVonkDebOperation,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
     SignedPackageObjectReceipt,
@@ -800,16 +802,14 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
         def issue_grant(self, **kwargs: object) -> object:
             self.grant_calls.append(kwargs)
-            operation = HostHelperOperation(
-                HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
-                {
-                    "action": kwargs["action"].value,
-                    "job_id": kwargs["job_id"],
-                    "operation_id": kwargs["operation_id"],
-                    "attempt": kwargs["attempt"],
-                    "fence": kwargs["fence"],
-                    "request_sha256": kwargs["request_sha256"],
-                },
+            operation = ExecuteContainerRuntimeRequestOperation(
+                type="execute-container-runtime-request",
+                action=kwargs["action"].value,
+                job_id=kwargs["job_id"],
+                operation_id=kwargs["operation_id"],
+                attempt=kwargs["attempt"],
+                fence=kwargs["fence"],
+                request_sha256=kwargs["request_sha256"],
             )
             return host_issuer.issue_grant(
                 node_id=kwargs["node_id"],
@@ -819,12 +819,10 @@ def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
 
         def issue_agent_upgrade_grant(self, **kwargs: object) -> object:
             self.upgrade_calls.append(kwargs)
-            operation = HostHelperOperation(
-                HostOperationKind.INSTALL_VONK_DEB,
-                {
-                    "package_sha256": kwargs["package_sha256"],
-                    "package_signature": kwargs["package_signature"],
-                },
+            operation = InstallVonkDebOperation(
+                type="install-vonk-deb",
+                package_sha256=kwargs["package_sha256"],
+                package_signature=kwargs["package_signature"],
             )
             return host_issuer.issue_grant(
                 node_id=kwargs["node_id"],
@@ -2486,11 +2484,6 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
 ) -> None:
     client, services, _, clock = agent_system
 
-    class Grant:
-        @staticmethod
-        def to_mapping() -> dict[str, object]:
-            return {"schema_version": 1, "test": "exact-rank-inspection"}
-
     class ExactObservationAuthority:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
@@ -2499,7 +2492,30 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
             self.calls.append(values)
             assert values["certificate_serial"] == "serial-a"
             assert values["expires_in_seconds"] == 10
-            return "f" * 64, Grant()
+            return "f" * 64, SignedHostHelperGrant(
+                schema_version=1,
+                claims=HostHelperGrantClaims(
+                    schema_version=1,
+                    authority="vonk.host-maintenance-helper",
+                    request_id="70000000-0000-4000-8000-000000000007",
+                    node_id=NODE_A,
+                    issued_at=1_800_000_000,
+                    expires_at=1_800_000_010,
+                    operation=ExecuteContainerRuntimeRequestOperation(
+                        type="execute-container-runtime-request",
+                        action="run-inspect",
+                        job_id=values["job_id"],
+                        operation_id=values["operation_id"],
+                        attempt=values["attempt"],
+                        fence=values["fence"],
+                        request_sha256=values["request_sha256"],
+                        observation_identity_sha256="f" * 64,
+                    ),
+                ),
+                signature=HostHelperSignature(
+                    algorithm="ed25519", key_id="0" * 64, value="0" * 128
+                ),
+            )
 
     authority = ExactObservationAuthority()
     object.__setattr__(services, "host_runtime_authority", authority)
@@ -2564,7 +2580,32 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     assert accepted.json() == {
         "schema_version": 1,
         "observation_identity_sha256": "f" * 64,
-        "grant": {"schema_version": 1, "test": "exact-rank-inspection"},
+        "grant": {
+            "schema_version": 1,
+            "claims": {
+                "schema_version": 1,
+                "authority": "vonk.host-maintenance-helper",
+                "request_id": "70000000-0000-4000-8000-000000000007",
+                "node_id": NODE_A,
+                "issued_at": 1_800_000_000,
+                "expires_at": 1_800_000_010,
+                "operation": {
+                    "type": "execute-container-runtime-request",
+                    "action": "run-inspect",
+                    "job_id": run_id,
+                    "operation_id": request["operation_id"],
+                    "attempt": request["attempt"],
+                    "fence": request["fence"],
+                    "request_sha256": request["request_sha256"],
+                    "observation_identity_sha256": "f" * 64,
+                },
+            },
+            "signature": {
+                "algorithm": "ed25519",
+                "key_id": "0" * 64,
+                "value": "0" * 128,
+            },
+        },
     }
     assert wrong_node.status_code == 409
     assert unknown_field.status_code == 422

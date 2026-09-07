@@ -52,11 +52,11 @@ document satisfies the contract.
 
 Rust uses `serde` structs and enums, with explicit semantic validation where
 types alone are insufficient. The current Rust protocol definitions are
-handwritten; they are not generated from Pydantic. Python protocol code also
-still contains dataclass contracts in the remaining helper/job audit. Those
-facts must remain visible until the implementations are consolidated; adding
-Pydantic elsewhere does not fix drift. Distribution, enrollment, and certificate
-rotation already use shared Pydantic wire models. Enrollment returns the issued
+handwritten; they are not generated from Pydantic. The remaining job-envelope and signed observation
+consolidation is tracked in the launch progress document; adding Pydantic
+elsewhere does not fix drift. Distribution, enrollment, certificate rotation,
+bootstrap, inventory, build/import, package and host-helper grants, compiled
+launch plans, and telemetry use shared Pydantic wire models. Enrollment returns the issued
 certificate directly; there is no pending-approval response or polling fallback.
 Bootstrap also has one response: the helper authority key is required, and the
 address and hostname list are explicit even when they are `null` and `[]`.
@@ -82,11 +82,16 @@ recipe revision, runtime compiler, or harness configuration changes.
 - `scripts/tests/run_agent_wire_contracts.py` builds the Rust probes from
   the checked-out source and runs every `test_*_wire_bridge.py` in the required
   Linux lane. The tests queue requests through the actual Controller,
-  parses them through the real Rust claim and launch validators, produces results
-  through the agent's shared result builders, and consumes those results back
+  parse them through the real Rust claim and launch validators, produce results
+  through the agent's shared result builders, and consume those results back
   into persisted Controller state. It covers single-node starts and distributed
   rank-launch/collective-readiness starts, distribution manifests, heartbeat
-  directives, bootstrap, enrollment, and certificate renewal. No old heartbeat response
+  directives, bootstrap, enrollment, certificate renewal, build/import evidence,
+  inventory, artifact jobs, and telemetry. The host-helper bridge passes an
+  actual API-issued grant through the Rust verifier and receipt signer and
+  verifies that receipt through the Python contract. The complete persisted
+  signed-observation workflow has its own integration check; a signature
+  round trip alone does not establish run readiness. No old heartbeat response
   shape is accepted.
   The same required job runs the complete `agent_protocol/tests` suite,
   including schema-derived required-field, type, nullable, unknown-field and
