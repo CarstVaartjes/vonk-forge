@@ -529,6 +529,8 @@ fn runner_with_bootstrap(ca: &[u8]) -> RecordingRunner {
         "ca_fingerprint": ca_fingerprint(ca),
         "ca_pem": String::from_utf8(ca.to_vec()).unwrap(),
         "host_helper_authority_public_key": "11".repeat(32),
+        "controller_address": null,
+        "service_hostnames": [],
     });
     RecordingRunner {
         commands: Vec::new(),
@@ -1591,6 +1593,8 @@ fn enrollment_bootstrap_must_match_the_prompted_ca_before_sudo() {
         "ca_fingerprint": "0".repeat(64),
         "ca_pem": String::from_utf8(ca.clone()).unwrap(),
         "host_helper_authority_public_key": "11".repeat(32),
+        "controller_address": null,
+        "service_hostnames": [],
     });
     let mut runner = RecordingRunner {
         commands: Vec::new(),
