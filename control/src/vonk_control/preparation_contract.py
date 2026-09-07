@@ -104,11 +104,11 @@ class ModelArtifactPreparation(_StrictModel):
     """Complete exact model set, including auxiliary and dependency files."""
 
     artifact_set_sha256: Digest
-    model_version_sha256: Digest
+    model_content_sha256: Digest
     recipe_revision_sha256: Digest | None = None
     artifact_count: int = Field(ge=1, le=1024)
     artifact_set_bytes: int = Field(ge=1)
-    dependency_model_version_sha256: list[Digest] = Field(
+    dependency_model_content_sha256: list[Digest] = Field(
         default_factory=list, max_length=128
     )
     completeness: Literal["complete", "incomplete", "unknown"]
@@ -117,13 +117,13 @@ class ModelArtifactPreparation(_StrictModel):
 
     @model_validator(mode="after")
     def exact_model_set_is_bound(self) -> ModelArtifactPreparation:
-        if len(self.dependency_model_version_sha256) != len(
-            set(self.dependency_model_version_sha256)
-        ) or self.dependency_model_version_sha256 != sorted(
-            self.dependency_model_version_sha256
+        if len(self.dependency_model_content_sha256) != len(
+            set(self.dependency_model_content_sha256)
+        ) or self.dependency_model_content_sha256 != sorted(
+            self.dependency_model_content_sha256
         ):
             raise ValueError("dependency model identities must be sorted and unique")
-        if self.model_version_sha256 in self.dependency_model_version_sha256:
+        if self.model_content_sha256 in self.dependency_model_content_sha256:
             raise ValueError("primary model cannot also be a dependency")
         if self.controller.expected_bytes != self.artifact_set_bytes:
             raise ValueError("Controller model bytes do not match the exact artifact set")
@@ -189,7 +189,7 @@ class CompatibilityIdentity(_StrictModel):
     """Immutable inputs for an exceptional reusable preparation artifact."""
 
     recipe_revision_sha256: Digest
-    model_version_sha256: Digest
+    model_content_sha256: Digest
     runtime_image_digest: ImageDigest
     parameters_sha256: Digest
     hardware_profile_sha256: Digest | None = None
@@ -262,7 +262,7 @@ class RolloutPreparation(_StrictModel):
             if (
                 identity.recipe_revision_sha256
                 != self.model.recipe_revision_sha256
-                or identity.model_version_sha256 != self.model.model_version_sha256
+                or identity.model_content_sha256 != self.model.model_content_sha256
                 or identity.runtime_image_digest != self.runtime_image.image_digest
             ):
                 raise ValueError("exception identity does not match the rollout authority")

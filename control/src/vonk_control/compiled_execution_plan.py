@@ -132,7 +132,7 @@ class VerifiedModelObject(_StrictModel):
     """One cache-authorized model file before recipe mount selection.
 
     The model content identity and file ID are part of the lookup key.  A
-    path alone is insufficient because different model versions legitimately
+    path alone is insufficient because different model definitions legitimately
     contain files with the same name, such as ``config.json``.
     """
 

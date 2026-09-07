@@ -72,7 +72,7 @@ class UninstallConsequences:
 
 @dataclass(frozen=True, slots=True)
 class UninstallModelImpact:
-    model_version_sha256: str
+    model_content_sha256: str
     model_title: str
     effect: str
     dependent_recipe_ids: tuple[str, ...]
@@ -123,7 +123,7 @@ class ModelDeletionNodeImpact:
 
 @dataclass(frozen=True, slots=True)
 class ModelDeletionPlan:
-    model_version_sha256: str
+    model_content_sha256: str
     model_title: str
     allowed: bool
     installations: tuple[ModelDeletionInstallationImpact, ...]
@@ -254,7 +254,7 @@ def uninstall_plan(
     active_run_count: int,
     active_runs_truncated: bool,
     active_operation: bool,
-    model_version_sha256: str,
+    model_content_sha256: str,
     model_title: str,
     dependent_recipe_ids_by_node: Mapping[str, Sequence[str]],
 ) -> UninstallPlan:
@@ -386,7 +386,7 @@ def uninstall_plan(
         "active_runs_truncated": active_runs_truncated,
         "active_operation": active_operation,
         "model_impact": {
-            "model_version_sha256": model_version_sha256,
+            "model_content_sha256": model_content_sha256,
             "effect": model_effect,
             "dependent_recipe_ids": list(ordered_dependents),
             "dependent_recipe_ids_by_node": dependents_by_node,
@@ -414,7 +414,7 @@ def uninstall_plan(
         warnings=(),
         consequences=UninstallConsequences(),
         model_impact=UninstallModelImpact(
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             model_title=model_title,
             effect=model_effect,
             dependent_recipe_ids=ordered_dependents,
@@ -427,7 +427,7 @@ def uninstall_plan(
 
 def model_deletion_plan(
     *,
-    model_version_sha256: str,
+    model_content_sha256: str,
     model_title: str,
     installations: Sequence[ModelDeletionInstallationImpact],
     nodes: Sequence[ModelDeletionNodeImpact],
@@ -437,7 +437,7 @@ def model_deletion_plan(
     active_operation: bool,
     evidence_exact: bool,
 ) -> ModelDeletionPlan:
-    """Build an exact, fleet-wide cascade plan for one model version."""
+    """Build an exact, fleet-wide cascade plan for one model definition."""
 
     ordered_installations = tuple(
         sorted(installations, key=lambda item: item.installation_id)
@@ -449,7 +449,7 @@ def model_deletion_plan(
         blockers.append(
             ActionReason(
                 "model-delete.not_installed",
-                "The exact model version has no installed recipe dependencies.",
+                "The exact model definition has no installed recipe dependencies.",
             )
         )
     if not evidence_exact:
@@ -477,13 +477,13 @@ def model_deletion_plan(
         blockers.append(
             ActionReason(
                 "model-delete.operation_active",
-                "This exact model version already has an active deletion operation.",
+                "This exact model definition already has an active deletion operation.",
             )
         )
     identity = {
         "schema_version": 1,
         "action": "model.delete",
-        "model_version_sha256": model_version_sha256,
+        "model_content_sha256": model_content_sha256,
         "installations": [
             {
                 "installation_id": item.installation_id,
@@ -520,7 +520,7 @@ def model_deletion_plan(
     }
     digest = hashlib.sha256(canonical_message(identity)).hexdigest()
     return ModelDeletionPlan(
-        model_version_sha256=model_version_sha256,
+        model_content_sha256=model_content_sha256,
         model_title=model_title,
         allowed=not blockers,
         installations=ordered_installations,
