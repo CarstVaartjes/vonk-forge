@@ -3,17 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import PurePosixPath
-from types import MappingProxyType
 from typing import Annotated, Any, Literal, Union
 from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import (
     Field,
-    TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
@@ -35,26 +33,10 @@ PACKAGE_HELPER_GRANT_DOMAIN = b"Vonk Forge-WORKLOAD-PACKAGE-HELPER-GRANT-V1\0"
 PACKAGE_OBJECT_RECEIPT_DOMAIN = b"Vonk Forge-WORKLOAD-PACKAGE-OBJECT-RECEIPT-V1\0"
 
 
-IDENTIFIER = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?\Z")
-PLATFORM = re.compile(r"[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*\Z")
-MEDIA_TYPE = re.compile(r"[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*\Z")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 CONTENT_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
-ED25519_SIGNATURE = re.compile(r"[0-9a-f]{128}\Z")
-GIT_COMMIT = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
-OCI_REFERENCE = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,510}@sha256:[0-9a-f]{64}\Z")
-OCI_ARCHITECTURE = re.compile(r"(?:linux-arm64|linux-x86_64)\Z")
-HF_REPOSITORY = re.compile(
-    r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,95})/"
-    r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,95})\Z"
-)
-UNSAFE_FIELD = re.compile(
-    r"password|secret|token|authorization|private.?key|command|shell|"
-    r"(?:^|[_-])(?:path|file|filename|filepath|directory|folder)(?:$|[_-])|"
-    r"host.?path|environment",
-    re.IGNORECASE,
-)
+
+Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 def _duplicate_free_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -93,38 +75,6 @@ def _load_document(value: Any) -> Mapping[str, Any]:
     return document
 
 
-def _mapping(value: Any, *, name: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise AgentProtocolError(f"{name} must be an object")
-    if not all(isinstance(key, str) for key in value):
-        raise AgentProtocolError(f"{name} keys must be strings")
-    return value
-
-
-def _exact_fields(
-    value: Mapping[str, Any],
-    *,
-    required: set[str],
-    optional: set[str] = frozenset(),
-    name: str,
-) -> None:
-    missing = required - set(value)
-    unknown = set(value) - required - optional
-    if missing:
-        raise AgentProtocolError(f"{name} missing fields: {', '.join(sorted(missing))}")
-    if unknown:
-        raise AgentProtocolError(f"{name} unknown fields: {', '.join(sorted(unknown))}")
-    for key in value:
-        if UNSAFE_FIELD.search(key):
-            raise AgentProtocolError(f"{name} contains unsafe field: {key}")
-
-
-def _identifier(value: Any, *, name: str) -> str:
-    if not isinstance(value, str) or IDENTIFIER.fullmatch(value) is None:
-        raise AgentProtocolError(f"{name} must be a canonical identifier")
-    return value
-
-
 def _bounded_text(value: Any, *, name: str, maximum: int = 256) -> str:
     if (
         not isinstance(value, str)
@@ -134,16 +84,6 @@ def _bounded_text(value: Any, *, name: str, maximum: int = 256) -> str:
         or "\\" in value
     ):
         raise AgentProtocolError(f"{name} is not bounded canonical text")
-    return value
-
-
-def _positive_integer(value: Any, *, name: str, maximum: int) -> int:
-    if (
-        not isinstance(value, int)
-        or isinstance(value, bool)
-        or not 1 <= value <= maximum
-    ):
-        raise AgentProtocolError(f"{name} must be a bounded positive integer")
     return value
 
 
@@ -182,40 +122,6 @@ def _https_url(value: Any, *, name: str) -> str:
             f"{name} must be an HTTPS URL without credentials or query data"
         )
     return text
-
-
-def _freeze(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
-    if isinstance(value, (list, tuple)):
-        return tuple(_freeze(item) for item in value)
-    return value
-
-
-def _thaw(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {key: _thaw(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_thaw(item) for item in value]
-    return value
-
-
-def _sequence(
-    value: Any,
-    *,
-    name: str,
-    minimum: int = 0,
-    maximum: int,
-) -> Sequence[Any]:
-    if (
-        not isinstance(value, (list, tuple))
-        or isinstance(value, (str, bytes))
-        or not minimum <= len(value) <= maximum
-    ):
-        raise AgentProtocolError(
-            f"{name} must contain between {minimum} and {maximum} items"
-        )
-    return value
 
 
 class _HttpsSource(WireModel):
@@ -269,7 +175,6 @@ ComponentSource = Annotated[
     Union[_HttpsSource, _OciSource, _GitSource, _HuggingFaceSource, _IndexSource],
     Field(discriminator="provider"),
 ]
-_COMPONENT_SOURCE_ADAPTER = TypeAdapter(ComponentSource)
 
 
 class ComponentEvidence(WireModel):
@@ -277,34 +182,8 @@ class ComponentEvidence(WireModel):
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
-def _parse_source(value: Any) -> ComponentSource:
-    try:
-        return _COMPONENT_SOURCE_ADAPTER.validate_json(canonical_message(value))
-    except ValidationError as error:
-        provider = value.get("provider") if isinstance(value, Mapping) else None
-        if "Extra inputs" in str(error):
-            message = "component source contains unknown fields"
-        elif provider == "oci":
-            message = "OCI source must use an exact digest reference"
-        elif provider == "git":
-            message = "Git source commit must be full lowercase hex"
-        elif provider == "huggingface":
-            message = "Hugging Face revision must be a full immutable revision"
-        else:
-            message = "component source is invalid"
-        raise AgentProtocolError(f"{message}: {error}") from error
-
-
-def _parse_evidence(value: Any, *, name: str) -> ComponentEvidence:
-    try:
-        return ComponentEvidence.model_validate_json(canonical_message(value))
-    except ValidationError as error:
-        message = (
-            f"{name} contains unknown fields"
-            if "Extra inputs" in str(error)
-            else f"{name} is invalid"
-        )
-        raise AgentProtocolError(f"{message}: {error}") from error
+Identifier = Annotated[str, Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")]
+Platform = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$")]
 
 
 class OciBundleMetadata(WireModel):
@@ -376,111 +255,34 @@ ComponentMaterialization = Annotated[
     Union[_SimpleMaterialization, _OciBundleMaterialization],
     Field(discriminator="method"),
 ]
-_MATERIALIZATION_ADAPTER = TypeAdapter(ComponentMaterialization)
-
-
-def _parse_materialization(value: Any) -> ComponentMaterialization:
-    materialization = _mapping(value, name="component materialization")
-    if materialization.get("method") == "oci-bundle":
-        materialization = {
-            "schema_version": 1,
-            **materialization,
-        }
-    try:
-        return _MATERIALIZATION_ADAPTER.validate_json(
-            canonical_message(materialization)
-        )
-    except ValidationError as error:
-        message = (
-            "component materialization contains unknown fields"
-            if "Extra inputs" in str(error)
-            else "component materialization is invalid"
-        )
-        raise AgentProtocolError(f"{message}: {error}") from error
 
 
 class ComponentDescriptor(WireModel):
-    name: str
-    kind: str
-    media_type: str
+    name: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+    kind: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+    media_type: str = Field(
+        pattern=r"^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"
+    )
     sources: tuple[ComponentSource, ...] = Field(min_length=1, max_length=MAX_SOURCES)
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     size: int = Field(ge=1, le=MAX_COMPONENT_SIZE)
     unpacked_size: int | None = Field(default=None, ge=1, le=MAX_COMPONENT_SIZE)
-    platforms: tuple[str, ...] = Field(min_length=1, max_length=16)
+    platforms: tuple[Platform, ...] = Field(min_length=1, max_length=16)
     materialization: ComponentMaterialization
     evidence: tuple[ComponentEvidence, ...] = Field(max_length=MAX_EVIDENCE)
 
+    @model_validator(mode="after")
+    def platforms_are_unique(self) -> ComponentDescriptor:
+        if len(set(self.platforms)) != len(self.platforms):
+            raise ValueError("component platforms contain duplicates")
+        return self
+
     @classmethod
     def parse(cls, value: Any) -> ComponentDescriptor:
-        component = _mapping(value, name="component")
-        required = {
-            "name",
-            "kind",
-            "media_type",
-            "sources",
-            "digest",
-            "size",
-            "unpacked_size",
-            "platforms",
-            "materialization",
-            "evidence",
-        }
-        _exact_fields(component, required=required, name="component")
-        media_type = component["media_type"]
-        if not isinstance(media_type, str) or MEDIA_TYPE.fullmatch(media_type) is None:
-            raise AgentProtocolError("component media_type is invalid")
-        unpacked_size = component["unpacked_size"]
-        if unpacked_size is not None:
-            unpacked_size = _positive_integer(
-                unpacked_size,
-                name="component unpacked_size",
-                maximum=MAX_COMPONENT_SIZE,
-            )
-        sources = tuple(
-            _parse_source(item)
-            for item in _sequence(
-                component["sources"],
-                name="component sources",
-                minimum=1,
-                maximum=MAX_SOURCES,
-            )
-        )
-        platforms = tuple(
-            _platform(item)
-            for item in _sequence(
-                component["platforms"],
-                name="component platforms",
-                minimum=1,
-                maximum=16,
-            )
-        )
-        if len(set(platforms)) != len(platforms):
-            raise AgentProtocolError("component platforms contain duplicates")
-        evidence = tuple(
-            _parse_evidence(item, name="component evidence")
-            for item in _sequence(
-                component["evidence"],
-                name="component evidence",
-                maximum=MAX_EVIDENCE,
-            )
-        )
-        return cls(
-            name=_identifier(component["name"], name="component name"),
-            kind=_identifier(component["kind"], name="component kind"),
-            media_type=media_type,
-            sources=sources,
-            digest=_sha256(component["digest"], name="component digest", prefixed=True),
-            size=_positive_integer(
-                component["size"],
-                name="component size",
-                maximum=MAX_COMPONENT_SIZE,
-            ),
-            unpacked_size=unpacked_size,
-            platforms=platforms,
-            materialization=_parse_materialization(component["materialization"]),
-            evidence=evidence,
-        )
+        try:
+            return cls.model_validate_json(canonical_message(value))
+        except ValidationError as error:
+            raise AgentProtocolError(f"component is invalid: {error}") from error
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -495,12 +297,6 @@ class ComponentDescriptor(WireModel):
             "materialization": self.materialization.model_dump(mode="json"),
             "evidence": [item.model_dump(mode="json") for item in self.evidence],
         }
-
-
-def _platform(value: Any) -> str:
-    if not isinstance(value, str) or PLATFORM.fullmatch(value) is None:
-        raise AgentProtocolError("component platform must be os/architecture")
-    return value
 
 
 class _PythonIndexIdentity(WireModel):
@@ -536,37 +332,6 @@ UpstreamIdentity = Annotated[
     ],
     Field(discriminator="provider"),
 ]
-_UPSTREAM_IDENTITY_ADAPTER = TypeAdapter(UpstreamIdentity)
-
-
-def _parse_upstream_identity(value: Any) -> UpstreamIdentity:
-    try:
-        return _UPSTREAM_IDENTITY_ADAPTER.validate_json(canonical_message(value))
-    except ValidationError as error:
-        provider = value.get("provider") if isinstance(value, Mapping) else None
-        if provider == "git":
-            message = "Git commit must be a full lowercase identity"
-        elif provider == "huggingface":
-            message = "Hugging Face revision must be a full immutable revision"
-        else:
-            message = "upstream_identity is invalid"
-        raise AgentProtocolError(f"{message}: {error}") from error
-
-
-def _identifier_tuple(
-    value: Any,
-    *,
-    name: str,
-    minimum: int = 0,
-    maximum: int = 32,
-) -> tuple[str, ...]:
-    result = tuple(
-        _identifier(item, name=name)
-        for item in _sequence(value, name=name, minimum=minimum, maximum=maximum)
-    )
-    if len(set(result)) != len(result):
-        raise AgentProtocolError(f"{name} contains duplicates")
-    return result
 
 
 class PythonRuntimeMetadata(WireModel):
@@ -606,9 +371,9 @@ class PythonRuntimeMetadata(WireModel):
 
 
 class Compatibility(WireModel):
-    architectures: tuple[str, ...] = Field(min_length=1, max_length=32)
-    operating_systems: tuple[str, ...] = Field(min_length=1, max_length=32)
-    required_capabilities: tuple[str, ...] = Field(max_length=32)
+    architectures: tuple[Identifier, ...] = Field(min_length=1, max_length=32)
+    operating_systems: tuple[Identifier, ...] = Field(min_length=1, max_length=32)
+    required_capabilities: tuple[Identifier, ...] = Field(max_length=32)
     minimum_storage_bytes: int = Field(ge=1, le=MAX_COMPONENT_SIZE)
     minimum_memory_bytes: int | None = Field(default=None, ge=1, le=MAX_COMPONENT_SIZE)
     minimum_driver: str | None = Field(default=None, min_length=1, max_length=64)
@@ -621,8 +386,6 @@ class Compatibility(WireModel):
     @field_validator("architectures", "operating_systems", "required_capabilities")
     @classmethod
     def identifiers_are_unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        for item in value:
-            _identifier(item, name="compatibility identifier")
         if len(set(value)) != len(value):
             raise ValueError("compatibility identifiers contain duplicates")
         return value
@@ -644,18 +407,6 @@ class Compatibility(WireModel):
         return self
 
 
-def _parse_compatibility(value: Any) -> Compatibility:
-    try:
-        return Compatibility.model_validate_json(canonical_message(value))
-    except ValidationError as error:
-        message = (
-            "compatibility contains unknown fields"
-            if "Extra inputs" in str(error)
-            else "compatibility is invalid"
-        )
-        raise AgentProtocolError(f"{message}: {error}") from error
-
-
 class ValidationRecord(WireModel):
     kind: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
     component: str | None = Field(
@@ -666,36 +417,9 @@ class ValidationRecord(WireModel):
     required: bool | None = None
 
 
-def _parse_validation(value: Any, *, component_names: set[str]) -> ValidationRecord:
-    try:
-        record = ValidationRecord.model_validate_json(canonical_message(value))
-    except ValidationError as error:
-        message = (
-            "validation record contains unknown fields"
-            if "Extra inputs" in str(error)
-            else "validation record is invalid"
-        )
-        raise AgentProtocolError(f"{message}: {error}") from error
-    if record.component is not None and record.component not in component_names:
-        raise AgentProtocolError("validation component is not declared")
-    return record
-
-
 class Resolver(WireModel):
     name: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
     version: int = Field(ge=1, le=2**31 - 1)
-
-
-def _parse_resolver(value: Any) -> Resolver:
-    try:
-        return Resolver.model_validate_json(canonical_message(value))
-    except ValidationError as error:
-        message = (
-            "resolver contains unknown fields"
-            if "Extra inputs" in str(error)
-            else "resolver is invalid"
-        )
-        raise AgentProtocolError(f"{message}: {error}") from error
 
 
 _RESOURCE_FIELDS = (
@@ -799,13 +523,6 @@ class ResourceEnvelope(WireModel):
                     f"resource_envelope aggregate {field} is below per-node total"
                 )
         return self
-
-
-def _parse_resource_envelope(value: Any) -> ResourceEnvelope:
-    try:
-        return ResourceEnvelope.model_validate_json(canonical_message(value))
-    except ValidationError as error:
-        raise AgentProtocolError(f"resource_envelope is invalid: {error}") from error
 
 
 class PackageHelperOperation(StrEnum):
@@ -994,7 +711,7 @@ class PackageReleaseLock(WireModel):
     upstream_version: str = Field(min_length=1, max_length=128)
     upstream_identity: UpstreamIdentity
     components: tuple[ComponentDescriptor, ...] = Field(max_length=255)
-    dependency_digests: tuple[str, ...] = Field(max_length=256)
+    dependency_digests: tuple[Digest, ...] = Field(max_length=256)
     adapter: ComponentDescriptor
     adapter_abi: int = Field(ge=1, le=255)
     compatibility: Compatibility
@@ -1002,6 +719,32 @@ class PackageReleaseLock(WireModel):
     provenance: tuple[ComponentEvidence, ...] = Field(max_length=64)
     resolver: Resolver
     resource_envelope: ResourceEnvelope | None = None
+
+    @field_validator("upstream_version")
+    @classmethod
+    def upstream_version_is_bounded(cls, value: str) -> str:
+        return _bounded_text(value, name="upstream_version", maximum=128)
+
+    @model_validator(mode="after")
+    def release_graph_is_consistent(self) -> PackageReleaseLock:
+        component_names = [item.name for item in self.components]
+        if len(set(component_names)) != len(component_names):
+            raise ValueError("duplicate component name")
+        if self.adapter.kind != "adapter":
+            raise ValueError("adapter component kind must be adapter")
+        if self.adapter.name in component_names:
+            raise ValueError("duplicate component name")
+        if len(set(self.dependency_digests)) != len(self.dependency_digests):
+            raise ValueError("duplicate dependency digest")
+        declared_names = {*component_names, self.adapter.name}
+        if any(
+            item.component is not None and item.component not in declared_names
+            for item in self.validation
+        ):
+            raise ValueError("validation component is not declared")
+        if len(self.canonical_bytes) > MAX_RELEASE_LOCK_BYTES:
+            raise ValueError("workload release lock is too large")
+        return self
 
     @property
     def canonical_bytes(self) -> bytes:
@@ -1032,99 +775,12 @@ class PackageReleaseLock(WireModel):
     @classmethod
     def parse(cls, value: Any) -> PackageReleaseLock:
         document = _load_document(value)
-        required = {
-            "schema_version",
-            "family_id",
-            "upstream_version",
-            "upstream_identity",
-            "components",
-            "dependency_digests",
-            "adapter",
-            "adapter_abi",
-            "compatibility",
-            "validation",
-            "provenance",
-            "resolver",
-        }
-        _exact_fields(
-            document,
-            required=required,
-            optional={"resource_envelope"},
-            name="workload release lock",
-        )
-        if document["schema_version"] != 1 or isinstance(
-            document["schema_version"], bool
-        ):
-            raise AgentProtocolError("unsupported workload release lock schema_version")
-        components = tuple(
-            ComponentDescriptor.parse(item)
-            for item in _sequence(
-                document["components"],
-                name="components",
-                maximum=MAX_AGGREGATE_COMPONENTS - 1,
-            )
-        )
-        component_names = [item.name for item in components]
-        if len(set(component_names)) != len(component_names):
-            raise AgentProtocolError("duplicate component name")
-        adapter = ComponentDescriptor.parse(document["adapter"])
-        if adapter.kind != "adapter":
-            raise AgentProtocolError("adapter component kind must be adapter")
-        if adapter.name in component_names:
-            raise AgentProtocolError("duplicate component name")
-        dependencies = tuple(
-            _sha256(item, name="dependency digest", prefixed=False)
-            for item in _sequence(
-                document["dependency_digests"],
-                name="dependency_digests",
-                maximum=MAX_AGGREGATE_COMPONENTS,
-            )
-        )
-        if len(set(dependencies)) != len(dependencies):
-            raise AgentProtocolError("duplicate dependency digest")
-        all_component_names = {*component_names, adapter.name}
-        validation = tuple(
-            _parse_validation(item, component_names=all_component_names)
-            for item in _sequence(
-                document["validation"],
-                name="validation",
-                maximum=64,
-            )
-        )
-        provenance = tuple(
-            _parse_evidence(item, name="provenance record")
-            for item in _sequence(
-                document["provenance"],
-                name="provenance",
-                maximum=64,
-            )
-        )
-        lock = cls(
-            schema_version=1,
-            family_id=_identifier(document["family_id"], name="family_id"),
-            upstream_version=_bounded_text(
-                document["upstream_version"], name="upstream_version", maximum=128
-            ),
-            upstream_identity=_parse_upstream_identity(document["upstream_identity"]),
-            components=components,
-            dependency_digests=dependencies,
-            adapter=adapter,
-            adapter_abi=_positive_integer(
-                document["adapter_abi"], name="adapter_abi", maximum=255
-            ),
-            compatibility=_parse_compatibility(document["compatibility"]),
-            validation=validation,
-            provenance=provenance,
-            resolver=_parse_resolver(document["resolver"]),
-            resource_envelope=(
-                _parse_resource_envelope(document["resource_envelope"])
-                if "resource_envelope" in document
-                else None
-            ),
-        )
-        if len(lock.canonical_bytes) > MAX_RELEASE_LOCK_BYTES:
-            raise AgentProtocolError("workload release lock is too large")
-        return lock
+        try:
+            return cls.model_validate_json(canonical_message(document))
+        except ValidationError as error:
+            raise AgentProtocolError(
+                f"workload release lock is invalid: {error}"
+            ) from error
 
 
 WORKLOAD_RELEASE_LOCK_SCHEMA_ID = (
