@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as datetime_module
 import hashlib
 import importlib
 import json
@@ -16,7 +17,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Protocol, Self, get_args, get_origin
+from typing import Any, ForwardRef, Protocol, Self, get_args, get_origin
 
 import attrs
 import httpx
@@ -291,6 +292,8 @@ def _generated_model_type(name: str, model: type[GeneratedJSONModel]) -> object:
 def _validate_generated_value(value: object, annotation: object, path: str) -> None:
     if isinstance(annotation, str):
         annotation = _generated_model_type(annotation, _validation_model)
+    elif isinstance(annotation, ForwardRef):
+        annotation = _generated_model_type(annotation.__forward_arg__, _validation_model)
     if annotation is Any or annotation is object:
         return
     origin = get_origin(annotation)
@@ -344,6 +347,16 @@ def _validate_generated_value(value: object, annotation: object, path: str) -> N
         valid = type(value) in (int, float) and type(value) is not bool
     elif annotation is str:
         valid = isinstance(value, str)
+    elif annotation is datetime_module.datetime:
+        if not isinstance(value, str):
+            valid = False
+        else:
+            try:
+                datetime_module.datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                valid = False
+            else:
+                valid = True
     elif annotation is types.NoneType:
         valid = value is None
     else:
