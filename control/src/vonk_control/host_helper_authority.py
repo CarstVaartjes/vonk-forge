@@ -190,6 +190,7 @@ class HostRuntimeAuthorityService:
             {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
         ),
     }
+
     def __init__(
         self,
         sessions: sessionmaker[Session],
@@ -408,8 +409,7 @@ class HostRuntimeAuthorityService:
             or int(now.timestamp()) > grant.claims.expires_at + 5
             or receipt.claims.node_id != node_id
             or receipt.claims.request_id != grant.claims.request_id
-            or receipt.claims.request_sha256
-            != grant.claims.operation.request_sha256
+            or receipt.claims.request_sha256 != grant.claims.operation.request_sha256
             or receipt.claims.observation_identity_sha256 != observation_identity
             or receipt.claims.observed_at != observed_epoch
             or not grant.claims.issued_at
