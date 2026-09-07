@@ -36,8 +36,8 @@ class RecipeImageAvailabilityResult:
             build_input_sha256 (Union[None, Unset, str]):
             local_image_config_id (Union[None, Unset, str]):
             model_child_id (Union[None, Unset, str]):
+            model_content_sha256s (Union[Unset, list[str]]):
             model_digest (Union[None, Unset, str]):
-            model_versions (Union[Unset, list[str]]):
             registry_manifest_digest (Union[None, Unset, str]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
@@ -53,8 +53,8 @@ class RecipeImageAvailabilityResult:
     build_input_sha256: Union[None, Unset, str] = UNSET
     local_image_config_id: Union[None, Unset, str] = UNSET
     model_child_id: Union[None, Unset, str] = UNSET
+    model_content_sha256s: Union[Unset, list[str]] = UNSET
     model_digest: Union[None, Unset, str] = UNSET
-    model_versions: Union[Unset, list[str]] = UNSET
     registry_manifest_digest: Union[None, Unset, str] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
@@ -105,17 +105,17 @@ class RecipeImageAvailabilityResult:
         else:
             model_child_id = self.model_child_id
 
+        model_content_sha256s: Union[Unset, list[str]] = UNSET
+        if not isinstance(self.model_content_sha256s, Unset):
+            model_content_sha256s = self.model_content_sha256s
+
+
+
         model_digest: Union[None, Unset, str]
         if isinstance(self.model_digest, Unset):
             model_digest = UNSET
         else:
             model_digest = self.model_digest
-
-        model_versions: Union[Unset, list[str]] = UNSET
-        if not isinstance(self.model_versions, Unset):
-            model_versions = self.model_versions
-
-
 
         registry_manifest_digest: Union[None, Unset, str]
         if isinstance(self.registry_manifest_digest, Unset):
@@ -146,10 +146,10 @@ class RecipeImageAvailabilityResult:
             field_dict["local_image_config_id"] = local_image_config_id
         if model_child_id is not UNSET:
             field_dict["model_child_id"] = model_child_id
+        if model_content_sha256s is not UNSET:
+            field_dict["model_content_sha256s"] = model_content_sha256s
         if model_digest is not UNSET:
             field_dict["model_digest"] = model_digest
-        if model_versions is not UNSET:
-            field_dict["model_versions"] = model_versions
         if registry_manifest_digest is not UNSET:
             field_dict["registry_manifest_digest"] = registry_manifest_digest
         if schema_version is not UNSET:
@@ -224,6 +224,9 @@ class RecipeImageAvailabilityResult:
         model_child_id = _parse_model_child_id(d.pop("model_child_id", UNSET))
 
 
+        model_content_sha256s = cast(list[str], d.pop("model_content_sha256s", UNSET))
+
+
         def _parse_model_digest(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -232,9 +235,6 @@ class RecipeImageAvailabilityResult:
             return cast(Union[None, Unset, str], data)
 
         model_digest = _parse_model_digest(d.pop("model_digest", UNSET))
-
-
-        model_versions = cast(list[str], d.pop("model_versions", UNSET))
 
 
         def _parse_registry_manifest_digest(data: object) -> Union[None, Unset, str]:
@@ -263,8 +263,8 @@ class RecipeImageAvailabilityResult:
             build_input_sha256=build_input_sha256,
             local_image_config_id=local_image_config_id,
             model_child_id=model_child_id,
+            model_content_sha256s=model_content_sha256s,
             model_digest=model_digest,
-            model_versions=model_versions,
             registry_manifest_digest=registry_manifest_digest,
             schema_version=schema_version,
         )

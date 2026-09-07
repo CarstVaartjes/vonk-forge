@@ -9,21 +9,21 @@ from pathlib import Path
 from typing import Any, Self
 
 import pytest
+from library_route_fixtures import _library_detail, _recipe, _recipe_digest
 
 from cluster_profiles.fleet_qualification import (
-    _CurrentRecipe,
-    _parse_library_detail,
     EvidenceLedger,
     OperationMonitor,
     QualificationError,
     QualificationRunner,
     RunnerOptions,
     ServiceSmokeAdapter,
+    _CurrentRecipe,
+    _parse_library_detail,
     build_plan,
     legal_blockers,
     load_policy,
 )
-from library_route_fixtures import _library_detail, _recipe, _recipe_digest
 from cluster_profiles.qualification_fixtures import (
     FixtureRegistry,
     RecipeFixture,
@@ -1713,7 +1713,9 @@ def test_apply_continues_after_recipe_failure_but_exits_nonzero(
 
 
 def test_model_documents_supply_territorial_license_metadata() -> None:
-    from cluster_profiles.generated_control.models.model_definition import ModelDefinition
+    from cluster_profiles.generated_control.models.model_definition import (
+        ModelDefinition,
+    )
 
     model = json.loads(
         resources.files("vonk_forge_contracts")
@@ -1725,7 +1727,9 @@ def test_model_documents_supply_territorial_license_metadata() -> None:
         "notice": "Not licensed in the denied territories.",
     }
     recipe = _recipe("restricted")
-    from cluster_profiles.generated_control.models.recipe_definition import RecipeDefinition
+    from cluster_profiles.generated_control.models.recipe_definition import (
+        RecipeDefinition,
+    )
 
     definition = RecipeDefinition.from_dict(recipe)
     document = ModelDefinition.from_dict(model)
@@ -1773,7 +1777,7 @@ def test_artifact_projection_requires_selected_file_id() -> None:
     current.definition.models[0].files[0].file_id = "dangling-file-id"
 
     with pytest.raises(QualificationError, match="dangling-file-id"):
-        current.artifact_identities
+        _ = current.artifact_identities
 
 
 def test_artifact_projection_deduplicates_repeated_physical_selection() -> None:
@@ -1797,7 +1801,9 @@ def test_artifact_download_bytes_deduplicates_shared_object_sha_across_models() 
     from cluster_profiles.generated_control.models.library_recipe_model import (
         LibraryRecipeModel,
     )
-    from cluster_profiles.generated_control.models.model_definition import ModelDefinition
+    from cluster_profiles.generated_control.models.model_definition import (
+        ModelDefinition,
+    )
     from cluster_profiles.generated_control.models.recipe_model_selection import (
         RecipeModelSelection,
     )

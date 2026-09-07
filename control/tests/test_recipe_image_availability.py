@@ -565,7 +565,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(tmp_path: Path
             return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
 
         def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
-            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_versions": [], "artifacts": []})
+            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_content_digests": [], "artifacts": []})
 
         def list_operations(self, *, limit: int) -> tuple[object, ...]:
             return (child,) if self.start_calls else ()
@@ -628,7 +628,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(tmp_path
             return {"plan_digest": "d" * 64, "artifact_set_sha256": "c" * 64}
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
-            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_versions": [], "artifacts": []})
+            return SimpleNamespace(digest="c" * 64, document=lambda: {"model_content_digests": [], "artifacts": []})
 
         def list_operations(self, **_: object) -> tuple[object, ...]:
             return ()
@@ -770,7 +770,7 @@ def test_recipe_retry_repairs_terminal_model_integrity_child_and_reuses_image(
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(
                 digest="c" * 64,
-                document=lambda: {"model_versions": [], "artifacts": []},
+                document=lambda: {"model_content_digests": [], "artifacts": []},
             )
 
         def list_operations(self, **_: object) -> tuple[object, ...]:

@@ -1918,7 +1918,7 @@
             ],
             "title": "Last Error"
           },
-          "model_version_sha256": {
+          "model_content_sha256": {
             "anyOf": [
               {
                 "pattern": "^[0-9a-f]{64}$",
@@ -1928,7 +1928,7 @@
                 "type": "null"
               }
             ],
-            "title": "Model Version Sha256"
+            "title": "Model Content Sha256"
           },
           "protected": {
             "title": "Protected",
@@ -2008,7 +2008,7 @@
         },
         "required": [
           "artifact_set_sha256",
-          "model_version_sha256",
+          "model_content_sha256",
           "recipe_revision_sha256",
           "state",
           "coverage",
@@ -2317,9 +2317,9 @@
             ],
             "title": "Hardware Profile Sha256"
           },
-          "model_version_sha256": {
+          "model_content_sha256": {
             "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Version Sha256",
+            "title": "Model Content Sha256",
             "type": "string"
           },
           "parameters_sha256": {
@@ -2340,7 +2340,7 @@
         },
         "required": [
           "recipe_revision_sha256",
-          "model_version_sha256",
+          "model_content_sha256",
           "runtime_image_digest",
           "parameters_sha256"
         ],
@@ -7484,18 +7484,6 @@
       "ManagedCatalogWithdrawnRecipe": {
         "additionalProperties": false,
         "properties": {
-          "model_version_key": {
-            "anyOf": [
-              {
-                "maxLength": 256,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Version Key"
-          },
           "recipe_id": {
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Id",
@@ -7975,18 +7963,18 @@
           "controller": {
             "$ref": "#/components/schemas/ControllerAssetState"
           },
-          "dependency_model_version_sha256": {
+          "dependency_model_content_sha256": {
             "items": {
               "pattern": "^[0-9a-f]{64}$",
               "type": "string"
             },
             "maxItems": 128,
-            "title": "Dependency Model Version Sha256",
+            "title": "Dependency Model Content Sha256",
             "type": "array"
           },
-          "model_version_sha256": {
+          "model_content_sha256": {
             "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Version Sha256",
+            "title": "Model Content Sha256",
             "type": "string"
           },
           "recipe_revision_sha256": {
@@ -8012,7 +8000,7 @@
         },
         "required": [
           "artifact_set_sha256",
-          "model_version_sha256",
+          "model_content_sha256",
           "artifact_count",
           "artifact_set_bytes",
           "completeness",
@@ -8070,7 +8058,7 @@
             ],
             "title": "Artifact Set Sha256"
           },
-          "model_version_sha256": {
+          "model_content_sha256": {
             "anyOf": [
               {
                 "pattern": "^[0-9a-f]{64}$",
@@ -8080,7 +8068,7 @@
                 "type": "null"
               }
             ],
-            "title": "Model Version Sha256"
+            "title": "Model Content Sha256"
           },
           "recipe_revision_id": {
             "anyOf": [
@@ -8213,7 +8201,7 @@
             ],
             "title": "Artifact Set Sha256"
           },
-          "model_version_sha256": {
+          "model_content_sha256": {
             "anyOf": [
               {
                 "pattern": "^[0-9a-f]{64}$",
@@ -8223,7 +8211,7 @@
                 "type": "null"
               }
             ],
-            "title": "Model Version Sha256"
+            "title": "Model Content Sha256"
           },
           "plan_digest": {
             "pattern": "^[0-9a-f]{64}$",
@@ -8940,7 +8928,7 @@
             "title": "Artifact Set Sha256",
             "type": "string"
           },
-          "latest_model_version_sha256": {
+          "latest_model_content_sha256": {
             "anyOf": [
               {
                 "pattern": "^[0-9a-f]{64}$",
@@ -8950,7 +8938,7 @@
                 "type": "null"
               }
             ],
-            "title": "Latest Model Version Sha256"
+            "title": "Latest Model Content Sha256"
           },
           "latest_recipe_revision_sha256": {
             "anyOf": [
@@ -8963,6 +8951,18 @@
               }
             ],
             "title": "Latest Recipe Revision Sha256"
+          },
+          "model_content_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Content Sha256"
           },
           "model_update_ambiguous": {
             "default": false,
@@ -9006,18 +9006,6 @@
             ],
             "title": "Model Update To"
           },
-          "model_version_sha256": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Version Sha256"
-          },
           "recipe_revision_sha256": {
             "anyOf": [
               {
@@ -9054,8 +9042,8 @@
         },
         "required": [
           "artifact_set_sha256",
-          "model_version_sha256",
-          "latest_model_version_sha256",
+          "model_content_sha256",
+          "latest_model_content_sha256",
           "recipe_revision_sha256",
           "latest_recipe_revision_sha256",
           "model_update_available",
@@ -9468,6 +9456,7 @@
             "type": "array"
           },
           "bytes_removed": {
+            "description": "Bytes freed from affected installation copies; shared/global cache bytes are excluded.",
             "minimum": 0.0,
             "title": "Bytes Removed",
             "type": "integer"
@@ -9480,15 +9469,15 @@
             "title": "Installations",
             "type": "array"
           },
+          "model_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Content Sha256",
+            "type": "string"
+          },
           "model_title": {
             "maxLength": 256,
             "minLength": 1,
             "title": "Model Title",
-            "type": "string"
-          },
-          "model_version_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Version Sha256",
             "type": "string"
           },
           "nodes": {
@@ -9505,7 +9494,8 @@
             "type": "string"
           },
           "shared_cache_policy": {
-            "pattern": "^remove-unreferenced-model-artifacts-only$",
+            "const": "retain-shared-download-cache",
+            "description": "Shared/global downloaded model caches remain installed.",
             "title": "Shared Cache Policy",
             "type": "string"
           },
@@ -9519,7 +9509,7 @@
           }
         },
         "required": [
-          "model_version_sha256",
+          "model_content_sha256",
           "model_title",
           "allowed",
           "installations",
@@ -9538,14 +9528,14 @@
       "ModelDeletionPreviewRequest": {
         "additionalProperties": false,
         "properties": {
-          "model_version_sha256": {
+          "model_content_sha256": {
             "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Version Sha256",
+            "title": "Model Content Sha256",
             "type": "string"
           }
         },
         "required": [
-          "model_version_sha256"
+          "model_content_sha256"
         ],
         "title": "ModelDeletionPreviewRequest",
         "type": "object"
@@ -12793,7 +12783,7 @@
             "title": "Kind",
             "type": "string"
           },
-          "model_version_sha256": {
+          "model_content_sha256": {
             "anyOf": [
               {
                 "type": "string"
@@ -12802,7 +12792,7 @@
                 "type": "null"
               }
             ],
-            "title": "Model Version Sha256"
+            "title": "Model Content Sha256"
           },
           "path": {
             "maxLength": 1024,
@@ -12909,11 +12899,11 @@
             "title": "Kind",
             "type": "string"
           },
-          "model_versions": {
+          "model_content_sha256s": {
             "items": {
               "type": "string"
             },
-            "title": "Model Versions",
+            "title": "Model Content Sha256S",
             "type": "array"
           },
           "plan_digest": {
@@ -13204,6 +13194,13 @@
             ],
             "title": "Model Child Id"
           },
+          "model_content_sha256s": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Model Content Sha256S",
+            "type": "array"
+          },
           "model_digest": {
             "anyOf": [
               {
@@ -13214,13 +13211,6 @@
               }
             ],
             "title": "Model Digest"
-          },
-          "model_versions": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Model Versions",
-            "type": "array"
           },
           "oci_archive_sha256": {
             "pattern": "^[0-9a-f]{64}$",
@@ -15631,9 +15621,9 @@
           "invocation": {
             "$ref": "#/components/schemas/InvocationMetadata"
           },
-          "model_version_sha256": {
+          "model_content_sha256": {
             "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Version Sha256",
+            "title": "Model Content Sha256",
             "type": "string"
           },
           "plan_digest": {
@@ -15685,7 +15675,7 @@
           }
         },
         "required": [
-          "model_version_sha256",
+          "model_content_sha256",
           "recipe_revision_id",
           "spark_group",
           "alias"
@@ -16140,7 +16130,7 @@
             "title": "Model Capabilities",
             "type": "array"
           },
-          "model_version_sha256": {
+          "model_content_sha256": {
             "anyOf": [
               {
                 "pattern": "^[0-9a-f]{64}$",
@@ -16150,7 +16140,7 @@
                 "type": "null"
               }
             ],
-            "title": "Model Version Sha256"
+            "title": "Model Content Sha256"
           },
           "phases": {
             "items": {
@@ -16294,7 +16284,7 @@
         "required": [
           "generated_at",
           "action",
-          "model_version_sha256",
+          "model_content_sha256",
           "recipe_revision_id",
           "recipe_content_sha256",
           "alias",
@@ -16350,9 +16340,9 @@
           "invocation": {
             "$ref": "#/components/schemas/InvocationMetadata"
           },
-          "model_version_sha256": {
+          "model_content_sha256": {
             "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Version Sha256",
+            "title": "Model Content Sha256",
             "type": "string"
           },
           "recipe_revision_id": {
@@ -16380,7 +16370,7 @@
           }
         },
         "required": [
-          "model_version_sha256",
+          "model_content_sha256",
           "recipe_revision_id",
           "spark_group",
           "alias"
@@ -19602,15 +19592,15 @@
             "title": "Effect",
             "type": "string"
           },
+          "model_content_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Model Content Sha256",
+            "type": "string"
+          },
           "model_title": {
             "maxLength": 256,
             "minLength": 1,
             "title": "Model Title",
-            "type": "string"
-          },
-          "model_version_sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Model Version Sha256",
             "type": "string"
           },
           "retained_node_ids": {
@@ -19624,7 +19614,7 @@
           }
         },
         "required": [
-          "model_version_sha256",
+          "model_content_sha256",
           "model_title",
           "effect",
           "dependent_recipe_ids",
@@ -23798,17 +23788,17 @@
         "summary": "Preview Model Deletion"
       }
     },
-    "/api/v1/library/models/{model_version_sha256}/delete": {
+    "/api/v1/library/models/{model_content_sha256}/delete": {
       "post": {
         "operationId": "deleteLibraryModel",
         "parameters": [
           {
             "in": "path",
-            "name": "model_version_sha256",
+            "name": "model_content_sha256",
             "required": true,
             "schema": {
               "pattern": "^[0-9a-f]{64}$",
-              "title": "Model Version Sha256",
+              "title": "Model Content Sha256",
               "type": "string"
             }
           }
