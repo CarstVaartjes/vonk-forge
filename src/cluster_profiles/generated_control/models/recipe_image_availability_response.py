@@ -38,7 +38,7 @@ class RecipeImageAvailabilityResponse:
             created_at (str):
             id (str):
             kind (Literal['recipe.image.availability.v2']):
-            progress (OperationProgress): Canonical progress payload persisted on the current operation attempt.
+            progress (OperationProgress): Canonical durable progress payload shared by Controller and agents.
             recipe_content_sha256 (str):
             recipe_revision_id (str):
             request_id (str):

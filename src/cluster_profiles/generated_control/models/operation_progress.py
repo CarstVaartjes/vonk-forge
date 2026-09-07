@@ -25,7 +25,7 @@ T = TypeVar("T", bound="OperationProgress")
 
 @_attrs_define
 class OperationProgress:
-    """ Canonical progress payload persisted on the current operation attempt.
+    """ Canonical durable progress payload shared by Controller and agents.
 
         Attributes:
             phase (str):

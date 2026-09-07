@@ -1358,12 +1358,9 @@ def test_production_profile_adapter_binds_one_real_run_switch_child(
 ) -> None:
     """The profile child delegates exact preparation and run admission to RunSwitch."""
 
-    try:
-        from .test_recipe_operations import setup_services
-    except ImportError as error:
-        pytest.skip(f"run-operation fixture awaits canonical catalog migration: {error}")
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
+    from .test_recipe_operations import setup_services
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,
@@ -1482,16 +1479,13 @@ def test_production_profile_adapter_routes_all_idle_to_one_complete_stop_child(
 ) -> None:
     """An empty desired set still stops a complete in-scope run through RunSwitch."""
 
-    try:
-        from .test_recipe_operations import (
-            installed_recipe,
-            setup_services,
-            started_recipe,
-        )
-    except ImportError as error:
-        pytest.skip(f"run-operation fixture awaits canonical catalog migration: {error}")
     from vonk_control.run_switch_operations import RunSwitchOperationService
 
+    from .test_recipe_operations import (
+        installed_recipe,
+        setup_services,
+        started_recipe,
+    )
     from .test_run_switch_operations import (
         CompleteArtifactInspector,
         RecordingArtifactExecutor,

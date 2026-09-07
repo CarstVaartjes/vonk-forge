@@ -1,4 +1,5 @@
 import type {TelemetryPoint, VisualFleetSnapshot} from "../api/types";
+import {telemetryMetrics} from "../test-fixtures/telemetry";
 import {fleetStreamReducer, initialFleetStreamState} from "./fleet-stream-state";
 
 function snapshot(cursor: number, cpu = 10): VisualFleetSnapshot {
@@ -60,6 +61,7 @@ function sample(cpu: number): TelemetryPoint {
     network_transmit_bytes_per_second: null,
     gap_samples: 0,
     details: {accelerator_name: null, accelerator_performance_state: null},
+    metrics: telemetryMetrics(),
   };
 }
 

@@ -1,7 +1,7 @@
 import type {components} from "./generated";
 
 export type AuthSession = components["schemas"]["AuthSession"];
-export type FleetTelemetryDetails = components["schemas"]["TelemetryDetails"];
+export type FleetTelemetryDetails = components["schemas"]["TelemetryPoint"]["details"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
 export type FleetTelemetryState = components["schemas"]["TelemetryState"];
 export type VisualFleetNode = components["schemas"]["FleetNode"];

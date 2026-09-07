@@ -1,281 +1,218 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import multiprocessing
-import threading
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import canonical_message
-from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.route_runtime import (
-    AcceptedEndpointEvidence,
+    RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     FileSupervisorAcknowledger,
-    RouteBundleRequest,
     RouteRuntimeError,
+    verify_active_route_bundle,
 )
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=UTC)
-NODE = "spk_" + "1" * 32
-RECONCILIATION_ID = "bb7aac18-edbf-4cc1-bafd-15e282557c53"
-PLAN_DIGEST = "a" * 64
-EVIDENCE_SET_DIGEST = "b" * 64
+ROOT = Path(__file__).resolve().parents[2]
 
 
-def _routes() -> dict[str, object]:
-    return {
-        "chat": {
-            "workload_id": "model",
-            "nodes": [NODE],
-            "entrypoint_node_id": NODE,
-            "scheme": "http",
-            "port": 8000,
-            "path": "/v1",
-            "quota": {
-                "requests_per_minute": 30,
-                "tokens_per_minute": 10_000,
-            },
-            "quota_digest": hashlib.sha256(
-                canonical_message(
-                    {
-                        "requests_per_minute": 30,
-                        "tokens_per_minute": 10_000,
-                    }
-                )
-            ).hexdigest(),
-        }
+def _encoded(value):
+    return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _publisher(tmp_path, **kwargs):
+    return AtomicRouteBundlePublisher(tmp_path / "runtime", clock=lambda: NOW, **kwargs)
+
+
+def _publish(publisher, **kwargs):
+    inputs = {
+        "authority_id": RECIPE_ROUTE_AUTHORITY_ID,
+        "plan_digest": "a" * 64,
+        "evidence_set_digest": "b" * 64,
+        "routes": _encoded({"schema_version": 2, "routes": {}}),
+        "litellm": AtomicRouteBundlePublisher.empty_litellm(),
+        "expires_at": NOW + timedelta(seconds=150),
     }
+    return publisher.publish_compiled(**(inputs | kwargs))
 
 
-def _endpoint_digest(
-    *, address: str, observed_at: datetime, verify_evidence_digest: str
-) -> str:
-    content = {
-        "address": address,
-        "node_id": NODE,
-        "observed_at": observed_at.isoformat(),
-        "operation_id": f"model:{NODE}:workload.verify",
-        "schema_version": 1,
-        "verify_evidence_digest": verify_evidence_digest,
-    }
-    return hashlib.sha256(
-        (json.dumps(content, sort_keys=True, separators=(",", ":")) + "\n").encode()
-    ).hexdigest()
-
-
-def _request(
-    *, address: str = "10.0.0.42", observed_at: datetime = NOW
-) -> RouteBundleRequest:
-    verify_evidence_digest = "c" * 64
-    return RouteBundleRequest(
-        reconciliation_id=RECONCILIATION_ID,
-        plan_digest=PLAN_DIGEST,
-        evidence_set_digest=EVIDENCE_SET_DIGEST,
-        routes=_routes(),
-        endpoints={
-            NODE: AcceptedEndpointEvidence(
-                node_id=NODE,
-                address=address,
-                observed_at=observed_at,
-                operation_id=f"model:{NODE}:workload.verify",
-                verify_evidence_digest=verify_evidence_digest,
-                evidence_digest=_endpoint_digest(
-                    address=address,
-                    observed_at=observed_at,
-                    verify_evidence_digest=verify_evidence_digest,
-                ),
-            )
-        },
-        expires_at=NOW + timedelta(seconds=150),
+def _supervisor(monkeypatch, root):
+    monkeypatch.syspath_prepend(str(ROOT / "agent_protocol/src/vonk_agent_protocol"))
+    spec = importlib.util.spec_from_file_location(
+        "route_test_supervisor", ROOT / "deploy/compose/litellm/config_supervisor.py"
     )
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "ACTIVATION", root / "activation.json")
+    monkeypatch.setattr(module, "GENERATIONS", root / "generations")
+    return module
 
 
-def _publisher(tmp_path: Path, **kwargs) -> AtomicRouteBundlePublisher:
-    return AtomicRouteBundlePublisher(
-        tmp_path / "runtime",
-        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
-        clock=lambda: NOW,
-        **kwargs,
-    )
+def test_actual_publisher_bytes_are_accepted_by_reader_and_supervisor(
+    tmp_path, monkeypatch
+):
+    marker = _publish(_publisher(tmp_path))
+    root = tmp_path / "runtime"
+    assert (root / "activation.json").read_bytes() == marker.canonical_bytes()
+    assert marker.schema_version == 2
+    assert marker.authority_id == RECIPE_ROUTE_AUTHORITY_ID
+    assert "reconciliation_id" not in marker.model_dump()
+    bundle = verify_active_route_bundle(root, clock=lambda: NOW)
+    assert bundle.marker == marker
+    supervisor = _supervisor(monkeypatch, root)
+    request = supervisor._active_request(now=NOW)
+    assert request is not None
+    assert request.activation_sha256 == marker.digest
+    assert request.marker == marker.model_dump()
+    manifest = (root / "generations" / marker.directory / "manifest.json").read_bytes()
+    assert manifest == _encoded(marker.manifest_document())
+    assert hashlib.sha256(manifest).hexdigest() == marker.manifest_sha256
 
 
-def test_bundle_stages_structured_routes_litellm_and_manifest_before_one_marker(
-    tmp_path: Path,
-) -> None:
-    publisher = _publisher(tmp_path)
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"schema_version": 1},
+        {"schema_version": 2.0},
+        {"schema_version": True},
+        {"generation": True},
+        {"generation": "1"},
+        {"generation": 0},
+        {"authority_id": "not-a-uuid"},
+        {"plan_digest": "z" * 64},
+        {"unknown": True},
+        {"reconciliation_id": RECIPE_ROUTE_AUTHORITY_ID},
+    ],
+)
+def test_reader_and_supervisor_reject_invalid_or_retired_markers(
+    tmp_path, monkeypatch, mutation
+):
+    marker = _publish(_publisher(tmp_path))
+    root = tmp_path / "runtime"
+    document = marker.model_dump() | mutation
+    (root / "activation.json").write_bytes(_encoded(document))
+    with pytest.raises(RouteRuntimeError):
+        verify_active_route_bundle(root, clock=lambda: NOW)
+    assert _supervisor(monkeypatch, root)._active_request(now=NOW) is None
 
-    marker = publisher.publish(_request())
 
-    assert marker.reconciliation_id == RECONCILIATION_ID
-    assert marker.plan_digest == PLAN_DIGEST
-    assert marker.evidence_set_digest == EVIDENCE_SET_DIGEST
-    directory = tmp_path / "runtime/generations" / marker.directory
-    routes = json.loads((directory / "routes.json").read_bytes())
-    config = json.loads((directory / "litellm.json").read_bytes())
-    manifest = json.loads((directory / "manifest.json").read_bytes())
-    activation_path = tmp_path / "runtime/activation.json"
-    assert (tmp_path / "runtime").stat().st_mode & 0o777 == 0o750
-    assert (tmp_path / "runtime/generations").stat().st_mode & 0o777 == 0o750
-    assert directory.stat().st_mode & 0o777 == 0o750
-    assert activation_path.stat().st_mode & 0o777 == 0o640
-    assert (directory / "routes.json").stat().st_mode & 0o777 == 0o640
-    activation = json.loads(activation_path.read_bytes())
+@pytest.mark.parametrize("filename", ["manifest.json", "routes.json", "litellm.json"])
+def test_corrupt_generation_fails_closed(tmp_path, monkeypatch, filename):
+    marker = _publish(_publisher(tmp_path))
+    root = tmp_path / "runtime"
+    (root / "generations" / marker.directory / filename).write_bytes(b"{}\n")
+    with pytest.raises(RouteRuntimeError, match="checksum"):
+        verify_active_route_bundle(root, clock=lambda: NOW)
+    assert _supervisor(monkeypatch, root)._active_request(now=NOW) is None
 
-    assert routes == {
-        "generation": 1,
-        "routes": {
-            "chat": {
-                "address": "10.0.0.42",
-                "evidence_digest": _endpoint_digest(
-                    address="10.0.0.42",
-                    observed_at=NOW,
-                    verify_evidence_digest="c" * 64,
-                ),
-                "node_id": NODE,
-                "observed_at": NOW.isoformat(),
-                "operation_id": f"model:{NODE}:workload.verify",
-                "path": "/v1",
-                "port": 8000,
-                "scheme": "http",
-                "verify_evidence_digest": "c" * 64,
-            }
-        },
-        "schema_version": 1,
-        "state": "published",
-    }
-    assert config["model_list"][0]["litellm_params"] == {
-        "api_base": "http://10.0.0.42:8000/v1",
-        "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
-        "model": "openai/chat",
-        "rpm": 30,
-        "tpm": 10_000,
-    }
-    assert config["general_settings"]["disable_admin_ui"] is False
-    assert config["general_settings"]["store_model_in_db"] is False
-    assert activation == {
-        **manifest,
-        "directory": marker.directory,
-        "manifest_sha256": marker.manifest_sha256,
-    }
+
+def test_noncanonical_and_expired_marker_fail_closed(tmp_path, monkeypatch):
+    marker = _publish(_publisher(tmp_path))
+    root = tmp_path / "runtime"
+    activation = root / "activation.json"
+    activation.write_text(json.dumps(marker.model_dump(), indent=2))
+    with pytest.raises(RouteRuntimeError, match="canonical"):
+        verify_active_route_bundle(root, clock=lambda: NOW)
+    assert _supervisor(monkeypatch, root)._active_request(now=NOW) is None
+    activation.write_bytes(marker.canonical_bytes())
+    with pytest.raises(RouteRuntimeError, match="lease"):
+        verify_active_route_bundle(root, clock=lambda: NOW + timedelta(seconds=151))
     assert (
-        activation["routes_sha256"]
-        == hashlib.sha256((directory / "routes.json").read_bytes()).hexdigest()
-    )
-    assert (
-        activation["litellm_sha256"]
-        == hashlib.sha256((directory / "litellm.json").read_bytes()).hexdigest()
-    )
-    assert marker.canonical_bytes() == activation_path.read_bytes()
-    assert marker.digest == hashlib.sha256(activation_path.read_bytes()).hexdigest()
-    assert publisher.inspect(expected=marker) == marker
-
-
-def test_routes_are_derived_only_from_exact_entrypoint_and_bounded_address_evidence(
-    tmp_path: Path,
-) -> None:
-    publisher = _publisher(tmp_path)
-    bad_routes = _routes()
-    bad_routes["chat"]["entrypoint_node_id"] = "spk_" + "2" * 32
-
-    with pytest.raises(RouteRuntimeError, match="entrypoint"):
-        publisher.publish(
-            _request().__class__(**{**_request().__dict__, "routes": bad_routes})
-        )
-    with pytest.raises(RouteRuntimeError, match="management"):
-        publisher.publish(_request(address="192.0.2.9"))
-    assert not (tmp_path / "runtime/activation.json").exists()
-
-
-def test_address_cannot_be_relabelled_with_an_accepted_endpoint_digest(
-    tmp_path: Path,
-) -> None:
-    request = _request()
-    original = request.endpoints[NODE]
-    relabelled = original.__class__(
-        node_id=NODE,
-        address="10.0.0.43",
-        observed_at=original.observed_at,
-        operation_id=original.operation_id,
-        verify_evidence_digest=original.verify_evidence_digest,
-        evidence_digest=original.evidence_digest,
+        _supervisor(monkeypatch, root)._active_request(now=NOW + timedelta(seconds=151))
+        is None
     )
 
-    with pytest.raises(RouteRuntimeError, match="binding"):
-        _publisher(tmp_path).publish(
-            request.__class__(**{**request.__dict__, "endpoints": {NODE: relabelled}})
-        )
 
-
-def test_route_lease_cannot_outlive_endpoint_freshness(tmp_path: Path) -> None:
-    request = _request(observed_at=NOW - timedelta(seconds=299))
-
-    with pytest.raises(RouteRuntimeError, match="freshness"):
-        _publisher(tmp_path).publish(request)
-
-
-def test_runtime_rejects_a_side_effecting_pre_marker_apply_hook(tmp_path: Path) -> None:
-    with pytest.raises(TypeError, match="apply"):
-        _publisher(tmp_path, apply=lambda _directory: None)
-
-
-def test_explicit_entrypoint_is_authoritative_even_when_nodes_have_another_order(
-    tmp_path: Path,
-) -> None:
-    request = _request()
-    routes = _routes()
-    routes["chat"]["nodes"] = ["spk_" + "2" * 32, NODE]
-
-    marker = _publisher(tmp_path).publish(
-        request.__class__(**{**request.__dict__, "routes": routes})
-    )
-
-    assert marker.state == "published"
-
-
-def test_concurrent_same_publication_is_one_idempotent_generation(
-    tmp_path: Path,
-) -> None:
-    publisher = _publisher(tmp_path)
-    barrier = threading.Barrier(2)
-    markers = []
-
-    def publish() -> None:
-        barrier.wait(timeout=5)
-        markers.append(publisher.publish(_request()))
-
-    threads = [threading.Thread(target=publish) for _ in range(2)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=5)
-
-    assert len(markers) == 2
-    assert markers[0] == markers[1]
-    assert markers[0].generation == 1
-    assert len(list((tmp_path / "runtime/generations").iterdir())) == 1
-
-
-def test_every_publication_waits_for_an_exact_live_supervisor_ack(
-    tmp_path: Path,
-) -> None:
+def test_renewal_and_empty_publication_keep_monotonic_generations_and_ack(tmp_path):
     acknowledged = []
-    publisher = _publisher(
-        tmp_path,
-        await_supervisor_ack=acknowledged.append,
-    )
+    publisher = _publisher(tmp_path, await_supervisor_ack=acknowledged.append)
+    first = _publish(publisher)
+    renewed = _publish(publisher, expires_at=NOW + timedelta(seconds=200))
+    empty = _publish(publisher, state="maintenance")
+    assert [m.generation for m in acknowledged] == [1, 2, 3]
+    assert acknowledged == [first, renewed, empty]
+    assert publisher.inspect() == empty
+    assert empty.state == "maintenance"
 
-    first = publisher.publish(_request())
-    second = publisher.publish(_request())
 
-    assert first == second
-    assert acknowledged == [first, second]
+def test_validation_failure_preserves_previous_activation(tmp_path):
+    marker = _publish(_publisher(tmp_path))
+    rejecting = _publisher(tmp_path, validate_litellm=lambda _: False)
+    with pytest.raises(RouteRuntimeError, match="validation"):
+        _publish(rejecting)
+    assert _publisher(tmp_path).inspect() == marker
+
+
+def test_ack_failure_is_reported_and_exact_persisted_marker_can_be_inspected(tmp_path):
+    def unavailable(marker):
+        raise RuntimeError("supervisor unavailable")
+
+    with pytest.raises(RouteRuntimeError, match="acknowledgement"):
+        _publish(_publisher(tmp_path, await_supervisor_ack=unavailable))
+    assert _publisher(tmp_path).inspect().generation == 1
+
+
+def test_restart_verifies_exact_marker_and_renews_with_next_generation(tmp_path):
+    first = _publish(_publisher(tmp_path))
+    restarted = _publisher(tmp_path)
+    assert restarted.inspect(expected=first) == first
+    assert _publish(restarted).generation == 2
+    with pytest.raises(RouteRuntimeError, match="expected"):
+        restarted.inspect(expected=first)
+
+
+def test_concurrent_writers_serialize_generation_allocation(tmp_path):
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        markers = list(pool.map(lambda _: _publish(_publisher(tmp_path)), range(2)))
+    assert sorted(m.generation for m in markers) == [1, 2]
+    assert _publisher(tmp_path).inspect().generation == 2
+
+
+def _process_publish(path):
+    _publish(_publisher(Path(path)))
+
+
+def test_filesystem_lock_serializes_independent_processes(tmp_path):
+    context = multiprocessing.get_context("spawn")
+    workers = [
+        context.Process(target=_process_publish, args=(str(tmp_path),))
+        for _ in range(2)
+    ]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=15)
+        assert worker.exitcode == 0
+    assert _publisher(tmp_path).inspect().generation == 2
+
+
+def test_symlink_lock_and_generation_are_rejected(tmp_path):
+    publisher = _publisher(tmp_path)
+    outside = tmp_path / "outside"
+    outside.touch()
+    (tmp_path / "runtime/.publication.lock").symlink_to(outside)
+    with pytest.raises(RouteRuntimeError, match="lock"):
+        _publish(publisher)
+
+
+def test_existing_update_boundary_still_fences_current_publication(tmp_path):
+    publisher = _publisher(tmp_path)
+    publisher.claim_update_boundary("e" * 64)
+    with pytest.raises(RouteRuntimeError, match="fenced"):
+        _publish(publisher)
+    publisher.release_update_boundary("e" * 64)
+    assert _publish(publisher).generation == 1
 
 
 def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) -> None:
-    marker = _publisher(tmp_path).publish(_request())
+    marker = _publish(_publisher(tmp_path))
     ack_path = tmp_path / "supervisor/ack.json"
     ack_path.parent.mkdir()
     acknowledgement = {
@@ -312,276 +249,3 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
     )
     with pytest.raises(RouteRuntimeError, match="timed out"):
         mismatched(marker)
-
-
-def test_restart_after_activation_before_ack_reuses_the_exact_request(
-    tmp_path: Path,
-) -> None:
-    def crash_before_ack(_marker):
-        raise RuntimeError("supervisor unavailable")
-
-    with pytest.raises(RouteRuntimeError, match="acknowledgement"):
-        _publisher(
-            tmp_path,
-            await_supervisor_ack=crash_before_ack,
-        ).publish(_request())
-
-    acknowledged = []
-    marker = _publisher(
-        tmp_path,
-        await_supervisor_ack=acknowledged.append,
-    ).publish(_request())
-
-    assert marker.generation == 1
-    assert acknowledged == [marker]
-
-
-def test_multiprocess_publication_is_serialized_to_one_generation(
-    tmp_path: Path,
-) -> None:
-    context = multiprocessing.get_context("fork")
-    barrier = context.Barrier(2)
-    results = context.Queue()
-
-    def publish() -> None:
-        barrier.wait(timeout=5)
-        marker = _publisher(tmp_path).publish(_request())
-        results.put((marker.generation, marker.digest))
-
-    processes = [context.Process(target=publish) for _ in range(2)]
-    for process in processes:
-        process.start()
-    for process in processes:
-        process.join(timeout=10)
-
-    assert [process.exitcode for process in processes] == [0, 0]
-    receipts = [results.get(timeout=2) for _ in processes]
-    assert receipts[0] == receipts[1]
-    assert receipts[0][0] == 1
-
-
-def test_validation_or_activation_failure_retains_previous_exact_marker(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    publisher = _publisher(tmp_path)
-    previous = publisher.publish(_request())
-    active = tmp_path / "runtime/activation.json"
-    previous_bytes = active.read_bytes()
-    replacement = _request().__class__(
-        **{**_request().__dict__, "evidence_set_digest": "d" * 64}
-    )
-
-    rejecting = _publisher(tmp_path, validate_litellm=lambda _content: False)
-    with pytest.raises(RouteRuntimeError, match="LiteLLM validation"):
-        rejecting.publish(replacement)
-    assert active.read_bytes() == previous_bytes
-
-    original_replace = __import__("os").replace
-
-    def fail_marker(source, target):
-        if Path(target) == active:
-            raise OSError("crash before activation")
-        original_replace(source, target)
-
-    monkeypatch.setattr("vonk_control.route_runtime.os.replace", fail_marker)
-    with pytest.raises(RouteRuntimeError, match="activation"):
-        publisher.publish(replacement)
-    assert active.read_bytes() == previous_bytes
-    monkeypatch.undo()
-    assert (
-        AtomicRouteBundlePublisher(
-            tmp_path / "runtime",
-            management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
-            clock=lambda: NOW,
-        ).inspect(expected=previous)
-        == previous
-    )
-
-
-def test_crash_before_files_leaves_no_generation_or_activation(tmp_path: Path) -> None:
-    publisher = _publisher(tmp_path, validate_routes=lambda _content: False)
-
-    with pytest.raises(RouteRuntimeError, match="route validation"):
-        publisher.publish(_request())
-
-    assert list((tmp_path / "runtime/generations").iterdir()) == []
-    assert not (tmp_path / "runtime/activation.json").exists()
-
-
-def test_restart_after_marker_before_db_ack_reuses_exact_receipt(
-    tmp_path: Path,
-) -> None:
-    marker = _publisher(tmp_path).publish(_request())
-
-    restarted = AtomicRouteBundlePublisher(
-        tmp_path / "runtime",
-        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
-        clock=lambda: NOW,
-    )
-
-    assert restarted.publish(_request()) == marker
-    assert len(list((tmp_path / "runtime/generations").iterdir())) == 1
-
-
-def test_restart_inspection_rejects_tampering_wrong_expectation_and_expired_lease(
-    tmp_path: Path,
-) -> None:
-    publisher = _publisher(tmp_path)
-    marker = publisher.publish(_request())
-    restarted = AtomicRouteBundlePublisher(
-        tmp_path / "runtime",
-        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
-        clock=lambda: NOW,
-    )
-    wrong = marker.__class__(**{**marker.__dict__, "plan_digest": "d" * 64})
-    with pytest.raises(RouteRuntimeError, match="expected"):
-        restarted.inspect(expected=wrong)
-
-    activation = tmp_path / "runtime/activation.json"
-    exact = activation.read_bytes()
-    activation.write_text(json.dumps(json.loads(exact), indent=2))
-    with pytest.raises(RouteRuntimeError, match="canonical"):
-        restarted.inspect(expected=marker)
-    activation.write_bytes(exact)
-
-    config = tmp_path / "runtime/generations" / marker.directory / "litellm.json"
-    config.write_bytes(b'{"model_list":[{"unsafe":true}]}\n')
-    with pytest.raises(RouteRuntimeError, match="checksum"):
-        restarted.inspect(expected=marker)
-
-    clean_root = tmp_path / "clean"
-    clean = AtomicRouteBundlePublisher(
-        clean_root,
-        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
-        clock=lambda: NOW,
-    )
-    clean_marker = clean.publish(_request())
-    expired = AtomicRouteBundlePublisher(
-        clean_root,
-        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
-        clock=lambda: NOW + timedelta(seconds=151),
-    )
-    with pytest.raises(RouteRuntimeError, match="lease"):
-        expired.inspect(expected=clean_marker)
-
-
-def test_withdrawal_activates_an_empty_fail_closed_bundle(tmp_path: Path) -> None:
-    publisher = _publisher(tmp_path)
-    publisher.publish(_request())
-
-    marker = publisher.withdraw(
-        reconciliation_id=RECONCILIATION_ID,
-        plan_digest=PLAN_DIGEST,
-        targets=(NODE,),
-        reason="reconciliation in progress bearer-secret",
-    )
-
-    directory = tmp_path / "runtime/generations" / marker.directory
-    routes = json.loads((directory / "routes.json").read_bytes())
-    config = json.loads((directory / "litellm.json").read_bytes())
-    assert marker.state == "maintenance"
-    assert routes["state"] == "maintenance"
-    assert routes["routes"] == {}
-    assert routes["targets"] == [NODE]
-    assert "bearer-secret" not in routes["reason"]
-    assert config["model_list"] == []
-
-
-def test_update_boundary_fences_normal_publication_until_exact_release(
-    tmp_path: Path,
-) -> None:
-    publisher = _publisher(tmp_path)
-    publisher.publish(_request())
-    boundary_key = "d" * 64
-
-    publisher.claim_update_boundary(boundary_key)
-
-    with pytest.raises(RouteRuntimeError, match="update boundary"):
-        publisher.publish(_request(address="10.0.0.43"))
-    keyed = publisher.publish(
-        _request(address="10.0.0.43"),
-        update_boundary_key=boundary_key,
-    )
-    assert keyed.generation == 2
-    with pytest.raises(RouteRuntimeError, match="different update boundary"):
-        publisher.claim_update_boundary("e" * 64)
-    with pytest.raises(RouteRuntimeError, match="update boundary key"):
-        publisher.release_update_boundary("e" * 64)
-
-    publisher.release_update_boundary(boundary_key)
-
-    restored = publisher.publish(_request())
-    assert restored.generation == 3
-
-
-def test_update_boundary_rejects_unkeyed_disjoint_reconciliation_withdrawal(
-    tmp_path: Path,
-) -> None:
-    publisher = _publisher(tmp_path)
-    exact = publisher.publish(_request())
-    publisher.claim_update_boundary("d" * 64)
-
-    with pytest.raises(RouteRuntimeError, match="update boundary"):
-        publisher.withdraw(
-            reconciliation_id="f89f180b-0c52-4c77-b983-663d16dd3aa7",
-            plan_digest="f" * 64,
-            targets=(NODE,),
-            reason="disjoint reconciliation maintenance",
-        )
-    assert publisher.inspect() == exact
-
-
-def test_exact_update_boundary_can_force_a_fresh_generation_before_expiry(
-    tmp_path: Path,
-) -> None:
-    publisher = _publisher(tmp_path)
-    first = publisher.publish(_request())
-    publisher.claim_update_boundary("d" * 64)
-
-    renewed = publisher.publish(
-        _request(),
-        update_boundary_key="d" * 64,
-        renew_update_boundary=True,
-    )
-
-    assert renewed.generation == first.generation + 1
-    with pytest.raises(RouteRuntimeError, match="requires its exact fence"):
-        publisher.publish(_request(), renew_update_boundary=True)
-
-
-def test_update_boundary_publication_compare_and_swap_is_atomic_and_idempotent(
-    tmp_path: Path,
-) -> None:
-    publisher = _publisher(tmp_path)
-    before = publisher.publish(_request())
-    key = "d" * 64
-    publisher.claim_update_boundary(key)
-
-    desired = publisher.publish(
-        _request(address="10.0.0.43"),
-        update_boundary_key=key,
-        expected_current_digest=before.digest,
-    )
-    retried = publisher.publish(
-        _request(address="10.0.0.43"),
-        update_boundary_key=key,
-        expected_current_digest=before.digest,
-    )
-    assert retried == desired
-
-    maintenance = publisher.withdraw(
-        reconciliation_id=RECONCILIATION_ID,
-        plan_digest=PLAN_DIGEST,
-        targets=(NODE,),
-        reason="authority lost",
-        update_boundary_key=key,
-        expected_current_digest=desired.digest,
-    )
-    with pytest.raises(RouteRuntimeError, match="compare-and-swap"):
-        publisher.publish(
-            _request(address="10.0.0.44"),
-            update_boundary_key=key,
-            expected_current_digest=desired.digest,
-        )
-    assert publisher.inspect() == maintenance

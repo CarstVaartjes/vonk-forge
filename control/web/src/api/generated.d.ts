@@ -351,8 +351,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download Source Bundle */
-        get: operations["downloadRecipeSourceBundle"];
+        get?: never;
         /** Upload Source Bundle */
         put: operations["uploadRecipeSourceBundle"];
         post?: never;
@@ -680,23 +679,6 @@ export interface paths {
         };
         /** Job Log List */
         get: operations["listJobLogs"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/jobs/{job_id}/logs/{digest}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Job Log Content */
-        get: operations["getJobLog"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1123,26 +1105,6 @@ export interface paths {
         };
         /** Get Updates */
         get: operations["getModelCacheUpdates"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/nodes/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read explicit node health-probe evidence
-         * @description Returns the node health-probe projection. The health_probe_stale field refers only to explicit node.probe compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection, inventory, and telemetry readiness.
-         */
-        get: operations["getNodeStatuses"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3151,15 +3113,6 @@ export interface components {
              */
             schema_version: 1;
         };
-        /** FleetStatusResponse */
-        FleetStatusResponse: {
-            /** Authority Revision */
-            authority_revision: string;
-            /** Evidence Digest */
-            evidence_digest: string;
-            /** Nodes */
-            nodes: components["schemas"]["NodeStatus"][];
-        };
         /** FreshnessEvidence */
         FreshnessEvidence: {
             /** Age Seconds */
@@ -3466,8 +3419,6 @@ export interface components {
             /** Operations */
             operations: components["schemas"]["JobOperationResponse"][];
             progress: components["schemas"]["JobProgress"];
-            /** Reconciliation Id */
-            reconciliation_id?: string | null;
             /** State */
             state: string;
             /** Status Reason */
@@ -3486,43 +3437,19 @@ export interface components {
             /** Job Id */
             job_id: string;
         };
-        /** JobOperationProgress */
-        JobOperationProgress: {
-            /** Bytes Per Second */
-            bytes_per_second?: number | null;
-            checkpoint?: components["schemas"]["OperationCheckpoint"] | null;
-            /** Completed Bytes */
-            completed_bytes?: number | null;
-            /** Eta Seconds */
-            eta_seconds?: number | null;
-            /** Kind */
-            kind?: string | null;
-            /** Members */
-            members?: components["schemas"]["OperationMemberProgress"][] | null;
-            /** Object Sha256 */
-            object_sha256?: string | null;
-            /** Phase */
-            phase: string;
-            /** Total Bytes */
-            total_bytes?: number | null;
-            /** Total Bytes Known */
-            total_bytes_known?: boolean | null;
-        };
         /** JobOperationResponse */
         JobOperationResponse: {
             /** Attempt */
             attempt: number;
             evidence_download?: components["schemas"]["OperationEvidenceDownload"] | null;
             failure?: components["schemas"]["OperationFailureEvidence"] | null;
-            /** Graph Operation Id */
-            graph_operation_id?: string | null;
             /** Id */
             id: string;
             /** Kind */
             kind: string;
             /** Node Id */
             node_id: string;
-            progress?: components["schemas"]["JobOperationProgress"] | null;
+            progress?: components["schemas"]["OperationProgress"] | null;
             provenance?: components["schemas"]["OperationEvidenceProvenance"] | null;
             recovery?: components["schemas"]["OperationRecovery"] | null;
             /** State */
@@ -5071,85 +4998,9 @@ export interface components {
             /** Display Name */
             display_name: string;
         };
-        /** NodeStatus */
-        NodeStatus: {
-            /** Agent Binary Digest */
-            agent_binary_digest?: string | null;
-            /** Agent Build Digest */
-            agent_build_digest?: string | null;
-            /** Agent Last Seen At */
-            agent_last_seen_at?: string | null;
-            /**
-             * Agent Online
-             * @default false
-             */
-            agent_online: boolean;
-            /** Agent Semantic Version */
-            agent_semantic_version?: string | null;
-            /**
-             * Agent State
-             * @default unregistered
-             */
-            agent_state: string;
-            /** Certificate Expires At */
-            certificate_expires_at?: string | null;
-            /** Certificate Expiry Seconds */
-            certificate_expiry_seconds?: number | null;
-            /**
-             * Compatibility
-             * @default unknown
-             */
-            compatibility: string;
-            /** Disk Available Bytes */
-            disk_available_bytes: number;
-            /** Display Name */
-            display_name: string;
-            /**
-             * Health Probe Stale
-             * @description True when explicit node.probe evidence is missing or older than the Controller health-probe window. This is not aggregate node readiness; use Fleet connection, inventory, and telemetry fields for live readiness.
-             */
-            health_probe_stale: boolean;
-            /**
-             * Healthy
-             * @description Health state from the latest explicit node.probe compute gate; null when no completed probe is available.
-             */
-            healthy: boolean | null;
-            /** Hostname */
-            hostname: string;
-            /** Id */
-            id: string;
-            /** Inventory Age Seconds */
-            inventory_age_seconds?: number | null;
-            /** Inventory Capabilities */
-            inventory_capabilities?: string[];
-            /** Inventory Observed At */
-            inventory_observed_at?: string | null;
-            /**
-             * Inventory Stale
-             * @default true
-             */
-            inventory_stale: boolean;
-            /** Labels */
-            labels: {
-                [key: string]: string;
-            };
-            /** Last Seen Age Seconds */
-            last_seen_age_seconds?: number | null;
-            /** Last Seen At */
-            last_seen_at?: string | null;
-            /** Lifecycle */
-            lifecycle: string;
-            /** Memory Available Bytes */
-            memory_available_bytes: number;
-            /**
-             * Probe Age Seconds
-             * @description Age of the latest completed explicit node.probe compute gate, or null when no probe evidence is available.
-             */
-            probe_age_seconds?: number | null;
-        };
         /**
          * OperationCheckpoint
-         * @description A restart-safe cursor identifying the last completed durable unit.
+         * @description Restart-safe cursor identifying a durable operation unit.
          */
         OperationCheckpoint: {
             /** Cursor */
@@ -5177,7 +5028,7 @@ export interface components {
             node_ids: string[];
             /** Parent Id */
             parent_id?: string | null;
-            progress?: components["schemas"]["JobOperationProgress"] | null;
+            progress?: components["schemas"]["OperationProgress"] | null;
             provenance?: components["schemas"]["OperationEvidenceProvenance"] | null;
             recovery?: components["schemas"]["OperationRecovery"] | null;
             /**
@@ -5249,8 +5100,12 @@ export interface components {
             completed_bytes: number;
             /** Eta Seconds */
             eta_seconds?: number | null;
+            /** Kind */
+            kind?: string | null;
             /** Member Id */
             member_id: string;
+            /** Object Sha256 */
+            object_sha256?: string | null;
             /** Phase */
             phase: string;
             /**
@@ -5263,7 +5118,7 @@ export interface components {
         };
         /**
          * OperationProgress
-         * @description Canonical progress payload persisted on the current operation attempt.
+         * @description Canonical durable progress payload shared by Controller and agents.
          */
         OperationProgress: {
             /** Bytes Per Second */
@@ -5714,7 +5569,7 @@ export interface components {
             target?: string | null;
         };
         /** RecipeBuildEvidence */
-        RecipeBuildEvidence: {
+        "RecipeBuildEvidence-Output": {
             /** Build Id */
             build_id: string | null;
             /** Build Input Sha256 */
@@ -6856,7 +6711,7 @@ export interface components {
             allowed: boolean;
             /** Blockers */
             blockers: components["schemas"]["RunSwitchReason"][];
-            build: components["schemas"]["RecipeBuildEvidence"];
+            build: components["schemas"]["RecipeBuildEvidence-Output"];
             /** Conflicts */
             conflicts: components["schemas"]["RunSwitchReason"][];
             effective_settings?: components["schemas"]["EffectiveSettingsSelection"] | null;
@@ -7359,10 +7214,7 @@ export interface components {
              */
             schema_version: 2;
         };
-        /**
-         * TelemetryCapability
-         * @description Capability inventory, including explicitly unsupported sensors.
-         */
+        /** TelemetryCapability */
         TelemetryCapability: {
             /** Device Id */
             device_id?: string | null;
@@ -7430,7 +7282,7 @@ export interface components {
             schema_version: 2;
         };
         /** TelemetryDetails */
-        TelemetryDetails: {
+        "TelemetryDetails-Output": {
             /** Accelerator Name */
             accelerator_name?: string | null;
             /** Accelerator Performance State */
@@ -7489,7 +7341,7 @@ export interface components {
             end: string;
             /** Maximum Points */
             maximum_points: number;
-            metadata?: components["schemas"]["TelemetryHistoryMetadata"] | null;
+            metadata: components["schemas"]["TelemetryHistoryMetadata"];
             /** Node Id */
             node_id: string;
             /** Points */
@@ -7547,7 +7399,7 @@ export interface components {
             scope?: string | null;
             /**
              * Source
-             * @default legacy
+             * @default controller-derived
              */
             source: string;
             /**
@@ -7556,10 +7408,7 @@ export interface components {
              */
             unit: string;
         };
-        /**
-         * TelemetryMetrics
-         * @description Rich per-sample metrics kept alongside legacy scalar columns.
-         */
+        /** TelemetryMetrics */
         TelemetryMetrics: {
             /** Capabilities */
             capabilities: components["schemas"]["TelemetryCapability"][];
@@ -7568,7 +7417,6 @@ export interface components {
             runtimes: components["schemas"]["TelemetryRuntime"][];
             /**
              * Schema Version
-             * @default 2
              * @constant
              */
             schema_version: 2;
@@ -7583,7 +7431,7 @@ export interface components {
             boot_id: string;
             /** Cpu Utilization Percent */
             cpu_utilization_percent?: number | null;
-            details: components["schemas"]["TelemetryDetails"];
+            details: components["schemas"]["TelemetryDetails-Output"];
             /** Disk Free Bytes */
             disk_free_bytes?: number | null;
             /** Disk Total Bytes */
@@ -7604,7 +7452,7 @@ export interface components {
             memory_available_bytes?: number | null;
             /** Memory Total Bytes */
             memory_total_bytes?: number | null;
-            metrics?: components["schemas"]["TelemetryMetrics"] | null;
+            metrics: components["schemas"]["TelemetryMetrics"];
             /** Network Receive Bytes Per Second */
             network_receive_bytes_per_second?: number | null;
             /** Network Transmit Bytes Per Second */
@@ -7667,10 +7515,7 @@ export interface components {
             /** Source Sample Count */
             source_sample_count: number;
         };
-        /**
-         * TelemetryRuntime
-         * @description Controller-owned runtime identity and adapter support summary.
-         */
+        /** TelemetryRuntime */
         TelemetryRuntime: {
             /** Adapter */
             adapter: string;
@@ -7710,10 +7555,7 @@ export interface components {
             /** Version */
             version?: string | null;
         };
-        /**
-         * TelemetrySeries
-         * @description One sampled or configured metric in canonical units.
-         */
+        /** TelemetrySeries */
         TelemetrySeries: {
             /** Aggregation */
             aggregation: string;
@@ -7781,10 +7623,7 @@ export interface components {
             freshness: "live" | "delayed" | "stale";
             sample: components["schemas"]["TelemetryPoint"];
         };
-        /**
-         * TelemetryWorkload
-         * @description Sanitized request/job correlation to the actual serving placement.
-         */
+        /** TelemetryWorkload */
         TelemetryWorkload: {
             /** Created At */
             created_at?: string | null;
@@ -9101,56 +8940,6 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-        };
-    };
-    downloadRecipeSourceBundle: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                sha256: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                    "application/vnd.vonk-forge.source-bundle.v1+tar": string;
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogProblem"];
-                };
-            };
-            /** @description Unprocessable Entity */
-            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10578,74 +10367,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobLogsResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Not Found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Service Unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    getJobLog: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                job_id: string;
-                digest: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Unauthorized */
@@ -12252,35 +11973,6 @@ export interface operations {
             };
             /** @description Service Unavailable */
             503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
-                };
-            };
-        };
-    };
-    getNodeStatuses: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FleetStatusResponse"];
-                };
-            };
-            /** @description Unauthorized */
-            401: {
                 headers: {
                     [name: string]: unknown;
                 };

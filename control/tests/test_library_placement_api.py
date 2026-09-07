@@ -113,7 +113,6 @@ def setup():
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
-        fleet=lambda: {"nodes": []},
         library_placements=Placements(),
         now=lambda: 10,
     )

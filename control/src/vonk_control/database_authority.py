@@ -23,13 +23,6 @@ from .serializers import serialize_document
 
 _REVISION = re.compile(r"[0-9a-f]{64}\Z")
 _ALLOWED_ROOTS = ("inventory/", "locks/", "manifests/", "docs/audits/")
-_DEFAULT_DOCUMENTS: dict[str, object] = {
-    "inventory/topology.json": {
-        "schema_version": 1,
-        "nodes": [],
-        "links": [],
-    }
-}
 
 
 class AuthorityPolicyError(ValueError):
@@ -123,7 +116,7 @@ class DatabaseAuthorityService:
             if head is not None:
                 return head.revision_id
             dependencies: dict[str, list[str]] = {}
-            documents = dict(_DEFAULT_DOCUMENTS)
+            documents: dict[str, object] = {}
             revision_id = _revision(documents, dependencies)
             now = self._clock()
             session.add(

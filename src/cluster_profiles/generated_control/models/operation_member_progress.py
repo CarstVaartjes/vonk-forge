@@ -29,6 +29,8 @@ class OperationMemberProgress:
             bytes_per_second (Union[None, Unset, float]):
             completed_bytes (Union[Unset, int]):  Default: 0.
             eta_seconds (Union[None, Unset, float]):
+            kind (Union[None, Unset, str]):
+            object_sha256 (Union[None, Unset, str]):
             state (Union[Unset, str]):  Default: 'running'.
             total_bytes (Union[None, Unset, int]):
      """
@@ -38,6 +40,8 @@ class OperationMemberProgress:
     bytes_per_second: Union[None, Unset, float] = UNSET
     completed_bytes: Union[Unset, int] = 0
     eta_seconds: Union[None, Unset, float] = UNSET
+    kind: Union[None, Unset, str] = UNSET
+    object_sha256: Union[None, Unset, str] = UNSET
     state: Union[Unset, str] = 'running'
     total_bytes: Union[None, Unset, int] = UNSET
 
@@ -64,6 +68,18 @@ class OperationMemberProgress:
         else:
             eta_seconds = self.eta_seconds
 
+        kind: Union[None, Unset, str]
+        if isinstance(self.kind, Unset):
+            kind = UNSET
+        else:
+            kind = self.kind
+
+        object_sha256: Union[None, Unset, str]
+        if isinstance(self.object_sha256, Unset):
+            object_sha256 = UNSET
+        else:
+            object_sha256 = self.object_sha256
+
         state = self.state
 
         total_bytes: Union[None, Unset, int]
@@ -85,6 +101,10 @@ class OperationMemberProgress:
             field_dict["completed_bytes"] = completed_bytes
         if eta_seconds is not UNSET:
             field_dict["eta_seconds"] = eta_seconds
+        if kind is not UNSET:
+            field_dict["kind"] = kind
+        if object_sha256 is not UNSET:
+            field_dict["object_sha256"] = object_sha256
         if state is not UNSET:
             field_dict["state"] = state
         if total_bytes is not UNSET:
@@ -123,6 +143,26 @@ class OperationMemberProgress:
         eta_seconds = _parse_eta_seconds(d.pop("eta_seconds", UNSET))
 
 
+        def _parse_kind(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        kind = _parse_kind(d.pop("kind", UNSET))
+
+
+        def _parse_object_sha256(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        object_sha256 = _parse_object_sha256(d.pop("object_sha256", UNSET))
+
+
         state = d.pop("state", UNSET)
 
         def _parse_total_bytes(data: object) -> Union[None, Unset, int]:
@@ -141,6 +181,8 @@ class OperationMemberProgress:
             bytes_per_second=bytes_per_second,
             completed_bytes=completed_bytes,
             eta_seconds=eta_seconds,
+            kind=kind,
+            object_sha256=object_sha256,
             state=state,
             total_bytes=total_bytes,
         )

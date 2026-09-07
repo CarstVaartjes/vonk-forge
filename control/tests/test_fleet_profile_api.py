@@ -149,7 +149,6 @@ def _setup(
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
-        fleet=lambda: {"nodes": []},
         now=lambda: 10,
         fleet_profiles=profiles,
     )

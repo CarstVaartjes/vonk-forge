@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import json
 import os
 import re
@@ -13,46 +12,15 @@ import time
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from vonk_agent_protocol import canonical_message
-
-from .presence import ManagementAddressPolicy, PresenceError
+from pydantic import ValidationError
+from vonk_agent_protocol.route_activation import ActivationMarker
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_NODE = re.compile(r"spk_[0-9a-f]{32}\Z")
-_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\Z")
-_OPERATION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
-_DIRECTORY = re.compile(r"[0-9]{8}-[0-9a-f]{64}\Z")
-_ROUTE_FIELDS = {
-    "workload_id",
-    "nodes",
-    "entrypoint_node_id",
-    "scheme",
-    "port",
-    "path",
-    "quota",
-    "quota_digest",
-}
-_QUOTA_FIELDS = {"requests_per_minute", "tokens_per_minute"}
-_MARKER_FIELDS = {
-    "schema_version",
-    "generation",
-    "state",
-    "reconciliation_id",
-    "plan_digest",
-    "evidence_set_digest",
-    "routes_sha256",
-    "litellm_sha256",
-    "issued_at",
-    "expires_at",
-    "directory",
-    "manifest_sha256",
-}
-
 RECIPE_ROUTE_AUTHORITY_ID = str(
     uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes")
 )
@@ -81,12 +49,6 @@ def _sha256(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def _canonical_sha256(value: Mapping[str, object]) -> str:
-    """Hash protocol documents without filesystem-only trailing whitespace."""
-
-    return _sha256(canonical_message(value))
-
-
 def _aware(value: datetime, label: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise RouteRuntimeError(f"{label} must include a timezone")
@@ -101,146 +63,6 @@ def _parse_time(value: object, label: str) -> datetime:
     except ValueError as error:
         raise RouteRuntimeError(f"activation {label} is invalid") from error
     return _aware(parsed, f"activation {label}")
-
-
-@dataclass(frozen=True)
-class AcceptedEndpointEvidence:
-    """Endpoint address carried by already-accepted, fenced operation evidence."""
-
-    node_id: str
-    address: str
-    observed_at: datetime
-    operation_id: str
-    verify_evidence_digest: str
-    evidence_digest: str
-
-
-@dataclass(frozen=True)
-class PublishedRoute:
-    """A validated route safe to expose to commit-pinned LiteLLM policy."""
-
-    alias: str
-    workload_id: str
-    api_base: str
-    requests_per_minute: int
-    tokens_per_minute: int
-
-
-def build_published_route(
-    alias: object,
-    raw: object,
-    address: object,
-) -> PublishedRoute:
-    """Build the sole canonical repository-policy view of a resolved route."""
-
-    if (
-        not isinstance(alias, str)
-        or _IDENTIFIER.fullmatch(alias) is None
-        or not isinstance(raw, Mapping)
-        or set(raw) != _ROUTE_FIELDS
-    ):
-        raise RouteRuntimeError("route fields do not match the resolved plan")
-    workload_id = raw.get("workload_id")
-    scheme = raw.get("scheme")
-    port = raw.get("port")
-    path = raw.get("path")
-    quota = raw.get("quota")
-    if (
-        not isinstance(workload_id, str)
-        or _IDENTIFIER.fullmatch(workload_id) is None
-        or scheme not in {"http", "https"}
-        or isinstance(port, bool)
-        or not isinstance(port, int)
-        or not 1 <= port <= 65535
-        or not isinstance(path, str)
-        or not path.startswith("/")
-        or "?" in path
-        or "#" in path
-        or "//" in path
-        or "/../" in f"{path}/"
-        or not isinstance(quota, Mapping)
-        or set(quota) != _QUOTA_FIELDS
-    ):
-        raise RouteRuntimeError("route policy input is invalid")
-    rpm = quota.get("requests_per_minute")
-    tpm = quota.get("tokens_per_minute")
-    if (
-        isinstance(rpm, bool)
-        or not isinstance(rpm, int)
-        or not 1 <= rpm <= 100_000
-        or isinstance(tpm, bool)
-        or not isinstance(tpm, int)
-        or not 1 <= tpm <= 100_000_000
-    ):
-        raise RouteRuntimeError("route policy quota is invalid")
-    if not isinstance(address, str):
-        raise RouteRuntimeError("route policy address is invalid")
-    try:
-        parsed_address = ipaddress.ip_address(address)
-    except ValueError as error:
-        raise RouteRuntimeError("route policy address is invalid") from error
-    if parsed_address.compressed != address:
-        raise RouteRuntimeError("route policy address is not canonical")
-    host = (
-        f"[{address}]" if isinstance(parsed_address, ipaddress.IPv6Address) else address
-    )
-    return PublishedRoute(
-        alias=alias,
-        workload_id=workload_id,
-        api_base=f"{scheme}://{host}:{port}{path.rstrip('/')}",
-        requests_per_minute=rpm,
-        tokens_per_minute=tpm,
-    )
-
-
-def published_routes_digest(routes: tuple[PublishedRoute, ...]) -> str:
-    """Hash the exact canonical route-policy input."""
-
-    return hashlib.sha256(
-        json.dumps(
-            [asdict(route) for route in routes],
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
-
-
-@dataclass(frozen=True)
-class RouteBundleRequest:
-    reconciliation_id: str
-    plan_digest: str
-    evidence_set_digest: str
-    routes: Mapping[str, object]
-    endpoints: Mapping[str, AcceptedEndpointEvidence]
-    expires_at: datetime
-    authority_revision: str = ""
-
-
-@dataclass(frozen=True)
-class ActivationMarker:
-    schema_version: int
-    generation: int
-    state: str
-    reconciliation_id: str
-    plan_digest: str
-    evidence_set_digest: str
-    routes_sha256: str
-    litellm_sha256: str
-    issued_at: str
-    expires_at: str
-    directory: str
-    manifest_sha256: str
-
-    def canonical_bytes(self) -> bytes:
-        """Return the exact representation persisted as the activation marker."""
-
-        return _encoded(asdict(self))
-
-    @property
-    def digest(self) -> str:
-        """Bind a durable database receipt to the exact activation marker bytes."""
-
-        return _sha256(self.canonical_bytes())
 
 
 @dataclass(frozen=True)
@@ -368,7 +190,6 @@ class AtomicRouteBundlePublisher:
         self,
         root: Path,
         *,
-        management_policy: ManagementAddressPolicy,
         clock: Callable[[], datetime],
         maximum_lease_seconds: int = 300,
         validate_routes: Callable[[bytes], bool] | None = None,
@@ -388,7 +209,6 @@ class AtomicRouteBundlePublisher:
         generations.chmod(0o750)
         self._root = root
         self._generations = generations
-        self._policy = management_policy
         self._clock = clock
         self._maximum_lease = timedelta(seconds=maximum_lease_seconds)
         self._validate_routes = validate_routes or self._valid_json_mapping
@@ -547,235 +367,18 @@ class AtomicRouteBundlePublisher:
         return issued, expires
 
     @staticmethod
-    def _identity(
-        reconciliation_id: str, plan_digest: str, evidence_digest: str
-    ) -> None:
+    def _identity(authority_id: str, plan_digest: str, evidence_digest: str) -> None:
         try:
-            parsed = uuid.UUID(reconciliation_id)
+            parsed = uuid.UUID(authority_id)
         except (TypeError, ValueError, AttributeError) as error:
             raise RouteRuntimeError("reconciliation ID is invalid") from error
-        if str(parsed) != reconciliation_id:
+        if str(parsed) != authority_id:
             raise RouteRuntimeError("reconciliation ID is not canonical")
         if (
             _DIGEST.fullmatch(plan_digest) is None
             or _DIGEST.fullmatch(evidence_digest) is None
         ):
             raise RouteRuntimeError("publication digest identity is invalid")
-
-    def _render_routes(
-        self,
-        generation: int,
-        request: RouteBundleRequest,
-        now: datetime,
-        expires: datetime,
-    ) -> tuple[bytes, bytes]:
-        if not request.routes:
-            raise RouteRuntimeError("published routes must not be empty")
-        exact_endpoints: set[str] = set()
-        rendered_routes: dict[str, object] = {}
-        models: list[dict[str, object]] = []
-        for alias, raw in sorted(request.routes.items()):
-            if not isinstance(alias, str) or _IDENTIFIER.fullmatch(alias) is None:
-                raise RouteRuntimeError("route alias is invalid")
-            if not isinstance(raw, Mapping) or set(raw) != _ROUTE_FIELDS:
-                raise RouteRuntimeError("route fields do not match the resolved plan")
-            workload_id = raw.get("workload_id")
-            nodes = raw.get("nodes")
-            node_id = raw.get("entrypoint_node_id")
-            scheme = raw.get("scheme")
-            port = raw.get("port")
-            path = raw.get("path")
-            quota = raw.get("quota")
-            quota_digest = raw.get("quota_digest")
-            if (
-                not isinstance(workload_id, str)
-                or _IDENTIFIER.fullmatch(workload_id) is None
-                or not isinstance(nodes, (list, tuple))
-                or not nodes
-                or len(nodes) != len(set(nodes))
-                or any(
-                    not isinstance(node, str) or _NODE.fullmatch(node) is None
-                    for node in nodes
-                )
-                or not isinstance(node_id, str)
-                or node_id not in nodes
-                or _NODE.fullmatch(node_id) is None
-            ):
-                raise RouteRuntimeError("route entrypoint is invalid")
-            evidence = request.endpoints.get(node_id)
-            if evidence is None or evidence.node_id != node_id:
-                raise RouteRuntimeError("route endpoint evidence is unavailable")
-            expected_operation = f"{workload_id}:{node_id}:workload.verify"
-            if (
-                _OPERATION.fullmatch(evidence.operation_id) is None
-                or evidence.operation_id != expected_operation
-                or _DIGEST.fullmatch(evidence.verify_evidence_digest) is None
-                or _DIGEST.fullmatch(evidence.evidence_digest) is None
-            ):
-                raise RouteRuntimeError(
-                    "route endpoint evidence is not exact verify evidence"
-                )
-            observed = _aware(evidence.observed_at, "endpoint evidence timestamp")
-            if observed > now or now - observed > self._maximum_lease:
-                raise RouteRuntimeError(
-                    "route endpoint evidence is stale or in the future"
-                )
-            try:
-                address = self._policy.validate(evidence.address)
-            except PresenceError as error:
-                raise RouteRuntimeError(
-                    f"management address evidence is invalid: {error}"
-                ) from error
-            expected_endpoint_digest = endpoint_evidence_digest(
-                node_id=node_id,
-                address=address,
-                observed_at=observed,
-                operation_id=evidence.operation_id,
-                verify_evidence_digest=evidence.verify_evidence_digest,
-            )
-            if evidence.evidence_digest != expected_endpoint_digest:
-                raise RouteRuntimeError("endpoint evidence binding is invalid")
-            if expires > observed + self._maximum_lease:
-                raise RouteRuntimeError("route lease exceeds endpoint freshness")
-            if (
-                scheme not in {"http", "https"}
-                or isinstance(port, bool)
-                or not isinstance(port, int)
-                or not 1 <= port <= 65535
-                or not isinstance(path, str)
-                or not path.startswith("/")
-                or "?" in path
-                or "#" in path
-                or "//" in path
-                or "/../" in f"{path}/"
-            ):
-                raise RouteRuntimeError("route structured endpoint is invalid")
-            if not isinstance(quota, Mapping) or set(quota) != _QUOTA_FIELDS:
-                raise RouteRuntimeError("route quota is invalid")
-            rpm = quota.get("requests_per_minute")
-            tpm = quota.get("tokens_per_minute")
-            if (
-                isinstance(rpm, bool)
-                or not isinstance(rpm, int)
-                or isinstance(tpm, bool)
-                or not isinstance(tpm, int)
-                or not 1 <= rpm <= 100_000
-                or not 1 <= tpm <= 100_000_000
-                or _DIGEST.fullmatch(quota_digest) is None
-                or _canonical_sha256(dict(quota)) != quota_digest
-            ):
-                raise RouteRuntimeError("route quota or quota digest is invalid")
-            published_route = build_published_route(alias, raw, address)
-            base = published_route.api_base
-            exact_endpoints.add(node_id)
-            rendered_routes[alias] = {
-                "address": address,
-                "evidence_digest": evidence.evidence_digest,
-                "node_id": node_id,
-                "observed_at": observed.isoformat(),
-                "operation_id": evidence.operation_id,
-                "path": path,
-                "port": port,
-                "scheme": scheme,
-                "verify_evidence_digest": evidence.verify_evidence_digest,
-            }
-            models.append(
-                {
-                    "model_name": alias,
-                    "litellm_params": {
-                        "api_base": base,
-                        "api_key": "os.environ/LITELLM_UPSTREAM_KEY",
-                        "model": f"openai/{alias}",
-                        "rpm": rpm,
-                        "tpm": tpm,
-                    },
-                }
-            )
-        if set(request.endpoints) != exact_endpoints:
-            raise RouteRuntimeError(
-                "endpoint evidence must exactly cover route entrypoints"
-            )
-        route_content = _encoded(
-            {
-                "generation": generation,
-                "routes": rendered_routes,
-                "schema_version": 1,
-                "state": "published",
-            }
-        )
-        litellm_document = json.loads(self.empty_litellm())
-        litellm_document["model_list"] = models
-        return route_content, _encoded(litellm_document)
-
-    def publish(
-        self,
-        request: RouteBundleRequest,
-        *,
-        update_boundary_key: str | None = None,
-        renew_update_boundary: bool = False,
-        expected_current_digest: str | None = None,
-    ) -> ActivationMarker:
-        if not isinstance(renew_update_boundary, bool):
-            raise RouteRuntimeError("route update renewal flag is invalid")
-        if renew_update_boundary and update_boundary_key is None:
-            raise RouteRuntimeError("route update renewal requires its exact fence")
-        if (
-            expected_current_digest is not None
-            and _DIGEST.fullmatch(expected_current_digest) is None
-        ):
-            raise RouteRuntimeError(
-                "route publication compare-and-swap digest is invalid"
-            )
-        self._identity(
-            request.reconciliation_id,
-            request.plan_digest,
-            request.evidence_set_digest,
-        )
-        with self._locked():
-            self._require_update_boundary(update_boundary_key)
-            issued, expires = self._lease(request.expires_at)
-            current = self._read_marker(
-                optional=True,
-                verify_files=True,
-                verify_lease=False,
-            )
-            generation = current.generation if current is not None else 1
-            routes, litellm = self._render_routes(generation, request, issued, expires)
-            if (
-                not renew_update_boundary
-                and current is not None
-                and current.state == "published"
-                and current.reconciliation_id == request.reconciliation_id
-                and current.plan_digest == request.plan_digest
-                and current.evidence_set_digest == request.evidence_set_digest
-                and current.routes_sha256 == _sha256(routes)
-                and current.litellm_sha256 == _sha256(litellm)
-                and _parse_time(current.expires_at, "expiry timestamp") > issued
-            ):
-                self._require_supervisor_ack(current)
-                return current
-            if expected_current_digest is not None and (
-                current is None or current.digest != expected_current_digest
-            ):
-                raise RouteRuntimeError("route publication compare-and-swap failed")
-            generation = (current.generation if current is not None else 0) + 1
-            if current is not None:
-                routes, litellm = self._render_routes(
-                    generation, request, issued, expires
-                )
-            marker = self._activate(
-                generation=generation,
-                state="published",
-                reconciliation_id=request.reconciliation_id,
-                plan_digest=request.plan_digest,
-                evidence_set_digest=request.evidence_set_digest,
-                routes=routes,
-                litellm=litellm,
-                issued=issued,
-                expires=expires,
-            )
-            self._require_supervisor_ack(marker)
-            return marker
 
     def publish_compiled(
         self,
@@ -790,8 +393,7 @@ class AtomicRouteBundlePublisher:
     ) -> ActivationMarker:
         """Activate a complete controller-validated database recipe bundle.
 
-        This is the Git-independent counterpart of ``publish``. Callers must
-        compile typed recipe state first; the same lock, validators, immutable
+        Callers compile typed recipe state first; the lock, validators, immutable
         generation directory, atomic marker, and supervisor acknowledgement
         remain mandatory.
         """
@@ -808,102 +410,11 @@ class AtomicRouteBundlePublisher:
             marker = self._activate(
                 generation=generation,
                 state=state,
-                reconciliation_id=authority_id,
+                authority_id=authority_id,
                 plan_digest=plan_digest,
                 evidence_set_digest=evidence_set_digest,
                 routes=routes,
                 litellm=litellm,
-                issued=issued,
-                expires=expires,
-            )
-            self._require_supervisor_ack(marker)
-            return marker
-
-    def withdraw(
-        self,
-        *,
-        reconciliation_id: str,
-        plan_digest: str,
-        targets: tuple[str, ...],
-        reason: str,
-        update_boundary_key: str | None = None,
-        renew_update_boundary: bool = False,
-        expected_current_digest: str | None = None,
-    ) -> ActivationMarker:
-        if not isinstance(renew_update_boundary, bool):
-            raise RouteRuntimeError("route update renewal flag is invalid")
-        if renew_update_boundary and update_boundary_key is None:
-            raise RouteRuntimeError("route update renewal requires its exact fence")
-        if (
-            expected_current_digest is not None
-            and _DIGEST.fullmatch(expected_current_digest) is None
-        ):
-            raise RouteRuntimeError(
-                "route publication compare-and-swap digest is invalid"
-            )
-        self._identity(reconciliation_id, plan_digest, "0" * 64)
-        if (
-            not targets
-            or len(targets) != len(set(targets))
-            or any(_NODE.fullmatch(target) is None for target in targets)
-        ):
-            raise RouteRuntimeError("maintenance targets are invalid")
-        safe_reason = re.sub(
-            r"(?i)(bearer|token|secret|password)[^\s]*",
-            "<redacted>",
-            reason,
-        )[:256]
-        with self._locked():
-            self._require_update_boundary(update_boundary_key)
-            issued = _aware(self._clock(), "route clock")
-            expires = issued + self._maximum_lease
-            current = self._read_marker(
-                optional=True,
-                verify_files=True,
-                verify_lease=False,
-            )
-            generation = current.generation if current is not None else 1
-
-            def maintenance_routes(number: int) -> bytes:
-                return _encoded(
-                    {
-                        "generation": number,
-                        "reason": safe_reason or "maintenance",
-                        "routes": {},
-                        "schema_version": 1,
-                        "state": "maintenance",
-                        "targets": sorted(targets),
-                    }
-                )
-
-            routes = maintenance_routes(generation)
-            empty = self.empty_litellm()
-            if (
-                not renew_update_boundary
-                and current is not None
-                and current.state == "maintenance"
-                and current.reconciliation_id == reconciliation_id
-                and current.plan_digest == plan_digest
-                and current.routes_sha256 == _sha256(routes)
-                and current.litellm_sha256 == _sha256(empty)
-                and _parse_time(current.expires_at, "expiry timestamp") > issued
-            ):
-                self._require_supervisor_ack(current)
-                return current
-            if expected_current_digest is not None and (
-                current is None or current.digest != expected_current_digest
-            ):
-                raise RouteRuntimeError("route publication compare-and-swap failed")
-            generation = (current.generation if current is not None else 0) + 1
-            routes = maintenance_routes(generation)
-            marker = self._activate(
-                generation=generation,
-                state="maintenance",
-                reconciliation_id=reconciliation_id,
-                plan_digest=plan_digest,
-                evidence_set_digest="0" * 64,
-                routes=routes,
-                litellm=empty,
                 issued=issued,
                 expires=expires,
             )
@@ -939,7 +450,7 @@ class AtomicRouteBundlePublisher:
         *,
         generation: int,
         state: str,
-        reconciliation_id: str,
+        authority_id: str,
         plan_digest: str,
         evidence_set_digest: str,
         routes: bytes,
@@ -952,10 +463,10 @@ class AtomicRouteBundlePublisher:
         if self._validate_litellm(litellm) is not True:
             raise RouteRuntimeError("LiteLLM validation rejected the staged bundle")
         manifest_document: dict[str, object] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "generation": generation,
             "state": state,
-            "reconciliation_id": reconciliation_id,
+            "authority_id": authority_id,
             "plan_digest": plan_digest,
             "evidence_set_digest": evidence_set_digest,
             "routes_sha256": _sha256(routes),
@@ -1081,31 +592,8 @@ class AtomicRouteBundlePublisher:
 
     @staticmethod
     def _validate_marker(marker: ActivationMarker) -> None:
-        if (
-            marker.schema_version != 1
-            or isinstance(marker.generation, bool)
-            or not isinstance(marker.generation, int)
-            or marker.generation <= 0
-            or marker.state not in {"maintenance", "published"}
-            or _DIRECTORY.fullmatch(marker.directory) is None
-            or marker.directory != f"{marker.generation:08d}-{marker.manifest_sha256}"
-            or any(
-                _DIGEST.fullmatch(value) is None
-                for value in (
-                    marker.plan_digest,
-                    marker.evidence_set_digest,
-                    marker.routes_sha256,
-                    marker.litellm_sha256,
-                    marker.manifest_sha256,
-                )
-            )
-        ):
-            raise RouteRuntimeError("route activation marker identity is invalid")
-        AtomicRouteBundlePublisher._identity(
-            marker.reconciliation_id,
-            marker.plan_digest,
-            marker.evidence_set_digest,
-        )
+        if marker.directory != f"{marker.generation:08d}-{marker.manifest_sha256}":
+            raise RouteRuntimeError("route activation marker directory binding is invalid")
 
 
 def verify_active_route_bundle(
@@ -1164,11 +652,9 @@ def _read_active_route_bundle(
         raw: Any = json.loads(marker_content)
     except (OSError, json.JSONDecodeError) as error:
         raise RouteRuntimeError("route activation marker is unreadable") from error
-    if not isinstance(raw, dict) or set(raw) != _MARKER_FIELDS:
-        raise RouteRuntimeError("route activation marker fields are invalid")
     try:
-        marker = ActivationMarker(**raw)
-    except TypeError as error:
+        marker = ActivationMarker.model_validate(raw)
+    except ValidationError as error:
         raise RouteRuntimeError("route activation marker fields are invalid") from error
     AtomicRouteBundlePublisher._validate_marker(marker)
     if marker_content != marker.canonical_bytes():
@@ -1179,21 +665,7 @@ def _read_active_route_bundle(
         directory = generations / marker.directory
         if directory.is_symlink() or not directory.is_dir():
             raise RouteRuntimeError("active route generation is unavailable")
-        manifest_document = {
-            field: getattr(marker, field)
-            for field in (
-                "schema_version",
-                "generation",
-                "state",
-                "reconciliation_id",
-                "plan_digest",
-                "evidence_set_digest",
-                "routes_sha256",
-                "litellm_sha256",
-                "issued_at",
-                "expires_at",
-            )
-        }
+        manifest_document = marker.manifest_document()
         expected_files = {
             "manifest.json": (
                 marker.manifest_sha256,

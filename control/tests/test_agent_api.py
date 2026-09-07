@@ -354,7 +354,6 @@ def agent_system(tmp_path):
         jobs=Jobs(),
         tokens=codec,
         audits=audits,
-        fleet=dict,
         now=lambda: 0,
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,
@@ -1505,7 +1504,6 @@ def test_spoofed_agent_header_is_rejected() -> None:
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
     )
 
     response = TestClient(app).post(
@@ -1520,7 +1518,6 @@ def test_unauthenticated_agent_gate_returns_without_reading_request_body() -> No
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
     )
     sent: list[dict[str, object]] = []
     body_reads = 0
@@ -1566,7 +1563,6 @@ def test_agent_routes_do_not_require_human_bearer_tokens() -> None:
         jobs=Jobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
     )
 
     response = TestClient(app).post(
@@ -1593,7 +1589,7 @@ def test_untrusted_proxy_and_malformed_forwarded_identity_are_rejected(
     )
 
     app = create_app(
-        jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore(), fleet=dict
+        jobs=Jobs(), tokens=TokenCodec(b"k" * 32), audits=MemoryAuditStore()
     )
     assert (
         TestClient(app)
@@ -3599,7 +3595,6 @@ def test_enrollment_rate_limit_rejects_before_reading_request_body(
         jobs=Jobs(),
         tokens=codec,
         audits=MemoryAuditStore(),
-        fleet=dict,
         agent=services,
         enrollment_rate_limiter=limiter,
     )

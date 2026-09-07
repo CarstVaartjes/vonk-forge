@@ -65,7 +65,6 @@ def _client(
         jobs=Jobs(),
         tokens=TokenCodec(signing_key),
         audits=audits,
-        fleet=lambda: {"nodes": []},
         now=lambda: int(NOW.timestamp()),
         browser_auth=service,
     )

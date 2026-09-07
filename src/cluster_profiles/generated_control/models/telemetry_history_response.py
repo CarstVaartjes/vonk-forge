@@ -13,7 +13,6 @@ from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
 from typing import Literal, Union, cast
-from typing import Union
 import datetime
 
 if TYPE_CHECKING:
@@ -35,21 +34,21 @@ class TelemetryHistoryResponse:
         Attributes:
             end (datetime.datetime):
             maximum_points (int):
+            metadata (TelemetryHistoryMetadata): Coverage and downsampling facts for a history/export response.
             node_id (str):
             points (list[Union['TelemetryPoint', 'TelemetryRollupPoint']]):
             resolution (TelemetryHistoryResponseResolution):
             start (datetime.datetime):
-            metadata (Union['TelemetryHistoryMetadata', None, Unset]):
             schema_version (Union[Literal[1], Unset]):  Default: 1.
      """
 
     end: datetime.datetime
     maximum_points: int
+    metadata: 'TelemetryHistoryMetadata'
     node_id: str
     points: list[Union['TelemetryPoint', 'TelemetryRollupPoint']]
     resolution: TelemetryHistoryResponseResolution
     start: datetime.datetime
-    metadata: Union['TelemetryHistoryMetadata', None, Unset] = UNSET
     schema_version: Union[Literal[1], Unset] = 1
 
 
@@ -63,6 +62,8 @@ class TelemetryHistoryResponse:
         end = self.end.isoformat()
 
         maximum_points = self.maximum_points
+
+        metadata = self.metadata.to_dict()
 
         node_id = self.node_id
 
@@ -82,14 +83,6 @@ class TelemetryHistoryResponse:
 
         start = self.start.isoformat()
 
-        metadata: Union[None, Unset, dict[str, Any]]
-        if isinstance(self.metadata, Unset):
-            metadata = UNSET
-        elif isinstance(self.metadata, TelemetryHistoryMetadata):
-            metadata = self.metadata.to_dict()
-        else:
-            metadata = self.metadata
-
         schema_version = self.schema_version
 
 
@@ -98,13 +91,12 @@ class TelemetryHistoryResponse:
         field_dict.update({
             "end": end,
             "maximum_points": maximum_points,
+            "metadata": metadata,
             "node_id": node_id,
             "points": points,
             "resolution": resolution,
             "start": start,
         })
-        if metadata is not UNSET:
-            field_dict["metadata"] = metadata
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -124,6 +116,11 @@ class TelemetryHistoryResponse:
 
 
         maximum_points = d.pop("maximum_points")
+
+        metadata = TelemetryHistoryMetadata.from_dict(d.pop("metadata"))
+
+
+
 
         node_id = d.pop("node_id")
 
@@ -164,26 +161,6 @@ class TelemetryHistoryResponse:
 
 
 
-        def _parse_metadata(data: object) -> Union['TelemetryHistoryMetadata', None, Unset]:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, dict):
-                    raise TypeError()
-                metadata_type_0 = TelemetryHistoryMetadata.from_dict(data)
-
-
-
-                return metadata_type_0
-            except: # noqa: E722
-                pass
-            return cast(Union['TelemetryHistoryMetadata', None, Unset], data)
-
-        metadata = _parse_metadata(d.pop("metadata", UNSET))
-
-
         schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 1 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
@@ -191,11 +168,11 @@ class TelemetryHistoryResponse:
         telemetry_history_response = cls(
             end=end,
             maximum_points=maximum_points,
+            metadata=metadata,
             node_id=node_id,
             points=points,
             resolution=resolution,
             start=start,
-            metadata=metadata,
             schema_version=schema_version,
         )
 

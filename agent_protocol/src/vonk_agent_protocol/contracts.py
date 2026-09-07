@@ -17,12 +17,7 @@ from uuid import UUID
 from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import (
     BaseModel,
-    ConfigDict,
     Field,
-    StrictBool,
-    StrictFloat,
-    StrictInt,
-    StrictStr,
     ValidationError,
     model_validator,
 )
@@ -93,16 +88,6 @@ class AgentProtocolError(ValueError):
     """A protocol message is invalid or outside the agent trust boundary."""
 
 
-type JsonValue = (
-    StrictBool
-    | StrictInt
-    | StrictFloat
-    | StrictStr
-    | None
-    | list[JsonValue]
-    | dict[str, JsonValue]
-)
-JsonObject = dict[str, JsonValue]
 _UUID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -129,13 +114,6 @@ DigestText = Annotated[
 class AgentOperation(StrEnum):
     AGENT_UPGRADE = "agent.upgrade.v1"
     ARTIFACT_DISTRIBUTION = "artifact.distribution.v1"
-    NODE_PROBE = "node.probe"
-    RELEASE_INSTALL = "release.install"
-    WORKLOAD_PREPARE = "workload.prepare"
-    WORKLOAD_START = "workload.start"
-    WORKLOAD_STOP = "workload.stop"
-    WORKLOAD_HEALTH = "workload.health"
-    WORKLOAD_VERIFY = "workload.verify"
     RECIPE_BUILD = "recipe.build.v1"
     RECIPE_IMAGE_IMPORT = "recipe.image.import.v1"
     RECIPE_INSTALL = "recipe.install"
@@ -275,8 +253,11 @@ class ArtifactDistributionResult(WireModel):
 
 
 class AgentFailureResult(WireModel):
-    reason: str | None = Field(default=None, min_length=1, max_length=512)
+    reason: str | None = Field(default=None, min_length=1, max_length=1024)
     error_code: str | None = Field(default=None, min_length=1, max_length=128)
+    summary: str | None = Field(default=None, min_length=1, max_length=1024)
+    uncertain: bool | None = None
+    recovery: str | None = Field(default=None, min_length=1, max_length=128)
     status: Literal["failed"] | None = None
     operation: AgentOperation | None = None
     stage: str | None = Field(default=None, min_length=1, max_length=128)
@@ -288,19 +269,6 @@ class AgentFailureResult(WireModel):
     def requires_failure_identity(self) -> AgentFailureResult:
         if self.reason is None and self.error_code is None:
             raise ValueError("failure result requires reason or error_code")
-        return self
-
-
-class AgentResultExtensions(WireModel):
-    """Bounded operator evidence for result kinds without a typed projection."""
-
-    model_config = ConfigDict(extra="allow", strict=True, frozen=True)
-    __pydantic_extra__: dict[str, JsonValue] = Field(init=False)
-
-    @model_validator(mode="after")
-    def requires_evidence(self) -> AgentResultExtensions:
-        if not self.model_fields_set:
-            raise ValueError("result evidence cannot be empty")
         return self
 
 
@@ -798,74 +766,6 @@ def _attempt_fields(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-class NodeProbePayload(WireModel):
-    """The current Rust node probe has no operation-specific fields."""
-
-    # Probe requests have controller-defined health gates that are intentionally
-    # extensible, while their values still use the strict recursive JSON graph.
-    model_config = ConfigDict(extra="allow", strict=True, frozen=True)
-    __pydantic_extra__: dict[str, JsonValue] = Field(init=False)
-    artifact_digest: DigestText | None = None
-    require_active_nvidia_compute_processes: int | None = Field(
-        default=None, strict=True, ge=0
-    )
-
-
-class ReleaseInstallPayload(WireModel):
-    """Legacy Controller operation with an intentionally empty wire payload."""
-
-
-class WorkloadPreparePayload(WireModel):
-    """Legacy Controller operation with an intentionally empty wire payload."""
-
-
-class WorkloadStartPayload(WireModel):
-    """Legacy Controller operation with an intentionally empty wire payload."""
-
-
-class WorkloadStopPayload(WireModel):
-    """Legacy Controller operation with an intentionally empty wire payload."""
-
-
-class WorkloadHealthPayload(WireModel):
-    """Legacy Controller operation with an intentionally empty wire payload."""
-
-
-class WorkloadVerifyPayload(WireModel):
-    """Legacy Controller operation with an intentionally empty wire payload."""
-
-
-class NodeProbeMemory(WireModel):
-    available_bytes: int = Field(strict=True, ge=0)
-    total_bytes: int = Field(strict=True, ge=0)
-
-
-class NodeProbeAccelerator(WireModel):
-    available: bool
-    active_nvidia_compute_processes: int = Field(strict=True, ge=0)
-
-
-class NodeProbeVonkForgeEvidence(WireModel):
-    schema_version: Literal[1]
-    memory: NodeProbeMemory
-    storage: NodeProbeMemory
-    accelerator: NodeProbeAccelerator
-
-
-class NodeProbeEvidence(WireModel):
-    vonk_forge: NodeProbeVonkForgeEvidence
-    nvidia: dict[str, JsonValue]
-
-
-class NodeProbeResult(WireModel):
-    status: Literal["ok"]
-    evidence: NodeProbeEvidence
-
-
-class NodeProbeHealthResult(WireModel):
-    healthy: bool
-
-
 from .build_import import (
     RecipeBuildEvidence,
     RecipeBuildRequest,
@@ -885,14 +785,7 @@ from .recipe_operations import (
 )
 
 AgentPayload = (
-    NodeProbePayload
-    | ReleaseInstallPayload
-    | WorkloadPreparePayload
-    | WorkloadStartPayload
-    | WorkloadStopPayload
-    | WorkloadHealthPayload
-    | WorkloadVerifyPayload
-    | AgentUpgradePayload
+    AgentUpgradePayload
     | ArtifactDistributionPayload
     | RecipeBuildRequest
     | RecipeImageImportRequest
@@ -904,9 +797,7 @@ AgentPayload = (
     | RecipeModelCleanupPayload
 )
 AgentResultPayload = (
-    NodeProbeResult
-    | NodeProbeHealthResult
-    | AgentInstallResult
+    AgentInstallResult
     | RecipeStartResult
     | RecipeStopResult
     | RecipeUninstallResult
@@ -917,16 +808,8 @@ AgentResultPayload = (
     | ArtifactDistributionResult
     | AgentFailureResult
     | AgentUpgradeResult
-    | AgentResultExtensions
 )
 PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
-    AgentOperation.NODE_PROBE: NodeProbePayload,
-    AgentOperation.RELEASE_INSTALL: ReleaseInstallPayload,
-    AgentOperation.WORKLOAD_PREPARE: WorkloadPreparePayload,
-    AgentOperation.WORKLOAD_START: WorkloadStartPayload,
-    AgentOperation.WORKLOAD_STOP: WorkloadStopPayload,
-    AgentOperation.WORKLOAD_HEALTH: WorkloadHealthPayload,
-    AgentOperation.WORKLOAD_VERIFY: WorkloadVerifyPayload,
     AgentOperation.AGENT_UPGRADE: AgentUpgradePayload,
     AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionPayload,
     AgentOperation.RECIPE_BUILD: RecipeBuildRequest,
@@ -945,13 +828,6 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
 # validate the exact result graph before accepting it.
 RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.AGENT_UPGRADE: AgentUpgradeResult,
-    AgentOperation.NODE_PROBE: NodeProbeResult,
-    AgentOperation.RELEASE_INSTALL: AgentResultExtensions,
-    AgentOperation.WORKLOAD_PREPARE: AgentResultExtensions,
-    AgentOperation.WORKLOAD_START: AgentResultExtensions,
-    AgentOperation.WORKLOAD_STOP: AgentResultExtensions,
-    AgentOperation.WORKLOAD_HEALTH: NodeProbeHealthResult,
-    AgentOperation.WORKLOAD_VERIFY: NodeProbeHealthResult,
     AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionResult,
     AgentOperation.RECIPE_INSTALL: AgentInstallResult,
     AgentOperation.RECIPE_START: RecipeStartResult,
@@ -1235,6 +1111,12 @@ class AgentResult(_ProtocolEnvelopeModel):
     @classmethod
     def parse(cls, raw: Any) -> AgentResult:
         try:
+            if isinstance(raw, Mapping) and isinstance(raw.get("result"), Mapping):
+                _validate_bounded_document(
+                    raw["result"],
+                    name="result",
+                    typed_result_strings=True,
+                )
             return cls.model_validate(raw)
         except AgentProtocolError:
             raise
@@ -1309,52 +1191,6 @@ def _add_protocol_schema_constraints(document: dict[str, Any]) -> None:
 
     constrain_extension_objects(document)
 
-    definitions = document.get("$defs", {})
-    node_probe = definitions.get("NodeProbePayload")
-    if isinstance(node_probe, dict):
-        # Node probe gates are the only flat extension map in the request
-        # graph.  Exclude every other typed operation shape so the public
-        # ``oneOf`` remains truthful despite that bounded extension surface.
-        operation_shapes = []
-        for name, value in definitions.items():
-            if name in {"NodeProbePayload", "AgentOperation"} or not isinstance(
-                value, dict
-            ):
-                continue
-            required = value.get("required")
-            if isinstance(required, list) and required:
-                operation_shapes.append({"required": required})
-        if operation_shapes:
-            node_probe["not"] = {"anyOf": operation_shapes}
-
-    result_extensions = definitions.get("AgentResultExtensions")
-    if isinstance(result_extensions, dict):
-        result_shapes = []
-        for name, value in definitions.items():
-            if name in {"AgentResultExtensions", "AgentOperation"} or not isinstance(
-                value, dict
-            ):
-                continue
-            required = value.get("required")
-            if isinstance(required, list) and required:
-                result_shapes.append({"required": required})
-        result_shapes.append(
-            {"anyOf": [{"required": [name]} for name in ("reason", "error_code", "status")]}
-        )
-        result_extensions["not"] = {"anyOf": result_shapes}
-
-    # Current empty payload operation models are exact empty objects.
-    for name in (
-        "ReleaseInstallPayload",
-        "WorkloadPreparePayload",
-        "WorkloadStartPayload",
-        "WorkloadStopPayload",
-        "WorkloadHealthPayload",
-        "WorkloadVerifyPayload",
-    ):
-        value = definitions.get(name)
-        if isinstance(value, dict):
-            value["maxProperties"] = 0
     properties = document.get("properties", {})
     for name in ("payload", "result"):
         value = properties.get(name)

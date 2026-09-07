@@ -15,7 +15,7 @@ from typing import Union
 if TYPE_CHECKING:
   from ..models.operation_evidence_provenance import OperationEvidenceProvenance
   from ..models.operation_evidence_download import OperationEvidenceDownload
-  from ..models.job_operation_progress import JobOperationProgress
+  from ..models.operation_progress import OperationProgress
   from ..models.operation_failure_evidence import OperationFailureEvidence
   from ..models.operation_recovery import OperationRecovery
 
@@ -40,7 +40,7 @@ class OperationDetailResponse:
             evidence_download (Union['OperationEvidenceDownload', None, Unset]):
             failure (Union['OperationFailureEvidence', None, Unset]):
             parent_id (Union[None, Unset, str]):
-            progress (Union['JobOperationProgress', None, Unset]):
+            progress (Union['OperationProgress', None, Unset]):
             provenance (Union['OperationEvidenceProvenance', None, Unset]):
             recovery (Union['OperationRecovery', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
@@ -56,7 +56,7 @@ class OperationDetailResponse:
     evidence_download: Union['OperationEvidenceDownload', None, Unset] = UNSET
     failure: Union['OperationFailureEvidence', None, Unset] = UNSET
     parent_id: Union[None, Unset, str] = UNSET
-    progress: Union['JobOperationProgress', None, Unset] = UNSET
+    progress: Union['OperationProgress', None, Unset] = UNSET
     provenance: Union['OperationEvidenceProvenance', None, Unset] = UNSET
     recovery: Union['OperationRecovery', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
@@ -69,7 +69,7 @@ class OperationDetailResponse:
     def to_dict(self) -> dict[str, Any]:
         from ..models.operation_evidence_provenance import OperationEvidenceProvenance
         from ..models.operation_evidence_download import OperationEvidenceDownload
-        from ..models.job_operation_progress import JobOperationProgress
+        from ..models.operation_progress import OperationProgress
         from ..models.operation_failure_evidence import OperationFailureEvidence
         from ..models.operation_recovery import OperationRecovery
         attempt = self.attempt
@@ -111,7 +111,7 @@ class OperationDetailResponse:
         progress: Union[None, Unset, dict[str, Any]]
         if isinstance(self.progress, Unset):
             progress = UNSET
-        elif isinstance(self.progress, JobOperationProgress):
+        elif isinstance(self.progress, OperationProgress):
             progress = self.progress.to_dict()
         else:
             progress = self.progress
@@ -176,7 +176,7 @@ class OperationDetailResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.operation_evidence_provenance import OperationEvidenceProvenance
         from ..models.operation_evidence_download import OperationEvidenceDownload
-        from ..models.job_operation_progress import JobOperationProgress
+        from ..models.operation_progress import OperationProgress
         from ..models.operation_failure_evidence import OperationFailureEvidence
         from ..models.operation_recovery import OperationRecovery
         d = dict(src_dict)
@@ -243,7 +243,7 @@ class OperationDetailResponse:
         parent_id = _parse_parent_id(d.pop("parent_id", UNSET))
 
 
-        def _parse_progress(data: object) -> Union['JobOperationProgress', None, Unset]:
+        def _parse_progress(data: object) -> Union['OperationProgress', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -251,14 +251,14 @@ class OperationDetailResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                progress_type_0 = JobOperationProgress.from_dict(data)
+                progress_type_0 = OperationProgress.from_dict(data)
 
 
 
                 return progress_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['JobOperationProgress', None, Unset], data)
+            return cast(Union['OperationProgress', None, Unset], data)
 
         progress = _parse_progress(d.pop("progress", UNSET))
 

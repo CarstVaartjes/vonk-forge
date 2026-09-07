@@ -1,5 +1,6 @@
 import {act, fireEvent, render, screen, within} from "@testing-library/react";
 import type {ControlApi, TelemetryPoint, VisualFleetNode, VisualFleetSnapshot} from "../api/types";
+import {historyMetadata, telemetryMetrics} from "../test-fixtures/telemetry";
 import {App} from "../app";
 import {ENROLLMENT_GRANT_TTL_SECONDS, FLEET_VIEW_STORAGE_KEY, FleetPage} from "./fleet";
 
@@ -36,7 +37,7 @@ function sample(nodeId: string, observedAt: string, gpu = 10): TelemetryPoint {
     gpu_utilization_percent: gpu, gpu_memory_total_bytes: 100 * GIB, gpu_memory_free_bytes: 70 * GIB,
     temperature_c: 42, power_watts: 18,
     network_receive_bytes_per_second: 1024, network_transmit_bytes_per_second: 512,
-    gap_samples: 0, details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"},
+    gap_samples: 0, details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"}, metrics: telemetryMetrics(observedAt),
   };
 }
 
@@ -58,7 +59,7 @@ function snapshot(nodes: VisualFleetNode[], cursor = 5): VisualFleetSnapshot {
 
 function control(
   visualFleet: ControlApi["visualFleet"],
-  history: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, resolution, maximumPoints) => ({schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, points: []}),
+  history: ControlApi["nodeTelemetryHistory"] = async (nodeId, start, end, resolution, maximumPoints) => ({schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints, metadata: historyMetadata(start, end, resolution, 0), points: []}),
   updateNodeProfile: ControlApi["updateNodeProfile"] = async (nodeId, input) => ({id: nodeId, display_name: input.display_name, hostname: `${nodeId}.internal`, ip_address: null}),
 ): ControlApi {
   return {
@@ -270,6 +271,7 @@ test("defaults card trends to 24h, supports the four bounded ranges, and appends
     historyCalls.push({maximumPoints, resolution, start});
     return {
       schema_version: 1, node_id: nodeId, start, end, resolution, maximum_points: maximumPoints,
+      metadata: historyMetadata(start, end, resolution, 1),
       points: [{...alpha.telemetry!.sample, id: "history-sample", gpu_utilization_percent: 41}],
     };
   };

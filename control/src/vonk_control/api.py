@@ -228,8 +228,6 @@ def build_agent_services(
         operations = AgentJobService(
             sessions,
             clock=clock,
-            revision_eligible=revision_eligible,
-            current_revision=current_revision,
         )
         policy = ManagementAddressPolicy.parse(
             settings.management_cidrs or "127.0.0.1/32",
@@ -310,8 +308,6 @@ def build_agent_services(
     operations = AgentJobService(
         sessions,
         clock=clock,
-        revision_eligible=revision_eligible,
-        current_revision=current_revision,
     )
     operations.set_contact_consumer(presence.observe_in_session)
     helper_authority = None
@@ -455,7 +451,6 @@ def create_app(
     jobs: JobQueue,
     tokens: TokenCodec,
     audits: AuditSink,
-    fleet: Callable[[], Mapping[str, object]],
     fleet_projection: Any | None = None,
     fleet_stream: Any | None = None,
     library_projection: Any | None = None,
@@ -1637,10 +1632,6 @@ def production_app() -> FastAPI:
 
     recipe_route_runtime = AtomicRouteBundlePublisher(
         Path("/routes"),
-        management_policy=ManagementAddressPolicy.parse(
-            settings.management_cidrs,
-            forbidden_cidrs=settings.direct_fabric_cidrs,
-        ),
         clock=clock,
         maximum_lease_seconds=300,
         await_supervisor_ack=FileSupervisorAcknowledger(
@@ -1745,10 +1736,13 @@ def production_app() -> FastAPI:
         operational_metrics.refresh()
         refresh_fleet_metrics(metrics, visual_fleet.read())
         with sessions() as session:
-            for kind, state, count in session.execute(
-                select(Job.kind, Job.state, func.count()).group_by(Job.kind, Job.state)
-            ):
-                metrics.set_job_count(kind, state, count)
+            metrics.replace_job_counts(
+                session.execute(
+                    select(Job.kind, Job.state, func.count()).group_by(
+                        Job.kind, Job.state
+                    )
+                )
+            )
         backup_marker = settings.state_path / "last-successful-backup.epoch"
         if backup_marker.is_file() and not backup_marker.is_symlink():
             try:
@@ -1790,7 +1784,6 @@ def production_app() -> FastAPI:
         jobs=job_service,
         tokens=token_codec,
         audits=audits_store,
-        fleet=visual_fleet.read,
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,

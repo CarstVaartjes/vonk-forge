@@ -234,6 +234,7 @@ def install_catalog_routes(
 
     @app.get(
         "/api/v1/catalog/source-bundles/{sha256}",
+        response_class=Response,
         responses={
             200: {
                 "content": {

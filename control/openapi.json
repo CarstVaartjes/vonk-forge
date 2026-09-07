@@ -4317,35 +4317,6 @@
         "title": "FleetSnapshot",
         "type": "object"
       },
-      "FleetStatusResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "authority_revision": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Authority Revision",
-            "type": "string"
-          },
-          "evidence_digest": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Evidence Digest",
-            "type": "string"
-          },
-          "nodes": {
-            "items": {
-              "$ref": "#/components/schemas/NodeStatus"
-            },
-            "title": "Nodes",
-            "type": "array"
-          }
-        },
-        "required": [
-          "authority_revision",
-          "nodes",
-          "evidence_digest"
-        ],
-        "title": "FleetStatusResponse",
-        "type": "object"
-      },
       "FreshnessEvidence": {
         "additionalProperties": false,
         "properties": {
@@ -5317,18 +5288,6 @@
           "progress": {
             "$ref": "#/components/schemas/JobProgress"
           },
-          "reconciliation_id": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reconciliation Id"
-          },
           "state": {
             "maxLength": 80,
             "minLength": 1,
@@ -5416,133 +5375,6 @@
         "title": "JobLogsResponse",
         "type": "object"
       },
-      "JobOperationProgress": {
-        "additionalProperties": false,
-        "properties": {
-          "bytes_per_second": {
-            "anyOf": [
-              {
-                "maximum": 1000000000000000.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Bytes Per Second"
-          },
-          "checkpoint": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OperationCheckpoint"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "completed_bytes": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed Bytes"
-          },
-          "eta_seconds": {
-            "anyOf": [
-              {
-                "maximum": 1000000000.0,
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Eta Seconds"
-          },
-          "kind": {
-            "anyOf": [
-              {
-                "maxLength": 80,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Kind"
-          },
-          "members": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/OperationMemberProgress"
-                },
-                "maxItems": 1024,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Members"
-          },
-          "object_sha256": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Object Sha256"
-          },
-          "phase": {
-            "maxLength": 80,
-            "minLength": 1,
-            "title": "Phase",
-            "type": "string"
-          },
-          "total_bytes": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Bytes"
-          },
-          "total_bytes_known": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Bytes Known"
-          }
-        },
-        "required": [
-          "phase"
-        ],
-        "title": "JobOperationProgress",
-        "type": "object"
-      },
       "JobOperationResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5571,18 +5403,6 @@
               }
             ]
           },
-          "graph_operation_id": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Graph Operation Id"
-          },
           "id": {
             "maxLength": 128,
             "minLength": 1,
@@ -5603,7 +5423,7 @@
           "progress": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/JobOperationProgress"
+                "$ref": "#/components/schemas/OperationProgress"
               },
               {
                 "type": "null"
@@ -10294,232 +10114,9 @@
         "title": "NodeProfileUpdateRequest",
         "type": "object"
       },
-      "NodeStatus": {
-        "additionalProperties": false,
-        "properties": {
-          "agent_binary_digest": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Binary Digest"
-          },
-          "agent_build_digest": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Build Digest"
-          },
-          "agent_last_seen_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Last Seen At"
-          },
-          "agent_online": {
-            "default": false,
-            "title": "Agent Online",
-            "type": "boolean"
-          },
-          "agent_semantic_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Semantic Version"
-          },
-          "agent_state": {
-            "default": "unregistered",
-            "title": "Agent State",
-            "type": "string"
-          },
-          "certificate_expires_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Certificate Expires At"
-          },
-          "certificate_expiry_seconds": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Certificate Expiry Seconds"
-          },
-          "compatibility": {
-            "default": "unknown",
-            "title": "Compatibility",
-            "type": "string"
-          },
-          "disk_available_bytes": {
-            "minimum": 0.0,
-            "title": "Disk Available Bytes",
-            "type": "integer"
-          },
-          "display_name": {
-            "title": "Display Name",
-            "type": "string"
-          },
-          "health_probe_stale": {
-            "description": "True when explicit node.probe evidence is missing or older than the Controller health-probe window. This is not aggregate node readiness; use Fleet connection, inventory, and telemetry fields for live readiness.",
-            "title": "Health Probe Stale",
-            "type": "boolean"
-          },
-          "healthy": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Health state from the latest explicit node.probe compute gate; null when no completed probe is available.",
-            "title": "Healthy"
-          },
-          "hostname": {
-            "title": "Hostname",
-            "type": "string"
-          },
-          "id": {
-            "pattern": "^spk_[0-9a-f]{32}$",
-            "title": "Id",
-            "type": "string"
-          },
-          "inventory_age_seconds": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inventory Age Seconds"
-          },
-          "inventory_capabilities": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 64,
-            "title": "Inventory Capabilities",
-            "type": "array"
-          },
-          "inventory_observed_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inventory Observed At"
-          },
-          "inventory_stale": {
-            "default": true,
-            "title": "Inventory Stale",
-            "type": "boolean"
-          },
-          "labels": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Labels",
-            "type": "object"
-          },
-          "last_seen_age_seconds": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Seen Age Seconds"
-          },
-          "last_seen_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Seen At"
-          },
-          "lifecycle": {
-            "title": "Lifecycle",
-            "type": "string"
-          },
-          "memory_available_bytes": {
-            "minimum": 0.0,
-            "title": "Memory Available Bytes",
-            "type": "integer"
-          },
-          "probe_age_seconds": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Age of the latest completed explicit node.probe compute gate, or null when no probe evidence is available.",
-            "title": "Probe Age Seconds"
-          }
-        },
-        "required": [
-          "id",
-          "display_name",
-          "hostname",
-          "lifecycle",
-          "healthy",
-          "health_probe_stale",
-          "labels",
-          "memory_available_bytes",
-          "disk_available_bytes"
-        ],
-        "title": "NodeStatus",
-        "type": "object"
-      },
       "OperationCheckpoint": {
         "additionalProperties": false,
-        "description": "A restart-safe cursor identifying the last completed durable unit.",
+        "description": "Restart-safe cursor identifying a durable operation unit.",
         "properties": {
           "cursor": {
             "anyOf": [
@@ -10634,7 +10231,7 @@
           "progress": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/JobOperationProgress"
+                "$ref": "#/components/schemas/OperationProgress"
               },
               {
                 "type": "null"
@@ -10864,11 +10461,36 @@
             ],
             "title": "Eta Seconds"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
           "member_id": {
             "maxLength": 128,
             "minLength": 1,
             "title": "Member Id",
             "type": "string"
+          },
+          "object_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Sha256"
           },
           "phase": {
             "maxLength": 80,
@@ -10905,7 +10527,7 @@
       },
       "OperationProgress": {
         "additionalProperties": false,
-        "description": "Canonical progress payload persisted on the current operation attempt.",
+        "description": "Canonical durable progress payload shared by Controller and agents.",
         "properties": {
           "bytes_per_second": {
             "anyOf": [
@@ -12288,7 +11910,7 @@
         "title": "RecipeBuildDefinition",
         "type": "object"
       },
-      "RecipeBuildEvidence": {
+      "RecipeBuildEvidence-Output": {
         "additionalProperties": false,
         "properties": {
           "build_id": {
@@ -16142,7 +15764,7 @@
             "type": "array"
           },
           "build": {
-            "$ref": "#/components/schemas/RecipeBuildEvidence"
+            "$ref": "#/components/schemas/RecipeBuildEvidence-Output"
           },
           "conflicts": {
             "items": {
@@ -17796,7 +17418,6 @@
       },
       "TelemetryCapability": {
         "additionalProperties": false,
-        "description": "Capability inventory, including explicitly unsupported sensors.",
         "properties": {
           "device_id": {
             "anyOf": [
@@ -17833,6 +17454,10 @@
           "key": {
             "maxLength": 96,
             "minLength": 1,
+            "not": {
+              "pattern": "[\\x00-\\x1f\\x7f]"
+            },
+            "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
             "title": "Key",
             "type": "string"
           },
@@ -17929,6 +17554,10 @@
           "source": {
             "maxLength": 128,
             "minLength": 1,
+            "not": {
+              "pattern": "[\\x00-\\x1f\\x7f]"
+            },
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
             "title": "Source",
             "type": "string"
           },
@@ -18003,7 +17632,7 @@
         "title": "TelemetryCurrentResponse",
         "type": "object"
       },
-      "TelemetryDetails": {
+      "TelemetryDetails-Output": {
         "additionalProperties": false,
         "properties": {
           "accelerator_name": {
@@ -18151,14 +17780,7 @@
             "type": "integer"
           },
           "metadata": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TelemetryHistoryMetadata"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/TelemetryHistoryMetadata"
           },
           "node_id": {
             "pattern": "^spk_[0-9a-f]{32}$",
@@ -18208,7 +17830,8 @@
           "end",
           "resolution",
           "maximum_points",
-          "points"
+          "points",
+          "metadata"
         ],
         "title": "TelemetryHistoryResponse",
         "type": "object"
@@ -18340,7 +17963,7 @@
             "title": "Scope"
           },
           "source": {
-            "default": "legacy",
+            "default": "controller-derived",
             "maxLength": 128,
             "minLength": 1,
             "title": "Source",
@@ -18365,7 +17988,6 @@
       },
       "TelemetryMetrics": {
         "additionalProperties": false,
-        "description": "Rich per-sample metrics kept alongside legacy scalar columns.",
         "properties": {
           "capabilities": {
             "items": {
@@ -18388,7 +18010,6 @@
           },
           "schema_version": {
             "const": 2,
-            "default": 2,
             "title": "Schema Version",
             "type": "integer"
           },
@@ -18410,6 +18031,7 @@
           }
         },
         "required": [
+          "schema_version",
           "series",
           "capabilities",
           "runtimes",
@@ -18441,7 +18063,7 @@
             "title": "Cpu Utilization Percent"
           },
           "details": {
-            "$ref": "#/components/schemas/TelemetryDetails"
+            "$ref": "#/components/schemas/TelemetryDetails-Output"
           },
           "disk_free_bytes": {
             "anyOf": [
@@ -18559,14 +18181,7 @@
             "title": "Memory Total Bytes"
           },
           "metrics": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TelemetryMetrics"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/TelemetryMetrics"
           },
           "network_receive_bytes_per_second": {
             "anyOf": [
@@ -18650,7 +18265,8 @@
           "observed_at",
           "received_at",
           "gap_samples",
-          "details"
+          "details",
+          "metrics"
         ],
         "title": "TelemetryPoint",
         "type": "object"
@@ -18661,12 +18277,20 @@
           "collector": {
             "maxLength": 64,
             "minLength": 1,
+            "not": {
+              "pattern": "[\\x00-\\x1f\\x7f]"
+            },
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
             "title": "Collector",
             "type": "string"
           },
           "collector_version": {
             "maxLength": 64,
             "minLength": 1,
+            "not": {
+              "pattern": "[\\x00-\\x1f\\x7f]"
+            },
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
             "title": "Collector Version",
             "type": "string"
           },
@@ -18765,7 +18389,6 @@
       },
       "TelemetryRuntime": {
         "additionalProperties": false,
-        "description": "Controller-owned runtime identity and adapter support summary.",
         "properties": {
           "adapter": {
             "maxLength": 64,
@@ -18959,11 +18582,14 @@
       },
       "TelemetrySeries": {
         "additionalProperties": false,
-        "description": "One sampled or configured metric in canonical units.",
         "properties": {
           "aggregation": {
             "maxLength": 32,
             "minLength": 1,
+            "not": {
+              "pattern": "[\\x00-\\x1f\\x7f]"
+            },
+            "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
             "title": "Aggregation",
             "type": "string"
           },
@@ -19012,6 +18638,10 @@
           "key": {
             "maxLength": 96,
             "minLength": 1,
+            "not": {
+              "pattern": "[\\x00-\\x1f\\x7f]"
+            },
+            "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
             "title": "Key",
             "type": "string"
           },
@@ -19125,6 +18755,10 @@
           "source": {
             "maxLength": 128,
             "minLength": 1,
+            "not": {
+              "pattern": "[\\x00-\\x1f\\x7f]"
+            },
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$",
             "title": "Source",
             "type": "string"
           },
@@ -19147,12 +18781,15 @@
           "value": {
             "anyOf": [
               {
+                "maximum": 9.223372036854776e+18,
+                "minimum": -9.223372036854776e+18,
                 "type": "integer"
               },
               {
                 "type": "number"
               },
               {
+                "maxLength": 256,
                 "type": "string"
               },
               {
@@ -19212,7 +18849,6 @@
       },
       "TelemetryWorkload": {
         "additionalProperties": false,
-        "description": "Sanitized request/job correlation to the actual serving placement.",
         "properties": {
           "created_at": {
             "anyOf": [
@@ -21659,9 +21295,6 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
-                "schema": {}
-              },
               "application/vnd.vonk-forge.source-bundle.v1+tar": {
                 "schema": {
                   "format": "binary",
@@ -21707,7 +21340,8 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Download Source Bundle"
+        "summary": "Download Source Bundle",
+        "x-vonk-streaming-transport": true
       },
       "put": {
         "operationId": "uploadRecipeSourceBundle",
@@ -23751,7 +23385,8 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Job Log Content"
+        "summary": "Job Log Content",
+        "x-vonk-streaming-transport": true
       }
     },
     "/api/v1/jobs/{job_id}/resume": {
@@ -25912,40 +25547,6 @@
           }
         ],
         "summary": "Get Updates"
-      }
-    },
-    "/api/v1/nodes/status": {
-      "get": {
-        "description": "Returns the node health-probe projection. The health_probe_stale field refers only to explicit node.probe compute-gate evidence, not aggregate Fleet readiness. Use /api/v1/fleet for live connection, inventory, and telemetry readiness.",
-        "operationId": "getNodeStatuses",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FleetStatusResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BoundedErrorResponse"
-                }
-              }
-            },
-            "description": "Unauthorized"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Read explicit node health-probe evidence"
       }
     },
     "/api/v1/nodes/{node_id}/profile": {

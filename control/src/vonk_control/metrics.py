@@ -6,7 +6,7 @@ import math
 import re
 import threading
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -98,6 +98,7 @@ class MetricsRegistry:
                 int | None,
                 int | None,
                 float | None,
+                float | None,
             ],
         ] = {}
         self._jobs: dict[tuple[str, str], int] = {}
@@ -132,6 +133,7 @@ class MetricsRegistry:
                 int | None,
                 int | None,
                 float | None,
+                float | None,
             ],
         ] = {}
         for node in snapshot.nodes:
@@ -146,6 +148,9 @@ class MetricsRegistry:
                 None if inventory is None else inventory.host_memory_free_bytes,
                 None if inventory is None else inventory.disk_free_bytes,
                 None if telemetry is None else telemetry.age_seconds,
+                None
+                if telemetry is None
+                else telemetry.sample.gpu_utilization_percent,
             )
         with self._lock:
             self._nodes = nodes
@@ -156,6 +161,17 @@ class MetricsRegistry:
         bounded = int(self._number(count, "job count"))
         with self._lock:
             self._jobs[(safe_kind, safe_state)] = bounded
+
+    def replace_job_counts(self, rows: Iterable[tuple[str, str, int]]) -> None:
+        """Atomically replace job counts with bounded, aggregated labels."""
+
+        jobs: dict[tuple[str, str], int] = defaultdict(int)
+        for kind, state, count in rows:
+            safe_kind = kind if kind in _JOB_KINDS else "other"
+            safe_state = state if state in _JOB_STATES else "other"
+            jobs[(safe_kind, safe_state)] += int(self._number(count, "job count"))
+        with self._lock:
+            self._jobs = dict(jobs)
 
     def set_route_state(self, state: str) -> None:
         if state not in _ROUTE_STATES:
@@ -250,6 +266,8 @@ class MetricsRegistry:
             "# TYPE vonk_node_inventory_freshness gauge",
             "# HELP vonk_node_telemetry_freshness Current telemetry freshness.",
             "# TYPE vonk_node_telemetry_freshness gauge",
+            "# HELP vonk_node_telemetry_gpu_utilization_percent Current typed GPU utilization telemetry.",
+            "# TYPE vonk_node_telemetry_gpu_utilization_percent gauge",
         ))
         for node_id, (
             connection_state,
@@ -259,6 +277,7 @@ class MetricsRegistry:
             memory,
             disk,
             telemetry_age,
+            gpu_utilization,
         ) in sorted(nodes.items()):
             label = f'node_id="{node_id}"'
             for state in _CONNECTION_STATES:
@@ -287,6 +306,11 @@ class MetricsRegistry:
                 lines.append(f"vonk_node_inventory_disk_free_bytes{{{label}}} {disk}")
             if telemetry_age is not None:
                 lines.append(f"vonk_node_telemetry_age_seconds{{{label}}} {telemetry_age:g}")
+            if gpu_utilization is not None:
+                lines.append(
+                    f"vonk_node_telemetry_gpu_utilization_percent{{{label}}} "
+                    f"{gpu_utilization:g}"
+                )
         lines.extend(("# HELP vonk_jobs Number of control jobs by bounded kind and state.", "# TYPE vonk_jobs gauge"))
         for (kind, state), count in sorted(jobs.items()):
             lines.append(f'vonk_jobs{{kind="{kind}",state="{state}"}} {count}')

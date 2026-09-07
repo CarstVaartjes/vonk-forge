@@ -621,7 +621,6 @@ def _read_spec_endpoint(sessions: sessionmaker[Session], tmp_path: Path, install
         jobs=_NoopJobs(),
         tokens=TokenCodec(b"k" * 32),
         audits=MemoryAuditStore(),
-        fleet=dict,
         now=lambda: int(NOW.timestamp()),
         agent=services,
         trusted_agent_proxy_auth=b"p" * 32,
