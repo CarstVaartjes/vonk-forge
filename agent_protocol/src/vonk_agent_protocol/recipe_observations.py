@@ -14,7 +14,11 @@ from typing import Annotated, Any, Literal
 from pydantic import Field, field_serializer, field_validator, model_validator
 
 from .contracts import AgentProtocolError, canonical_message
-from .host_helper import SignedHostHelperGrant, SignedRecipeRunObservationReceipt
+from .host_helper import (
+    ExecuteContainerRuntimeRequestOperation,
+    SignedHostHelperGrant,
+    SignedRecipeRunObservationReceipt,
+)
 from .wire_model import WireModel
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -52,9 +56,9 @@ class RecipeRunObservationWire(WireModel):
     rank: int = Field(ge=0, le=1023, strict=True)
     role: str = Field(min_length=1, max_length=64)
     world_size: int = Field(ge=1, le=1024, strict=True)
-    local_address: str = Field(min_length=2, max_length=45)
-    master_address: str = Field(min_length=2, max_length=45)
-    master_port: int = Field(ge=1024, le=65535, strict=True)
+    local_address: str | None = Field(min_length=2, max_length=45)
+    master_address: str | None = Field(min_length=2, max_length=45)
+    master_port: int | None = Field(ge=1024, le=65535, strict=True)
     port: int = Field(ge=1024, le=65535, strict=True)
     runtime_arguments_sha256: Digest
     observed_at: datetime
@@ -85,7 +89,9 @@ class RecipeRunObservationWire(WireModel):
 
     @field_validator("local_address", "master_address")
     @classmethod
-    def valid_address(cls, value: str) -> str:
+    def valid_address(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         import ipaddress
 
         try:
@@ -98,13 +104,38 @@ class RecipeRunObservationWire(WireModel):
     def exact_receipt_binding(self) -> RecipeRunObservationWire:
         if self.rank >= self.world_size:
             raise ValueError("recipe run observation rank is invalid")
+        singleton = self.world_size == 1
+        if singleton != (
+            self.local_address is None
+            and self.master_address is None
+            and self.master_port is None
+        ):
+            raise ValueError("recipe run observation rendezvous is invalid")
         if (self.local_address == self.master_address) != (
             self.endpoint_ready is not None
         ):
             raise ValueError("recipe run observation endpoint readiness is invalid")
         if self.helper_receipt.claims.node_id != self.node_id:
             raise ValueError("recipe run observation receipt node is invalid")
-        if self.helper_receipt.claims.observation_identity_sha256 != self.observation_identity_sha256:
+        if self.grant.claims.node_id != self.node_id:
+            raise ValueError("recipe run observation grant node is invalid")
+        if self.grant.claims.request_id != self.helper_receipt.claims.request_id:
+            raise ValueError("recipe run observation grant request is invalid")
+        operation = self.grant.claims.operation
+        if not isinstance(operation, ExecuteContainerRuntimeRequestOperation):
+            raise TypeError("recipe run observation grant operation is invalid")
+        if (
+            operation.action != "run-inspect"
+            or operation.job_id != self.run_id
+            or operation.attempt != self.run_generation
+            or operation.request_sha256 != self.helper_receipt.claims.request_sha256
+            or operation.observation_identity_sha256 != self.observation_identity_sha256
+        ):
+            raise ValueError("recipe run observation grant binding is invalid")
+        if (
+            self.helper_receipt.claims.observation_identity_sha256
+            != self.observation_identity_sha256
+        ):
             raise ValueError("recipe run observation receipt identity is invalid")
         if self.observed_at.timestamp() != self.helper_receipt.claims.observed_at:
             raise ValueError("recipe run observation receipt time is invalid")
@@ -113,9 +144,12 @@ class RecipeRunObservationWire(WireModel):
         ).hexdigest()
         if self.helper_receipt.signature.key_id != expected_key_id:
             raise ValueError("recipe run observation receipt key is invalid")
-        if self.observation_identity_sha256 != hashlib.sha256(
-            canonical_message(self.observation_identity())
-        ).hexdigest():
+        if (
+            self.observation_identity_sha256
+            != hashlib.sha256(
+                canonical_message(self.observation_identity())
+            ).hexdigest()
+        ):
             raise ValueError("recipe run observation identity is invalid")
         return self
 
@@ -175,7 +209,63 @@ class RecipeRunObservationsWire(WireModel):
         try:
             return cls.model_validate_json(canonical_message(value))
         except Exception as error:
-            raise AgentProtocolError("recipe run observation snapshot is invalid") from error
+            raise AgentProtocolError(
+                "recipe run observation snapshot is invalid"
+            ) from error
+
+
+class RecipeRunObservationGrantRequest(WireModel):
+    """Exact Controller request that authorizes one runtime inspection."""
+
+    schema_version: Literal[1]
+    node_id: str = Field(pattern=_NODE)
+    run_id: str = Field(pattern=_UUID4)
+    installation_id: str = Field(pattern=_UUID4)
+    recipe_revision_id: str = Field(pattern=_UUID4)
+    recipe_content_sha256: Digest
+    mapping_id: str = Field(pattern=_UUID4)
+    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
+    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
+    image_digest: Digest
+    artifact_set_digest: Digest
+    model_identity: str = Field(min_length=3, max_length=1024)
+    rank: int = Field(ge=0, le=1023, strict=True)
+    role: str = Field(min_length=1, max_length=64)
+    world_size: int = Field(ge=1, le=1024, strict=True)
+    local_address: str | None = Field(min_length=2, max_length=45)
+    master_address: str | None = Field(min_length=2, max_length=45)
+    master_port: int | None = Field(ge=1024, le=65535, strict=True)
+    port: int = Field(ge=1024, le=65535, strict=True)
+    runtime_arguments_sha256: Digest
+    job_id: str = Field(pattern=_UUID4)
+    operation_id: str = Field(pattern=_UUID4)
+    attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
+    fence: str = Field(pattern=_UUID4)
+    request_sha256: Digest
+    expires_in_seconds: Literal[10]
+
+    @model_validator(mode="after")
+    def exact_rendezvous(self) -> RecipeRunObservationGrantRequest:
+        singleton = self.world_size == 1
+        if singleton != (
+            self.local_address is None
+            and self.master_address is None
+            and self.master_port is None
+        ):
+            raise ValueError("recipe run observation rendezvous is invalid")
+        return self
+
+    def observation_identity(self) -> dict[str, object]:
+        return self.model_dump(
+            exclude={
+                "job_id",
+                "operation_id",
+                "attempt",
+                "fence",
+                "request_sha256",
+                "expires_in_seconds",
+            }
+        )
 
 
 class RecipeRunObservationGrantWire(WireModel):
@@ -188,6 +278,7 @@ class RecipeRunObservationGrantWire(WireModel):
 
 __all__ = [
     "RECIPE_RUN_OBSERVATION_SCHEMA_VERSION",
+    "RecipeRunObservationGrantRequest",
     "RecipeRunObservationGrantWire",
     "RecipeRunObservationWire",
     "RecipeRunObservationsWire",

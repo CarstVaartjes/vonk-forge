@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 from pathlib import Path
 
 import pytest
-from vonk_agent_protocol import RecipeRunObservationsWire
+from vonk_agent_protocol import RecipeRunObservationsWire, canonical_message
 
 from agent_protocol.tests.test_recipe_observations import _observation
 
@@ -43,12 +44,48 @@ def recipe_observation_wire_probe() -> Path:
     return path
 
 
+@pytest.mark.parametrize("singleton", [False, True])
 def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
     recipe_observation_wire_probe: Path,
+    singleton: bool,
 ) -> None:
+    payload = _observation()
+    if singleton:
+        payload.update(
+            {
+                "rank": 0,
+                "role": "entrypoint",
+                "world_size": 1,
+                "local_address": None,
+                "master_address": None,
+                "master_port": None,
+                "endpoint_ready": True,
+            }
+        )
+        identity = {
+            key: value
+            for key, value in payload.items()
+            if key
+            not in {
+                "observed_at",
+                "endpoint_ready",
+                "observation_identity_sha256",
+                "grant",
+                "helper_receipt",
+                "observation_receipt_public_key",
+            }
+        }
+        identity_sha256 = hashlib.sha256(canonical_message(identity)).hexdigest()
+        payload["observation_identity_sha256"] = identity_sha256
+        payload["grant"]["claims"]["operation"]["observation_identity_sha256"] = (
+            identity_sha256  # type: ignore[index]
+        )
+        payload["helper_receipt"]["claims"]["observation_identity_sha256"] = (
+            identity_sha256  # type: ignore[index]
+        )
     completed = subprocess.run(
         [str(recipe_observation_wire_probe)],
-        input=json.dumps(_observation(), separators=(",", ":")) + "\n",
+        input=json.dumps(payload, separators=(",", ":")) + "\n",
         text=True,
         capture_output=True,
         check=False,
@@ -60,3 +97,4 @@ def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
     assert parsed.schema_version == 2
     assert len(parsed.runs) == 1
     assert parsed.runs[0].helper_receipt.signature.algorithm == "ed25519"
+    assert parsed.runs[0].world_size == (1 if singleton else 2)

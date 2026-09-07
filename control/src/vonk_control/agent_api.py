@@ -38,6 +38,7 @@ from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
     DistributionAssignment,
+    RecipeRunObservationGrantRequest,
     RecipeRunObservationGrantWire,
     RecipeRunObservationsWire,
     SignedHostHelperGrant,
@@ -640,48 +641,6 @@ class InventoryRequest(StrictJSONModel):
         ):
             raise ValueError("inventory evidence is inconsistent")
         return self
-
-
-class RecipeRunObservationGrantRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1]
-    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
-    run_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    installation_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    recipe_revision_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    mapping_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    mapping_generation: int = Field(ge=1, le=2**63 - 1, strict=True)
-    run_generation: int = Field(ge=1, le=2**31 - 1, strict=True)
-    image_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    artifact_set_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
-    model_identity: str = Field(min_length=3, max_length=1024)
-    rank: int = Field(ge=0, le=1023, strict=True)
-    role: str = Field(min_length=1, max_length=64)
-    world_size: int = Field(ge=1, le=1024, strict=True)
-    local_address: str = Field(min_length=2, max_length=45)
-    master_address: str = Field(min_length=2, max_length=45)
-    master_port: int = Field(ge=1024, le=65535, strict=True)
-    port: int = Field(ge=1024, le=65535, strict=True)
-    runtime_arguments_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    job_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    operation_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
-    fence: str = Field(pattern=r"^[0-9a-f-]{36}$")
-    request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    expires_in_seconds: Literal[10]
-
-    def observation_identity(self) -> dict[str, object]:
-        return self.model_dump(
-            exclude={
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "request_sha256",
-                "expires_in_seconds",
-            }
-        )
 
 
 class TelemetryDetailsRequest(StrictJSONModel):

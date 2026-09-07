@@ -594,13 +594,12 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let observation = identity
             .map(|identity| {
                 let (local_address, master_address, master_port) = if placement.world_size == 1 {
-                    let endpoint = placement.endpoint_address.ok_or(OciError::Artifact)?;
-                    (endpoint, endpoint, placement.port)
+                    (None, None, None)
                 } else {
                     (
-                        placement.local_address.ok_or(OciError::Artifact)?,
-                        placement.master_address.ok_or(OciError::Artifact)?,
-                        placement.master_port.ok_or(OciError::Artifact)?,
+                        Some(placement.local_address.ok_or(OciError::Artifact)?),
+                        Some(placement.master_address.ok_or(OciError::Artifact)?),
+                        Some(placement.master_port.ok_or(OciError::Artifact)?),
                     )
                 };
                 if identity.mapping_generation == 0
@@ -888,24 +887,24 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 || binding.rank != placement.rank
                 || binding.role != placement.role
                 || binding.world_size != placement.world_size
-                || Some(binding.local_address)
-                    != (if placement.world_size == 1 {
-                        placement.endpoint_address
+                || binding.local_address
+                    != if placement.world_size == 1 {
+                        None
                     } else {
                         placement.local_address
-                    })
-                || Some(binding.master_address)
-                    != (if placement.world_size == 1 {
-                        placement.endpoint_address
+                    }
+                || binding.master_address
+                    != if placement.world_size == 1 {
+                        None
                     } else {
                         placement.master_address
-                    })
-                || Some(binding.master_port)
-                    != (if placement.world_size == 1 {
-                        Some(placement.port)
+                    }
+                || binding.master_port
+                    != if placement.world_size == 1 {
+                        None
                     } else {
                         placement.master_port
-                    })
+                    }
                 || binding.port != placement.port
                 || binding.recipe_content_sha256 != self.recipe_digest(&installation_id)?
                 || binding.artifact_set_digest != self.artifact_set_digest(&installation_id)?
@@ -1984,6 +1983,7 @@ mod tests {
         time::Duration,
     };
     use tempfile::tempdir;
+    use uuid::Uuid;
 
     struct NoProcess;
 
@@ -2160,6 +2160,56 @@ mod tests {
 
     fn authorize_installation(installation: &Path, recipe_digest: &str) {
         fs::write(installation.join("recipe-content.sha256"), recipe_digest).unwrap();
+    }
+
+    #[test]
+    fn singleton_start_persists_authoritative_observation_binding_without_rendezvous_defaults() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        let recipe_digest = "9".repeat(64);
+        authorize_installation(&installation, &recipe_digest);
+        let run_id = Uuid::new_v4().to_string();
+        let placement: crate::workloads::Placement =
+            serde_json::from_value(serde_json::to_value(&plan.runtime.placement).unwrap()).unwrap();
+        let identity = super::RecipeRunStartIdentity {
+            mapping_generation: 12,
+            mapping_id: Uuid::new_v4(),
+            recipe_content_sha256: recipe_digest,
+            recipe_revision_id: Uuid::new_v4(),
+            run_generation: 7,
+        };
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+
+        runtime
+            .prepare_start_with_inspection_identity(
+                &plan,
+                &installation_id,
+                &run_id,
+                &placement,
+                &identity,
+            )
+            .unwrap();
+
+        let lifecycle: Value = serde_json::from_slice(
+            &fs::read(
+                data.path()
+                    .join("run-metadata")
+                    .join(&run_id)
+                    .join("lifecycle.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let observation = lifecycle["observation"].clone();
+        assert!(observation["local_address"].is_null());
+        assert!(observation["master_address"].is_null());
+        assert!(observation["master_port"].is_null());
+        assert_eq!(observation["run_generation"], 7);
+        assert_eq!(observation["mapping_generation"], 12);
+        let binding: vonk_agent_protocol::RecipeRunInspectionBinding =
+            serde_json::from_value(observation).unwrap();
+        binding.validate().unwrap();
     }
 
     #[test]

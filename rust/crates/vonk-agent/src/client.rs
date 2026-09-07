@@ -15,8 +15,8 @@ use url::Url;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
     HostRuntimeAction, HostRuntimeRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
-    RecipeRunObservationsWire, canonical_json, hex_sha256, parse_strict,
+    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationGrant,
+    RecipeRunObservationWire, RecipeRunObservationsWire, canonical_json, hex_sha256, parse_strict,
 };
 
 use crate::{
@@ -148,7 +148,7 @@ struct HostRuntimeGrantResponse {
 
 #[derive(Debug)]
 pub struct RecipeRunInspectionGrant {
-    pub grant: serde_json::Value,
+    pub grant: RecipeRunObservationGrant,
     pub observation_identity_sha256: String,
 }
 
@@ -157,7 +157,7 @@ pub struct RecipeRunInspectionGrant {
 struct RecipeRunInspectionGrantResponse {
     schema_version: u8,
     observation_identity_sha256: String,
-    grant: serde_json::Value,
+    grant: RecipeRunObservationGrant,
 }
 
 #[derive(Debug, Clone)]
@@ -401,7 +401,37 @@ impl AgentHttpClient {
             parse_strict(&body).map_err(|_| ClientError::Protocol)?;
         if response.schema_version != 1
             || !valid_sha256(&response.observation_identity_sha256)
-            || !response.grant.is_object()
+            || response.grant.validate().is_err()
+            || response.grant.claims.node_id != self.node_id
+        {
+            return Err(ClientError::Protocol);
+        }
+        let operation = match &response.grant.claims.operation {
+            vonk_agent_protocol::RecipeRunObservationGrantOperation::ExecuteContainerRuntimeRequest {
+                action,
+                job_id,
+                operation_id,
+                attempt,
+                fence,
+                request_sha256: granted_request_sha256,
+                observation_identity_sha256,
+            } => (
+                action,
+                job_id,
+                operation_id,
+                attempt,
+                fence,
+                granted_request_sha256,
+                observation_identity_sha256,
+            ),
+        };
+        if operation.0 != &HostRuntimeAction::RunInspect
+            || operation.1 != &request.job_id
+            || operation.2 != &request.operation_id
+            || *operation.3 != request.attempt
+            || operation.4 != &request.fence
+            || operation.5 != request_sha256
+            || operation.6 != &response.observation_identity_sha256
         {
             return Err(ClientError::Protocol);
         }
@@ -1082,17 +1112,18 @@ impl AgentHttpClient {
         let mut run_ids = std::collections::BTreeSet::new();
         for observation in observations {
             observation.validate().map_err(|_| ClientError::Protocol)?;
-            let grant_claims = observation
-                .grant
-                .get("claims")
-                .and_then(serde_json::Value::as_object)
-                .ok_or(ClientError::Protocol)?;
             let receipt_request_id = observation.helper_receipt.claims.request_id.to_string();
+            let grant_operation = match &observation.grant.claims.operation {
+                vonk_agent_protocol::RecipeRunObservationGrantOperation::ExecuteContainerRuntimeRequest {
+                    job_id,
+                    request_sha256,
+                    ..
+                } => (job_id, request_sha256),
+            };
             if !run_ids.insert(observation.binding.run_id)
                 || observation.schema_version != 1
                 || observation.node_id != self.node_id
                 || !valid_sha256(&observation.observation_identity_sha256)
-                || !observation.grant.is_object()
                 || observation.helper_receipt.validate().is_err()
                 || observation.helper_receipt.claims.node_id != self.node_id
                 || observation
@@ -1105,14 +1136,9 @@ impl AgentHttpClient {
                     .filter(|key| key.len() == 32)
                     .map(|key| hex_sha256(&key))
                     != Some(observation.helper_receipt.signature.key_id.clone())
-                || grant_claims
-                    .get("request_id")
-                    .and_then(serde_json::Value::as_str)
-                    != Some(receipt_request_id.as_str())
-                || grant_claims
-                    .get("request_sha256")
-                    .and_then(serde_json::Value::as_str)
-                    != Some(observation.helper_receipt.claims.request_sha256.as_str())
+                || grant_operation.0.to_string() != observation.binding.run_id.to_string()
+                || grant_operation.1 != &observation.helper_receipt.claims.request_sha256
+                || observation.grant.claims.request_id.to_string() != receipt_request_id
                 || observation.observed_at.timestamp()
                     != observation.helper_receipt.claims.observed_at
                 || (observation.binding.local_address == observation.binding.master_address)
@@ -1478,6 +1504,8 @@ mod tests {
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, HostRuntimeAction, HostRuntimeRequest,
         RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunInspectionBinding,
+        RecipeRunObservationGrant, RecipeRunObservationGrantClaims,
+        RecipeRunObservationGrantOperation, RecipeRunObservationGrantSignature,
         RecipeRunObservationOutcome, RecipeRunObservationReceipt,
         RecipeRunObservationReceiptClaims, RecipeRunObservationReceiptSignature, canonical_json,
         hex_sha256,
@@ -1501,9 +1529,9 @@ mod tests {
             artifact_set_digest: "a".repeat(64),
             image_digest: "b".repeat(64),
             installation_id: Uuid::new_v4(),
-            local_address: "192.168.100.11".parse().unwrap(),
-            master_address: "192.168.100.10".parse().unwrap(),
-            master_port: 29500,
+            local_address: Some("192.168.100.11".parse().unwrap()),
+            master_address: Some("192.168.100.10".parse().unwrap()),
+            master_port: Some(29500),
             mapping_generation: 4,
             mapping_id: Uuid::new_v4(),
             model_identity: "example/model@immutable".to_owned(),
@@ -2624,10 +2652,36 @@ mod tests {
             observation: Some(binding.clone()),
         };
         let digest = hex_sha256(&canonical_json(&request).unwrap());
+        let request_id = Uuid::new_v4();
         let response = serde_json::to_vec(&serde_json::json!({
             "schema_version": 1,
             "observation_identity_sha256": "e".repeat(64),
-            "grant": {"claims": {"request_id": Uuid::new_v4()}}
+            "grant": {
+                "schema_version": 1,
+                "claims": {
+                    "schema_version": 1,
+                    "authority": "vonk.host-maintenance-helper",
+                    "request_id": request_id,
+                    "node_id": "spk_0123456789abcdef0123456789abcdef",
+                    "issued_at": 1_788_000_000,
+                    "expires_at": 1_788_000_010,
+                    "operation": {
+                        "type": "execute-container-runtime-request",
+                        "action": "run-inspect",
+                        "job_id": binding.run_id,
+                        "operation_id": request.operation_id,
+                        "attempt": request.attempt,
+                        "fence": request.fence,
+                        "request_sha256": digest,
+                        "observation_identity_sha256": "e".repeat(64)
+                    }
+                },
+                "signature": {
+                    "algorithm": "ed25519",
+                    "key_id": "f".repeat(64),
+                    "value": "e".repeat(128)
+                }
+            }
         }))
         .unwrap();
         let (client, server) = request_capture_client(200, vec![], response, None);
@@ -2677,10 +2731,31 @@ mod tests {
                 .unwrap(),
             binding: binding.clone(),
             endpoint_ready: None,
-            grant: serde_json::json!({"claims": {
-                "request_id": helper_receipt.claims.request_id,
-                "request_sha256": helper_receipt.claims.request_sha256.clone(),
-            }}),
+            grant: RecipeRunObservationGrant {
+                schema_version: 1,
+                claims: RecipeRunObservationGrantClaims {
+                    schema_version: 1,
+                    authority: "vonk.host-maintenance-helper".to_owned(),
+                    request_id: helper_receipt.claims.request_id,
+                    node_id: helper_receipt.claims.node_id.clone(),
+                    issued_at: helper_receipt.claims.observed_at - 1,
+                    expires_at: helper_receipt.claims.observed_at + 60,
+                    operation: RecipeRunObservationGrantOperation::ExecuteContainerRuntimeRequest {
+                        action: HostRuntimeAction::RunInspect,
+                        job_id: binding.run_id,
+                        operation_id: Uuid::new_v4(),
+                        attempt: binding.run_generation as u32,
+                        fence: Uuid::new_v4(),
+                        request_sha256: helper_receipt.claims.request_sha256.clone(),
+                        observation_identity_sha256: "e".repeat(64),
+                    },
+                },
+                signature: RecipeRunObservationGrantSignature {
+                    algorithm: "ed25519".to_owned(),
+                    key_id: "f".repeat(64),
+                    value: "e".repeat(128),
+                },
+            },
             observation_identity_sha256: "e".repeat(64),
             helper_receipt,
             observation_receipt_public_key: "00".repeat(32),

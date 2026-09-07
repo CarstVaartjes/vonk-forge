@@ -61,6 +61,7 @@ from .recipe_jobs import (
 )
 from .recipe_observations import (
     RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
+    RecipeRunObservationGrantRequest,
     RecipeRunObservationGrantWire,
     RecipeRunObservationsWire,
     RecipeRunObservationWire,
@@ -141,6 +142,7 @@ __all__ = [
     "RecipeModelCleanupPayload",
     "RecipeModelCleanupResult",
     "RecipeOperationRequest",
+    "RecipeRunObservationGrantRequest",
     "RecipeRunObservationGrantWire",
     "RecipeRunObservationReceiptClaims",
     "RecipeRunObservationWire",
