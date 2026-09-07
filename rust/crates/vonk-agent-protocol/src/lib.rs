@@ -18,6 +18,13 @@ pub const RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY: &str = "vonk.recipe-run-obse
 pub const RECIPE_RUN_OBSERVATION_SCHEMA_VERSION: u8 = 2;
 const RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN: &[u8] = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\0";
 
+fn required_optional_bool<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<bool>::deserialize(deserializer)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostRuntimeAction {
@@ -106,7 +113,7 @@ impl RecipeRunInspectionBinding {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.mapping_generation == 0
             || self.run_generation == 0
-            || self.world_size <= 1
+            || self.world_size == 0
             || self.rank >= self.world_size
             || self.master_port == 0
             || self.port == 0
@@ -210,6 +217,7 @@ pub struct RecipeRunObservationWire {
     #[serde(flatten)]
     pub binding: RecipeRunInspectionBinding,
     pub observed_at: DateTime<Utc>,
+    #[serde(deserialize_with = "required_optional_bool")]
     pub endpoint_ready: Option<bool>,
     pub observation_identity_sha256: String,
     pub grant: Value,

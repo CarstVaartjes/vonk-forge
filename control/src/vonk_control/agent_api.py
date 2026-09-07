@@ -695,7 +695,7 @@ class RecipeRunObservationGrantRequest(StrictJSONModel):
     model_identity: str = Field(min_length=3, max_length=1024)
     rank: int = Field(ge=0, le=1023, strict=True)
     role: str = Field(min_length=1, max_length=64)
-    world_size: int = Field(ge=2, le=1024, strict=True)
+    world_size: int = Field(ge=1, le=1024, strict=True)
     local_address: str = Field(min_length=2, max_length=45)
     master_address: str = Field(min_length=2, max_length=45)
     master_port: int = Field(ge=1024, le=65535, strict=True)
