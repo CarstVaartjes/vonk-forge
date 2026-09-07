@@ -13,7 +13,7 @@ import tempfile
 import time
 import uuid
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -539,9 +539,14 @@ class AgentGrantResponse(StrictJSONModel):
     grant: dict[str, object]
 
 
+class PackageHelperGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    grant: SignedPackageHelperGrant
+
+
 class PackageHelperReceiptsResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    receipts: list[dict[str, object]]
+    receipts: list[SignedPackageObjectReceipt]
 
 
 class RecipeRunObservationGrantResponse(StrictJSONModel):
@@ -556,17 +561,16 @@ def _host_grant_response(grant: object) -> dict[str, object]:
     return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
 
 
-def _package_grant_response(grant: object) -> dict[str, object]:
-    parsed = SignedPackageHelperGrant.parse(grant.to_mapping())
-    return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
+def _package_grant_response(
+    grant: SignedPackageHelperGrant,
+) -> PackageHelperGrantResponse:
+    return PackageHelperGrantResponse(grant=grant)
 
 
-def _package_receipts_response(receipts: object) -> dict[str, object]:
-    parsed = [
-        SignedPackageObjectReceipt.parse(receipt.to_mapping()).to_mapping()
-        for receipt in receipts
-    ]
-    return PackageHelperReceiptsResponse(receipts=parsed).model_dump()
+def _package_receipts_response(
+    receipts: Sequence[SignedPackageObjectReceipt],
+) -> PackageHelperReceiptsResponse:
+    return PackageHelperReceiptsResponse(receipts=list(receipts))
 
 
 def _agent_upgrade_request_material(
@@ -2485,7 +2489,9 @@ def install_agent_routes(
                 status_code=409, detail="agent upgrade authority rejected request"
             ) from None
 
-    @agent.post("/package-helper/receipts")
+    @agent.post(
+        "/package-helper/receipts", response_model=PackageHelperReceiptsResponse
+    )
     def package_helper_receipts(
         body: PackageHelperReceiptsRequest, request: Request
     ) -> Response:
@@ -2510,7 +2516,7 @@ def install_agent_routes(
                 status_code=409, detail="workload helper authority rejected request"
             ) from None
 
-    @agent.post("/package-helper/grant")
+    @agent.post("/package-helper/grant", response_model=PackageHelperGrantResponse)
     def package_helper_grant(
         body: PackageHelperGrantRequest, request: Request
     ) -> Response:

@@ -476,8 +476,8 @@ class CompiledExecutionPlan(_Strict):
         ):
             raise ValueError("compiled placement identity is inconsistent")
         if self.endpoint is not None:
-            if placement.port != self.endpoint.port:
-                raise ValueError("compiled serving endpoint port is inconsistent")
+            if placement.port is None:
+                raise ValueError("compiled serving placement port is unavailable")
         elif placement.port is not None:
             raise ValueError("compiled job placement must not have a port")
         if self.topology.world_size < self.topology.node_count:
