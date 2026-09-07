@@ -3666,8 +3666,12 @@ def _queued_distributed_recovery_restart(tmp_path: Path, *, engine=None):
         stop_job,
         nodes,
     ) = _queued_distributed_recovery_stop(tmp_path, engine=engine)
-    service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
-    service.record_node_result(stop_job.id, nodes[1], succeeded=True, evidence={})
+    service.record_node_result(
+        stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
+    )
+    service.record_node_result(
+        stop_job.id, nodes[1], succeeded=True, evidence={"stopped": True}
+    )
     with sessions() as session:
         restart = session.scalar(
             select(Job).where(
@@ -3764,7 +3768,9 @@ def test_distributed_recovery_deadline_is_enforced_during_stop_phase_advance(
     ) = _queued_distributed_recovery_stop(tmp_path)
     service._clock = lambda: NOW + timedelta(seconds=31)
 
-    service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
+    service.record_node_result(
+        stop_job.id, nodes[0], succeeded=True, evidence={"stopped": True}
+    )
 
     with sessions() as session:
         worker_stop = session.scalar(
