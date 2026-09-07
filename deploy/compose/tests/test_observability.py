@@ -47,8 +47,34 @@ def test_stale_agent_alert_uses_current_connection_projection() -> None:
         if rule["alert"] == "NodeAgentStale"
     )
     expression = alert["expr"]
-    assert expression == 'vonk_node_connection_state{state="offline"} == 1'
+    assert expression == (
+        'vonk_node_connection_state{state="offline"} == 1 '
+        'and on(node_id) vonk_agent_state{state="active"} == 1'
+    )
     assert "vonk_agent_last_seen_age_seconds" not in expression
+
+
+def test_fleet_dashboard_uses_only_produced_metrics() -> None:
+    dashboard = json.loads(
+        (ROOT / "deploy/compose/grafana/dashboards/fleet.json").read_text()
+    )
+    expressions = {
+        target["expr"]
+        for panel in dashboard["panels"]
+        for target in panel["targets"]
+    }
+    assert "vonk_node_telemetry_gpu_utilization_percent" in expressions
+    assert not any(
+        metric in expression
+        for expression in expressions
+        for metric in (
+            "vonk_package_candidates",
+            "vonk_package_validations",
+            "vonk_package_rollouts",
+            "vonk_package_rollout_nodes",
+            "DCGM_FI_DEV_GPU_UTIL",
+        )
+    )
 
 
 def test_every_service_has_bounded_logging() -> None:

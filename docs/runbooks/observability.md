@@ -13,7 +13,7 @@ content-addressed and available only to operator/administrator API roles.
 
 Inspect the current recipe operation and affected-node Fleet connection,
 inventory, and telemetry state. Keep routes withdrawn until the pinned commit,
-releases, leases, and acceptance checks all pass. Do not manually point LiteLLM
+current API settings, recipe operation leases, and acceptance checks all pass. Do not manually point LiteLLM
 at an unaccepted GPU node endpoint.
 
 ## Stale fleet evidence
@@ -21,8 +21,8 @@ at an unaccepted GPU node endpoint.
 Open `/api/v1/fleet` and inspect the node's connection state, certificate
 validity, admission inventory freshness, and telemetry freshness. Missing,
 delayed, and stale evidence remain distinct; an online connection alone does
-not establish readiness. A hostname or address change must be updated via the
-fleet repository proposal; it must not create a new node identity.
+not establish readiness. A hostname or address change must be updated through
+the current Fleet API settings; it must not create a new node identity.
 
 ## Invalid node certificate
 

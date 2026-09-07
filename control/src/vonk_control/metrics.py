@@ -98,6 +98,7 @@ class MetricsRegistry:
                 int | None,
                 int | None,
                 float | None,
+                float | None,
             ],
         ] = {}
         self._jobs: dict[tuple[str, str], int] = {}
@@ -146,6 +147,9 @@ class MetricsRegistry:
                 None if inventory is None else inventory.host_memory_free_bytes,
                 None if inventory is None else inventory.disk_free_bytes,
                 None if telemetry is None else telemetry.age_seconds,
+                None
+                if telemetry is None
+                else telemetry.sample.gpu_utilization_percent,
             )
         with self._lock:
             self._nodes = nodes
@@ -250,6 +254,8 @@ class MetricsRegistry:
             "# TYPE vonk_node_inventory_freshness gauge",
             "# HELP vonk_node_telemetry_freshness Current telemetry freshness.",
             "# TYPE vonk_node_telemetry_freshness gauge",
+            "# HELP vonk_node_telemetry_gpu_utilization_percent Current typed GPU utilization telemetry.",
+            "# TYPE vonk_node_telemetry_gpu_utilization_percent gauge",
         ))
         for node_id, (
             connection_state,
@@ -259,6 +265,7 @@ class MetricsRegistry:
             memory,
             disk,
             telemetry_age,
+            gpu_utilization,
         ) in sorted(nodes.items()):
             label = f'node_id="{node_id}"'
             for state in _CONNECTION_STATES:
@@ -287,6 +294,11 @@ class MetricsRegistry:
                 lines.append(f"vonk_node_inventory_disk_free_bytes{{{label}}} {disk}")
             if telemetry_age is not None:
                 lines.append(f"vonk_node_telemetry_age_seconds{{{label}}} {telemetry_age:g}")
+            if gpu_utilization is not None:
+                lines.append(
+                    f"vonk_node_telemetry_gpu_utilization_percent{{{label}}} "
+                    f"{gpu_utilization:g}"
+                )
         lines.extend(("# HELP vonk_jobs Number of control jobs by bounded kind and state.", "# TYPE vonk_jobs gauge"))
         for (kind, state), count in sorted(jobs.items()):
             lines.append(f'vonk_jobs{{kind="{kind}",state="{state}"}} {count}')

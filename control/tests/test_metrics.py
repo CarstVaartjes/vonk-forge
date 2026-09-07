@@ -30,6 +30,7 @@ def _fleet_snapshot(
     telemetry: str | None = "live",
     online_state: str = "online",
     certificate_state: str = "valid",
+    gpu_utilization: float | None = None,
 ) -> FleetSnapshot:
     point = TelemetryPoint(
         id="00000000-0000-4000-8000-000000000001",
@@ -38,6 +39,7 @@ def _fleet_snapshot(
         sequence=1,
         observed_at=NOW,
         received_at=NOW,
+        gpu_utilization_percent=gpu_utilization,
         gap_samples=0,
         details=TelemetryDetails(),
         metrics=telemetry_metrics(),
@@ -113,6 +115,7 @@ def test_metrics_use_typed_fleet_evidence_without_health_or_probe_fields() -> No
     assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="fresh"}} 1' in text
     assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="live"}} 1' in text
     assert f'vonk_node_inventory_host_memory_free_bytes{{node_id="{NODE}"}} 15000' in text
+    assert f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}' not in text
     assert "vonk_node_ready" not in text
     assert "probe" not in text.lower()
     assert "192.168." not in text and "node.local" not in text
@@ -135,6 +138,17 @@ def test_metrics_keep_missing_and_stale_evidence_distinct() -> None:
     assert f'vonk_node_inventory_freshness{{node_id="{NODE}",state="missing"}} 1' in text
     assert f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="missing"}} 1' in text
     assert f'vonk_node_inventory_host_memory_free_bytes{{node_id="{NODE}"}}' not in text
+
+
+def test_metrics_export_typed_gpu_utilization_and_omit_unknown() -> None:
+    metrics = MetricsRegistry()
+    metrics.update_fleet(_fleet_snapshot(gpu_utilization=42.5))
+    text = metrics.render()
+    assert f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}} 42.5' in text
+
+    metrics.update_fleet(_fleet_snapshot(gpu_utilization=None))
+    text = metrics.render()
+    assert f'vonk_node_telemetry_gpu_utilization_percent{{node_id="{NODE}"}}' not in text
 
 
 def test_metrics_keep_connection_and_certificate_validity_independent() -> None:
