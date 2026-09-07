@@ -23,8 +23,8 @@ from vonk_agent_protocol import (
 
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .compiled_execution_plan import (
-    CompiledExecutionPlanError,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
+    CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
 from .distributed_lifecycle import (
@@ -62,8 +62,8 @@ from .recipe_action_plans import (
     uninstall_plan,
 )
 from .recipe_builds import RecipeBuildPlan, RecipeBuildService
-from .recipe_contract import recipe_topology
 from .recipe_routes import RecipeRouteService, route_publication_transaction
+from .recipe_runtime_specs import recipe_topology
 from .recipe_start_payloads import (
     RecipeStartPayloadError,
     RecipeStartPlacement,
