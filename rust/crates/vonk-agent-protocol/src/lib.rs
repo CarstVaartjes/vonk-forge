@@ -1040,7 +1040,7 @@ impl RecipeOperationRequest {
                     // A singleton has no rendezvous phase, but still carries
                     // its run generation so its exact observation binding is
                     // persisted from the initial start.
-                    (None, None, Some(generation)) => generation > 0 && value.world_size == 1,
+                    (None, None, Some(generation)) => generation > 0,
                     (Some(RecipeStartPhase::RankLaunch), Some(deadline), Some(generation)) => {
                         generation > 0
                             && value.world_size > 1
@@ -1199,6 +1199,12 @@ mod recipe_start_tests {
             "schema_version": 2,
             "world_size": world_size,
         });
+        if world_size == 1 {
+            payload
+                .as_object_mut()
+                .unwrap()
+                .insert("run_generation".to_owned(), Value::from(1));
+        }
         if let Some(phase) = phase {
             let document = payload.as_object_mut().unwrap();
             document.insert("phase".to_owned(), Value::String(phase.to_owned()));
@@ -1239,15 +1245,7 @@ mod recipe_start_tests {
         let single = parsed_start(start_payload(1, 0, None, None, None)).unwrap();
         assert_eq!(single.phase, None);
         assert_eq!(single.start_deadline, None);
-        assert_eq!(single.run_generation, None);
-        let mut singleton_with_generation = start_payload(1, 0, None, None, None);
-        singleton_with_generation["run_generation"] = Value::from(1);
-        assert_eq!(
-            parsed_start(singleton_with_generation)
-                .unwrap()
-                .run_generation,
-            Some(1)
-        );
+        assert_eq!(single.run_generation, Some(1));
         let unphased_wire = serde_json::to_value(single).unwrap();
         assert!(unphased_wire.get("phase").is_none());
         assert!(unphased_wire.get("start_deadline").is_none());

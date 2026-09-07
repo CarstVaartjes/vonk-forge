@@ -73,6 +73,7 @@ def _start(plan: dict[str, Any] | None = None) -> dict[str, Any]:
         "local_address": None,
         "master_address": None,
         "master_port": None,
+        "run_generation": 1,
     }
 
 

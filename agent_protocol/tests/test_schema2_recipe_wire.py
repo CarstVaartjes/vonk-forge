@@ -64,6 +64,7 @@ def _start() -> dict[str, object]:
         "local_address": None,
         "master_address": None,
         "master_port": None,
+        "run_generation": 1,
     }
 
 
