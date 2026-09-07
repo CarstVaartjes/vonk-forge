@@ -20,13 +20,15 @@ import re
 import subprocess
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Annotated, Literal, Protocol
 
+from pydantic import Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol.wire_model import Digest, WireModel
 from vonk_forge_contracts import RecipeDefinition
 
 from .cached_file_verification import verified_files
@@ -204,38 +206,55 @@ class SkopeoOCIImageTransport:
         )
 
 
-@dataclass(frozen=True, slots=True)
-class RuntimeImageReceipt:
-    """Normalized image identity consumable without a Controller restart."""
+ImageDigest = Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
 
-    schema_version: int
-    source: str
-    distribution_publisher: str
-    distribution_slug: str
-    distribution_content_sha256: str
-    registry_manifest_digest: str | None
-    platform_manifest_digest: str
-    image_digest: str
-    oci_archive_sha256: str
-    image_bytes: int
-    local_image_config_id: str | None
-    local_image_reference: str | None
-    architecture: str
-    runtime_interface: str
-    archive_path: str
-    recorded_at: str
-    build_id: str | None = None
-    # The wire runtime contract and the OCI label are deliberately separate
-    # observations.  Older persisted receipts may omit the label; newly
-    # prepared receipts always record it.
-    runtime_interface_label: str | None = None
 
-    @property
-    def oci_layout_sha256(self) -> str:
-        return self.oci_archive_sha256
+class RuntimeImageReceipt(WireModel):
+    """Strict schema-2 receipt persisted by the Controller image cache.
+
+    ``oci_archive_sha256`` is the established filesystem/SQL receipt field.
+    The compiled launch plan uses its own ``oci_layout_sha256`` field; the
+    execution-plan service performs that one explicit typed projection at the
+    plan boundary.
+    """
+
+    schema_version: Literal[2] = 2
+    source: Literal["published", "controller-build"]
+    distribution_publisher: str = Field(min_length=1, max_length=128)
+    distribution_slug: str = Field(min_length=1, max_length=128)
+    distribution_content_sha256: Digest
+    registry_manifest_digest: ImageDigest | None
+    platform_manifest_digest: ImageDigest
+    image_digest: ImageDigest
+    oci_archive_sha256: Digest
+    image_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
+    local_image_config_id: ImageDigest | None
+    local_image_reference: str | None = Field(default=None, min_length=1, max_length=512)
+    architecture: Literal["linux-arm64"]
+    runtime_interface: Literal["vonk.runtime.v1"]
+    archive_path: str = Field(min_length=1, max_length=4096)
+    recorded_at: str = Field(min_length=1, max_length=128)
+    build_id: str | None = Field(default=None, min_length=1, max_length=128)
+    runtime_interface_label: str = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def receipt_identity_is_consistent(self) -> RuntimeImageReceipt:
+        if self.platform_manifest_digest != self.image_digest:
+            raise ValueError("runtime image receipt platform and image digests differ")
+        if self.source == "published" and (
+            self.registry_manifest_digest is None or self.build_id is not None
+        ):
+            raise ValueError("published runtime image receipt provenance is invalid")
+        if self.source == "controller-build" and (
+            self.registry_manifest_digest is not None or self.build_id is None
+        ):
+            raise ValueError("Controller-build runtime image receipt provenance is invalid")
+        if self.runtime_interface_label != "v1":
+            raise ValueError("runtime image receipt interface label is invalid")
+        return self
 
     def to_mapping(self) -> dict[str, object]:
-        return asdict(self)
+        return self.model_dump(mode="json")
 
 
 def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
@@ -245,11 +264,11 @@ def _parse_runtime_image_receipt(value: object) -> RuntimeImageReceipt:
             "runtime image receipt schema version is unsupported",
         )
     try:
-        return RuntimeImageReceipt(**dict(value))
-    except (TypeError, ValueError, KeyError) as error:
+        return RuntimeImageReceipt.model_validate(value)
+    except (TypeError, ValueError) as error:
         raise RuntimeImagePreparationError(
             "runtime_image.receipt_unavailable",
-            "runtime image receipt is unavailable or malformed",
+            "runtime image receipt identity is unavailable or malformed",
         ) from error
 
 
@@ -1071,6 +1090,7 @@ def _prepare_from_build(
             "runtime_image.build_incomplete", "source-build receipt is not succeeded"
         )
     image_digest = _string(value.get("image_digest"), "runtime_image.build_digest")
+    build_id = _string(value.get("build_id"), "runtime_image.build_id")
     archive_sha = _string(value.get("oci_layout_sha256"), "runtime_image.build_archive_digest")
     if _IMAGE_DIGEST.fullmatch(image_digest) is None or _SHA256.fullmatch(archive_sha) is None:
         raise RuntimeImagePreparationError(
@@ -1096,7 +1116,7 @@ def _prepare_from_build(
         and cached.runtime_interface == expected_interface
         and cached.runtime_interface_label == expected_interface_label
         and cached.image_bytes == image_bytes
-        and cached.build_id == _optional_string(value.get("build_id"), None)
+        and cached.build_id == build_id
     ):
         return cached
     observed = transport.inspect_archive(
@@ -1137,7 +1157,7 @@ def _prepare_from_build(
         runtime_interface_label=observed.runtime_interface,
         archive_path=str(getattr(storage, "root", Path("")) / archive_sha),
         recorded_at=_timestamp(now),
-        build_id=_optional_string(value.get("build_id"), None),
+        build_id=build_id,
     )
     # A build receipt already points at an immutable stored archive, but still
     # update the receipt atomically so direct and source-build paths converge.

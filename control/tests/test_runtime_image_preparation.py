@@ -28,6 +28,8 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
     resolve_persisted_runtime_image_receipt,
 )
+from vonk_control.compiled_execution_plan import CompiledRuntimeImage
+from vonk_control.execution_plan_service import _runtime_receipt_mapping
 from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 IMAGE_DIGEST = "sha256:" + "d" * 64
@@ -256,6 +258,50 @@ def test_non_schema_two_receipt_is_rejected_by_all_read_paths(tmp_path: Path) ->
             read()
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda value: value.pop("runtime_interface_label"), "identity"),
+        (lambda value: value.update(unexpected_field="rejected"), "identity"),
+        (lambda value: value.update(image_bytes=True), "identity"),
+    ],
+    ids=["missing-interface-label", "unknown-field", "boolean-image-bytes"],
+)
+def test_current_receipt_parser_rejects_noncanonical_shape(
+    tmp_path: Path, mutation, message: str
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    receipt = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    path = storage.root / f"{receipt.oci_archive_sha256}.receipt.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    mutation(value)
+    path.write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(RuntimeImagePreparationError, match=message):
+        storage.read_receipt(receipt.oci_archive_sha256)
+
+
+def test_current_producer_parser_and_compiled_plan_consumer_preserve_archive_identity(
+    tmp_path: Path,
+) -> None:
+    storage = FilesystemRuntimeImageStorage(tmp_path / "objects")
+    produced = prepare_runtime_image(
+        _recipe("recipe-image.json"),
+        runtime=_runtime(),
+        storage=storage,
+        transport=TinyTransport(),
+    )
+    parsed = storage.read_receipt(produced.oci_archive_sha256)
+    compiled = CompiledRuntimeImage.model_validate(_runtime_receipt_mapping(parsed))
+    assert parsed.oci_archive_sha256 == produced.oci_archive_sha256
+    assert compiled.oci_layout_sha256 == produced.oci_archive_sha256
+    assert compiled.runtime_interface_label == produced.runtime_interface_label
+
+
 def test_packaged_skopeo_transport_observes_config_label_and_exports_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -317,7 +363,7 @@ def test_docker_export_keeps_build_provenance_separate_from_reconstructed_manife
         storage=storage,
         transport=DifferentArchive(),
         build_receipt={
-            "state": "succeeded", "image_digest": BUILT_IMAGE_DIGEST,
+            "state": "succeeded", "build_id": "build-archive", "image_digest": BUILT_IMAGE_DIGEST,
             "oci_layout_sha256": ARCHIVE_DIGEST, "image_bytes": len(ARCHIVE),
         },
     )
@@ -471,6 +517,7 @@ def test_build_receipt_requires_the_exact_stored_archive(tmp_path: Path) -> None
             storage=storage,
             build_receipt={
                 "state": "succeeded",
+                "build_id": "missing-archive",
                 "image_digest": BUILT_IMAGE_DIGEST,
                 "oci_layout_sha256": "1" * 64,
                 "image_bytes": len(ARCHIVE),
@@ -542,10 +589,11 @@ def test_published_receipt_persists_idempotently_and_conflicts_fail_closed(
         session.commit()
         assert same.id == row.id
         assert same.verified_at.replace(tzinfo=UTC) == second_at
-    conflicting = replace(
-        receipt,
-        platform_manifest_digest=BUILT_IMAGE_DIGEST,
-        image_digest=BUILT_IMAGE_DIGEST,
+    conflicting = receipt.model_copy(
+        update={
+            "platform_manifest_digest": BUILT_IMAGE_DIGEST,
+            "image_digest": BUILT_IMAGE_DIGEST,
+        }
     )
     with Session(engine) as session, pytest.raises(
         RuntimeImagePreparationError, match="identity changed"

@@ -801,7 +801,10 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     result={
                         "runtime_image": receipt.to_mapping(),
                         "image_digest": receipt.image_digest,
-                        "oci_layout_sha256": receipt.oci_layout_sha256,
+                            # Keep the phase result's established wire key;
+                            # the preparation receipt itself uses its
+                            # established ``oci_archive_sha256`` field.
+                            "oci_layout_sha256": receipt.oci_archive_sha256,
                         "image_bytes": receipt.image_bytes,
                     }
                 )
