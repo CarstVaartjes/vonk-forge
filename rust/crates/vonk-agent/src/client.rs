@@ -734,9 +734,9 @@ impl AgentHttpClient {
     /// Consume a complete assignment. Every model/configuration object and the
     /// exact OCI archive is fetched through the assignment-bound endpoint;
     /// complete files are reused by trusted metadata, while `.partial` files
-    /// resume by identity and length after an agent process restart. The
-    /// archive root is supplied by the caller so retention uses one explicit
-    /// global cache location across assignment directories.
+    /// resume by identity and length after an agent process restart. Model
+    /// objects are stored below one content-addressed root so assignments with
+    /// different plan digests can reuse the same verified bytes.
     pub async fn download_distribution(
         &self,
         plan_digest: &str,
@@ -785,7 +785,7 @@ impl AgentHttpClient {
         let total_bytes = assignment.objects.iter().map(|object| object.bytes).sum();
         for object in &assignment.objects {
             let path = if object.kind == "model" {
-                model_root.join(&object.name)
+                model_root.join(&object.sha256)
             } else if object.sha256 == assignment.oci_archive_sha256 && object.kind == "oci-archive"
             {
                 oci_root.join(&object.sha256)
@@ -867,9 +867,9 @@ impl AgentHttpClient {
         F: FnMut(u64),
     {
         // The assignment-bound mTLS endpoint and its exact ranged response
-        // headers establish the object identity. The SHA-256 remains the
-        // stable path ID; trusted finalization deliberately avoids a second
-        // full-file scan here.
+        // headers establish the transfer contract. Hash the completed object
+        // before accepting it so a digest-named cache file cannot be trusted
+        // merely because its length and custody metadata look correct.
         if !valid_sha256(plan_digest)
             || !valid_sha256(sha256)
             || !(1..=16 * 1024_u64.pow(4)).contains(&expected_bytes)
@@ -885,6 +885,9 @@ impl AgentHttpClient {
 
         if let Some(file) = inspect_trusted_final(destination, expected_bytes).await? {
             drop(file);
+            if sha256_path(destination, expected_bytes).await? != sha256 {
+                return Err(ClientError::Protocol);
+            }
             progress(expected_bytes);
             return Ok(());
         }
@@ -902,6 +905,9 @@ impl AgentHttpClient {
             tokio::fs::rename(&partial, destination).await?;
             sync_parent(parent).await?;
             validate_trusted_file(destination, expected_bytes).await?;
+            if sha256_path(destination, expected_bytes).await? != sha256 {
+                return Err(ClientError::Protocol);
+            }
             progress(expected_bytes);
             return Ok(());
         }
@@ -958,7 +964,11 @@ impl AgentHttpClient {
         drop(output);
         tokio::fs::rename(&partial, destination).await?;
         sync_parent(parent).await?;
-        validate_trusted_file(destination, expected_bytes).await
+        validate_trusted_file(destination, expected_bytes).await?;
+        if sha256_path(destination, expected_bytes).await? != sha256 {
+            return Err(ClientError::Protocol);
+        }
+        Ok(())
     }
 
     async fn download_content_addressed(
@@ -1515,7 +1525,12 @@ mod tests {
         AgentHttpClient, ClientError, ExactRecipeRunObservation, partial_path,
         valid_reported_hostname,
     };
-    use crate::{oci::RecipeRunObservation, telemetry::TelemetrySample};
+    use crate::{
+        oci::{OciRuntime, RecipeRunObservation},
+        process::{ProcessError, ProcessOutput, ProcessRunner, Program},
+        telemetry::TelemetrySample,
+        workloads::CompiledExecutionPlan,
+    };
     use chrono::{DateTime, Utc};
     use serde_json::{Value, json};
     use std::{
@@ -1536,6 +1551,19 @@ mod tests {
         RecipeRunObservationReceiptClaims, RecipeRunObservationReceiptSignature, canonical_json,
         hex_sha256,
     };
+
+    struct NoProcess;
+
+    impl ProcessRunner for NoProcess {
+        fn run(
+            &self,
+            _: Program,
+            _: &[String],
+            _: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            panic!("distribution/install handoff test must not launch a process");
+        }
+    }
 
     fn inspection_binding() -> RecipeRunInspectionBinding {
         RecipeRunInspectionBinding {
@@ -2115,6 +2143,137 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn content_addressed_distribution_handoff_reuses_objects_across_plan_digests() {
+        let model = b"model payload".to_vec();
+        let (archive, _) = oci_archive_fixture();
+        let image_digest = "1".repeat(64);
+        let mut assignment = distribution_assignment_fixture(&model, &archive, &image_digest);
+        assignment.plan_digest = "a".repeat(64);
+        assignment.model_artifact_set_sha256 = "d".repeat(64);
+        assignment.validate().unwrap();
+        let mut objects = HashMap::new();
+        objects.insert(hex_sha256(&model), model.clone());
+        objects.insert(hex_sha256(&archive), archive.clone());
+        let (client, server) = distribution_fixture_server(
+            assignment.clone(),
+            objects.clone(),
+            3,
+            DistributionFixtureMode::Good,
+        );
+        let root = tempfile::tempdir().unwrap();
+        let distribution_root = root.path().join("distribution");
+        let archive_root = root.path().join("oci-archives");
+        std::fs::create_dir_all(&distribution_root).unwrap();
+        std::fs::create_dir_all(&archive_root).unwrap();
+        let evidence = client
+            .download_distribution(&assignment.plan_digest, &distribution_root, &archive_root)
+            .await
+            .unwrap();
+        assert_eq!(server.join().unwrap().len(), 3);
+        assert_eq!(
+            evidence.model_paths,
+            vec![
+                distribution_root
+                    .join("models")
+                    .join(&assignment.model_artifact_set_sha256)
+                    .join(hex_sha256(&model))
+            ]
+        );
+        assert_eq!(
+            evidence.oci_archive_path,
+            archive_root.join(&assignment.oci_archive_sha256)
+        );
+
+        let mut plan_value: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
+        let model_sha256 = hex_sha256(&model);
+        let archive_sha256 = hex_sha256(&archive);
+        plan_value["identity"]["execution_sha256"] = json!("e".repeat(64));
+        plan_value["identity"]["model_artifact_set_sha256"] =
+            json!(assignment.model_artifact_set_sha256.clone());
+        plan_value["identity"]["model_artifact_bytes"] = json!(model.len());
+        plan_value["artifacts"][0]["sha256"] = json!(model_sha256.clone());
+        plan_value["artifacts"][0]["size_bytes"] = json!(model.len());
+        plan_value["artifacts"][0]["distribution_object"]["sha256"] = json!(model_sha256);
+        plan_value["artifacts"][0]["distribution_object"]["bytes"] = json!(model.len());
+        plan_value["runtime"]["image_digest"] = json!(format!("sha256:{image_digest}"));
+        plan_value["runtime_image"]["image_digest"] = json!(format!("sha256:{image_digest}"));
+        plan_value["runtime_image"]["platform_manifest_digest"] =
+            json!(format!("sha256:{image_digest}"));
+        plan_value["runtime_image"]["oci_layout_sha256"] = json!(archive_sha256.clone());
+        plan_value["runtime_image"]["image_bytes"] = json!(archive.len());
+        plan_value["runtime_image"]["local_image_reference"] = json!(format!(
+            "localhost/vonk/compiled-runtime-{archive_sha256}@sha256:{image_digest}"
+        ));
+        plan_value["runtime_image"]["distribution_object"]["sha256"] = json!(archive_sha256);
+        plan_value["runtime_image"]["distribution_object"]["bytes"] = json!(archive.len());
+        let plan: CompiledExecutionPlan = serde_json::from_value(plan_value).unwrap();
+        plan.validate().unwrap();
+
+        let runner = NoProcess;
+        let runtime = OciRuntime {
+            runner: &runner,
+            data_root: root.path(),
+            huggingface_curl_config: None,
+        };
+        let first_installation = "cb555393-764b-4eb6-8f15-b416d289428f";
+        runtime
+            .install(
+                &plan,
+                first_installation,
+                &plan.identity.recipe_revision_sha256,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join(format!(
+                "installations/{first_installation}/models/primary/weights.bin"
+            )))
+            .unwrap(),
+            model
+        );
+        assert!(archive_root.join(&archive_sha256).is_file());
+
+        let mut second_assignment = assignment.clone();
+        second_assignment.plan_digest = "f".repeat(64);
+        let (second_client, second_server) = distribution_fixture_server(
+            second_assignment.clone(),
+            objects,
+            1,
+            DistributionFixtureMode::Good,
+        );
+        let reused = second_client
+            .download_distribution(
+                &second_assignment.plan_digest,
+                &distribution_root,
+                &archive_root,
+            )
+            .await
+            .unwrap();
+        assert_eq!(reused.downloaded_bytes, evidence.downloaded_bytes);
+        assert_eq!(second_server.join().unwrap().len(), 1);
+
+        let mut second_plan = plan.clone();
+        second_plan.identity.execution_sha256 = "f".repeat(64);
+        let second_installation = "cb555393-764b-4eb6-8f15-b416d2894290";
+        runtime
+            .install(
+                &second_plan,
+                second_installation,
+                &second_plan.identity.recipe_revision_sha256,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root.path().join(format!(
+                "installations/{second_installation}/models/primary/weights.bin"
+            )))
+            .unwrap(),
+            model
+        );
+    }
+
+    #[tokio::test]
     async fn distribution_acceptance_resumes_partial_object_and_rejects_corruption() {
         let model = b"small model object";
         let (archive, image_digest) = oci_archive_fixture();
@@ -2127,7 +2286,7 @@ mod tests {
             .path()
             .join("models")
             .join(&assignment.model_artifact_set_sha256)
-            .join("weights/model.bin");
+            .join(&assignment.objects[0].sha256);
         let partial_path = PathBuf::from(format!("{}.partial", model_path.display()));
         std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
         std::fs::write(&partial_path, &model[..5]).unwrap();
@@ -2247,15 +2406,25 @@ mod tests {
             .path()
             .join("models")
             .join(&assignment.model_artifact_set_sha256)
-            .join("weights/model.bin");
+            .join(&assignment.objects[0].sha256);
         std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
         std::fs::write(model_path, model).unwrap();
+        std::fs::set_permissions(
+            root.path()
+                .join("models")
+                .join(&assignment.model_artifact_set_sha256)
+                .join(&assignment.objects[0].sha256),
+            std::fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
         let destination = root
             .path()
             .join("oci-archives")
             .join(&assignment.oci_archive_sha256);
+        let archive_root = root.path().join("oci-archives");
         std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
         std::fs::write(&destination, vec![0_u8; archive.len()]).unwrap();
+        std::fs::set_permissions(&destination, std::fs::Permissions::from_mode(0o600)).unwrap();
         let (client, server) = distribution_fixture_server(
             assignment.clone(),
             objects,
@@ -2264,7 +2433,7 @@ mod tests {
         );
         assert!(matches!(
             client
-                .download_distribution(&assignment.plan_digest, root.path(), root.path())
+                .download_distribution(&assignment.plan_digest, root.path(), &archive_root)
                 .await,
             Err(ClientError::Protocol)
         ));
