@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import io
 import json
 import re
@@ -40,6 +41,37 @@ _SHA256 = re.compile(r"^[a-f0-9]{64}$")
 
 class LibraryValidationError(ValueError):
     pass
+
+
+def _canonical_harness_from(platform_root: Path):
+    """Load canonical harness metadata from this platform checkout exactly.
+
+    The validator can run in a process that already imported ``vonk_control``
+    from another checkout.  Importing by package name would then silently use
+    that stale authority, so load the metadata module by its platform-root
+    file path instead.
+    """
+
+    source = platform_root / "control" / "src" / "vonk_control" / "harnesses" / "canonical_metadata.py"
+    if not source.is_file():
+        raise LibraryValidationError("platform canonical harness metadata is missing")
+    source_key = hashlib.sha256(str(source.resolve()).encode()).hexdigest()[:16]
+    module_name = f"_vonk_platform_canonical_metadata_{source_key}"
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    if spec is None or spec.loader is None:
+        raise LibraryValidationError("platform canonical harness metadata is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+        value = module.canonical_harness
+    except (AttributeError, ImportError, OSError, SyntaxError) as error:
+        raise LibraryValidationError(
+            "platform canonical harness metadata is unavailable"
+        ) from error
+    finally:
+        sys.modules.pop(module_name, None)
+    return value
 
 
 def _arguments() -> argparse.Namespace:
@@ -417,16 +449,7 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
         validate_model_references(models.values())
     except ContractResolutionError as error:
         raise LibraryValidationError(f"model reference graph is invalid: {error}") from error
-    control_source = platform_root / "control" / "src"
-    if not control_source.is_dir():
-        raise LibraryValidationError("platform canonical harness metadata is missing")
-    sys.path.insert(0, str(control_source))
-    try:
-        from vonk_control.harnesses.canonical_metadata import canonical_harness
-    except (ImportError, OSError) as error:
-        raise LibraryValidationError(
-            "platform canonical harness metadata is unavailable"
-        ) from error
+    canonical_harness = _canonical_harness_from(platform_root)
     recipe_keys: set[tuple[str, str]] = set()
     digests: list[str] = []
     try:
@@ -518,6 +541,11 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
             raise LibraryValidationError(
                 f"{path}: serving interface is not implemented by platform harness: "
                 f"{recipe.validation.serving.interface}"
+            )
+        if recipe.topology.mode not in harness.topology_modes:
+            raise LibraryValidationError(
+                f"{path}: topology mode is not supported by platform harness: "
+                f"{recipe.topology.mode}"
             )
         row = indexed.get(key)
         digest = content_sha256(recipe)
