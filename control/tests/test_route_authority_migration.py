@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
-import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
@@ -172,22 +171,33 @@ def _assert_migrated_state(engine: Engine) -> None:
     } == {("recipe_route_authorities", ("authority_id",))}
 
     with engine.connect() as connection:
-        assert connection.execute(
-            text("SELECT authority_id FROM recipe_route_authorities")
-        ).scalar_one() == RECIPE_ROUTE_AUTHORITY_ID
-        assert connection.execute(text("SELECT count(*) FROM route_publications")).scalar_one() == 0
-        assert connection.execute(
-            text("SELECT count(*) FROM route_publication_owner")
-        ).scalar_one() == 0
+        assert (
+            connection.execute(
+                text("SELECT authority_id FROM recipe_route_authorities")
+            ).scalar_one()
+            == RECIPE_ROUTE_AUTHORITY_ID
+        )
+        assert (
+            connection.execute(
+                text("SELECT count(*) FROM route_publications")
+            ).scalar_one()
+            == 0
+        )
+        assert (
+            connection.execute(
+                text("SELECT count(*) FROM route_publication_owner")
+            ).scalar_one()
+            == 0
+        )
         assert connection.execute(text("SELECT id FROM jobs")).fetchall() == [
             (_CURRENT_JOB_ID,)
         ]
-        assert connection.execute(text("SELECT job_id FROM job_attempts")).fetchall() == [
-            (_CURRENT_JOB_ID,)
-        ]
-        assert connection.execute(text("SELECT job_id FROM job_log_entries")).fetchall() == [
-            (_CURRENT_JOB_ID,)
-        ]
+        assert connection.execute(
+            text("SELECT job_id FROM job_attempts")
+        ).fetchall() == [(_CURRENT_JOB_ID,)]
+        assert connection.execute(
+            text("SELECT job_id FROM job_log_entries")
+        ).fetchall() == [(_CURRENT_JOB_ID,)]
 
 
 def test_sqlite_route_authority_migration_resets_legacy_state(tmp_path: Path) -> None:

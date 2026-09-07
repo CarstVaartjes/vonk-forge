@@ -13,9 +13,7 @@ down_revision = "0022_current_telemetry_defaults"
 branch_labels = None
 depends_on = None
 
-AUTHORITY_ID = str(
-    uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes")
-)
+AUTHORITY_ID = str(uuid.uuid5(uuid.NAMESPACE_URL, "https://vonkforge.ai/local-recipes"))
 
 
 def _drop_constraint(table: str, name: str) -> None:
@@ -30,9 +28,7 @@ def _sqlite_route_publications_source() -> sa.Table:
         sa.Column(
             "reconciliation_id",
             sa.String(36),
-            sa.ForeignKey(
-                "recipe_route_authorities.authority_id", ondelete="CASCADE"
-            ),
+            sa.ForeignKey("recipe_route_authorities.authority_id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column("state", sa.String(32), nullable=False),
@@ -76,8 +72,7 @@ def _sqlite_route_publications_source() -> sa.Table:
             name="ck_route_publications_bundle_digest_length",
         ),
         sa.CheckConstraint(
-            "activation_marker_digest IS NULL OR "
-            "length(activation_marker_digest) = 64",
+            "activation_marker_digest IS NULL OR length(activation_marker_digest) = 64",
             name="ck_route_publications_activation_marker_digest_length",
         ),
         sa.CheckConstraint(
@@ -98,9 +93,7 @@ def _sqlite_route_publication_owner_source() -> sa.Table:
         sa.Column(
             "reconciliation_id",
             sa.String(36),
-            sa.ForeignKey(
-                "recipe_route_authorities.authority_id", ondelete="SET NULL"
-            ),
+            sa.ForeignKey("recipe_route_authorities.authority_id", ondelete="SET NULL"),
         ),
         sa.Column("owner_generation", sa.BigInteger, nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True)),
@@ -133,9 +126,7 @@ def _sqlite_route_tables() -> None:
         ["generation"],
         unique=True,
     )
-    op.create_index(
-        "ix_route_publications_state", "route_publications", ["state"]
-    )
+    op.create_index("ix_route_publications_state", "route_publications", ["state"])
     with op.batch_alter_table(
         "route_publication_owner",
         recreate="always",

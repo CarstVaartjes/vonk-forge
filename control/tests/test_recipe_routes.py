@@ -26,8 +26,8 @@ from vonk_control.models import (
     Job,
     RecipeBuild,
     RecipeInstallation,
+    RecipeRouteAuthority,
     RecipeRun,
-    Reconciliation,
     RoutePublication,
     RoutePublicationOwner,
     RunNode,
@@ -104,9 +104,11 @@ def setup(
     interfaces=None,
     endpoint_owner_rank=0,
     exact_distributed=True,
+    engine=None,
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
-    engine = create_engine(f"sqlite:///{tmp_path / 'routes.sqlite'}")
+    if engine is None:
+        engine = create_engine(f"sqlite:///{tmp_path / 'routes.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     nodes = tuple("spk_" + f"{index + 1:032x}" for index in range(ranks))
@@ -497,7 +499,6 @@ def atomic_service(
 ) -> RecipeRouteService:
     runtime = AtomicRouteBundlePublisher(
         root,
-        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
     )
     return RecipeRouteService(
@@ -967,7 +968,6 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     service, _publisher, _applied, run_id = setup(tmp_path / "database")
     atomic = AtomicRouteBundlePublisher(
         tmp_path / "live",
-        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=lambda: NOW,
     )
     service = RecipeRouteService(
@@ -1008,10 +1008,10 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
         owner = session.get(RoutePublicationOwner, 1)
         assert owner is not None
         assert owner.owner_generation == generation.generation
-        publication = session.get(RoutePublication, owner.reconciliation_id)
-        reconciliation = session.get(Reconciliation, owner.reconciliation_id)
+        publication = session.get(RoutePublication, owner.authority_id)
+        authority = session.get(RecipeRouteAuthority, owner.authority_id)
         assert publication is not None and publication.state == "completed"
-        assert reconciliation is not None and reconciliation.status == "succeeded"
+        assert authority is not None and authority.authority_id == owner.authority_id
 
     projection = durable_operation_services(
         service.sessions,
@@ -1045,7 +1045,7 @@ def test_worker_renews_from_fresh_all_rank_evidence_and_recovers_owner(
     with service.sessions() as session:
         run = session.get(RecipeRun, run_id)
         owner = session.get(RoutePublicationOwner, 1)
-        publication = session.get(RoutePublication, owner.reconciliation_id)
+        publication = session.get(RoutePublication, owner.authority_id)
         assert run.route_generation > first.generation
         assert publication.lease_expires_at.replace(tzinfo=UTC) == (
             clock.now + timedelta(seconds=300)
@@ -1089,7 +1089,7 @@ def test_worker_withdraws_when_rank_health_is_stale_while_agent_is_active(
         assert run.route_state == "withdrawn"
         assert all(agent is not None and agent.state == "active" for agent in agents)
         owner = session.get(RoutePublicationOwner, 1)
-        publication = session.get(RoutePublication, owner.reconciliation_id)
+        publication = session.get(RoutePublication, owner.authority_id)
         assert publication.state == "routes-withdrawn"
 
 
@@ -1194,5 +1194,65 @@ def test_worker_withdraws_all_stale_runs_in_one_recovered_candidate(
 
 def _recipe_owner_id(session) -> str:
     owner = session.get(RoutePublicationOwner, 1)
-    assert owner is not None and owner.reconciliation_id is not None
-    return owner.reconciliation_id
+    assert owner is not None and owner.authority_id is not None
+    return owner.authority_id
+
+
+def test_postgres_current_publication_renewal_withdrawal_and_owner_recovery(
+    tmp_path: Path, postgres_engine, monkeypatch
+) -> None:
+    from vonk_control.route_runtime import verify_active_route_bundle
+
+    from .test_route_runtime import _supervisor
+
+    clock = MutableClock(NOW)
+    base, _, _, run_id = setup(tmp_path / "database", clock=clock, engine=postgres_engine)
+    root = tmp_path / "live"
+    service = atomic_service(base, root, clock)
+    first = service.publish_run(run_id)
+    bundle = verify_active_route_bundle(root, clock=clock)
+    request = _supervisor(monkeypatch, root)._active_request(now=clock.now)
+    assert request is not None and request.activation_sha256 == bundle.marker.digest
+    with service.sessions() as session:
+        owner = session.get(RoutePublicationOwner, 1)
+        publication = session.get(RoutePublication, owner.authority_id)
+        assert publication.activation_marker == bundle.marker.model_dump()
+        assert publication.activation_marker_digest == request.activation_sha256
+        assert owner.owner_generation == first.generation
+
+    clock.now += timedelta(seconds=240)
+    with service.sessions.begin() as session:
+        for index, node in enumerate(session.query(RunNode).filter_by(run_id=run_id)):
+            node.updated_at = clock.now
+            node.evidence_digest = str(index + 5) * 64
+        session.delete(session.get(RoutePublicationOwner, 1))
+    assert RecipeOperationWorker(service.sessions, service, clock=clock).tick() is True
+    renewed = verify_active_route_bundle(root, clock=clock)
+    assert renewed.marker.generation > first.generation
+    with service.sessions() as session:
+        owner = session.get(RoutePublicationOwner, 1)
+        assert owner.owner_generation == renewed.marker.generation
+
+    service.withdraw_run(run_id)
+    withdrawn = verify_active_route_bundle(root, clock=clock)
+    assert withdrawn.marker.state == "maintenance"
+    assert withdrawn.marker.generation > renewed.marker.generation
+    assert withdrawn.routes["routes"] == {}
+    assert _supervisor(monkeypatch, root)._active_request(now=clock.now) is not None
+
+
+def test_postgres_concurrent_current_publishers_keep_one_owner_receipt(
+    tmp_path: Path, postgres_engine
+) -> None:
+    base, _, _, run_id = setup(tmp_path / "database", engine=postgres_engine)
+    root = tmp_path / "live"
+    services = [atomic_service(base, root, lambda: NOW) for _ in range(2)]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda service: service.publish_run(run_id), services))
+    with base.sessions() as session:
+        owner = session.get(RoutePublicationOwner, 1)
+        publication = session.get(RoutePublication, owner.authority_id)
+        marker = AtomicRouteBundlePublisher(root, clock=lambda: NOW).inspect()
+        assert owner.owner_generation == marker.generation == publication.generation
+        assert publication.activation_marker_digest == marker.digest
+        assert marker.generation == max(result.generation for result in results)

@@ -8,4 +8,6 @@ COPY --from=upstream --chmod=0555 \
     /root/.cache/prisma-python/binaries/5.4.2/ac9d7041ed77bcc8a8dbd2ab6616b39013829574/node_modules/@prisma/engines/query-engine-* \
     /opt/vonk-litellm/prisma/query-engine
 
+COPY --chmod=0444 agent_protocol/src/vonk_agent_protocol/route_activation.py /opt/vonk-litellm/route_activation.py
+
 USER 10002:10001

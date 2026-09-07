@@ -106,7 +106,6 @@ def test_production_builder_wires_recipe_operations_and_housekeeping(
     route_root = tmp_path / "routes"
     publisher = AtomicRouteBundlePublisher(
         route_root,
-        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
     )
 

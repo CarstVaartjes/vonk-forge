@@ -113,9 +113,6 @@ class Job(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    reconciliation_id: Mapped[str | None] = mapped_column(
-        ForeignKey("reconciliations.id"), unique=True, index=True
-    )
 
 
 class JobAttempt(Base):
@@ -271,145 +268,13 @@ class ControlProcessHeartbeat(Base):
     )
 
 
-class Reconciliation(Base):
-    __tablename__ = "reconciliations"
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    authority_revision: Mapped[str] = mapped_column(String(128), nullable=False)
-    status: Mapped[str] = mapped_column(String(32), nullable=False)
-    summary: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    graph: Mapped[dict[str, object]] = mapped_column(
-        JSON,
-        nullable=False,
-        default=lambda: {
-            "authority_revision": "",
-            "nodes": [],
-            "schema_version": 1,
-            "targets": [],
-        },
-        server_default='{"authority_revision":"","nodes":[],"schema_version":1,"targets":[]}',
-    )
-    graph_digest: Mapped[str] = mapped_column(
-        String(64),
-        nullable=False,
-        default="5c061eb8dfce0a3f2bcbfbf06cb71d695c33e8f4269e17bfe5cd1cda0054cdc5",
-        server_default="5c061eb8dfce0a3f2bcbfbf06cb71d695c33e8f4269e17bfe5cd1cda0054cdc5",
-    )
-    plan_digest: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
-    resolved_plan: Mapped[dict[str, object] | None] = mapped_column(JSON)
-    current_phase: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="planned", server_default="planned"
-    )
-    route_withdrawal_generation: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, server_default="0"
-    )
-    terminal_reason: Mapped[str | None] = mapped_column(Text)
-    completion_generation: Mapped[int | None] = mapped_column(
-        BigInteger, unique=True, index=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
+class RecipeRouteAuthority(Base):
+    """Current database identity for atomic recipe route publications."""
 
-
-class ReconciliationCompletionGeneration(Base):
-    __tablename__ = "reconciliation_completion_generation"
-    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    last_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
-
-
-class ReconciliationOperation(Base):
-    __tablename__ = "reconciliation_operations"
-    __table_args__ = (
-        UniqueConstraint(
-            "reconciliation_id",
-            "graph_operation_id",
-            "role",
-            name="uq_reconciliation_operation_graph_role",
-        ),
-        CheckConstraint(
-            "length(graph_operation_id) BETWEEN 1 AND 128",
-            name="ck_reconciliation_operations_graph_operation_id_length",
-        ),
-        CheckConstraint(
-            "role IN ('primary', 'compensation')",
-            name="ck_reconciliation_operations_role",
-        ),
-        CheckConstraint(
-            "state IN ('planned', 'queued', 'running', 'succeeded', "
-            "'accepted', 'failed', 'waiting-for-operator', 'compensating', "
-            "'compensated', 'uncertain')",
-            name="ck_reconciliation_operations_state",
-        ),
-        CheckConstraint(
-            "length(expected_payload_digest) = 64",
-            name="ck_reconciliation_operations_expected_payload_digest_length",
-        ),
-        CheckConstraint(
-            "result_digest IS NULL OR length(result_digest) = 64",
-            name="ck_reconciliation_operations_result_digest_length",
-        ),
-        CheckConstraint(
-            "evidence_digest IS NULL OR length(evidence_digest) = 64",
-            name="ck_reconciliation_operations_evidence_digest_length",
-        ),
-        CheckConstraint(
-            "compensated_graph_operation_id IS NULL OR "
-            "length(compensated_graph_operation_id) BETWEEN 1 AND 128",
-            name="ck_reconciliation_operations_compensated_id_length",
-        ),
-    )
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    reconciliation_id: Mapped[str] = mapped_column(
-        ForeignKey("reconciliations.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    graph_operation_id: Mapped[str] = mapped_column(String(128), nullable=False)
-    role: Mapped[str] = mapped_column(String(16), nullable=False)
-    agent_operation_id: Mapped[str | None] = mapped_column(
-        ForeignKey("agent_operations.id"), unique=True, index=True
-    )
-    expected_payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
-    state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    result_digest: Mapped[str | None] = mapped_column(String(64))
-    evidence_digest: Mapped[str | None] = mapped_column(String(64))
-    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    compensated_graph_operation_id: Mapped[str | None] = mapped_column(String(128))
-
-
-class ReconciliationCancellation(Base):
-    """Durable operator intent advanced independently of process lifetime."""
-
-    __tablename__ = "reconciliation_cancellations"
-    __table_args__ = (
-        CheckConstraint(
-            "state IN ('requested', 'withdrawal-pending', 'withdrawn', "
-            "'processing', 'compensating', 'completed', "
-            "'waiting-for-operator')",
-            name="ck_reconciliation_cancellations_state",
-        ),
-        CheckConstraint(
-            "length(reason) BETWEEN 1 AND 1024",
-            name="ck_reconciliation_cancellations_reason_length",
-        ),
-    )
-    reconciliation_id: Mapped[str] = mapped_column(
-        ForeignKey("reconciliations.id", ondelete="CASCADE"), primary_key=True
-    )
-    state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    reason: Mapped[str] = mapped_column(Text, nullable=False)
-    actor: Mapped[str] = mapped_column(String(200), nullable=False)
-    request_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
-    requested_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    __tablename__ = "recipe_route_authorities"
+    authority_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RoutePublication(Base):
@@ -454,8 +319,8 @@ class RoutePublication(Base):
             name="ck_route_publications_lease_window",
         ),
     )
-    reconciliation_id: Mapped[str] = mapped_column(
-        ForeignKey("reconciliations.id", ondelete="CASCADE"), primary_key=True
+    authority_id: Mapped[str] = mapped_column(
+        ForeignKey("recipe_route_authorities.authority_id", ondelete="CASCADE"), primary_key=True
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     generation: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
@@ -485,8 +350,8 @@ class RoutePublicationOwner(Base):
         ),
     )
     singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    reconciliation_id: Mapped[str | None] = mapped_column(
-        ForeignKey("reconciliations.id", ondelete="SET NULL"),
+    authority_id: Mapped[str | None] = mapped_column(
+        ForeignKey("recipe_route_authorities.authority_id", ondelete="SET NULL"),
         unique=True,
     )
     owner_generation: Mapped[int] = mapped_column(

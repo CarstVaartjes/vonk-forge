@@ -482,6 +482,7 @@ def expected(root: Path) -> tuple[dict[str, bytes], bytes, dict[str, object]]:
         "deploy/compose/hermes-agent/compose.yaml",
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
+        "agent_protocol/src/vonk_agent_protocol/route_activation.py",
         "deploy/compose/litellm/Dockerfile",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/bootstrap-config.json",
@@ -597,7 +598,7 @@ def image_errors(root: Path) -> list[str]:
             "target": "managed",
         },
         {
-            "context": "deploy/compose/litellm",
+            "context": ".",
             "dockerfile": "deploy/compose/litellm/Dockerfile",
             "environment": "LITELLM_IMAGE",
             "package": "vonk-forge-litellm",

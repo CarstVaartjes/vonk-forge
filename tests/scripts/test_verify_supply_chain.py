@@ -630,7 +630,7 @@ def test_image_lock_declares_all_four_release_artifacts() -> None:
             "target": "managed",
         },
         {
-            "context": "deploy/compose/litellm",
+            "context": ".",
             "dockerfile": "deploy/compose/litellm/Dockerfile",
             "environment": "LITELLM_IMAGE",
             "package": "vonk-forge-litellm",

@@ -23,6 +23,7 @@ SUPERVISOR = ROOT / "deploy/compose/litellm/config_supervisor.py"
 
 
 def _module():
+    sys.path.insert(0, str(ROOT / "agent_protocol/src/vonk_agent_protocol"))
     spec = importlib.util.spec_from_file_location(
         "litellm_config_supervisor", SUPERVISOR
     )
@@ -533,10 +534,10 @@ def _bundle(
     config = b'{"model_list":[{"model_name":"chat"}]}\n'
     routes = b'{"routes":{"chat":{}},"state":"published"}\n'
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generation": generation,
         "state": "published",
-        "reconciliation_id": "bb7aac18-edbf-4cc1-bafd-15e282557c53",
+        "authority_id": "bb7aac18-edbf-4cc1-bafd-15e282557c53",
         "plan_digest": "a" * 64,
         "evidence_set_digest": "b" * 64,
         "routes_sha256": hashlib.sha256(routes).hexdigest(),

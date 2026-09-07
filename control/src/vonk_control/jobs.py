@@ -159,15 +159,9 @@ class JobService:
         payload: Mapping[str, object],
         *,
         request_id: str | None = None,
-        reconciliation_id: str | None = None,
     ) -> Job:
         if not all(value.strip() for value in (kind, actor, authority_revision)):
             raise ValueError("job kind, actor, and authority revision are required")
-        if reconciliation_id is not None:
-            try:
-                reconciliation_id = str(uuid.UUID(reconciliation_id))
-            except (AttributeError, TypeError, ValueError) as error:
-                raise ValueError("reconciliation identity is invalid") from error
         clean, encoded = _canonical_payload(payload, kind=kind)
         now = self._clock()
         job = Job(
@@ -182,7 +176,6 @@ class JobService:
             current_attempt=0,
             created_at=now,
             updated_at=now,
-            reconciliation_id=reconciliation_id,
         )
         try:
             with self._sessions.begin() as session:
@@ -314,7 +307,6 @@ class JobService:
         *,
         authority_check: Callable[[], bool],
         request_id: str | None = None,
-        reconciliation_id: str | None = None,
     ) -> Job:
         """Create a job only while its external acceptance evidence stays current."""
 
@@ -322,11 +314,6 @@ class JobService:
             raise TypeError("job enqueue authority check is invalid")
         if not all(value.strip() for value in (kind, actor, authority_revision)):
             raise ValueError("job kind, actor, and authority revision are required")
-        if reconciliation_id is not None:
-            try:
-                reconciliation_id = str(uuid.UUID(reconciliation_id))
-            except (AttributeError, TypeError, ValueError) as error:
-                raise ValueError("reconciliation identity is invalid") from error
         clean, encoded = _canonical_payload(payload, kind=kind)
         now = self._clock()
         job = Job(
@@ -341,7 +328,6 @@ class JobService:
             current_attempt=0,
             created_at=now,
             updated_at=now,
-            reconciliation_id=reconciliation_id,
         )
         try:
             with self._sessions.begin() as session:
@@ -392,17 +378,20 @@ class JobService:
             statement = (
                 select(Job)
                 .where(
-                    Job.reconciliation_id.is_(None),
                     # Agent work and durable coordinators own these jobs.
                     # A generic lease must never turn their queued state into
                     # an "unsupported job kind" failure between worker turns.
-                    Job.kind.not_in((
-                        "agent-upgrade", "artifact-distribution",
-                        "recipe.run-switch.v2", "recipe.stop.v2",
-                    )),
-                    ~select(AgentOperation.id).where(
-                        AgentOperation.parent_job_id == Job.id
-                    ).exists(),
+                    Job.kind.not_in(
+                        (
+                            "agent-upgrade",
+                            "artifact-distribution",
+                            "recipe.run-switch.v2",
+                            "recipe.stop.v2",
+                        )
+                    ),
+                    ~select(AgentOperation.id)
+                    .where(AgentOperation.parent_job_id == Job.id)
+                    .exists(),
                     or_(
                         Job.state == "queued",
                         Job.id.in_(
