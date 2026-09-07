@@ -7,11 +7,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
-use vonk_agent_protocol::RecipeImageImportRequest;
+use vonk_agent_protocol::{RecipeImageImportEvidence, RecipeImageImportRequest};
 
 use crate::workloads::CompiledExecutionPlan;
 
@@ -21,14 +20,6 @@ pub enum ImageImportError {
     Io(#[from] std::io::Error),
     #[error("OCI archive digest or size does not match")]
     Digest,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct ImageImportEvidence {
-    pub build_id: Uuid,
-    pub image_bytes: u64,
-    pub image_digest: String,
-    pub oci_layout_sha256: String,
 }
 
 pub struct ImageImporter<'a> {
@@ -199,7 +190,7 @@ impl ImageImporter<'_> {
         &self,
         request: &RecipeImageImportRequest,
         archive: &Path,
-    ) -> Result<ImageImportEvidence, ImageImportError> {
+    ) -> Result<RecipeImageImportEvidence, ImageImportError> {
         validate_archive_metadata(archive, request.image_bytes, false)?;
         if !path_within_root(archive, self.data_root)? {
             return Err(ImageImportError::Digest);
@@ -207,7 +198,7 @@ impl ImageImporter<'_> {
         if sha256_file(archive)? != request.oci_layout_sha256 {
             return Err(ImageImportError::Digest);
         }
-        Ok(ImageImportEvidence {
+        Ok(RecipeImageImportEvidence {
             build_id: request.build_id,
             image_bytes: request.image_bytes,
             image_digest: request.image_digest.clone(),
