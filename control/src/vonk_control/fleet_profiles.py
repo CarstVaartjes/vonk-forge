@@ -48,9 +48,12 @@ from .models import (
     RunNode,
 )
 from .preparation_contract import RolloutPreparation
-from .recipe_contract import RecipeContractError, recipe_topology
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
-from .recipe_runtime_specs import resolve_recipe_entities
+from .recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    recipe_topology,
+    resolve_recipe_entities,
+)
 from .run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchOperation,
@@ -2166,7 +2169,7 @@ class FleetProfileService:
                 raise FleetProfileConflict("profile recipe revision must be active")
             try:
                 topology = recipe_topology(revision.document)
-            except RecipeContractError as error:
+            except RecipeRuntimeSpecError as error:
                 raise FleetProfileConflict(str(error)) from error
             if topology.get("name") != value.topology_name:
                 raise FleetProfileConflict(

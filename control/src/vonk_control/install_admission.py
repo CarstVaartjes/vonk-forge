@@ -31,8 +31,11 @@ from .models import (
     RecipeInstallation,
     ResourceReservation,
 )
-from .recipe_contract import recipe_topology
-from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
+from .recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    recipe_topology,
+    resolve_recipe_entities,
+)
 from .topology import Placement, TopologyError, validate_topology
 
 
