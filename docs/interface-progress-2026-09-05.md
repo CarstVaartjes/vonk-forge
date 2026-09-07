@@ -31,18 +31,30 @@ separate results.
   and fresh PostgreSQL.
 - CLI qualification uses the current Library API. Selected file IDs are exact;
   download totals deduplicate shared object bytes across Models.
-- Current checks include 432 Rust tests across 40 executables in unprivileged
-  ARM64 OrbStack, 300 composed Controller/database/protocol/CLI tests, and all
-  catalog role projections. Full Controller and web checks found remaining
-  test fixtures and one action-label type mismatch; their corrections and the
-  combined rerun are underway. Actual uninstall producer-to-Rust wire coverage
-  and the corrected development lifecycle canary are being completed.
-- Three exact changes remain pending automatic-review approval: deleting old
-  catalog ModelGroup/ModelVersion schema branches and seed/test documents;
-  removing repeated full-file hashes at trusted internal handoffs; and removing
-  the qualification CLI's duplicate territorial metadata check. These removals
-  have not been performed. Current runtime does not consume the old Model entity
-  documents. Active platform harness/runtime wire contracts remain supported.
+- Run/Switch consumes the typed cache manifest and the current preview response
+  contract. Connected tests prove companion Model references survive, empty
+  support files remain selectable, and shared object bytes count once.
+- Concurrent Model and image workers claim only the row they will process;
+  PostgreSQL no longer over-locks queued work and starves another worker.
+- Current verification: 1,943 Controller tests pass (three documented platform
+  or opt-in skips); all four Controller-to-Rust install/start/uninstall/cleanup
+  bridge tests pass. The 432 Rust tests across 40 executables passed in
+  unprivileged ARM64 OrbStack before the final response-builder extraction;
+  its focused protocol and connected bridge tests also pass. Web: 216 unit
+  tests, production build, and 25 browser journeys pass (one capture-only skip).
+  CLI/generated/supply-chain checks previously passed 328 tests plus 45 subtests;
+  the final generated/supply-chain rerun passed all 107 tests.
+- The development lifecycle canary has current source-built Controller images
+  and ARM64 binaries. Its reused target failed the fresh-target check before
+  lifecycle execution; an isolated fresh target is being prepared. This is
+  development evidence, not signed publication or physical Spark acceptance.
+- The user approved deleting all remaining legacy code. Removal of old catalog
+  ModelGroup/ModelVersion schema branches, validators, and seed/test documents
+  is underway in an isolated worker. Active platform harness/runtime wire
+  contracts remain supported. Separate exact approvals remain pending for
+  removing repeated full-file hashes at trusted internal handoffs and the
+  qualification CLI's duplicate territorial metadata check. Those changes have
+  not been performed.
 - The NAS Controller is unchanged. Backups and a fresh database are prepared;
   device identities have not been copied and no selected Model download has
   started. Deployment follows successful publication and acceptance.
