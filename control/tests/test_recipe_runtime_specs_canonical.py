@@ -42,7 +42,7 @@ def _recipe(name: str, *, engine: str, entrypoint: list[str]) -> object:
 
 
 def test_final_image_recipe_compiles_with_platform_defaults(model: object) -> None:
-    recipe = _recipe("recipe-image.json", engine="vllm", entrypoint=["vllm", "serve", "/models"])
+    recipe = _recipe("recipe-image.json", engine="vllm", entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"])
     spec = compile_runtime_spec(recipe, models=[model], role="entrypoint", rank=0)
 
     assert spec["runtime"]["image"].endswith("@sha256:" + "d" * 64)  # type: ignore[index]
@@ -54,7 +54,7 @@ def test_final_image_recipe_compiles_with_platform_defaults(model: object) -> No
 
 
 def test_source_build_requires_and_binds_exact_receipt(model: object) -> None:
-    recipe = _recipe("recipe-source-build.json", engine="vllm", entrypoint=["vllm", "serve", "/models"])
+    recipe = _recipe("recipe-source-build.json", engine="vllm", entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"])
     digest = "a" * 64
     spec = compile_runtime_spec(
         recipe,
@@ -70,17 +70,35 @@ def test_source_build_requires_and_binds_exact_receipt(model: object) -> None:
     assert spec["runtime"]["image"] == f"localhost/vonk/recipe-build@sha256:{digest}"  # type: ignore[index]
 
 
+def test_runtime_compiler_rejects_retired_entity_authorities(model: object) -> None:
+    recipe = _recipe(
+        "recipe-image.json",
+        engine="vllm",
+        entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
+    )
+    with pytest.raises(RecipeRuntimeSpecError, match="retired authorities"):
+        compile_runtime_spec(
+            recipe,
+            resolved_entities={
+                "execution_harness": {"kind": "execution-harness"},
+            },
+            models=[model],
+            role="entrypoint",
+            rank=0,
+        )
+
+
 @pytest.mark.parametrize(
     ("engine", "entrypoint", "recipe_file"),
     [
-        ("vllm", ["vllm", "serve", "/models"], "recipe-image.json"),
-        ("sglang", ["sglang", "serve", "/models"], "recipe-image.json"),
-        ("tensorrt-llm", ["trtllm-serve", "serve", "/models"], "recipe-image.json"),
-        ("llama-cpp", ["llama-server", "/models"], "recipe-image.json"),
-        ("ds4", ["ds4-serve", "/models"], "recipe-image.json"),
-        ("diffusers", ["diffusers-job"], "recipe-job.json"),
-        ("comfyui", ["comfyui-job"], "recipe-job.json"),
-        ("pytorch-pipeline", ["pytorch-pipeline"], "recipe-job.json"),
+        ("vllm", ["/opt/vonk/bin/vllm", "serve", "/models"], "recipe-image.json"),
+        ("sglang", ["/opt/vonk/bin/sglang-serve", "serve", "/models"], "recipe-image.json"),
+        ("tensorrt-llm", ["/opt/vonk/bin/trtllm-serve", "serve", "/models"], "recipe-image.json"),
+        ("llama-cpp", ["/opt/vonk/bin/llama-server", "/models"], "recipe-image.json"),
+        ("ds4", ["/opt/vonk/bin/ds4-serve", "/models"], "recipe-image.json"),
+        ("diffusers", ["/opt/vonk/bin/diffusers-job"], "recipe-job.json"),
+        ("comfyui", ["/opt/vonk/bin/comfyui-job"], "recipe-job.json"),
+        ("pytorch-pipeline", ["/opt/vonk/bin/pytorch-pipeline"], "recipe-job.json"),
     ],
 )
 def test_all_builtin_harnesses_compile_final_examples(
@@ -190,13 +208,15 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
     """Compile every role from the current canonical recipe checkout."""
     root = recipe_library_root()
     recipe_files = sorted((root / "recipes").glob("*.json"))
-    assert recipe_files
+    assert len(recipe_files) == 85
     model_documents: dict[tuple[str, str], object] = {}
     for path in (root / "models").glob("*.json"):
         item = json.loads(path.read_text(encoding="utf-8"))
         parsed = contracts.ModelDefinition.model_validate(item)
         model_documents[(parsed.identity.publisher, parsed.identity.slug)] = parsed
+    assert len(model_documents) == 92
     engines: set[str] = set()
+    projection_count = 0
     for path in recipe_files:
         recipe = contracts.RecipeDefinition.model_validate(json.loads(path.read_text(encoding="utf-8")))
         engines.add(recipe.runtime.engine)
@@ -226,6 +246,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
                     role=role.name,
                     rank=rank,
                 )
+                projection_count += 1
                 for artifact in spec["artifacts"]:
                     assert artifact["mount"]["source"].startswith(
                         f"/run/vonk/models/{artifact['selection_id']}/{artifact['file_id']}"
@@ -238,6 +259,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
         "comfyui",
         "pytorch-pipeline",
     }
+    assert projection_count == 109
 
 
 def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(model: object) -> None:
@@ -294,7 +316,7 @@ def test_security_is_in_execution_projection_and_build_input_is_separate(model: 
     changed["security"]["user"] = "10002:10002"
     assert _execution_digest(common) != _execution_digest(changed)
 
-    recipe = _recipe("recipe-source-build.json", engine="vllm", entrypoint=["vllm", "serve", "/models"])
+    recipe = _recipe("recipe-source-build.json", engine="vllm", entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"])
     digest = "a" * 64
     package = {
         "image_digest": digest,

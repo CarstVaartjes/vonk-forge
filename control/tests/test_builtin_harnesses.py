@@ -3,11 +3,12 @@ from __future__ import annotations
 import copy
 import json
 from importlib.resources import files
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from vonk_control import harnesses
 from vonk_control.harnesses.canonical import compile_canonical_harness
+from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_control.harnesses.common import HarnessCompileError
 from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
@@ -31,18 +32,17 @@ BUILTINS = (
     "comfyui",
     "pytorch-pipeline",
 )
-HARNESS_ROOT = Path(__file__).resolve().parents[2] / "config/execution-harnesses"
 
 OPENAI_BUILTINS = {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4"}
 ENTRYPOINTS = {
-    "vllm": ["vllm", "serve", "/models"],
-    "sglang": ["sglang", "serve", "/models"],
-    "tensorrt-llm": ["trtllm-serve", "serve", "/models"],
-    "llama-cpp": ["llama-server", "/models"],
-    "ds4": ["ds4-serve", "/models"],
-    "diffusers": ["diffusers-job"],
-    "comfyui": ["comfyui-job"],
-    "pytorch-pipeline": ["pytorch-pipeline"],
+    "vllm": ["/opt/vonk/bin/vllm", "serve", "/models"],
+    "sglang": ["/opt/vonk/bin/sglang-serve", "serve", "/models"],
+    "tensorrt-llm": ["/opt/vonk/bin/trtllm-serve", "serve", "/models"],
+    "llama-cpp": ["/opt/vonk/bin/llama-server", "/models"],
+    "ds4": ["/opt/vonk/bin/ds4-serve", "/models"],
+    "diffusers": ["/opt/vonk/bin/diffusers-job"],
+    "comfyui": ["/opt/vonk/bin/comfyui-job"],
+    "pytorch-pipeline": ["/opt/vonk/bin/pytorch-pipeline"],
 }
 ARGS = {
     "vllm": [
@@ -97,14 +97,33 @@ def _example(name: str) -> dict[str, object]:
     )
 
 
-def test_config_contains_exactly_the_canonical_builtin_harness_assets() -> None:
-    paths = sorted(HARNESS_ROOT.glob("*.json"))
+def test_platform_metadata_contains_exactly_the_canonical_builtin_harnesses() -> None:
+    assert tuple(metadata.slug for metadata in CANONICAL_HARNESSES) == BUILTINS
 
-    assert {path.stem for path in paths} == set(BUILTINS)
-    for path in paths:
-        document = json.loads(path.read_text(encoding="utf-8"))
-        assert document["kind"] == "execution-harness"
-        assert document["compiler_slug"] == path.stem
+
+def test_harness_package_exposes_only_the_canonical_compiler_boundary() -> None:
+    assert not hasattr(harnesses, "HarnessRegistry")
+    assert not hasattr(harnesses, "TrustedBuiltinComposition")
+
+
+def test_platform_metadata_is_strict_and_has_current_capabilities() -> None:
+    vllm = next(item for item in CANONICAL_HARNESSES if item.slug == "vllm")
+    sglang = next(item for item in CANONICAL_HARNESSES if item.slug == "sglang")
+    assert vllm.topology_modes == ("single", "distributed")
+    assert sglang.topology_modes == ("single", "distributed")
+    assert vllm.security_exceptions == ("model.trust-remote-code",)
+    assert sglang.security_exceptions == ("model.trust-remote-code",)
+    with pytest.raises(ValidationError):
+        type(vllm).model_validate({**vllm.model_dump(), "schema_version": 1})
+
+
+def test_platform_metadata_is_immutable_and_digest_bound() -> None:
+    for metadata in CANONICAL_HARNESSES:
+        assert metadata.content_sha256 == metadata.model_copy().content_sha256
+        assert metadata.executables
+        assert metadata.wrapper.startswith("/")
+        with pytest.raises(ValidationError):
+            metadata.slug = "mutated"  # type: ignore[misc]
 
 
 @pytest.fixture(scope="module")
@@ -198,6 +217,18 @@ def test_builtin_harness_compiles_the_declared_model_and_output_mounts(
     assert projection.output_mount.target == "/outputs"
     assert projection.output_mount.read_only is False
     assert projection.output_mount.isolated is True
+
+
+def test_builtin_harness_executes_a_valid_short_entrypoint_as_authored(
+    model: ModelDefinition,
+) -> None:
+    raw = _recipe("vllm").model_dump(mode="json")
+    raw["runtime"]["entrypoint"] = ["vllm", "serve", "/models"]
+    projection = _projection(
+        "vllm", recipe=RecipeDefinition.model_validate(raw), model=model
+    )
+
+    assert projection.command[0] == "vllm"
 
 
 def test_vllm_preserves_opaque_engine_options(model: ModelDefinition) -> None:
