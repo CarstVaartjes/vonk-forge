@@ -298,7 +298,7 @@ def test_human_agent_upgrade_detail_separates_diagnosis_from_raw_evidence() -> N
                             "retry_queued": False,
                         }
                     ],
-                    "legacy_generic_ambiguous": True,
+                    "failure_details_unavailable": True,
                     "next_action": "Inspect package-helper and dpkg recovery state before resuming.",
                     "operator_summary": "The exact target identity was not proven.",
                 },
@@ -320,7 +320,7 @@ def test_human_agent_upgrade_detail_separates_diagnosis_from_raw_evidence() -> N
     assert "raw_helper_reason: agent upgrade request is invalid" in output
     assert "retry_not_before: 2026-08-28T21:27:40+00:00" in output
     assert "retry_queued: false" in output
-    assert "legacy helper response is ambiguous" in output
+    assert "helper did not report the failed stage" in output
     assert "next_action: Inspect package-helper" in output
 
 

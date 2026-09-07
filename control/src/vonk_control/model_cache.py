@@ -3539,7 +3539,14 @@ class ModelCacheService:
 
     @classmethod
     def _manifest_has_huggingface_source(cls, manifest: ArtifactSetManifest) -> bool:
-        return cls._payload_has_huggingface_source(manifest.document())
+        for spec in _unique_artifacts(manifest.artifacts).values():
+            try:
+                host = urlsplit(spec.source).hostname
+            except ValueError:
+                continue
+            if _is_hf_authority(host):
+                return True
+        return False
 
     def _record_huggingface_cooldown(self, until: datetime) -> None:
         with self._lock:

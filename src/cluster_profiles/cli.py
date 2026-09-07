@@ -354,9 +354,9 @@ def _emit_agent_upgrade_detail(payload: Mapping[str, object]) -> bool:
                 print(
                     f"  retry_queued: {str(target.get('retry_queued') is True).lower()}"
                 )
-    if diagnostics.get("legacy_generic_ambiguous") is True:
+    if diagnostics.get("failure_details_unavailable") is True:
         print(
-            "diagnosis: legacy helper response is ambiguous; the exact target "
+            "diagnosis: helper did not report the failed stage; the exact target "
             "identity remains the success gate"
         )
     if diagnostics.get("next_action"):
