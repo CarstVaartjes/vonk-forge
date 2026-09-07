@@ -35,7 +35,11 @@ from vonk_forge_contracts.model import ModelReference
 
 from .cached_file_verification import verified_files
 from .logging import redact_text
-from .model_cache_contract import ModelCacheOperationResult, parse_model_cache_result
+from .model_cache_contract import (
+    ModelCacheOperationResponse,
+    ModelCacheOperationResult,
+    parse_model_cache_result,
+)
 from .models import (
     CatalogDocumentRevision,
     FleetProfile,
@@ -2994,7 +2998,7 @@ class ModelCacheService:
     def _operation_view(operation: ModelCacheOperation) -> CacheOperationView:
         result = operation.payload.get("result") if isinstance(operation.payload, Mapping) else None
         failure = ModelCacheService._canonical_failure(operation)
-        return CacheOperationView(
+        view = CacheOperationView(
             id=operation.id,
             request_key=operation.request_key,
             kind=operation.kind,
@@ -3016,6 +3020,8 @@ class ModelCacheService:
             ),
             failure=failure,
         )
+        ModelCacheOperationResponse.model_validate(view, from_attributes=True)
+        return view
 
     @staticmethod
     def _canonical_failure(
@@ -4750,9 +4756,21 @@ class ModelCacheService:
                 operation = session.get(ModelCacheOperation, operation_id)
                 if operation is not None:
                     operation.state = "failed"
-                    operation.last_error = (
+                    operation.last_error = redact_text(
                         error.detail if isinstance(error, ModelCacheError) else str(error)
                     )[:512]
+                    payload = dict(operation.payload)
+                    payload.pop("claim", None)
+                    payload.pop("result", None)
+                    payload["failure"] = {
+                        "code": error.code if isinstance(error, ModelCacheError)
+                        else "model_cache.eviction_failed",
+                        "detail": operation.last_error,
+                        "retryable": False,
+                        "recovery": "inspect",
+                    }
+                    operation.payload = payload
+                    operation.progress = dict(operation.progress) | {"phase": "failed"}
                     operation.updated_at = now
                     operation.completed_at = now
 

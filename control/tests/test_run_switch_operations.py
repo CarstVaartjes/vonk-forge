@@ -2080,3 +2080,42 @@ def test_operation_read_rejects_malformed_persisted_result(
         assert job is not None
         assert job.result == invalid_result
         assert job.state == previous_state
+
+
+def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evidence(tmp_path):
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4()))
+    service = _service(sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor())
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest,
+                              request_key=str(uuid.uuid4())), actor="admin",
+    )
+    # Resume the durable checkpoint written after the last phase of a retry.
+    with sessions.begin() as session:
+        row = session.get(Job, operation.operation_id)
+        row.state = "running"
+        row.result = dict(row.result) | {
+            "phase_index": len(plan.phases),
+            "completed_phases": [phase.kind for phase in plan.phases],
+            "retryable": True,
+            "failed_phase": "transfer",
+        }
+    restarted = _service(sessions, lifecycle._clock(), lifecycle, RecordingArtifactExecutor())
+    assert restarted.tick() is True
+    completed = restarted.get(operation.operation_id)
+    assert completed.state == "succeeded"
+    assert completed.result.retryable is False
+    assert completed.result.failed_phase is None
+    assert completed.status_reason is None
+    from vonk_control.run_switch_contract import RunSwitchOperation
+    with pytest.raises(ValidationError, match="completed phase evidence"):
+        RunSwitchOperation.model_validate(completed.model_dump() | {"result": None})
+    with pytest.raises(ValidationError, match="requires a status reason"):
+        RunSwitchOperation.model_validate(completed.model_dump() | {"state": "failed"})
+    with sessions.begin() as session:
+        row = session.get(Job, operation.operation_id)
+        row.result = None
+    with pytest.raises(ValidationError, match="completed phase evidence"):
+        restarted.get(operation.operation_id)
