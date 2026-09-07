@@ -201,8 +201,8 @@ class RecipeOperationRequest:
     phase: str | None = None
     start_deadline: str | None = None
     run_generation: int | None = None
-    cleanup_model_version_sha256: str | None = None
-    model_version_sha256: str | None = None
+    cleanup_model_content_sha256: str | None = None
+    model_content_sha256: str | None = None
     installations: tuple[tuple[str, str], ...] = ()
     compiled_execution_plan: Mapping[str, Any] | None = None
 
@@ -261,11 +261,11 @@ class RecipeOperationRequest:
         if operation is AgentOperation.RECIPE_STOP:
             required = common | {"run_id"}
         elif operation is AgentOperation.RECIPE_MODEL_UNINSTALL:
-            required = common | {"model_version_sha256", "installations"}
+            required = common | {"model_content_sha256", "installations"}
         else:
             required = common | {"installation_id", "recipe_content_sha256"}
-            if "cleanup_model_version_sha256" in value:
-                required.add("cleanup_model_version_sha256")
+            if "cleanup_model_content_sha256" in value:
+                required.add("cleanup_model_content_sha256")
         _fields(value, required=required)
         schema_version = _version(value["schema_version"])
         plan_digest = _digest(value["plan_digest"], "plan_digest")
@@ -281,15 +281,15 @@ class RecipeOperationRequest:
         )
         cleanup_model_digest = (
             _digest(
-                value["cleanup_model_version_sha256"],
-                "cleanup_model_version_sha256",
+                value["cleanup_model_content_sha256"],
+                "cleanup_model_content_sha256",
             )
-            if value.get("cleanup_model_version_sha256") is not None
+            if value.get("cleanup_model_content_sha256") is not None
             else None
         )
         model_digest = (
-            _digest(value["model_version_sha256"], "model_version_sha256")
-            if "model_version_sha256" in value
+            _digest(value["model_content_sha256"], "model_content_sha256")
+            if "model_content_sha256" in value
             else None
         )
         installations: tuple[tuple[str, str], ...] = ()
@@ -333,8 +333,8 @@ class RecipeOperationRequest:
             recipe_content_sha256=recipe_digest,
             expected_bytes=expected_bytes,
             run_id=run_id,
-            cleanup_model_version_sha256=cleanup_model_digest,
-            model_version_sha256=model_digest,
+            cleanup_model_content_sha256=cleanup_model_digest,
+            model_content_sha256=model_digest,
             installations=installations,
         )
 

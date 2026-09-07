@@ -22,9 +22,10 @@ UNINSTALL = {
     "recipe_content_sha256": RECIPE_DIGEST,
     "plan_digest": PLAN_DIGEST,
 }
+UNINSTALL_WITH_MODEL_CLEANUP = UNINSTALL | {"cleanup_model_content_sha256": "f" * 64}
 MODEL_UNINSTALL = {
     "schema_version": 1,
-    "model_version_sha256": "f" * 64,
+    "model_content_sha256": "f" * 64,
     "plan_digest": PLAN_DIGEST,
     "installations": [
         {
@@ -57,6 +58,7 @@ def test_recipe_operation_vocabulary_is_closed() -> None:
     [
         (AgentOperation.RECIPE_STOP, STOP),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL),
+        (AgentOperation.RECIPE_UNINSTALL, UNINSTALL_WITH_MODEL_CLEANUP),
         (AgentOperation.RECIPE_MODEL_UNINSTALL, MODEL_UNINSTALL),
     ],
 )
