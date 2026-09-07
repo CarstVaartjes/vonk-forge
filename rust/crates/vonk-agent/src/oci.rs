@@ -97,6 +97,7 @@ pub struct JobOutputState {
 const INSTALLATION_METADATA_SCHEMA_VERSION: u8 = 2;
 const INSTALLATION_METADATA_FILE: &str = "model-metadata.json";
 const MAX_COMPILED_DOCUMENT_BYTES: u64 = 16 * 1024 * 1024;
+const TRUSTED_RUNTIME_UID: u32 = 10_001;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -1291,7 +1292,7 @@ fn sha256_open_file(file: &mut File, before: &fs::Metadata) -> Result<String, Oc
         hasher.update(&buffer[..read]);
     }
     let after = file.metadata()?;
-    if !trusted_model_metadata(&after, before.len()) || !metadata_stable(before, &after) {
+    if !trusted_model_file(file, &after, before.len()) || !metadata_stable(before, &after) {
         return Err(OciError::Artifact);
     }
     Ok(hex::encode(hasher.finalize()))
@@ -1416,12 +1417,61 @@ fn metadata_matches_receipt(metadata: &fs::Metadata, receipt: &InstallationMetad
 }
 
 fn trusted_model_metadata(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
+    trusted_model_shape(metadata, expected_bytes) && metadata.mode() & 0o777 == 0o600
+}
+
+fn trusted_model_shape(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
     metadata.file_type().is_file()
         && !metadata.file_type().is_symlink()
         && metadata.nlink() == 1
         && metadata.uid() == rustix::process::geteuid().as_raw()
-        && metadata.mode() & 0o777 == 0o600
         && metadata.len() == expected_bytes
+}
+
+fn trusted_model_file(file: &File, metadata: &fs::Metadata, expected_bytes: u64) -> bool {
+    if !trusted_model_shape(metadata, expected_bytes) {
+        return false;
+    }
+    match metadata.mode() & 0o777 {
+        0o600 => true,
+        0o640 => exact_runtime_file_acl(file),
+        _ => false,
+    }
+}
+
+fn exact_runtime_file_acl(file: &File) -> bool {
+    const ACL_VERSION: u32 = 0x0002;
+    const USER_OBJ: u16 = 0x0001;
+    const USER: u16 = 0x0002;
+    const GROUP_OBJ: u16 = 0x0004;
+    const MASK: u16 = 0x0010;
+    const OTHER: u16 = 0x0020;
+    let mut value = [0_u8; 4 + 5 * 8];
+    let Ok(length) = rustix::fs::fgetxattr(file, "system.posix_acl_access", &mut value) else {
+        return false;
+    };
+    if length != value.len() || u32::from_le_bytes(value[..4].try_into().unwrap()) != ACL_VERSION {
+        return false;
+    }
+    let mut user_object = false;
+    let mut runtime_user = false;
+    let mut group_object = false;
+    let mut mask = false;
+    let mut other = false;
+    for entry in value[4..].chunks_exact(8) {
+        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
+        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
+        let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+        match tag {
+            USER_OBJ if identifier == u32::MAX => user_object = permissions == 0o6,
+            USER if identifier == TRUSTED_RUNTIME_UID => runtime_user = permissions == 0o4,
+            GROUP_OBJ if identifier == u32::MAX => group_object = permissions == 0,
+            MASK if identifier == u32::MAX => mask = permissions == 0o4,
+            OTHER if identifier == u32::MAX => other = permissions == 0,
+            _ => return false,
+        }
+    }
+    user_object && runtime_user && group_object && mask && other
 }
 
 fn open_trusted_model_file(
@@ -1429,7 +1479,7 @@ fn open_trusted_model_file(
     expected_bytes: u64,
 ) -> Result<(File, fs::Metadata), OciError> {
     let path_metadata = fs::symlink_metadata(path)?;
-    if !trusted_model_metadata(&path_metadata, expected_bytes) {
+    if !trusted_model_shape(&path_metadata, expected_bytes) {
         return Err(OciError::Artifact);
     }
     let file = OpenOptions::new()
@@ -1437,7 +1487,7 @@ fn open_trusted_model_file(
         .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
         .open(path)?;
     let opened_metadata = file.metadata()?;
-    if !trusted_model_metadata(&opened_metadata, expected_bytes)
+    if !trusted_model_file(&file, &opened_metadata, expected_bytes)
         || opened_metadata.dev() != path_metadata.dev()
         || opened_metadata.ino() != path_metadata.ino()
     {
@@ -1870,6 +1920,29 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    fn apply_acl(path: &Path, entries: &[(u16, u16, u32)]) {
+        let mut value = Vec::with_capacity(4 + entries.len() * 8);
+        value.extend_from_slice(&0x0002_u32.to_le_bytes());
+        for &(tag, permissions, identifier) in entries {
+            value.extend_from_slice(&tag.to_le_bytes());
+            value.extend_from_slice(&permissions.to_le_bytes());
+            value.extend_from_slice(&identifier.to_le_bytes());
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        rustix::fs::fsetxattr(
+            &file,
+            "system.posix_acl_access",
+            &value,
+            rustix::fs::XattrFlags::empty(),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn trusted_installation_verification_reuses_unchanged_metadata_receipt() {
         let data = tempdir().unwrap();
@@ -1901,6 +1974,86 @@ mod tests {
 
         let after = SHA256_FILE_CALLS.with(|calls| calls.get());
         assert_eq!(after, before);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn trusted_installation_verification_reuses_exact_runtime_acl_receipt_after_metadata_refresh() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, _) = persisted_installation(data.path());
+        let primary = installation.join("models/primary/config.json");
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let before = SHA256_FILE_CALLS.with(|calls| calls.get());
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), before);
+
+        apply_acl(
+            &primary,
+            &[
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o4, 10_001),
+                (0x0004, 0, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0, u32::MAX),
+            ],
+        );
+        runtime.verify_installation(&installation_id).unwrap();
+        let after_acl = SHA256_FILE_CALLS.with(|calls| calls.get());
+        assert_eq!(after_acl, before + 1);
+
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_FILE_CALLS.with(|calls| calls.get()), after_acl);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn trusted_installation_verification_rejects_unauthorized_runtime_acls() {
+        for entries in [
+            vec![
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o4, 10_001),
+                (0x0004, 0o4, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0, u32::MAX),
+            ],
+            vec![
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o4, 10_001),
+                (0x0004, 0, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0o4, u32::MAX),
+            ],
+            vec![
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o4, 10_001),
+                (0x0002, 0o4, 10_002),
+                (0x0004, 0, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0, u32::MAX),
+            ],
+            vec![
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o6, 10_001),
+                (0x0004, 0, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0, u32::MAX),
+            ],
+        ] {
+            let data = tempdir().unwrap();
+            let (installation_id, installation, _) = persisted_installation(data.path());
+            let primary = installation.join("models/primary/config.json");
+            apply_acl(&primary, &entries);
+            let runner = NoProcess;
+            let runtime = runtime(data.path(), &runner);
+            assert!(
+                matches!(
+                    runtime.verify_installation(&installation_id),
+                    Err(OciError::Artifact)
+                ),
+                "entries {entries:?}"
+            );
+        }
     }
 
     #[test]
