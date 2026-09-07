@@ -7,9 +7,10 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator
 
 from .auth import CursorCodec
+from .model_cache_contract import Digest
 from .operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
@@ -20,24 +21,25 @@ from .recipe_image_availability import (
     RecipeImageAvailabilityService,
     RecipeImageAvailabilityView,
 )
+from .strict_json import StrictJSONModel
 
 
-class RecipeImageAvailabilityStart(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeImageAvailabilityStart(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     request_key: str = Field(min_length=1, max_length=36)
     recipe_revision_id: str = Field(min_length=1, max_length=128)
     force: bool = False
 
 
-class RecipeImageAvailabilityRetry(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeImageAvailabilityRetry(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     request_key: str = Field(min_length=1, max_length=36)
 
 
-class RecipeImageAvailabilityArtifact(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeImageAvailabilityArtifact(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     key: str = Field(min_length=1, max_length=256)
     id: str = Field(min_length=1, max_length=256)
@@ -49,11 +51,11 @@ class RecipeImageAvailabilityArtifact(BaseModel):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     download_bytes: int = Field(ge=0)
     roles: list[str]
-    model_version_sha256: str | None = None
+    model_content_sha256: str | None = None
 
 
-class RecipeImageAvailabilityChild(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeImageAvailabilityChild(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     kind: Literal["model-cache", "runtime-image"]
     id: str
@@ -61,27 +63,37 @@ class RecipeImageAvailabilityChild(BaseModel):
     state: Literal["queued", "running", "partial", "succeeded", "failed"]
     artifact_set_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     plan_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    model_versions: list[str] = Field(default_factory=list)
+    model_content_digests: list[Digest]
     artifacts: list[RecipeImageAvailabilityArtifact] = Field(default_factory=list)
     progress: OperationProgress
     failure: AvailabilityOperationFailure | None = None
 
 
-class RecipeImageAvailabilityAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeImageAvailabilityAction(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     key: AvailabilityRecoveryAction
 
+    @field_validator("key", mode="before")
+    @classmethod
+    def parse_key(cls, value: object) -> object:
+        if isinstance(value, AvailabilityRecoveryAction):
+            return value
+        try:
+            return AvailabilityRecoveryAction(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError("key contains an invalid action") from error
 
-class RecipeImageAvailabilityResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+
+class RecipeImageAvailabilityResult(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
     recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     model_digest: str | None = None
     model_child_id: str | None = None
     artifact_set_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    model_versions: list[str] = Field(default_factory=list)
+    model_content_digests: list[Digest]
     build_input_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     source: str = Field(min_length=1, max_length=64)
     registry_manifest_digest: str | None = None
@@ -93,8 +105,8 @@ class RecipeImageAvailabilityResult(BaseModel):
     build_id: str | None = None
 
 
-class RecipeImageAvailabilityResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeImageAvailabilityResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
     id: str = Field(min_length=1, max_length=128)
@@ -113,8 +125,8 @@ class RecipeImageAvailabilityResponse(BaseModel):
     updated_at: str
 
 
-class RecipeImageAvailabilityListResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeImageAvailabilityListResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
     operations: list[RecipeImageAvailabilityResponse]
@@ -122,8 +134,8 @@ class RecipeImageAvailabilityListResponse(BaseModel):
     next_cursor: str | None = None
 
 
-class RecipeImageAvailabilityErrorResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class RecipeImageAvailabilityErrorResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
     failure: AvailabilityOperationFailure
@@ -184,21 +196,11 @@ def _progress(value: object) -> OperationProgress:
 
 
 def _child(value: object, *, kind: Literal["model-cache", "runtime-image"]) -> RecipeImageAvailabilityChild:
-    raw = value if isinstance(value, dict) else {}
-    failure = raw.get("failure")
-    if isinstance(failure, dict):
-        failure = dict(failure)
-    return RecipeImageAvailabilityChild(
-        kind=kind,
-        id=str(raw.get("id", "")),
-        request_key=raw.get("request_key") if isinstance(raw.get("request_key"), str) else None,
-        state=str(raw.get("state", "queued")),
-        artifact_set_sha256=raw.get("artifact_set_sha256") if isinstance(raw.get("artifact_set_sha256"), str) else None,
-        plan_digest=raw.get("plan_digest") if isinstance(raw.get("plan_digest"), str) else None,
-        model_versions=[item for item in raw.get("model_versions", []) if isinstance(item, str)],
-        artifacts=[RecipeImageAvailabilityArtifact.model_validate(item) for item in raw.get("artifacts", []) if isinstance(item, dict)],
-        progress=_progress(raw.get("progress")),
-        failure=AvailabilityOperationFailure.model_validate(failure) if isinstance(failure, dict) else None,
+    raw = dict(value) if isinstance(value, dict) else {}
+    if kind == "runtime-image":
+        raw["model_content_digests"] = []
+    return RecipeImageAvailabilityChild.model_validate(
+        raw | {"kind": kind, "progress": _progress(raw.get("progress"))}
     )
 
 
@@ -215,7 +217,11 @@ def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailability
             | {
                 "model_child_id": child.get("id") if isinstance(child, dict) else None,
                 "artifact_set_sha256": child.get("artifact_set_sha256") if isinstance(child, dict) else None,
-                "model_versions": child.get("model_versions", []) if isinstance(child, dict) else [],
+                "model_content_digests": (
+                    child["model_content_digests"]
+                    if isinstance(child, dict)
+                    else []
+                ),
             }
         )
     failure = document.get("failure")

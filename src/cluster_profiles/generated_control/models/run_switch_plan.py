@@ -61,7 +61,7 @@ class RunSwitchPlan:
             invocation (InvocationMetadata): Context for audit and tracing which has no decision-making authority.
             mapping (Union['MappingSelection', None]):
             model_capabilities (list['CapabilityEvidence']):
-            model_version_sha256 (Union[None, str]):
+            model_content_sha256 (Union[None, str]):
             phases (list['RunSwitchPhase']):
             plan_digest (str):
             recipe_build_id (Union[None, str]):
@@ -100,7 +100,7 @@ class RunSwitchPlan:
     invocation: 'InvocationMetadata'
     mapping: Union['MappingSelection', None]
     model_capabilities: list['CapabilityEvidence']
-    model_version_sha256: Union[None, str]
+    model_content_sha256: Union[None, str]
     phases: list['RunSwitchPhase']
     plan_digest: str
     recipe_build_id: Union[None, str]
@@ -206,8 +206,8 @@ class RunSwitchPlan:
 
 
 
-        model_version_sha256: Union[None, str]
-        model_version_sha256 = self.model_version_sha256
+        model_content_sha256: Union[None, str]
+        model_content_sha256 = self.model_content_sha256
 
         phases = []
         for phases_item_data in self.phases:
@@ -305,7 +305,7 @@ class RunSwitchPlan:
             "invocation": invocation,
             "mapping": mapping,
             "model_capabilities": model_capabilities,
-            "model_version_sha256": model_version_sha256,
+            "model_content_sha256": model_content_sha256,
             "phases": phases,
             "plan_digest": plan_digest,
             "recipe_build_id": recipe_build_id,
@@ -493,12 +493,12 @@ class RunSwitchPlan:
             model_capabilities.append(model_capabilities_item)
 
 
-        def _parse_model_version_sha256(data: object) -> Union[None, str]:
+        def _parse_model_content_sha256(data: object) -> Union[None, str]:
             if data is None:
                 return data
             return cast(Union[None, str], data)
 
-        model_version_sha256 = _parse_model_version_sha256(d.pop("model_version_sha256"))
+        model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256"))
 
 
         phases = []
@@ -666,7 +666,7 @@ class RunSwitchPlan:
             invocation=invocation,
             mapping=mapping,
             model_capabilities=model_capabilities,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             phases=phases,
             plan_digest=plan_digest,
             recipe_build_id=recipe_build_id,

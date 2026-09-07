@@ -1,4 +1,4 @@
-"""Safe, resumable controller-only qualification of public recipe catalogs."""
+"""Safe, resumable controller-only qualification of the current recipe Library."""
 
 from __future__ import annotations
 
@@ -18,6 +18,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from .generated_control.models.library_recipe_detail import LibraryRecipeDetail
+from .generated_control.models.library_recipe_list import LibraryRecipeList
+from .generated_control.models.library_recipe_model import LibraryRecipeModel
+from .generated_control.models.model_definition import ModelDefinition
+from .generated_control.models.recipe_definition import RecipeDefinition
+from .generated_control.types import Unset
 from .qualification_fixtures import (
     FixtureError,
     FixtureRegistry,
@@ -69,6 +75,126 @@ class ControllerClient(Protocol):
         expected_size: int,
         overwrite: bool,
     ) -> dict[str, object]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _CurrentRecipe:
+    """Typed identity and canonical document resolved from the Controller Library."""
+
+    recipe_id: str
+    recipe_revision_id: str
+    publisher: str
+    slug: str
+    content_sha256: str
+    definition: RecipeDefinition
+    model_documents: tuple[LibraryRecipeModel, ...]
+
+    @property
+    def key(self) -> str:
+        return f"{self.publisher}/{self.slug}"
+
+    @property
+    def node_count(self) -> int:
+        return self.definition.topology.node_count
+
+    @property
+    def release_version(self) -> str:
+        return self.definition.release.version
+
+    @property
+    def disk_requirements(self) -> dict[str, dict[str, int]]:
+        return _disk_requirements_by_role(self.definition)
+
+    def _selected_model_files(self) -> list[tuple[str, Any, list[str]]]:
+        documents_by_digest = {
+            selected_model.selection.model.content_sha256: selected_model.model_document
+            for selected_model in self.model_documents
+        }
+        selected_files: list[tuple[str, Any, list[str]]] = []
+        for selection in self.definition.models:
+            model = documents_by_digest.get(selection.model.content_sha256)
+            if model is None:
+                raise QualificationError(
+                    "recipe model selection references a missing Library model document"
+                )
+            model_key = f"{model.identity.publisher}/{model.identity.slug}"
+            files_by_id = {file.id: file for file in model.files}
+            for selected_file in selection.files:
+                file = files_by_id.get(selected_file.file_id)
+                if file is None:
+                    raise QualificationError(
+                        f"recipe model selection references missing file: {model_key}:{selected_file.file_id}"
+                    )
+                selected_files.append((model_key, file, selected_file.roles))
+        return selected_files
+
+    @property
+    def artifact_identities(self) -> list[dict[str, object]]:
+        rows_by_physical_file: dict[tuple[str, str, str], dict[str, object]] = {}
+        for model_key, file, selected_roles in self._selected_model_files():
+            physical_key = (model_key, file.path, file.sha256)
+            row = rows_by_physical_file.get(physical_key)
+            if row is None:
+                identity = {
+                    "model": model_key,
+                    "path": file.path,
+                    "sha256": file.sha256,
+                }
+                row = {
+                    "artifact_id": f"{model_key}:{file.id}",
+                    "identity_sha256": _digest(identity),
+                    "download_bytes": file.size_bytes,
+                    "installed_bytes": file.size_bytes,
+                    "roles": [],
+                }
+                rows_by_physical_file[physical_key] = row
+            row["roles"] = sorted(set(row["roles"]) | set(selected_roles))
+        return sorted(
+            rows_by_physical_file.values(),
+            key=lambda item: str(item["identity_sha256"]),
+        )
+
+    @property
+    def artifact_download_bytes(self) -> int:
+        bytes_by_sha256: dict[str, int] = {}
+        for _model_key, file, _selected_roles in self._selected_model_files():
+            sha256 = file.sha256
+            size = file.size_bytes
+            previous = bytes_by_sha256.setdefault(sha256, size)
+            if previous != size:
+                raise QualificationError(
+                    f"artifacts sharing SHA-256 have inconsistent sizes: {sha256}"
+                )
+        return sum(bytes_by_sha256.values())
+
+    @property
+    def maximum_installed_bytes_per_node(self) -> int:
+        return max(
+            (
+                sum(
+                    role.resources.disk.to_dict().values()
+                )
+                for role in self.definition.topology.roles
+            ),
+            default=0,
+        )
+
+    @property
+    def temporary_build_bytes_per_node(self) -> int:
+        return max(
+            (
+                role.resources.disk.staging_bytes
+                for role in self.definition.topology.roles
+            ),
+            default=0,
+        )
+
+    @property
+    def maximum_runtime_memory_bytes_per_node(self) -> int:
+        return max(
+            (role.resources.memory.startup_peak_bytes for role in self.definition.topology.roles),
+            default=0,
+        )
 
 
 def _canonical(value: object) -> bytes:
@@ -305,48 +431,40 @@ def load_policy(path: Path | None) -> dict[str, Blocker]:
 
 
 def _territorial_restrictions(
-    recipe: Mapping[str, object],
+    model: ModelDefinition,
 ) -> Mapping[str, object] | None:
-    # The controller projection is expected to expose the resolved model license as
-    # model_license. Accept license as well to remain compatible with catalog documents.
-    for field in ("model_license", "license"):
-        license_value = recipe.get(field)
-        if not isinstance(license_value, Mapping):
-            continue
-        restrictions = license_value.get("territorial_restrictions")
-        if isinstance(restrictions, Mapping):
-            return restrictions
-    visual = recipe.get("visual_recipe")
-    if isinstance(visual, Mapping):
-        return _territorial_restrictions(visual)
-    return None
-
-
-def legal_blockers(
-    recipe: Mapping[str, object], jurisdiction: str | None = None
-) -> list[Blocker]:
-    """Validate license metadata without enforcing territorial restrictions."""
-
-    del jurisdiction
-    restrictions = _territorial_restrictions(recipe)
-    if restrictions is None:
-        return []
-    denied = restrictions.get("denied_jurisdictions")
+    restrictions = model.license_.territorial_restrictions
+    if restrictions is None or isinstance(restrictions, Unset):
+        return None
+    value = restrictions.to_dict()
+    denied = value.get("denied_jurisdictions")
     if (
         not isinstance(denied, list)
         or not denied
         or any(
-            not isinstance(item, str) or len(item) != 2 or item != item.upper()
+            not isinstance(item, str)
+            or not 2 <= len(item) <= 3
+            or item != item.upper()
             for item in denied
         )
     ):
-        return [
-            Blocker(
-                "license",
-                "license.territorial_restrictions_invalid",
-                "Resolved model license restrictions are malformed; qualification fails closed.",
-            )
-        ]
+        raise QualificationError(
+            "resolved model license restrictions are malformed; qualification fails closed"
+        )
+    return value
+
+
+def legal_blockers(
+    recipe: RecipeDefinition,
+    jurisdiction: str | None = None,
+    *,
+    model_documents: Iterable[ModelDefinition | LibraryRecipeModel] = (),
+) -> list[Blocker]:
+    """Validate license metadata without enforcing territorial restrictions."""
+
+    del jurisdiction
+    del recipe
+    del model_documents
     # The declaration is retained and validated as catalog metadata.  The
     # qualification runner has no reliable basis to determine an operator's
     # territory, so these facts cannot block a plan or an execution smoke.
@@ -543,166 +661,104 @@ def _capacity_candidate_signature(
     }
 
 
-def _recipe_key(recipe: Mapping[str, object]) -> str:
-    publisher = recipe.get("publisher")
-    slug = recipe.get("slug")
-    if not isinstance(publisher, str) or not isinstance(slug, str):
-        raise QualificationError("public recipe identity is invalid")
-    return f"{publisher}/{slug}"
+def _library_recipe_rows(
+    client: ControllerClient,
+) -> tuple[dict[str, object], list[_CurrentRecipe]]:
+    """Read the complete current Library catalog and its canonical details."""
 
+    cursor: str | None = None
+    pages: list[LibraryRecipeList] = []
+    seen_cursors: set[str] = set()
+    for _ in range(128):
+        query: dict[str, object] = {"limit": 512}
+        if cursor is not None:
+            query["cursor"] = cursor
+        try:
+            page = LibraryRecipeList.from_dict(
+                client.request("GET", "/api/v1/library/recipes", query=query)
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise QualificationError("current Library recipe list is invalid") from error
+        pages.append(page)
+        next_cursor = page.next_cursor
+        if next_cursor is None:
+            break
+        if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+            raise QualificationError("current Library recipe pagination cursor is invalid")
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    else:
+        raise QualificationError("current Library recipe pagination exceeded its bound")
 
-def _local_recipe_id(recipe: Mapping[str, object]) -> str | None:
-    local = recipe.get("local")
-    if not isinstance(local, Mapping) or local.get("status") != "current":
-        return None
-    recipe_id = local.get("recipe_id")
-    return recipe_id if isinstance(recipe_id, str) else None
-
-
-def _artifact_identities(value: Mapping[str, object] | None) -> list[dict[str, object]]:
-    if value is None:
-        return []
-    projected = value.get("artifact_identities")
-    if isinstance(projected, list):
-        result: list[dict[str, object]] = []
-        for raw in projected:
-            artifact = _object(raw, "recipe artifact identity")
-            artifact_id = artifact.get("artifact_id")
-            identity_sha256 = artifact.get("identity_sha256")
-            download_bytes = artifact.get("download_bytes")
-            installed_bytes = artifact.get("installed_bytes")
-            roles = artifact.get("roles")
+    rows: list[_CurrentRecipe] = []
+    for page in pages:
+        for summary in page.recipes:
+            recipe_id = summary.recipe_id
+            revision_id = summary.recipe_revision_id
+            digest = summary.content_sha256
+            detail, definition, model_documents = _parse_library_detail(
+                client.request(
+                    "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
+                )
+            )
+            identity = detail.recipe
             if (
-                not isinstance(artifact_id, str)
-                or not artifact_id
-                or not isinstance(identity_sha256, str)
-                or len(identity_sha256) != 64
-                or any(value not in "0123456789abcdef" for value in identity_sha256)
-                or not isinstance(download_bytes, int)
-                or isinstance(download_bytes, bool)
-                or download_bytes <= 0
-                or not isinstance(installed_bytes, int)
-                or isinstance(installed_bytes, bool)
-                or installed_bytes <= 0
-                or not isinstance(roles, list)
-                or any(not isinstance(role, str) for role in roles)
+                identity.recipe_id != recipe_id
+                or identity.recipe_revision_id != revision_id
+                or identity.content_sha256 != digest
             ):
-                raise QualificationError("recipe artifact identity projection is invalid")
-            result.append(
-                {
-                    "artifact_id": artifact_id,
-                    "identity_sha256": identity_sha256,
-                    "download_bytes": download_bytes,
-                    "installed_bytes": installed_bytes,
-                    "roles": sorted(set(roles)),
-                }
+                raise QualificationError(
+                    "current Library recipe identity changed while planning"
+                )
+            if _digest(definition.to_dict()) != digest:
+                raise QualificationError(
+                    f"current Library recipe digest does not match its canonical definition: {identity.publisher}/{identity.slug}"
+                )
+            rows.append(
+                _CurrentRecipe(
+                    recipe_id=recipe_id,
+                    recipe_revision_id=revision_id,
+                    publisher=identity.publisher,
+                    slug=identity.slug,
+                    content_sha256=digest,
+                    definition=definition,
+                    model_documents=model_documents,
+                )
             )
-        identities = [str(item["identity_sha256"]) for item in result]
-        if len(identities) != len(set(identities)):
-            raise QualificationError("recipe artifact identities are not unique")
-        return sorted(result, key=lambda item: str(item["identity_sha256"]))
-    visual = value.get("visual_recipe")
-    document = (
-        visual
-        if isinstance(visual, Mapping) and isinstance(visual.get("artifacts"), list)
-        else value
+    return (
+        {
+            "source": "controller-library",
+            "generated_at": pages[0].generated_at.isoformat(),
+            "freshness_policy": pages[0].freshness_policy.to_dict(),
+        },
+        rows,
     )
-    artifacts = document.get("artifacts")
-    if not isinstance(artifacts, list):
-        return []
-    result: list[dict[str, object]] = []
-    for raw in artifacts:
-        if not isinstance(raw, Mapping):
-            raise QualificationError("recipe artifact projection is invalid")
-        include_paths = raw.get("include_paths", [])
-        if (
-            not isinstance(raw.get("id"), str)
-            or not isinstance(raw.get("kind"), str)
-            or not isinstance(raw.get("repository"), str)
-            or not isinstance(raw.get("revision"), str)
-            or not raw.get("revision")
-            or not isinstance(include_paths, list)
-            or any(not isinstance(value, str) for value in include_paths)
-        ):
-            raise QualificationError(
-                "recipe artifact lacks an immutable subset identity"
-            )
-        identity = {
-            "kind": raw.get("kind"),
-            "repository": raw.get("repository"),
-            "revision": raw.get("revision"),
-            "include_paths": sorted(set(include_paths)),
-        }
-        download_bytes = raw.get("download_bytes")
-        installed_bytes = raw.get("installed_bytes")
-        if not (
-            isinstance(download_bytes, int)
-            and not isinstance(download_bytes, bool)
-            and download_bytes > 0
-            and isinstance(installed_bytes, int)
-            and not isinstance(installed_bytes, bool)
-            and installed_bytes > 0
-        ):
-            raise QualificationError("recipe artifact byte bounds are invalid")
-        result.append(
-            {
-                "artifact_id": raw.get("id"),
-                "identity_sha256": _digest(identity),
-                "download_bytes": download_bytes,
-                "installed_bytes": installed_bytes,
-                "roles": sorted(str(value) for value in raw.get("roles", []))
-                if isinstance(raw.get("roles", []), list)
-                else [],
-            }
-        )
-    return sorted(result, key=lambda item: str(item["identity_sha256"]))
 
 
-def _temporary_build_bytes(value: Mapping[str, object] | None) -> int:
-    if value is None:
-        return 0
-    projected = value.get("temporary_build_bytes_per_node")
-    if projected is not None:
-        if (
-            not isinstance(projected, int)
-            or isinstance(projected, bool)
-            or projected < 0
-        ):
-            raise QualificationError("recipe temporary build bytes are invalid")
-        return projected
-    visual = value.get("visual_recipe")
-    document = (
-        visual
-        if isinstance(visual, Mapping) and isinstance(visual.get("build"), Mapping)
-        else value
+def _parse_library_detail(
+    value: Mapping[str, object],
+) -> tuple[LibraryRecipeDetail, RecipeDefinition, tuple[ModelDefinition, ...]]:
+    try:
+        detail = LibraryRecipeDetail.from_dict(value)
+        definition = detail.definition
+        model_documents = tuple(detail.model_documents)
+    except (KeyError, TypeError, ValueError) as error:
+        raise QualificationError("current Library recipe detail is invalid") from error
+    for model in model_documents:
+        _territorial_restrictions(model.model_document)
+    return detail, definition, model_documents
+
+
+def _temporary_build_bytes(recipe: RecipeDefinition) -> int:
+    return max(
+        (role.resources.disk.staging_bytes for role in recipe.topology.roles),
+        default=0,
     )
-    build = document.get("build")
-    temporary = build.get("temporary_bytes") if isinstance(build, Mapping) else None
-    if temporary is None:
-        resources_value = (
-            build.get("resources") if isinstance(build, Mapping) else None
-        )
-        temporary = (
-            resources_value.get("temporary_bytes")
-            if isinstance(resources_value, Mapping)
-            else None
-        )
-    if not isinstance(temporary, int) or isinstance(temporary, bool) or temporary < 0:
-        return 0
-    return temporary
 
 
 def _disk_requirements_by_role(
-    value: Mapping[str, object] | None,
+    recipe: RecipeDefinition,
 ) -> dict[str, dict[str, int]]:
-    if value is None:
-        return {}
-    topology = value.get("topology")
-    roles = topology.get("roles") if isinstance(topology, Mapping) else None
-    if not isinstance(roles, list):
-        roles = value.get("topology_roles")
-    if not isinstance(roles, list):
-        return {}
     fields = (
         "image_bytes",
         "artifact_bytes",
@@ -712,15 +768,9 @@ def _disk_requirements_by_role(
         "safety_margin_bytes",
     )
     result: dict[str, dict[str, int]] = {}
-    for raw_role in roles:
-        role = _object(raw_role, "recipe role")
-        name = role.get("name")
-        resources = role.get("resources")
-        disk = role.get("disk")
-        if not isinstance(disk, Mapping):
-            disk = resources.get("disk") if isinstance(resources, Mapping) else None
-        if not isinstance(name, str) or not isinstance(disk, Mapping):
-            raise QualificationError("recipe role lacks exact disk requirements")
+    for role in recipe.topology.roles:
+        name = role.name
+        disk = role.resources.disk.to_dict()
         normalized: dict[str, int] = {}
         for field in fields:
             amount = disk.get(field)
@@ -737,15 +787,14 @@ def _disk_requirements_by_role(
 
 def _validate_role_disk_requirements(
     key: str,
-    recipe: Mapping[str, object],
+    recipe: RecipeDefinition,
     requirements: Mapping[str, Mapping[str, int]],
 ) -> None:
-    roles = _list(recipe.get("topology_roles"), "public recipe topology roles")
+    roles = recipe.topology.roles
     expected: dict[str, int] = {}
-    for raw_role in roles:
-        role = _object(raw_role, "public recipe topology role")
-        name = role.get("name")
-        count = role.get("count")
+    for role in roles:
+        name = role.name
+        count = role.count
         if (
             not isinstance(name, str)
             or not name
@@ -756,7 +805,7 @@ def _validate_role_disk_requirements(
         ):
             raise QualificationError(f"{key} has invalid topology role metadata")
         expected[name] = count
-    node_count = recipe.get("node_count")
+    node_count = recipe.topology.node_count
     if not expected or sum(expected.values()) != node_count:
         raise QualificationError(f"{key} has invalid topology role counts")
     if set(requirements) != set(expected):
@@ -775,8 +824,7 @@ def build_plan(
     fixtures: FixtureRegistry | None = None,
 ) -> dict[str, object]:
     fleet = client.request("GET", "/api/v1/fleet")
-    public = client.request("GET", "/api/v1/catalog/public-recipes")
-    recipes = _list(public.get("recipes"), "public recipes")
+    library, library_rows = _library_recipe_rows(client)
     online_nodes = _fleet_nodes(fleet)
     authority_node_ids = {
         node_id
@@ -799,18 +847,21 @@ def build_plan(
     fleet_fingerprint = _fleet_fingerprint(fleet)
     items: list[dict[str, object]] = []
     seen: set[str] = set()
-    for raw in recipes:
-        recipe = _object(raw, "public recipe")
-        key = _recipe_key(recipe)
+    for current in library_rows:
+        key = current.key
         if key in seen:
-            raise QualificationError(f"duplicate public recipe identity: {key}")
+            raise QualificationError(f"duplicate Library recipe identity: {key}")
         seen.add(key)
         if options.selected_recipes and key not in options.selected_recipes:
             continue
-        blockers = legal_blockers(recipe, options.jurisdiction)
+        blockers = legal_blockers(
+            current.definition,
+            options.jurisdiction,
+            model_documents=current.model_documents,
+        )
         if key in policy:
             blockers.append(policy[key])
-        node_count = recipe.get("node_count")
+        node_count = current.node_count
         if options.allowed_node_ids and node_count != 1:
             raise QualificationError(
                 f"node-pinned campaign recipe must require exactly one Spark: {key}"
@@ -843,7 +894,7 @@ def build_plan(
                     f"Recipe requires {node_count} online Sparks; campaign node allowlist currently has {len(campaign_online_nodes)} online.",
                 )
             )
-        required_memory = recipe.get("maximum_runtime_memory_bytes_per_node")
+        required_memory = current.maximum_runtime_memory_bytes_per_node
         available_memory = [
             value
             for node in campaign_online_nodes
@@ -863,17 +914,6 @@ def build_plan(
                     "every online Spark's observed available memory.",
                 )
             )
-        if recipe.get("execution_readiness") != "executable":
-            blockers.append(
-                Blocker(
-                    "runtime",
-                    "runtime.not_executable",
-                    str(
-                        recipe.get("execution_readiness_detail")
-                        or "Recipe is not executable."
-                    )[:512],
-                )
-            )
         if fixtures is not None and node_count in {1, 2}:
             special = fixtures.special.get(key)
             artifact_fixture = fixtures.recipes.get(key)
@@ -884,7 +924,7 @@ def build_plan(
                 or special is not None
             )
             if special is not None:
-                if special.get("content_sha256") != recipe.get("content_sha256"):
+                if special.get("content_sha256") != current.content_sha256:
                     blockers.append(
                         Blocker(
                             "fixture",
@@ -904,7 +944,7 @@ def build_plan(
                     )
             elif (
                 artifact_fixture is not None
-                and artifact_fixture.content_sha256 != recipe.get("content_sha256")
+                and artifact_fixture.content_sha256 != current.content_sha256
             ):
                 blockers.append(
                     Blocker(
@@ -915,7 +955,7 @@ def build_plan(
                 )
             elif (
                 service_fixture is not None
-                and service_fixture.content_sha256 != recipe.get("content_sha256")
+                and service_fixture.content_sha256 != current.content_sha256
             ):
                 blockers.append(
                     Blocker(
@@ -932,97 +972,46 @@ def build_plan(
                         "No reviewed digest-bound qualification contract exists.",
                     )
                 )
-        local_recipe_id = _local_recipe_id(recipe)
-        local_revision_id: str | None = None
-        recipe_document: Mapping[str, object] | None = None
-        if local_recipe_id is not None:
-            detail = client.request(
-                "GET", f"/api/v1/library/recipes/{_quote(local_recipe_id)}"
-            )
-            selected_revision = detail.get("selected_revision")
-            if isinstance(selected_revision, Mapping):
-                selected_id = selected_revision.get("id")
-                selected_sha256 = selected_revision.get("content_sha256")
-                if isinstance(selected_id, str) and selected_sha256 == recipe.get(
-                    "content_sha256"
-                ):
-                    local_revision_id = selected_id
-            if local_revision_id is None:
-                raise QualificationError(
-                    f"current local recipe revision is inconsistent: {key}"
-                )
-            blockers.extend(legal_blockers(detail, options.jurisdiction))
-            recipe_document = detail
-        import_preview: Mapping[str, object] | None = None
-        if not blockers and local_revision_id is None:
-            uri = recipe.get("uri")
-            if not isinstance(uri, str):
-                raise QualificationError(f"public recipe URI is invalid: {key}")
-            import_preview = client.request(
-                "POST", "/api/v1/catalog/imports/public/preview", {"uri": uri}
-            )
-            if import_preview.get("content_sha256") != recipe.get("content_sha256"):
-                raise QualificationError(
-                    f"public recipe changed during planning: {key}"
-                )
-            blockers.extend(legal_blockers(import_preview, options.jurisdiction))
-            recipe_document = import_preview
-        disk_requirements = _disk_requirements_by_role(recipe)
-        _validate_role_disk_requirements(key, recipe, disk_requirements)
-        artifact_identities = _artifact_identities(recipe)
-        artifact_count = recipe.get("artifact_count")
-        if (
-            not isinstance(artifact_count, int)
-            or isinstance(artifact_count, bool)
-            or artifact_count != len(artifact_identities)
-        ):
-            raise QualificationError(f"{key} artifact identity projection is incomplete")
-        temporary_build_bytes = _temporary_build_bytes(recipe)
+        recipe_id = current.recipe_id
+        revision_id = current.recipe_revision_id
+        disk_requirements = current.disk_requirements
+        _validate_role_disk_requirements(key, current.definition, disk_requirements)
+        artifact_identities = current.artifact_identities
+        temporary_build_bytes = current.temporary_build_bytes_per_node
         if not blockers:
-            preview_disk_requirements = _disk_requirements_by_role(recipe_document)
-            _validate_role_disk_requirements(key, recipe, preview_disk_requirements)
+            preview_disk_requirements = _disk_requirements_by_role(current.definition)
+            _validate_role_disk_requirements(
+                key, current.definition, preview_disk_requirements
+            )
             if preview_disk_requirements != disk_requirements:
                 raise QualificationError(
                     f"{key} exact disk requirements changed during planning"
                 )
-            if _artifact_identities(recipe_document) != artifact_identities:
-                raise QualificationError(
-                    f"{key} artifact identities changed during planning"
-                )
-            if _temporary_build_bytes(recipe_document) != temporary_build_bytes:
+            if _temporary_build_bytes(current.definition) != temporary_build_bytes:
                 raise QualificationError(
                     f"{key} temporary build bytes changed during planning"
                 )
         items.append(
             {
                 "key": key,
-                "publisher": recipe.get("publisher"),
-                "slug": recipe.get("slug"),
-                "uri": recipe.get("uri"),
-                "content_sha256": recipe.get("content_sha256"),
-                "release_version": recipe.get("release_version"),
+                "publisher": current.publisher,
+                "slug": current.slug,
+                "content_sha256": current.content_sha256,
+                "release_version": current.release_version,
                 "node_count": node_count,
-                "expected_download_bytes": recipe.get("expected_download_bytes"),
-                "maximum_installed_bytes_per_node": recipe.get(
-                    "maximum_installed_bytes_per_node"
-                ),
+                "expected_download_bytes": current.artifact_download_bytes,
+                "maximum_installed_bytes_per_node": current.maximum_installed_bytes_per_node,
                 "temporary_build_bytes_per_node": temporary_build_bytes,
                 "disk_requirements_by_role": disk_requirements,
                 "artifact_identities": artifact_identities,
-                "maximum_runtime_memory_bytes_per_node": recipe.get(
-                    "maximum_runtime_memory_bytes_per_node"
-                ),
-                "local_recipe_id": local_recipe_id,
-                "local_revision_id": local_revision_id,
-                "import_preview_sha256": _digest(import_preview)
-                if import_preview
-                else None,
+                "maximum_runtime_memory_bytes_per_node": current.maximum_runtime_memory_bytes_per_node,
+                "recipe_id": recipe_id,
+                "recipe_revision_id": revision_id,
                 "blockers": [item.as_dict() for item in blockers],
                 "planned_actions": (
                     []
                     if blockers
                     else [
-                        *([] if local_revision_id else ["import"]),
                         "placement-preview",
                         "mapping",
                         "build",
@@ -1064,7 +1053,7 @@ def build_plan(
         missing = sorted(options.selected_recipes - seen)
         if missing:
             raise QualificationError(
-                f"selected recipe is not in public catalog: {missing[0]}"
+                f"selected recipe is absent from the current Library catalog: {missing[0]}; publish it to global vonk-forge-recipes and refresh the current catalog"
             )
     items.sort(
         key=lambda item: (
@@ -1077,8 +1066,7 @@ def build_plan(
     intent = {
         "schema_version": 1,
         "catalog": {
-            "repository": public.get("repository"),
-            "commit": public.get("commit"),
+            **library,
         },
         "controller_authority": {
             "authority_revision": fleet.get("authority_revision"),
@@ -1093,8 +1081,9 @@ def build_plan(
         "recipes": [
             {
                 "key": item["key"],
-                "uri": item["uri"],
                 "content_sha256": item["content_sha256"],
+                "recipe_id": item["recipe_id"],
+                "recipe_revision_id": item["recipe_revision_id"],
                 "release_version": item["release_version"],
                 "node_count": item["node_count"],
                 "temporary_build_bytes_per_node": item[
@@ -1134,8 +1123,7 @@ def build_plan(
         "schema_version": 1,
         "campaign_intent": intent,
         "catalog": {
-            "repository": public.get("repository"),
-            "commit": public.get("commit"),
+            **library,
         },
         "fleet": {
             "authority_revision": fleet.get("authority_revision"),
@@ -1252,8 +1240,10 @@ class ArtifactJobSmokeAdapter:
         recipe_key: str,
         recipe_content_sha256: str,
     ) -> dict[str, object]:
-        visual = detail.get("visual_recipe")
-        interfaces = visual.get("interfaces") if isinstance(visual, Mapping) else None
+        definition = detail.get("definition")
+        interfaces = (
+            definition.get("interfaces") if isinstance(definition, Mapping) else None
+        )
         interface_rows = interfaces if isinstance(interfaces, list) else []
         adapters = [
             item.get("adapter") for item in interface_rows if isinstance(item, Mapping)
@@ -1814,39 +1804,30 @@ class QualificationRunner:
             else None
         )
 
-    def _ensure_import(
+    def _resolve_current_recipe(
         self, digest: str, item: Mapping[str, object]
     ) -> tuple[str, str]:
+        """Resolve the digest-bound recipe revision already in the Library."""
+
+        del digest
         key = str(item["key"])
-        records = self.ledger.recipe_records(digest, key)
-        imports = _payloads(records, "recipe.imported")
-        if imports:
-            result = _object(imports[-1].get("result"), "import result")
-        elif isinstance(item.get("local_recipe_id"), str) and isinstance(
-            item.get("local_revision_id"), str
-        ):
-            return str(item["local_recipe_id"]), str(item["local_revision_id"])
-        else:
-            result = self.client.request(
-                "POST",
-                "/api/v1/catalog/imports/public",
-                {
-                    "uri": item["uri"],
-                    "expected_content_sha256": item["content_sha256"],
-                },
-            )
-            if result.get("content_sha256") != item.get("content_sha256"):
-                raise QualificationError(f"imported content digest mismatch: {key}")
-            self.ledger.append(
-                "recipe.imported",
-                plan_digest=digest,
-                recipe=key,
-                payload={"result": result},
-            )
-        recipe_id = result.get("recipe_id")
-        revision_id = result.get("id")
+        recipe_id = item.get("recipe_id")
+        revision_id = item.get("recipe_revision_id")
         if not isinstance(recipe_id, str) or not isinstance(revision_id, str):
-            raise QualificationError(f"import result identity is invalid: {key}")
+            raise QualificationError(
+                f"{key} is absent from the current Library revision; publish it to global vonk-forge-recipes and refresh the current catalog"
+            )
+        _detail, _definition, _models = _parse_library_detail(
+            self.client.request(
+                "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
+            )
+        )
+        identity = _detail.recipe
+        if (
+            identity.recipe_revision_id != revision_id
+            or identity.content_sha256 != item.get("content_sha256")
+        ):
+            raise QualificationError(f"{key} current Library revision changed")
         return recipe_id, revision_id
 
     def _initialize_capacity_state(self, digest: str) -> None:
@@ -1917,15 +1898,15 @@ class QualificationRunner:
             if key in completed or _list(item.get("blockers"), "recipe blockers"):
                 continue
             try:
-                recipe_id, revision_id = self._ensure_import(digest, item)
+                recipe_id, revision_id = self._resolve_current_recipe(digest, item)
                 detail = self.client.request(
                     "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
                 )
-                selected_revision = detail.get("selected_revision")
+                parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
+                selected_revision = parsed_detail.recipe
                 if (
-                    not isinstance(selected_revision, Mapping)
-                    or selected_revision.get("id") != revision_id
-                    or selected_revision.get("content_sha256")
+                    selected_revision.recipe_revision_id != revision_id
+                    or selected_revision.content_sha256
                     != item.get("content_sha256")
                 ):
                     raise QualificationError(
@@ -1944,7 +1925,11 @@ class QualificationRunner:
                 )
                 self._preflight_failed.add(key)
                 continue
-            restrictions = legal_blockers(detail, self.options.jurisdiction)
+            restrictions = legal_blockers(
+                detail_definition,
+                self.options.jurisdiction,
+                model_documents=detail_models,
+            )
             if restrictions:
                 self.ledger.append(
                     "recipe.blocked",
@@ -3026,7 +3011,6 @@ class QualificationRunner:
             projected_recipes.append(
                 {
                     "key": item.get("key"),
-                    "uri": item.get("uri"),
                     "content_sha256": item.get("content_sha256"),
                     "release_version": item.get("release_version"),
                     "node_count": item.get("node_count"),
@@ -3340,18 +3324,13 @@ class QualificationRunner:
             records = self.ledger.recipe_records(digest, key)
             installation_ids: set[str] = set()
             uninstalled: set[str] = set()
-            recipe_id = item.get("local_recipe_id")
-            revision_id = item.get("local_revision_id")
+            recipe_id = item.get("recipe_id")
+            revision_id = item.get("recipe_revision_id")
             for record in records:
                 payload = record.get("payload")
                 if not isinstance(payload, Mapping):
                     continue
                 event = record.get("event")
-                if event == "recipe.imported":
-                    result = payload.get("result")
-                    if isinstance(result, Mapping):
-                        recipe_id = result.get("recipe_id", recipe_id)
-                        revision_id = result.get("id", revision_id)
                 if event == "recipe.succeeded":
                     candidate = payload.get("installation_id")
                     if isinstance(candidate, str):
@@ -3649,22 +3628,26 @@ class QualificationRunner:
         key = str(item["key"])
         prepared = self._prepared.get(key)
         if prepared is None:
-            recipe_id, revision_id = self._ensure_import(digest, item)
+            recipe_id, revision_id = self._resolve_current_recipe(digest, item)
         else:
             recipe_id, revision_id, _ = prepared
         detail = self.client.request(
             "GET", f"/api/v1/library/recipes/{_quote(recipe_id)}"
         )
-        selected_revision = detail.get("selected_revision")
+        parsed_detail, detail_definition, detail_models = _parse_library_detail(detail)
+        selected_revision = parsed_detail.recipe
         if (
-            not isinstance(selected_revision, Mapping)
-            or selected_revision.get("id") != revision_id
-            or selected_revision.get("content_sha256") != item.get("content_sha256")
+            selected_revision.recipe_revision_id != revision_id
+            or selected_revision.content_sha256 != item.get("content_sha256")
         ):
             raise QualificationError(
                 f"{key} selected revision changed after campaign planning"
             )
-        restrictions = legal_blockers(detail, self.options.jurisdiction)
+        restrictions = legal_blockers(
+            detail_definition,
+            self.options.jurisdiction,
+            model_documents=detail_models,
+        )
         if restrictions:
             self.ledger.append(
                 "recipe.blocked",
@@ -3851,8 +3834,10 @@ class QualificationRunner:
             if not isinstance(installation_id, str):
                 raise QualificationError(f"{key} installation identity is invalid")
 
-        visual = detail.get("visual_recipe")
-        interfaces = visual.get("interfaces") if isinstance(visual, Mapping) else []
+        definition = detail.get("definition")
+        interfaces = (
+            definition.get("interfaces") if isinstance(definition, Mapping) else []
+        )
         interface_rows = interfaces if isinstance(interfaces, list) else []
         is_job = any(
             isinstance(interface, Mapping) and interface.get("adapter") in _JOB_ADAPTERS

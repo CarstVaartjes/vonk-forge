@@ -29,6 +29,11 @@ class RecipeRuntimeSpecError(ValueError):
     """The canonical recipe cannot produce a secure runtime projection."""
 
 
+def recipe_topology(value: object) -> Mapping[str, object]:
+    """Return the topology projection from a validated canonical recipe."""
+    return _recipe(value).topology.model_dump(mode="json")
+
+
 def _recipe(value: object) -> RecipeDefinition:
     if isinstance(value, RecipeDefinition):
         return value

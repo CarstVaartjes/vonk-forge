@@ -25,27 +25,27 @@ class AgentSummary:
     """
         Attributes:
             capabilities (list[str]):
-            certificate_expires_at (Union[None, str]):
-            last_seen_at (Union[None, str]):
             node_id (str):
             stale (bool):
             state (str):
             binary_digest (Union[None, Unset, str]):
             build_digest (Union[None, Unset, str]):
+            certificate_expires_at (Union[None, Unset, str]):
             last_seen_age_seconds (Union[None, Unset, float]):
+            last_seen_at (Union[None, Unset, str]):
             protocol_version (Union[None, Unset, int]):
             semantic_version (Union[None, Unset, str]):
      """
 
     capabilities: list[str]
-    certificate_expires_at: Union[None, str]
-    last_seen_at: Union[None, str]
     node_id: str
     stale: bool
     state: str
     binary_digest: Union[None, Unset, str] = UNSET
     build_digest: Union[None, Unset, str] = UNSET
+    certificate_expires_at: Union[None, Unset, str] = UNSET
     last_seen_age_seconds: Union[None, Unset, float] = UNSET
+    last_seen_at: Union[None, Unset, str] = UNSET
     protocol_version: Union[None, Unset, int] = UNSET
     semantic_version: Union[None, Unset, str] = UNSET
 
@@ -57,12 +57,6 @@ class AgentSummary:
         capabilities = self.capabilities
 
 
-
-        certificate_expires_at: Union[None, str]
-        certificate_expires_at = self.certificate_expires_at
-
-        last_seen_at: Union[None, str]
-        last_seen_at = self.last_seen_at
 
         node_id = self.node_id
 
@@ -82,11 +76,23 @@ class AgentSummary:
         else:
             build_digest = self.build_digest
 
+        certificate_expires_at: Union[None, Unset, str]
+        if isinstance(self.certificate_expires_at, Unset):
+            certificate_expires_at = UNSET
+        else:
+            certificate_expires_at = self.certificate_expires_at
+
         last_seen_age_seconds: Union[None, Unset, float]
         if isinstance(self.last_seen_age_seconds, Unset):
             last_seen_age_seconds = UNSET
         else:
             last_seen_age_seconds = self.last_seen_age_seconds
+
+        last_seen_at: Union[None, Unset, str]
+        if isinstance(self.last_seen_at, Unset):
+            last_seen_at = UNSET
+        else:
+            last_seen_at = self.last_seen_at
 
         protocol_version: Union[None, Unset, int]
         if isinstance(self.protocol_version, Unset):
@@ -105,8 +111,6 @@ class AgentSummary:
 
         field_dict.update({
             "capabilities": capabilities,
-            "certificate_expires_at": certificate_expires_at,
-            "last_seen_at": last_seen_at,
             "node_id": node_id,
             "stale": stale,
             "state": state,
@@ -115,8 +119,12 @@ class AgentSummary:
             field_dict["binary_digest"] = binary_digest
         if build_digest is not UNSET:
             field_dict["build_digest"] = build_digest
+        if certificate_expires_at is not UNSET:
+            field_dict["certificate_expires_at"] = certificate_expires_at
         if last_seen_age_seconds is not UNSET:
             field_dict["last_seen_age_seconds"] = last_seen_age_seconds
+        if last_seen_at is not UNSET:
+            field_dict["last_seen_at"] = last_seen_at
         if protocol_version is not UNSET:
             field_dict["protocol_version"] = protocol_version
         if semantic_version is not UNSET:
@@ -130,22 +138,6 @@ class AgentSummary:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         capabilities = cast(list[str], d.pop("capabilities"))
-
-
-        def _parse_certificate_expires_at(data: object) -> Union[None, str]:
-            if data is None:
-                return data
-            return cast(Union[None, str], data)
-
-        certificate_expires_at = _parse_certificate_expires_at(d.pop("certificate_expires_at"))
-
-
-        def _parse_last_seen_at(data: object) -> Union[None, str]:
-            if data is None:
-                return data
-            return cast(Union[None, str], data)
-
-        last_seen_at = _parse_last_seen_at(d.pop("last_seen_at"))
 
 
         node_id = d.pop("node_id")
@@ -174,6 +166,16 @@ class AgentSummary:
         build_digest = _parse_build_digest(d.pop("build_digest", UNSET))
 
 
+        def _parse_certificate_expires_at(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        certificate_expires_at = _parse_certificate_expires_at(d.pop("certificate_expires_at", UNSET))
+
+
         def _parse_last_seen_age_seconds(data: object) -> Union[None, Unset, float]:
             if data is None:
                 return data
@@ -182,6 +184,16 @@ class AgentSummary:
             return cast(Union[None, Unset, float], data)
 
         last_seen_age_seconds = _parse_last_seen_age_seconds(d.pop("last_seen_age_seconds", UNSET))
+
+
+        def _parse_last_seen_at(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        last_seen_at = _parse_last_seen_at(d.pop("last_seen_at", UNSET))
 
 
         def _parse_protocol_version(data: object) -> Union[None, Unset, int]:
@@ -206,14 +218,14 @@ class AgentSummary:
 
         agent_summary = cls(
             capabilities=capabilities,
-            certificate_expires_at=certificate_expires_at,
-            last_seen_at=last_seen_at,
             node_id=node_id,
             stale=stale,
             state=state,
             binary_digest=binary_digest,
             build_digest=build_digest,
+            certificate_expires_at=certificate_expires_at,
             last_seen_age_seconds=last_seen_age_seconds,
+            last_seen_at=last_seen_at,
             protocol_version=protocol_version,
             semantic_version=semantic_version,
         )

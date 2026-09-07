@@ -27,6 +27,7 @@ class RecipeImageAvailabilityResult:
         Attributes:
             image_bytes (int):
             image_digest (str):
+            model_content_digests (list[str]):
             oci_archive_sha256 (str):
             platform_manifest_digest (str):
             recipe_content_sha256 (str):
@@ -37,13 +38,13 @@ class RecipeImageAvailabilityResult:
             local_image_config_id (Union[None, Unset, str]):
             model_child_id (Union[None, Unset, str]):
             model_digest (Union[None, Unset, str]):
-            model_versions (Union[Unset, list[str]]):
             registry_manifest_digest (Union[None, Unset, str]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
     image_bytes: int
     image_digest: str
+    model_content_digests: list[str]
     oci_archive_sha256: str
     platform_manifest_digest: str
     recipe_content_sha256: str
@@ -54,7 +55,6 @@ class RecipeImageAvailabilityResult:
     local_image_config_id: Union[None, Unset, str] = UNSET
     model_child_id: Union[None, Unset, str] = UNSET
     model_digest: Union[None, Unset, str] = UNSET
-    model_versions: Union[Unset, list[str]] = UNSET
     registry_manifest_digest: Union[None, Unset, str] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
@@ -66,6 +66,10 @@ class RecipeImageAvailabilityResult:
         image_bytes = self.image_bytes
 
         image_digest = self.image_digest
+
+        model_content_digests = self.model_content_digests
+
+
 
         oci_archive_sha256 = self.oci_archive_sha256
 
@@ -111,12 +115,6 @@ class RecipeImageAvailabilityResult:
         else:
             model_digest = self.model_digest
 
-        model_versions: Union[Unset, list[str]] = UNSET
-        if not isinstance(self.model_versions, Unset):
-            model_versions = self.model_versions
-
-
-
         registry_manifest_digest: Union[None, Unset, str]
         if isinstance(self.registry_manifest_digest, Unset):
             registry_manifest_digest = UNSET
@@ -131,6 +129,7 @@ class RecipeImageAvailabilityResult:
         field_dict.update({
             "image_bytes": image_bytes,
             "image_digest": image_digest,
+            "model_content_digests": model_content_digests,
             "oci_archive_sha256": oci_archive_sha256,
             "platform_manifest_digest": platform_manifest_digest,
             "recipe_content_sha256": recipe_content_sha256,
@@ -148,8 +147,6 @@ class RecipeImageAvailabilityResult:
             field_dict["model_child_id"] = model_child_id
         if model_digest is not UNSET:
             field_dict["model_digest"] = model_digest
-        if model_versions is not UNSET:
-            field_dict["model_versions"] = model_versions
         if registry_manifest_digest is not UNSET:
             field_dict["registry_manifest_digest"] = registry_manifest_digest
         if schema_version is not UNSET:
@@ -165,6 +162,9 @@ class RecipeImageAvailabilityResult:
         image_bytes = d.pop("image_bytes")
 
         image_digest = d.pop("image_digest")
+
+        model_content_digests = cast(list[str], d.pop("model_content_digests"))
+
 
         oci_archive_sha256 = d.pop("oci_archive_sha256")
 
@@ -234,9 +234,6 @@ class RecipeImageAvailabilityResult:
         model_digest = _parse_model_digest(d.pop("model_digest", UNSET))
 
 
-        model_versions = cast(list[str], d.pop("model_versions", UNSET))
-
-
         def _parse_registry_manifest_digest(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
@@ -254,6 +251,7 @@ class RecipeImageAvailabilityResult:
         recipe_image_availability_result = cls(
             image_bytes=image_bytes,
             image_digest=image_digest,
+            model_content_digests=model_content_digests,
             oci_archive_sha256=oci_archive_sha256,
             platform_manifest_digest=platform_manifest_digest,
             recipe_content_sha256=recipe_content_sha256,
@@ -264,7 +262,6 @@ class RecipeImageAvailabilityResult:
             local_image_config_id=local_image_config_id,
             model_child_id=model_child_id,
             model_digest=model_digest,
-            model_versions=model_versions,
             registry_manifest_digest=registry_manifest_digest,
             schema_version=schema_version,
         )

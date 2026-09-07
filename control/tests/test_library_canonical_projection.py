@@ -283,7 +283,7 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(tmp_path
     )
     run_input = RunSwitchPreviewRequest.model_validate(
         {
-            "model_version_sha256": "a" * 64,
+            "model_content_sha256": "a" * 64,
             "recipe_revision_id": detail_payload["recipe"]["recipe_revision_id"],
             "spark_group": {
                 "nodes": [

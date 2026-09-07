@@ -264,6 +264,35 @@ def test_generic_operation_read_contract_projects_bounded_durable_state() -> Non
     assert detail.json() == listed.json()["operations"][0]
 
 
+def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> None:
+    projected = operation_api._progress_projection(
+        {
+            "phase": "download",
+            "kind": "oci-layer",
+            "object_sha256": "a" * 64,
+            "completed_bytes": 128,
+            "total_bytes": 256,
+            "total_bytes_known": True,
+        }
+    )
+    assert projected is not None
+    assert projected.model_dump(mode="json") == {
+        "phase": "download",
+        "kind": "oci-layer",
+        "object_sha256": "a" * 64,
+        "completed_bytes": 128,
+        "total_bytes": 256,
+        "total_bytes_known": True,
+    }
+    assert operation_api._progress_projection({"phase": "verify"}).model_dump(
+        mode="json"
+    ) == {"phase": "verify"}
+    for retired in ("bytes_done", "bytes_completed", "bytes_total", "rate"):
+        assert operation_api._progress_projection(
+            {"phase": "download", retired: 1}
+        ) is None
+
+
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:
     client, operator, *_ = _client()
 
@@ -286,7 +315,11 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
             "kind": "cache-download",
             "state": "running",
             "attempt": 1,
-            "progress": {"phase": "download", "total_unknown": True},
+            "progress": {
+                "phase": "download",
+                "total_bytes": None,
+                "total_bytes_known": False,
+            },
             "updated_at": "2026-08-15T12:01:00Z",
             "created_at": "2026-08-15T12:01:00Z",
             "supported_actions": [],
@@ -651,12 +684,10 @@ def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:
                     "lifecycle": "ready",
                     "healthy": None,
                     "labels": {},
-                    "profile": None,
                     "memory_available_bytes": 0,
                     "disk_available_bytes": 0,
                     "probe_age_seconds": None,
                     "health_probe_stale": True,
-                    "stale": True,
                 }
             ],
         }
@@ -669,7 +700,8 @@ def test_nodes_status_marks_missing_observation_unknown_and_stale() -> None:
     node = response.json()["nodes"][0]
     assert node["healthy"] is None
     assert node["health_probe_stale"] is True
-    assert node["stale"] is True
+    assert "stale" not in node
+    assert "profile" not in node
     assert node["probe_age_seconds"] is None
     assert "management" not in json.dumps(response.json(), sort_keys=True)
 
@@ -1503,10 +1535,10 @@ def test_fleet_operation_registry_keeps_visual_and_evidence_contracts_distinct()
     ]["schema"] == {"$ref": "#/components/schemas/FleetStatusResponse"}
     node_status = schema["components"]["schemas"]["NodeStatus"]
     health_probe_stale = node_status["properties"]["health_probe_stale"]
-    legacy_stale = node_status["properties"]["stale"]
+    assert "health_probe_stale" in node_status["required"]
     assert "not aggregate node readiness" in health_probe_stale["description"]
-    assert legacy_stale["deprecated"] is True
-    assert "health_probe_stale" in legacy_stale["description"]
+    assert "stale" not in node_status["properties"]
+    assert "profile" not in node_status["properties"]
     assert paths["/api/v1/nodes/status"]["get"]["summary"] == (
         "Read explicit node health-probe evidence"
     )

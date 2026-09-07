@@ -36,7 +36,7 @@ class CacheEntryResponse:
             coverage (CacheEntryResponseCoverage):
             created_at (str):
             expected_bytes (int):
-            model_version_sha256 (Union[None, str]):
+            model_content_sha256 (Union[None, str]):
             protected (bool):
             protected_reasons (list[str]):
             recipe_revision_sha256 (Union[None, str]):
@@ -56,7 +56,7 @@ class CacheEntryResponse:
     coverage: CacheEntryResponseCoverage
     created_at: str
     expected_bytes: int
-    model_version_sha256: Union[None, str]
+    model_content_sha256: Union[None, str]
     protected: bool
     protected_reasons: list[str]
     recipe_revision_sha256: Union[None, str]
@@ -91,8 +91,8 @@ class CacheEntryResponse:
 
         expected_bytes = self.expected_bytes
 
-        model_version_sha256: Union[None, str]
-        model_version_sha256 = self.model_version_sha256
+        model_content_sha256: Union[None, str]
+        model_content_sha256 = self.model_content_sha256
 
         protected = self.protected
 
@@ -135,7 +135,7 @@ class CacheEntryResponse:
             "coverage": coverage,
             "created_at": created_at,
             "expected_bytes": expected_bytes,
-            "model_version_sha256": model_version_sha256,
+            "model_content_sha256": model_content_sha256,
             "protected": protected,
             "protected_reasons": protected_reasons,
             "recipe_revision_sha256": recipe_revision_sha256,
@@ -181,12 +181,12 @@ class CacheEntryResponse:
 
         expected_bytes = d.pop("expected_bytes")
 
-        def _parse_model_version_sha256(data: object) -> Union[None, str]:
+        def _parse_model_content_sha256(data: object) -> Union[None, str]:
             if data is None:
                 return data
             return cast(Union[None, str], data)
 
-        model_version_sha256 = _parse_model_version_sha256(d.pop("model_version_sha256"))
+        model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256"))
 
 
         protected = d.pop("protected")
@@ -245,7 +245,7 @@ class CacheEntryResponse:
             coverage=coverage,
             created_at=created_at,
             expected_bytes=expected_bytes,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             protected=protected,
             protected_reasons=protected_reasons,
             recipe_revision_sha256=recipe_revision_sha256,

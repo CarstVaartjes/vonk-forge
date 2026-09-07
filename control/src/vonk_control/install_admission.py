@@ -11,8 +11,8 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition
 
-from .artifact_sizes import ArtifactSizeResolver
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
     validate_compiled_launch_payload,
@@ -31,8 +31,11 @@ from .models import (
     RecipeInstallation,
     ResourceReservation,
 )
-from .recipe_contract import recipe_topology
-from .recipe_runtime_specs import RecipeRuntimeSpecError, resolve_recipe_entities
+from .recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    recipe_topology,
+    resolve_recipe_entities,
+)
 from .topology import Placement, TopologyError, validate_topology
 
 
@@ -110,16 +113,11 @@ class InstallAdmissionService:
         self,
         sessions: sessionmaker[Session],
         *,
-        sizes: ArtifactSizeResolver,
         inventory_max_age: int = 300,
         disk_floor_bytes: int = 10_000_000_000,
         compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
     ) -> None:
         self._sessions = sessions
-        # Canonical model bytes come from the receipt-bound compiled plan.
-        # Keep the constructor slot while callers converge on that single
-        # authority; this service never reads recipe-level artifact metadata.
-        del sizes
         self._inventory = InventoryRepository(sessions)
         self._inventory_max_age = inventory_max_age
         self._disk_floor = disk_floor_bytes
@@ -617,12 +615,18 @@ class InstallAdmissionService:
         ):
             raise InstallPlanConflict("install.plan_stale")
         try:
-            resolve_recipe_entities(session, revision.document)
+            resolved_entities = resolve_recipe_entities(session, revision.document)
+            model_content_digests = _resolved_model_content_digests(
+                session, resolved_entities["models"]
+            )
         except RecipeRuntimeSpecError as error:
+            raise InstallPlanConflict("install.dependencies_stale") from error
+        except (TypeError, ValueError) as error:
             raise InstallPlanConflict("install.dependencies_stale") from error
         installation = RecipeInstallation(
             recipe_revision_id=plan.recipe_revision_id,
-            model_version_sha256=_primary_model_sha256(revision.document),
+            model_content_sha256=_primary_model_sha256(revision.document),
+            model_content_digests=sorted(model_content_digests),
             mapping_id=plan.mapping_id,
             mapping_generation=plan.mapping_generation,
             recipe_build_id=plan.recipe_build_id,
@@ -726,6 +730,32 @@ def _primary_model_sha256(document: Mapping[str, object]) -> str:
     ):
         raise InstallPlanConflict("install.model_identity_unavailable")
     return digest
+
+
+def _resolved_model_content_digests(
+    session: Session, models: Sequence[CatalogDocumentRevision]
+) -> set[str]:
+    """Return every canonical model content identity used by an installation."""
+
+    pending = [model.content_digest for model in models]
+    resolved: dict[str, CatalogDocumentRevision] = {}
+    while pending:
+        digest = pending.pop()
+        if digest in resolved:
+            continue
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.content_digest == digest,
+                CatalogDocumentRevision.state == "active",
+            )
+        )
+        if revision is None:
+            raise InstallPlanConflict("install.model_dependency_unavailable")
+        definition = ModelDefinition.model_validate(revision.document)
+        resolved[digest] = revision
+        pending.extend(dependency.content_sha256 for dependency in definition.dependencies)
+    return set(resolved)
 
 
 def _is_source_build(document: Mapping[str, object]) -> bool:

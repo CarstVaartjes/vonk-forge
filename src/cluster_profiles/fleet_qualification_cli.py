@@ -26,7 +26,8 @@ from .qualification_locking import ledger_lock, node_locks
 def _arguments(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Inventory and sequentially qualify one- and two-Spark public recipes "
+            "Inventory and sequentially qualify one- and two-Spark recipes from "
+            "the current Controller Library "
             "through durable controller operations. Preview is the default."
         )
     )
@@ -57,7 +58,7 @@ def _arguments(argv: list[str] | None) -> argparse.Namespace:
         action="append",
         default=[],
         metavar="PUBLISHER/SLUG",
-        help="Limit qualification to an exact recipe identity; repeatable",
+        help="Limit qualification to an exact current Library recipe identity; repeatable",
     )
     parser.add_argument(
         "--node-id",
