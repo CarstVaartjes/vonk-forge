@@ -351,7 +351,7 @@ class AgentUpgradeTargetDiagnosticsResponse(StrictModel):
 class AgentUpgradeDiagnosticsResponse(StrictModel):
     expected_identity: AgentUpgradeIdentityResponse
     targets: list[AgentUpgradeTargetDiagnosticsResponse] = Field(max_length=64)
-    legacy_generic_ambiguous: bool
+    failure_details_unavailable: bool
     next_action: str | None = Field(default=None, max_length=512)
     operator_summary: str | None = Field(default=None, max_length=1024)
 
@@ -882,7 +882,7 @@ def _agent_upgrade_diagnostics(
     expected_binary = package.get("target_binary_digest")
     expected_build = package.get("target_build_digest")
     targets: list[dict[str, object]] = []
-    legacy_generic_ambiguous = False
+    failure_details_unavailable = False
     retry_queued_any = False
     operator_summary = None
     for node_id in job.targets:
@@ -905,7 +905,7 @@ def _agent_upgrade_diagnostics(
         unresolved_generic = bool(
             not target_proven and raw_reason in GENERIC_AGENT_UPGRADE_REASONS
         )
-        legacy_generic_ambiguous = legacy_generic_ambiguous or unresolved_generic
+        failure_details_unavailable = failure_details_unavailable or unresolved_generic
         retry_queued = bool(
             operation is not None
             and operation.retry_disposition == "retry"
@@ -953,7 +953,7 @@ def _agent_upgrade_diagnostics(
             "build_digest": expected_build,
         },
         "targets": targets,
-        "legacy_generic_ambiguous": legacy_generic_ambiguous,
+        "failure_details_unavailable": failure_details_unavailable,
         "next_action": (
             agent_upgrade_next_action(retry_queued=retry_queued_any)
             if any(
