@@ -63,6 +63,8 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
+from .canonical_recipe_fixtures import canonical_example
+
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
 REGISTRY_DIGEST = "sha256:" + "d" * 64
 PLATFORM_DIGEST = "sha256:" + "e" * 64
@@ -271,11 +273,7 @@ def _seed() -> tuple[sessionmaker[Session], str, str, str]:
     )
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
-    recipe_document = json.loads(
-        resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
-        .read_text()
-    )
+    recipe_document = canonical_example("recipe-image.json")
     model_document = json.loads(
         resources.files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")
