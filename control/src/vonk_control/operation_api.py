@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 
 from .agent_upgrade_status import (
-    LEGACY_GENERIC_AGENT_UPGRADE_REASONS,
+    GENERIC_AGENT_UPGRADE_REASONS,
     RECOVERABLE_AGENT_UPGRADE_REASONS,
     agent_upgrade_next_action,
     operator_agent_upgrade_reason,
@@ -44,7 +44,6 @@ from .operation_contract import (
     OperationEvidenceProvenance,
     OperationFailureEvidence,
     OperationMemberProgress,
-    OperationProgress,
     OperationRecovery,
     OperationRecoveryAction,
     normalize_operation_progress,
@@ -273,6 +272,8 @@ class AgentsResponse(StrictModel):
 
 class JobOperationProgress(StrictModel):
     phase: str = Field(min_length=1, max_length=80)
+    kind: str | None = Field(default=None, min_length=1, max_length=80)
+    object_sha256: str | None = Field(default=None, pattern=DIGEST_PATTERN)
     completed_bytes: int | None = Field(default=None, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
@@ -374,7 +375,7 @@ class AgentUpgradeTargetDiagnosticsResponse(StrictModel):
 class AgentUpgradeDiagnosticsResponse(StrictModel):
     expected_identity: AgentUpgradeIdentityResponse
     targets: list[AgentUpgradeTargetDiagnosticsResponse] = Field(max_length=64)
-    legacy_generic_ambiguous: bool
+    failure_details_unavailable: bool
     next_action: str | None = Field(default=None, max_length=512)
     operator_summary: str | None = Field(default=None, max_length=1024)
 
@@ -721,37 +722,14 @@ def decode_offset(
 def _progress_projection(value: object) -> JobOperationProgress | None:
     if not isinstance(value, Mapping):
         return None
-    phase = value.get("phase")
-    if not isinstance(phase, str) or not phase.strip() or len(phase) > 80:
-        return None
-    recognized = {
-        "completed_bytes",
-        "bytes_done",
-        "bytes_completed",
-        "total_bytes",
-        "bytes_total",
-        "bytes_per_second",
-        "rate_bytes_per_second",
-        "rate",
-        "eta_seconds",
-        "checkpoint",
-        "members",
-        "total_bytes_known",
-        "total_unknown",
-    }
     try:
-        # Validate the durable wire values before the compatibility normalizer
-        # runs. Pydantic's default coercion would turn malformed strings such as
-        # ``"100"`` into an apparently valid byte counter.
-        OperationProgress.model_validate(value, strict=True)
         normalized = normalize_operation_progress(value)
     except (TypeError, ValueError):
-        # Unknown extension fields from older agents must not make the whole
-        # job status unavailable; retain the stable phase only.
-        if recognized.intersection(value):
-            return None
-        normalized = {"phase": phase}
-    return JobOperationProgress(**normalized)
+        return None
+    try:
+        return JobOperationProgress.model_validate(normalized, strict=True)
+    except (TypeError, ValueError):
+        return None
 
 
 def _failure_projection(value: object) -> OperationFailureEvidence | None:
@@ -927,7 +905,7 @@ def _agent_upgrade_diagnostics(
     expected_binary = package.get("target_binary_digest")
     expected_build = package.get("target_build_digest")
     targets: list[dict[str, object]] = []
-    legacy_generic_ambiguous = False
+    failure_details_unavailable = False
     retry_queued_any = False
     operator_summary = None
     for node_id in job.targets:
@@ -948,9 +926,9 @@ def _agent_upgrade_diagnostics(
         # the success gate and must never be projected as proof here.
         target_proven = bool(operation is not None and operation.state == "succeeded")
         unresolved_generic = bool(
-            not target_proven and raw_reason in LEGACY_GENERIC_AGENT_UPGRADE_REASONS
+            not target_proven and raw_reason in GENERIC_AGENT_UPGRADE_REASONS
         )
-        legacy_generic_ambiguous = legacy_generic_ambiguous or unresolved_generic
+        failure_details_unavailable = failure_details_unavailable or unresolved_generic
         retry_queued = bool(
             operation is not None
             and operation.retry_disposition == "retry"
@@ -998,7 +976,7 @@ def _agent_upgrade_diagnostics(
             "build_digest": expected_build,
         },
         "targets": targets,
-        "legacy_generic_ambiguous": legacy_generic_ambiguous,
+        "failure_details_unavailable": failure_details_unavailable,
         "next_action": (
             agent_upgrade_next_action(retry_queued=retry_queued_any)
             if any(

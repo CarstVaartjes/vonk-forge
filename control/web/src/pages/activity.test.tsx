@@ -244,7 +244,7 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   expect(loadJob).toHaveBeenCalledTimes(2);
 });
 
-test("explains an unresolved legacy agent upgrade without guessing its failure stage", async () => {
+test("explains an upgrade failure without guessing its missing failure stage", async () => {
   const expectedBinary = "b".repeat(64);
   const expectedBuild = `sha256:${"c".repeat(64)}`;
   const oldBinary = "d".repeat(64);
@@ -282,7 +282,7 @@ test("explains an unresolved legacy agent upgrade without guessing its failure s
         retry_not_before: null,
         retry_queued: false,
       }],
-      legacy_generic_ambiguous: true,
+      failure_details_unavailable: true,
       next_action: nextAction,
       operator_summary: "The exact target identity was not proven.",
     },
@@ -297,7 +297,7 @@ test("explains an unresolved legacy agent upgrade without guessing its failure s
   expect(diagnosis).toHaveTextContent("0.1.0~dev.350+g15f9faf7c5bf");
   expect(diagnosis).toHaveTextContent("2 install attempts · exact target not reported");
   expect(diagnosis).toHaveTextContent("Observed version0.1.0");
-  expect(diagnosis).toHaveTextContent("Legacy helper response is ambiguous");
+  expect(diagnosis).toHaveTextContent("Helper did not report the failed stage");
   expect(diagnosis).toHaveTextContent("does not prove that authorization or download failed");
   expect(within(diagnosis).queryByText("Retry not before")).not.toBeInTheDocument();
   expect(screen.getByText(nextAction)).toBeVisible();
@@ -328,7 +328,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
     agent_upgrade_diagnostics: {
       expected_identity: {version: "0.1.0~dev.350+g15f9faf7c5bf", binary_digest: "b".repeat(64), build_digest: `sha256:${"c".repeat(64)}`},
       targets: [{node_id: TARGET_ID, state: "waiting-for-operator", attempts: 2, target_proven: false, observed_identity: {version: "0.1.0", binary_digest: "d".repeat(64), build_digest: `sha256:${"e".repeat(64)}`}, raw_reason: "agent upgrade helper is unavailable", retry_not_before: "2026-08-15T12:04:00Z", retry_queued: true}],
-      legacy_generic_ambiguous: false, next_action: nextAction, operator_summary: null,
+      failure_details_unavailable: false, next_action: nextAction, operator_summary: null,
     },
   };
   const loadJob = vi.fn().mockResolvedValue(detail);

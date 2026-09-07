@@ -273,7 +273,7 @@ function AgentUpgradeDiagnostics({detail, targetNames}: {detail: JobDetail; targ
       <dl><div><dt>Observed version</dt><dd>{target.observed_identity.version || "Not reported"}</dd></div><CopyableValue label="Observed binary digest" value={target.observed_identity.binary_digest}/><CopyableValue label="Observed build digest" value={target.observed_identity.build_digest}/>{target.retry_not_before && <div><dt>{target.retry_queued ? "Controller retry not before" : "Retry not before"}</dt><dd><time dateTime={target.retry_not_before}>{exactTime(target.retry_not_before) || target.retry_not_before}</time></dd></div>}</dl>
       {target.raw_reason && <details><summary>Raw helper evidence</summary><code>{target.raw_reason}</code></details>}
     </li>)}</ul>
-    {diagnostics.legacy_generic_ambiguous && <p className="activity-upgrade-ambiguity"><strong>Legacy helper response is ambiguous.</strong> It does not prove that authorization or download failed, and it does not prove that the package installed. The exact runtime identity remains the success gate.</p>}
+    {diagnostics.failure_details_unavailable && <p className="activity-upgrade-ambiguity"><strong>Helper did not report the failed stage.</strong> It does not prove that authorization or download failed, and it does not prove that the package installed. The exact runtime identity remains the success gate.</p>}
   </section>;
 }
 

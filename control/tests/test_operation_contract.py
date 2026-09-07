@@ -29,9 +29,14 @@ def test_operation_phase_contract_is_stable_and_complete() -> None:
     ]
 
 
-def test_progress_makes_unknown_totals_explicit_and_accepts_wire_aliases() -> None:
+def test_progress_makes_unknown_totals_explicit_with_canonical_fields() -> None:
     unknown = OperationProgress.model_validate(
-        {"phase": "download", "bytes_done": 10, "total_unknown": True}
+        {
+            "phase": "download",
+            "completed_bytes": 10,
+            "total_bytes": None,
+            "total_bytes_known": False,
+        }
     )
     assert unknown.completed_bytes == 10
     assert unknown.total_bytes is None
@@ -52,21 +57,17 @@ def test_progress_makes_unknown_totals_explicit_and_accepts_wire_aliases() -> No
     assert known.model_dump(mode="json")["total_bytes"] == 100
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("total_unknown", "true"),
-        ("total_bytes_known", 1),
-        ("bytes_done", "10"),
-        ("bytes_total", True),
-        ("rate", "10.5"),
-    ],
-)
-def test_progress_compact_aliases_reject_coercible_values(
-    field: str, value: object
-) -> None:
+@pytest.mark.parametrize("field", [
+    "bytes_done",
+    "bytes_completed",
+    "bytes_total",
+    "rate",
+    "rate_bytes_per_second",
+    "total_unknown",
+])
+def test_progress_retired_aliases_are_rejected(field: str) -> None:
     with pytest.raises(ValidationError, match=field):
-        OperationProgress.model_validate({"phase": "download", field: value})
+        OperationProgress.model_validate({"phase": "download", field: 10})
 
 
 def test_progress_nested_checkpoint_and_members_are_strict() -> None:
@@ -83,11 +84,33 @@ def test_progress_nested_checkpoint_and_members_are_strict() -> None:
         )
 
 
+def test_progress_preserves_distribution_object_identity() -> None:
+    progress = normalize_operation_progress(
+        {
+            "phase": "download",
+            "kind": "model",
+            "object_sha256": "a" * 64,
+            "completed_bytes": 10,
+            "total_bytes": 20,
+            "total_bytes_known": True,
+        }
+    )
+    assert progress == {
+        "phase": "download",
+        "kind": "model",
+        "object_sha256": "a" * 64,
+        "completed_bytes": 10,
+        "total_bytes": 20,
+        "total_bytes_known": True,
+    }
+
+
 def test_checkpoint_and_bytes_updates_are_monotonic() -> None:
     previous = {
         "phase": "transfer",
         "completed_bytes": 50,
         "total_bytes": 100,
+        "total_bytes_known": True,
         "checkpoint": {"key": "shard", "sequence": 2, "cursor": "50"},
     }
     updated = validate_progress_update(
