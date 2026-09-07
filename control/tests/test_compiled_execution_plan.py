@@ -37,6 +37,7 @@ from vonk_control.execution_plan_service import (
     ControllerExecutionPlanService,
     ExecutionPlanCompilationError,
     _bind_runtime_artifacts,
+    _placement,
 )
 from vonk_control.jobs import _canonical_payload
 from vonk_control.models import (
@@ -932,6 +933,60 @@ def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundar
             mapping_nodes=(),
             parameters={},
         )
+
+
+def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resolution() -> None:
+    from importlib.resources import files
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/recipe-source-build.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+
+    class Cache:
+        def resolve_artifact_set(self, **_kwargs: object) -> object:
+            raise AssertionError("digest mismatches must fail before cache resolution")
+
+    revision = SimpleNamespace(
+        kind="recipe",
+        state="active",
+        content_digest="a" * 64,
+        document=recipe.model_dump(mode="json"),
+    )
+    service = ControllerExecutionPlanService(Cache())
+    with pytest.raises(
+        ExecutionPlanCompilationError,
+        match="recipe revision digest does not match the canonical document",
+    ):
+        service.compile_installation(
+            None,
+            revision=revision,
+            build=None,
+            mapping_nodes=(),
+            parameters={},
+        )
+
+
+def test_placement_rejects_unresolved_role_and_endpoint() -> None:
+    from importlib.resources import files
+
+    recipe = RecipeDefinition.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples/recipe-source-build.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+    node = SimpleNamespace(rank=0, role="missing", node_id="spk_missing")
+    with pytest.raises(ExecutionPlanCompilationError, match="mapped role"):
+        _placement(recipe, {"endpoint": {"port": 8000}}, node, 1)
+
+    node.role = "entrypoint"
+    with pytest.raises(ExecutionPlanCompilationError, match="endpoint"):
+        _placement(recipe, {}, node, 1)
 
 
 def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> (

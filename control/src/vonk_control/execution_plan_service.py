@@ -128,6 +128,10 @@ class ControllerExecutionPlanService:
             raise ExecutionPlanCompilationError(
                 "recipe does not satisfy the canonical contract"
             ) from error
+        if content_sha256(recipe) != revision.content_digest:
+            raise ExecutionPlanCompilationError(
+                "recipe revision digest does not match the canonical document"
+            )
         try:
             resolved = (
                 dict(resolved_entities)
@@ -341,10 +345,18 @@ def _placement(
 ) -> dict[str, object]:
     endpoint = runtime_spec.get("endpoint")
     role = next((item for item in recipe.topology.roles if item.name == node.role), None)
-    reserved = role.resources.memory.startup_peak_bytes if role is not None else 1
-    port = endpoint.get("port") if isinstance(endpoint, Mapping) else 1024
-    if type(port) is not int or port <= 0:
-        port = 1024
+    if role is None:
+        raise ExecutionPlanCompilationError(
+            f"mapped role {node.role!r} is absent from the canonical recipe topology"
+        )
+    reserved = role.resources.memory.startup_peak_bytes
+    if type(reserved) is not int or reserved <= 0:
+        raise ExecutionPlanCompilationError("canonical recipe role memory is invalid")
+    if not isinstance(endpoint, Mapping):
+        raise ExecutionPlanCompilationError("compiled runtime endpoint is unavailable")
+    port = endpoint.get("port")
+    if type(port) is not int or port <= 0 or port > 65535:
+        raise ExecutionPlanCompilationError("compiled runtime endpoint port is invalid")
     return {
         "endpoint_address": None,
         "rank": node.rank,
@@ -368,9 +380,11 @@ def _bind_runtime_artifacts(
     if not isinstance(raw_artifacts, Sequence) or isinstance(raw_artifacts, (str, bytes)):
         raise ExecutionPlanCompilationError("canonical runtime model artifacts are unavailable")
     by_identity: dict[tuple[str, str], Mapping[str, object]] = {}
-    for model in models:
-        if not isinstance(model, ModelDefinition):
-            raise ExecutionPlanCompilationError("canonical model projection is invalid")
+    try:
+        canonical_models = _canonical_models(models)
+    except (TypeError, ValueError) as error:
+        raise ExecutionPlanCompilationError("canonical model projection is invalid") from error
+    for model in canonical_models:
         identity = content_sha256(model)
         for file in model.files:
             by_identity[(identity, file.id)] = file.model_dump(mode="json")
