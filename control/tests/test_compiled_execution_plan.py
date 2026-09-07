@@ -298,6 +298,50 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
     assert "patch_bundle_sha256" not in rendered
 
 
+def test_compiled_launch_projection_validates_before_persisting() -> None:
+    spec = _spec()
+    endpoint = spec["endpoint"]
+    assert isinstance(endpoint, dict)
+    endpoint["protocol"] = "legacy"
+
+    with pytest.raises(CompiledExecutionPlanError):
+        _compile().to_compiled_launch_payload(
+            spec,
+            placement={
+                "endpoint_address": None,
+                "rank": 0,
+                "role": "entrypoint",
+                "world_size": 1,
+                "local_address": None,
+                "master_address": None,
+                "master_port": None,
+                "port": 8000,
+                "reserved_memory_bytes": 1,
+            },
+        )
+
+
+def test_compiled_launch_consumer_rejects_malformed_interface_document() -> None:
+    payload = _compile().to_compiled_launch_payload(
+        _spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 8000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+    payload["endpoint"] = {"protocol": "openai", "port": 8000}
+
+    with pytest.raises(CompiledExecutionPlanError):
+        validate_compiled_launch_payload(payload)
+
+
 def test_compiled_launch_payload_rejects_document_over_dedicated_ceiling() -> None:
     plan = _compile()
     payload = plan.to_compiled_launch_payload(
