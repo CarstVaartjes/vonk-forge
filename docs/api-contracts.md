@@ -4,6 +4,12 @@ The rule is **strict structure, extensible content**. Each shared document has
 one authoritative definition. Consumers must preserve its meaning, not just
 accept a similar-looking dictionary.
 
+This is a greenfield contract. Do not retain old field aliases, alternate
+document parsers, old-response fallbacks, positional compatibility constructors,
+or default values that conceal malformed input. Fix the producer and consumer
+together. Transport retries and partial progress updates remain supported by
+their current contracts; neither requires accepting an older document format.
+
 ## Ownership
 
 | Document | Authoritative definition | Consumers |
@@ -30,6 +36,12 @@ at ingress, retain the typed value through the operation, and serialize through
 that model at egress. API response validation matters as much as request
 validation. Do not recreate a subset of Model or Recipe in a route, worker,
 validator, or CLI.
+
+Required fields, scalar types, nesting, discriminators, patterns, and numeric
+bounds belong in the Pydantic field definitions so the generated JSON Schema
+exposes them. Use model validators for relationships between fields and
+execution/security rules. Wrapping a handwritten parser in a mostly untyped
+Pydantic class does not create an authoritative structural contract.
 
 Ordinary internal records and database tables can use dataclasses and ORM
 models. A JSON contract document loaded from a database must still be parsed
