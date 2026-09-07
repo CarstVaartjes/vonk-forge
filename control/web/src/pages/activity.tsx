@@ -1,14 +1,15 @@
 import {useCallback, useEffect, useId, useMemo, useRef, useState} from "react";
 import type {SyntheticEvent} from "react";
-import type {AuditSummary, ControlApi, JobDetail, JobSummary, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
+import type {AuditSummary, ControlApi, JobDetail, JobSummary, OperationDetail, LibrarySnapshot, VisualFleetSnapshot} from "../api/types";
+import {ApiError} from "../api/client";
 import {StatusPill} from "../components/status-pill";
 import {nodeDisplayName} from "../lib/fleet";
 
 type ActivityView = "timeline" | "table";
 type ActivityStatus = "recorded" | "in_progress" | "attention" | "unsuccessful" | "unknown";
-type ActivityRecord = AuditSummary & {occurred_at?: string | null; source: "audit" | "operation"; target_names?: string[]};
+type ActivityRecord = AuditSummary & {occurred_at?: string | null; source: "audit" | "job" | "operation"; target_names?: string[]; operation?: OperationDetail};
 type TimestampedJob = JobSummary & {created_at?: string};
-type ActivityApi = Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet">;
+type ActivityApi = Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet" | "operations" | "operation" | "retryFleetProfileApplication" | "retryLibraryPlacement">;
 
 const VIEW_PREFERENCE_KEY = "vonk.activity.view";
 
@@ -418,7 +419,7 @@ function targetNameLookup(fleet: VisualFleetSnapshot | null, library: LibrarySna
   return names;
 }
 
-function ActivityTimeline({api, events, now, onJobUpdate, targetNames}: {api: Pick<ActivityApi, "job" | "resumeJob">; events: ActivityRecord[]; now: Date; onJobUpdate: (detail: JobDetail) => void; targetNames: Map<string, string>}) {
+function ActivityTimeline({api, events, now, onJobUpdate, onOperationUpdate, retryRequests, targetNames}: {api: ActivityApi; onOperationUpdate: (detail: OperationDetail) => void; retryRequests: Map<string, {key: string; accepted?: boolean}>; events: ActivityRecord[]; now: Date; onJobUpdate: (detail: JobDetail) => void; targetNames: Map<string, string>}) {
   return <ol className="activity-timeline" aria-label="Activity timeline">
     {events.map((event, index) => {
       const status = activityStatus(event);
@@ -430,7 +431,8 @@ function ActivityTimeline({api, events, now, onJobUpdate, targetNames}: {api: Pi
             <StatusPill tone={statusTone(status)}>{statusLabel(status)}</StatusPill>
           </header>
           <div className="activity-event-meta"><span>By <strong>{event.actor || "Unknown operator"}</strong></span><TargetSummary event={event}/><EventTime event={event} now={now}/></div>
-          {event.source === "operation" && <JobProgressDetails api={api} event={event} onUpdate={onJobUpdate} targetNames={targetNames}/>}
+          {event.source === "job" && <JobProgressDetails api={api} event={event} onUpdate={onJobUpdate} targetNames={targetNames}/>}
+          {event.operation && <CanonicalOperationDetails api={api} detail={event.operation} onUpdate={onOperationUpdate} retryRequests={retryRequests}/>}
           <TechnicalDetails event={event}/>
         </article>
       </li>;
@@ -438,7 +440,7 @@ function ActivityTimeline({api, events, now, onJobUpdate, targetNames}: {api: Pi
   </ol>;
 }
 
-function ActivityTable({api, events, now, onJobUpdate, targetNames}: {api: Pick<ActivityApi, "job" | "resumeJob">; events: ActivityRecord[]; now: Date; onJobUpdate: (detail: JobDetail) => void; targetNames: Map<string, string>}) {
+function ActivityTable({api, events, now, onJobUpdate, onOperationUpdate, retryRequests, targetNames}: {api: ActivityApi; onOperationUpdate: (detail: OperationDetail) => void; retryRequests: Map<string, {key: string; accepted?: boolean}>; events: ActivityRecord[]; now: Date; onJobUpdate: (detail: JobDetail) => void; targetNames: Map<string, string>}) {
   return <div className="activity-table-wrap"><table className="activity-table">
     <caption className="sr-only">Recorded operator and system activity</caption>
     <thead><tr><th scope="col">Event</th><th scope="col">Status</th><th scope="col">Operator</th><th scope="col">When</th><th scope="col"><span className="sr-only">Technical details</span></th></tr></thead>
@@ -449,7 +451,7 @@ function ActivityTable({api, events, now, onJobUpdate, targetNames}: {api: Pick<
         <td data-label="Status"><StatusPill tone={statusTone(status)}>{statusLabel(status)}</StatusPill></td>
         <td data-label="Operator">{event.actor || "Unknown operator"}</td>
         <td data-label="When"><EventTime event={event} now={now}/></td>
-        <td className="activity-table-technical">{event.source === "operation" && <JobProgressDetails api={api} event={event} onUpdate={onJobUpdate} targetNames={targetNames}/>}<TechnicalDetails event={event}/></td>
+        <td className="activity-table-technical">{event.source === "job" && <JobProgressDetails api={api} event={event} onUpdate={onJobUpdate} targetNames={targetNames}/>}{event.operation && <CanonicalOperationDetails api={api} detail={event.operation} onUpdate={onOperationUpdate} retryRequests={retryRequests}/>}<TechnicalDetails event={event}/></td>
       </tr>;
     })}</tbody>
   </table></div>;
@@ -481,15 +483,94 @@ function ActivityOverview({events, filtering, loadedCount}: {events: ActivityRec
   </section>;
 }
 
-function operationRecord(job: TimestampedJob): ActivityRecord {
+function jobRecord(job: TimestampedJob): ActivityRecord {
   return {
     request_id: job.id,
     actor: "Vonk Forge",
     action: `operation.${job.kind}.${job.state}`,
     occurred_at: job.created_at,
     targets: [],
-    source: "operation",
+    source: "job",
   };
+}
+
+function canonicalRecord(detail: OperationDetail, names: Map<string, string>): ActivityRecord {
+  return {request_id: detail.id, actor: "Vonk Forge", action: `operation.${detail.kind}.${detail.state}`, occurred_at: detail.created_at, targets: detail.node_ids, target_names: detail.node_ids.map(id => names.get(id) ?? ""), source: "operation", operation: detail};
+}
+
+function CanonicalOperationDetails({api, detail, onUpdate, retryRequests}: {
+  api: ActivityApi; detail: OperationDetail; onUpdate: (detail: OperationDetail) => void;
+  retryRequests: Map<string, {key: string; accepted?: boolean}>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const mounted = useRef(true);
+  const inFlight = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const refresh = useCallback(async () => {
+    try {
+      const current = await api.operation(detail.id);
+      if (mounted.current) { onUpdate(current); setError(""); }
+    } catch (value) {
+      if (mounted.current) setError(`Current progress could not be loaded. ${value instanceof Error ? value.message : "Try refreshing details."}`);
+    }
+  }, [api, detail.id, onUpdate]);
+  const active = ["queued", "running", "pending", "planned"].includes(detail.state);
+  useEffect(() => {
+    if (!active) return;
+    let loading = false;
+    const timer = window.setInterval(() => {
+      if (loading) return;
+      loading = true;
+      void refresh().finally(() => { loading = false; });
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [active, refresh]);
+  const placement = detail.kind === "library.placement";
+  const supported = placement || detail.kind.startsWith("fleet-profile.");
+  const retryable = supported && detail.recovery?.actions.includes("retry");
+  async function retry(): Promise<void> {
+    if (!retryable || inFlight.current || retryRequests.get(detail.id)?.accepted) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError("");
+    const request = retryRequests.get(detail.id) ?? {key: crypto.randomUUID()};
+    retryRequests.set(detail.id, request);
+    try {
+      const next = placement
+        ? await api.retryLibraryPlacement(detail.id, {request_key: request.key})
+        : await api.retryFleetProfileApplication(detail.id, {request_key: request.key});
+      request.accepted = true;
+      if (mounted.current) setNotice(`Retry attempt ${next.attempt} accepted. Loading its progress.`);
+      try {
+        const current = await api.operation(next.id);
+        onUpdate(current);
+        if (mounted.current) setNotice(`Retry attempt ${next.attempt} appears in Activity.`);
+      } catch (value) {
+        // The mutation succeeded: preserve its identity even if detail loading failed.
+        request.accepted = false;
+        if (mounted.current) setError(`Retry accepted, but progress could not be loaded. Try again to retrieve the same attempt. ${value instanceof Error ? value.message : ""}`);
+      }
+    } catch (value) {
+      if (mounted.current) setError(value instanceof ApiError && value.status < 500
+        ? `Retry was rejected. ${value.message}`
+        : `Retry response could not be confirmed. Try again with the same request to avoid a duplicate attempt. ${value instanceof Error ? value.message : ""}`);
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
+  return <div className="activity-job-reason" style={{gap: ".5rem"}}>
+    {detail.failure && <><strong>{detail.failure.summary}</strong>{detail.failure.detail && <p style={{margin: 0}}>{detail.failure.detail}</p>}</>}
+    <p className="activity-job-attempt" style={{margin: 0}}>Attempt {detail.attempt}{detail.progress?.phase ? ` · ${titleCase(detail.progress.phase)}` : ""}{active ? " · Updates automatically" : ""}</p>
+    {(detail.recovery?.uncertain || detail.failure?.uncertain)
+      ? <p style={{margin: 0}}>Outcome uncertain. {detail.recovery?.explanation ?? "Inspect the observed state before recovery."}</p>
+      : detail.recovery?.explanation && <p style={{margin: 0}}>{detail.recovery.explanation}</p>}
+    <div style={{display: "flex", flexWrap: "wrap", gap: ".5rem"}}><button type="button" className="button secondary" disabled={busy} onClick={() => void refresh()}>Refresh operation</button>{retryable && <button type="button" className="button secondary" disabled={busy || retryRequests.get(detail.id)?.accepted} onClick={() => void retry()}>{busy ? "Retrying…" : "Retry operation"}</button>}</div>
+    {notice && <p role="status">{notice}</p>}
+    {error && <p role="alert">{error}</p>}
+  </div>;
 }
 
 function eventTimestamp(event: ActivityRecord): number {
@@ -537,6 +618,12 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
   const [auditAvailable, setAuditAvailable] = useState(true);
   const [jobsAvailable, setJobsAvailable] = useState(true);
   const operationIds = useRef(new Set<string>());
+  const canonicalIds = useRef(new Set<string>());
+  const retryRequests = useRef(new Map<string, {key: string; accepted?: boolean}>());
+  const [canonicalCount, setCanonicalCount] = useState(0);
+  const [canonicalTotal, setCanonicalTotal] = useState(0);
+  const [canonicalCursor, setCanonicalCursor] = useState<string | null>(null);
+  const [canonicalAvailable, setCanonicalAvailable] = useState(true);
   const requestGeneration = useRef(0);
 
   useEffect(() => {
@@ -550,23 +637,35 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     void Promise.allSettled([
       api.audit(),
       api.jobs(),
+      api.operations(undefined, controller.signal),
       api.visualFleet(controller.signal).catch(() => null),
       api.librarySnapshot(undefined, controller.signal).catch(() => null),
-    ]).then(([auditResult, operationsResult, fleetResult, libraryResult]) => {
+    ]).then(([auditResult, operationsResult, canonicalResult, fleetResult, libraryResult]) => {
       if (!active) return;
       const audit = auditResult.status === "fulfilled" ? auditResult.value : null;
       const operations = operationsResult.status === "fulfilled" ? operationsResult.value : null;
       const auditError = auditResult.status === "rejected" ? (auditResult.reason instanceof Error ? auditResult.reason.message : "Unable to load audit history.") : "";
       const operationsError = operationsResult.status === "rejected" ? (operationsResult.reason instanceof Error ? operationsResult.reason.message : "Unable to load operations.") : "";
+      const canonical = canonicalResult.status === "fulfilled" ? canonicalResult.value : null;
+      const canonicalError = canonicalResult.status === "rejected" ? (canonicalResult.reason instanceof Error ? canonicalResult.reason.message : "Unable to load operations.") : "";
+      setCanonicalAvailable(Boolean(canonical));
       setAuditAvailable(Boolean(audit));
       setJobsAvailable(Boolean(operations));
-      if (!audit && !operations) {
+      if (!audit && !operations && !canonical) {
         setEvents(null);
-        setError(`Unable to load audit history or operations. ${[auditError, operationsError].filter(Boolean).join(" ")}`);
+        setError(`Unable to load audit history, jobs, or operations. ${[auditError, operationsError, canonicalError].filter(Boolean).join(" ")}`);
         return;
       }
-      if (!audit) setPartialWarning(`Audit history could not be loaded (${auditError}). Showing operations only.`);
-      if (!operations) setPartialWarning(`Operations could not be loaded (${operationsError}). Showing audit history only.`);
+      const warnings = [
+        !audit ? `Audit history could not be loaded (${auditError}).` : "",
+        !operations ? `Jobs could not be loaded (${operationsError}).` : "",
+        !canonical ? `Operations could not be loaded (${canonicalError}).` : "",
+      ].filter(Boolean);
+      if (warnings.length) setPartialWarning(`${warnings.join(" ")} Showing available activity only.`);
+      canonicalIds.current = new Set((canonical?.operations ?? []).map(operation => operation.id));
+      setCanonicalCount(canonicalIds.current.size);
+      setCanonicalTotal(canonical?.total ?? 0);
+      setCanonicalCursor(canonical?.next_cursor ?? null);
       const fleet = fleetResult.status === "fulfilled" ? fleetResult.value : null;
       const library = libraryResult.status === "fulfilled" ? libraryResult.value : null;
       const names = targetNameLookup(fleet, library);
@@ -578,8 +677,9 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
       setJobCursor(operations?.next_cursor ?? null);
       setPaginationError("");
       setEvents([
+        ...(canonical?.operations ?? []).filter((operation, index, all) => all.findIndex(item => item.id === operation.id) === index).map(operation => canonicalRecord(operation, names)),
         ...(audit?.events ?? []).map(event => ({...event, source: "audit" as const, target_names: event.targets.map(target => names.get(target) ?? "")})),
-        ...(operations?.jobs ?? []).filter((job, index, jobs) => jobs.findIndex(candidate => candidate.id === job.id) === index).map(job => operationRecord(job as TimestampedJob)),
+        ...(operations?.jobs ?? []).filter((job, index, jobs) => jobs.findIndex(candidate => candidate.id === job.id) === index).map(job => jobRecord(job as TimestampedJob)),
       ].sort(sortActivityByTime));
     }).catch(value => {
       if (!active) return;
@@ -596,25 +696,42 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
   }, [api, attempt]);
 
   async function loadMoreOperations(): Promise<void> {
-    if (!jobCursor || loading || loadingMore) return;
-    const cursor = jobCursor;
+    if ((!jobCursor && !canonicalCursor) || loading || loadingMore) return;
     const generation = requestGeneration.current;
     setLoadingMore(true);
     setPaginationError("");
-    try {
-      const next = await api.jobs(cursor);
-      if (requestGeneration.current !== generation) return;
-      const additional = next.jobs.filter(job => !operationIds.current.has(job.id));
-      additional.forEach(job => operationIds.current.add(job.id));
-      setEvents(current => [...(current ?? []), ...additional.map(job => operationRecord(job as TimestampedJob))].sort(sortActivityByTime));
+    const [jobsResult, canonicalResult] = await Promise.allSettled([
+      jobCursor ? api.jobs(jobCursor) : Promise.resolve(null),
+      canonicalCursor ? api.operations(canonicalCursor) : Promise.resolve(null),
+    ]);
+    if (requestGeneration.current !== generation) return;
+    const additional: ActivityRecord[] = [];
+    const errors: string[] = [];
+    if (jobsResult.status === "fulfilled" && jobsResult.value) {
+      const next = jobsResult.value;
+      for (const job of next.jobs) {
+        if (operationIds.current.has(job.id)) continue;
+        operationIds.current.add(job.id);
+        additional.push(jobRecord(job as TimestampedJob));
+      }
       setLoadedJobCount(operationIds.current.size);
       setJobTotal(next.total);
       setJobCursor(next.next_cursor ?? null);
-    } catch (value) {
-      if (requestGeneration.current === generation) setPaginationError(value instanceof Error ? value.message : "Unable to load older operations.");
-    } finally {
-      if (requestGeneration.current === generation) setLoadingMore(false);
-    }
+    } else if (jobsResult.status === "rejected") errors.push(`Older jobs could not be loaded. ${jobsResult.reason instanceof Error ? jobsResult.reason.message : "Try again."}`);
+    if (canonicalResult.status === "fulfilled" && canonicalResult.value) {
+      const next = canonicalResult.value;
+      for (const operation of next.operations) {
+        if (canonicalIds.current.has(operation.id)) continue;
+        canonicalIds.current.add(operation.id);
+        additional.push(canonicalRecord(operation, targetNames));
+      }
+      setCanonicalCount(canonicalIds.current.size);
+      setCanonicalTotal(next.total);
+      setCanonicalCursor(next.next_cursor ?? null);
+    } else if (canonicalResult.status === "rejected") errors.push(`Older operations could not be loaded. ${canonicalResult.reason instanceof Error ? canonicalResult.reason.message : "Try again."}`);
+    setEvents(current => [...(current ?? []), ...additional].sort(sortActivityByTime));
+    setPaginationError(errors.join(" "));
+    setLoadingMore(false);
   }
 
   const categories = useMemo(() => [...new Set((events ?? []).map(activityCategory))].sort(), [events]);
@@ -630,16 +747,25 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
       if (actor && event.actor !== actor) return false;
       if (status && activityStatus(event) !== status) return false;
       if (!normalized) return true;
-      return [activityActionLabel(event.action), activityCategory(event), event.action, event.actor, event.request_id, event.authority_revision ?? "", ...event.targets, ...(event.target_names ?? [])]
+      return [activityActionLabel(event.action), activityCategory(event), event.action, event.actor, event.request_id, event.authority_revision ?? "", event.operation?.failure?.summary ?? "", event.operation?.failure?.detail ?? "", ...event.targets, ...(event.target_names ?? [])]
         .some(value => value.toLocaleLowerCase().includes(normalized));
     });
   }, [actor, category, events, query, status]);
   const displayed = useMemo(() => [...filtered].sort(sort === "attention" ? sortActivityByAttention : sortActivityByTime), [filtered, sort]);
 
   const updateOperation = useCallback((detail: JobDetail): void => {
-    setEvents(current => current?.map(event => event.source === "operation" && event.request_id === detail.id
+    setEvents(current => current?.map(event => event.source === "job" && event.request_id === detail.id
       ? {...event, action: `operation.${detail.kind}.${detail.state}`, targets: detail.targets, target_names: detail.targets.map(target => targetNames.get(target) ?? "")}
       : event).sort(sortActivityByTime) ?? null);
+  }, [targetNames]);
+
+  const updateCanonicalOperation = useCallback((detail: OperationDetail): void => {
+    const record = canonicalRecord(detail, targetNames);
+    const alreadyLoaded = canonicalIds.current.has(detail.id);
+    canonicalIds.current.add(detail.id);
+    setCanonicalCount(canonicalIds.current.size);
+    if (!alreadyLoaded) setCanonicalTotal(current => current + 1);
+    setEvents(current => [...(current ?? []).filter(event => !(event.source === "operation" && event.request_id === detail.id)), record].sort(sortActivityByTime));
   }, [targetNames]);
 
   function chooseView(next: ActivityView): void {
@@ -664,9 +790,10 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     {events && events.length > 0 && <ActivityOverview events={filtered} filtering={filtering} loadedCount={events.length}/>}
 
     {events && <section className="library-pagination" aria-label="Activity history coverage">
-      <p role="status">{auditAvailable ? `Loaded ${auditCount} audit ${auditCount === 1 ? "record" : "records"} from the latest-100 API window` : "Audit history is unavailable"} and {jobsAvailable ? `${loadedJobCount} of ${jobTotal} operations` : "operations are unavailable"}. Summary counts and filters cover only these loaded records; older audit history is not available from this API.</p>
-      {jobCursor && <button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => void loadMoreOperations()}>{loadingMore ? "Loading older operations…" : "Load older operations"}</button>}
-      {jobsAvailable && !jobCursor && loadedJobCount < jobTotal && <p role="status">The operations API reports additional records but did not provide a continuation cursor.</p>}
+      <p role="status">{auditAvailable ? `Loaded ${auditCount} audit ${auditCount === 1 ? "record" : "records"} from the latest-100 API window` : "Audit history is unavailable"} and {jobsAvailable ? `${loadedJobCount} of ${jobTotal} jobs` : "jobs are unavailable"}, plus {canonicalAvailable ? `${canonicalCount} of ${canonicalTotal} operations` : "operations are unavailable"}. Summary counts and filters cover only these loaded records; older audit history is not available from this API.</p>
+      {(jobCursor || canonicalCursor) && <button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => void loadMoreOperations()}>{loadingMore ? "Loading older operations…" : "Load older operations"}</button>}
+      {jobsAvailable && !jobCursor && loadedJobCount < jobTotal && <p role="status">The jobs API reports additional records but did not provide a continuation cursor.</p>}
+      {canonicalAvailable && !canonicalCursor && canonicalCount < canonicalTotal && <p role="status">The operations API reports additional records but did not provide a continuation cursor.</p>}
       {paginationError && <p role="alert">{paginationError}</p>}
     </section>}
 
@@ -694,6 +821,6 @@ export function ActivityPage({api, now = new Date()}: {api: ActivityApi; now?: D
     {error && <section className="activity-state is-error" role="alert"><div><strong>Activity unavailable</strong><p>{error}</p></div><button type="button" className="button secondary" disabled={loading || loadingMore} onClick={() => setAttempt(value => value + 1)}>Try again</button></section>}
     {!loading && !error && events?.length === 0 && <section className="activity-state"><strong>{partialWarning ? "No activity from available sources" : "No activity in the loaded window"}</strong><p>{partialWarning ? "The available activity source returned no records. Retry to check the unavailable source." : "No audit or operation records were returned by the current API windows."}</p></section>}
     {events && filtered.length === 0 && events.length > 0 && <section className="activity-state"><strong>No matching activity</strong><p>Try a broader search or remove one or more filters.</p><button type="button" className="button secondary" onClick={clearFilters}>Clear filters</button></section>}
-    {displayed.length > 0 && (view === "timeline" ? <ActivityTimeline api={api} events={displayed} now={now} onJobUpdate={updateOperation} targetNames={targetNames}/> : <ActivityTable api={api} events={displayed} now={now} onJobUpdate={updateOperation} targetNames={targetNames}/>)}
+    {displayed.length > 0 && (view === "timeline" ? <ActivityTimeline api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} retryRequests={retryRequests.current} targetNames={targetNames}/> : <ActivityTable api={api} events={displayed} now={now} onJobUpdate={updateOperation} onOperationUpdate={updateCanonicalOperation} retryRequests={retryRequests.current} targetNames={targetNames}/>)}
   </div>;
 }
