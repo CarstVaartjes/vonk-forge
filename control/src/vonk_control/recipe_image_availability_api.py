@@ -185,7 +185,9 @@ def _failure_response(error: RecipeImageAvailabilityError) -> RecipeImageAvailab
 
 
 def _progress(value: object) -> OperationProgress:
-    raw = dict(value) if isinstance(value, dict) else {"phase": "prepare"}
+    if not isinstance(value, dict):
+        raise TypeError("progress must be a JSON object")
+    raw = dict(value)
     # ModelCache uses transfer-specific counters; map them at this boundary
     # into the shared progress contract without leaking provider fields.
     if "completed_bytes" not in raw and isinstance(raw.get("downloaded_bytes"), int):
@@ -234,22 +236,26 @@ def _view_document(view: RecipeImageAvailabilityView) -> RecipeImageAvailability
             }
         )
     failure = document.get("failure")
+    children = []
+    if view.model_child is not None:
+        children.append(_child(view.model_child, kind="model-cache"))
+    # image_progress is intentionally optional while the runtime image child
+    # has not been created. Once present, it is required to be a typed object.
+    if view.image_progress is not None:
+        children.append(_child({
+            "id": view.id,
+            "request_key": view.request_id,
+            "state": view.image_state or view.state,
+            "progress": view.image_progress,
+            "failure": view.image_failure,
+        }, kind="runtime-image"))
     return RecipeImageAvailabilityResponse(
         id=str(document["id"]), request_id=str(document["request_id"]), kind=str(document["kind"]),
         state=str(document["state"]), attempt=int(document["attempt"]),
         recipe_revision_id=str(document["recipe_revision_id"]),
         recipe_content_sha256=str(document["recipe_content_sha256"]),
         progress=_progress(document.get("progress")),
-        children=(
-            ([_child(view.model_child, kind="model-cache")] if view.model_child is not None else [])
-            + [_child({
-                "id": view.id,
-                "request_key": view.request_id,
-                "state": view.image_state or view.state,
-                "progress": view.image_progress or {"phase": "prepare"},
-                "failure": view.image_failure,
-            }, kind="runtime-image")]
-        ),
+        children=children,
         result=result_model,
         failure=AvailabilityOperationFailure.model_validate(failure) if isinstance(failure, dict) else None,
         actions=[RecipeImageAvailabilityAction(key=str(item)) for item in document.get("supported_actions", [])],

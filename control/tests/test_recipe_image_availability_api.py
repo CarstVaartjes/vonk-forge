@@ -60,6 +60,35 @@ def test_failure_response_serializes_the_complete_declared_error_model() -> None
     assert response.failure.recovery_actions == ["retry"]
 
 
+@pytest.mark.parametrize("value", [None, [], "prepare", 7])
+def test_progress_rejects_non_object_persisted_values(value: object) -> None:
+    with pytest.raises((TypeError, ValidationError)):
+        _progress(value)
+
+
+def test_optional_missing_image_progress_does_not_create_a_fake_child() -> None:
+    view = RecipeImageAvailabilityView(
+        id="operation",
+        request_id="r" * 36,
+        kind="recipe.image.availability.v2",
+        state="queued",
+        attempt=1,
+        recipe_revision_id="revision",
+        recipe_content_sha256="a" * 64,
+        model_digest=None,
+        build_input_sha256=None,
+        progress={"phase": "prepare", "total_bytes_known": False},
+        image_progress=None,
+        result=None,
+        failure=None,
+        supported_actions=(),
+        created_at="2026-01-01T00:00:00+00:00",
+        updated_at="2026-01-01T00:00:00+00:00",
+    )
+
+    assert _view_document(view).children == []
+
+
 def test_completed_result_projection_is_strict_and_exposes_both_children() -> None:
     view = RecipeImageAvailabilityView(
         id="operation",

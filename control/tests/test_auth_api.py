@@ -14,6 +14,7 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService, LoginRateLimiter
 from vonk_control.models import Base, User
+from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.passwords import hash_password
 
 ADMIN_PASSWORD = "correct horse battery staple"
@@ -77,6 +78,27 @@ def _login(client: TestClient, password: str = ADMIN_PASSWORD):
         headers={"origin": ORIGIN},
         json={"subject": "admin", "password": password},
     )
+
+
+def test_auth_openapi_documents_every_runtime_error_status() -> None:
+    client, _audits, _verifier = _client()
+
+    schema = client.app.openapi()
+    paths = schema["paths"]
+    expected = {
+        "/api/v1/auth/login": {"401", "403", "422", "429"},
+        "/api/v1/auth/session": {"401"},
+        "/api/v1/auth/logout": {"401", "403"},
+    }
+    for path, statuses in expected.items():
+        for method in ("post",) if path != "/api/v1/auth/session" else ("get",):
+            responses = paths[path][method]["responses"]
+            assert statuses <= set(responses)
+            for status_code in statuses - {"422"}:
+                response_schema = responses[status_code]["content"][
+                    "application/json"
+                ]["schema"]
+                assert response_schema["$ref"].endswith(BoundedErrorResponse.__name__)
 
 
 def _chunked_asgi_login(

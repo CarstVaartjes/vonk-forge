@@ -61,7 +61,7 @@ def install_auth_routes(
     audits: AuditSink,
     actor_dependency: Any,
 ) -> None:
-    from .operation_api import _ADMIN_OPERATION_IDS
+    from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
 
     _ADMIN_OPERATION_IDS.update(
         {
@@ -101,6 +101,7 @@ def install_auth_routes(
         "/api/v1/auth/login",
         response_model=AuthSession,
         responses={
+            **bounded_error_responses(401, 403, 429),
             422: {
                 "description": "Invalid login request",
                 "model": LoginRequestInvalid,
@@ -140,6 +141,7 @@ def install_auth_routes(
     @app.get(
         "/api/v1/auth/session",
         response_model=AuthSession,
+        responses=bounded_error_responses(401),
         operation_id="getBrowserSession",
     )
     def session(request: Request, _actor: Actor = authenticated) -> AuthSession:
@@ -149,6 +151,7 @@ def install_auth_routes(
         "/api/v1/auth/logout",
         status_code=204,
         response_model=None,
+        responses=bounded_error_responses(401, 403),
         operation_id="logoutBrowser",
     )
     def logout(
