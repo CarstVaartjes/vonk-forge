@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
-
 from vonk_agent_protocol import (
-    RecipeRunObservationWire,
+    AgentProtocolError,
     RecipeRunObservationsWire,
+    RecipeRunObservationWire,
     canonical_message,
 )
 
@@ -115,13 +115,13 @@ def test_rust_shaped_observation_round_trips_through_shared_wire_model() -> None
 
 
 def test_legacy_and_receiptless_observations_are_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(AgentProtocolError):
         RecipeRunObservationsWire.parse(
             {"schema_version": 1, "observed_at": "2026-09-07T00:00:00Z", "runs": []}
         )
     payload = _observation()
     payload.pop("helper_receipt")
-    with pytest.raises(Exception):
+    with pytest.raises(AgentProtocolError):
         RecipeRunObservationWire.parse(payload)
 
 
@@ -162,12 +162,12 @@ def test_singleton_observation_uses_the_same_signed_structure() -> None:
 def test_observation_endpoint_readiness_field_is_required() -> None:
     payload = _observation()
     payload.pop("endpoint_ready")
-    with pytest.raises(Exception):
+    with pytest.raises(AgentProtocolError):
         RecipeRunObservationWire.parse(payload)
 
     payload = _observation()
     payload["observation_receipt_public_key"] = "11" * 32
-    with pytest.raises(Exception):
+    with pytest.raises(AgentProtocolError):
         RecipeRunObservationWire.parse(payload)
 
 

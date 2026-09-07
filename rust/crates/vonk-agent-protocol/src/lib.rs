@@ -1088,7 +1088,7 @@ impl RecipeOperationRequest {
                     // Role-ordered distributed starts are deliberately
                     // unphased.  The collective readiness variant carries
                     // the complete phase envelope below.
-                    (None, None, None) => true,
+                    (None, None, None) => value.world_size > 1,
                     // A singleton has no rendezvous phase, but still carries
                     // its run generation so its exact observation binding is
                     // persisted from the initial start.
