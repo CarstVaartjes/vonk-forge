@@ -344,8 +344,8 @@ class HostRuntimeAuthorityService:
         identity: Mapping[str, object],
         observed_at: datetime,
         received_at: datetime,
-        signed_grant: Mapping[str, object],
-        helper_receipt: Mapping[str, object],
+        signed_grant: SignedHostHelperGrant,
+        helper_receipt: SignedRecipeRunObservationReceipt,
     ) -> tuple[str, bool, str]:
         """Verify and consume the exact grant echoed by an observation result."""
 
@@ -358,7 +358,7 @@ class HostRuntimeAuthorityService:
             now=now,
         )
         try:
-            grant = SignedHostHelperGrant.parse(signed_grant)
+            grant = signed_grant
             self._issuer.public_key.verify(
                 bytes.fromhex(grant.signature.value),
                 host_helper_grant_signing_bytes(grant.claims),
@@ -368,7 +368,7 @@ class HostRuntimeAuthorityService:
                 "recipe run observation grant signature is invalid"
             ) from error
         try:
-            receipt = SignedRecipeRunObservationReceipt.parse(helper_receipt)
+            receipt = helper_receipt
             node = session.get(AgentNode, node_id)
             if node is None or node.observation_receipt_public_key is None:
                 raise HostHelperAuthorityError(

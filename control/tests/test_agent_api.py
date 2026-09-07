@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
 
 import pytest
 from cryptography import x509
@@ -25,6 +26,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     ExecuteContainerRuntimeRequestOperation,
+    HostHelperGrantClaims,
+    HostHelperSignature,
     InstallVonkDebOperation,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
@@ -981,7 +984,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
 ) -> None:
     client, _services, _, clock = agent_system
     payload = {
-        "schema_version": 2,
+        "schema_version": 1,
         "observed_at": clock.now.isoformat(),
         "runs": [],
     }
@@ -2358,6 +2361,11 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
 ) -> None:
     client, services, _, _ = agent_system
     assert services.bootstrap is not None
+    object.__setattr__(
+        services,
+        "host_runtime_authority",
+        SimpleNamespace(public_key_document={"public_key": "11" * 32}),
+    )
 
     response = client.get("/agent/v1/bootstrap")
 
@@ -2366,6 +2374,7 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
     assert response.json() == {
         "ca_fingerprint": services.bootstrap.ca_fingerprint,
         "ca_pem": services.bootstrap.ca_pem,
+        "host_helper_authority_public_key": "11" * 32,
         "controller_endpoint": "https://agents.example.test:8443",
         "enrollment_endpoint": "https://enroll.example.test:8443",
         "controller_address": "192.168.1.231",
@@ -2380,36 +2389,33 @@ def test_public_enrollment_bootstrap_is_canonical_bounded_and_contains_only_publ
     assert "PRIVATE KEY" not in response.text
 
 
-def test_setup_schema_two_adds_only_the_host_helper_public_authority(
+def test_bootstrap_has_one_current_response_even_with_an_obsolete_query(
     agent_system,
 ) -> None:
     client, services, _, _ = agent_system
 
-    class PublicAuthority:
-        def __init__(self) -> None:
-            self.public_key_document = {"public_key": "11" * 32}
+    object.__setattr__(
+        services,
+        "host_runtime_authority",
+        SimpleNamespace(public_key_document={"public_key": "11" * 32}),
+    )
 
-    object.__setattr__(services, "host_runtime_authority", PublicAuthority())
+    current = client.get("/agent/v1/bootstrap")
+    setup = client.get("/agent/v1/bootstrap?setup_schema=1")
 
-    legacy = client.get("/agent/v1/bootstrap")
-    setup = client.get("/agent/v1/bootstrap?setup_schema=2")
-
-    assert legacy.status_code == setup.status_code == 200
-    assert "host_helper_authority_public_key" not in legacy.json()
-    assert setup.json() == {
-        **legacy.json(),
-        "host_helper_authority_public_key": "11" * 32,
-    }
+    assert current.status_code == setup.status_code == 200
+    assert current.json() == setup.json()
+    assert setup.json()["host_helper_authority_public_key"] == "11" * 32
     assert setup.content == canonical_message(setup.json())
     assert "PRIVATE KEY" not in setup.text
 
 
-def test_setup_schema_two_fails_closed_without_a_host_helper_authority(
+def test_bootstrap_requires_the_host_helper_authority(
     agent_system,
 ) -> None:
     client, _, _, _ = agent_system
 
-    response = client.get("/agent/v1/bootstrap?setup_schema=2")
+    response = client.get("/agent/v1/bootstrap")
 
     assert response.status_code == 503
     assert response.json() == {"detail": "host runtime authority is unavailable"}
@@ -2420,35 +2426,6 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
 ) -> None:
     client, services, _, clock = agent_system
 
-    grant = SignedHostHelperGrant.model_validate(
-        {
-            "schema_version": 1,
-            "claims": {
-                "schema_version": 1,
-                "authority": "vonk.host-maintenance-helper",
-                "request_id": "50000000-0000-4000-8000-000000000005",
-                "node_id": NODE_A,
-                "issued_at": 1788000000,
-                "expires_at": 1788000060,
-                "operation": {
-                    "type": "execute-container-runtime-request",
-                    "action": "run-inspect",
-                    "job_id": "10000000-0000-4000-8000-000000000001",
-                    "operation_id": "50000000-0000-4000-8000-000000000005",
-                    "attempt": 3,
-                    "fence": "60000000-0000-4000-8000-000000000006",
-                    "request_sha256": "e" * 64,
-                    "observation_identity_sha256": "f" * 64,
-                },
-            },
-            "signature": {
-                "algorithm": "ed25519",
-                "key_id": "a" * 64,
-                "value": "b" * 128,
-            },
-        }
-    )
-
     class ExactObservationAuthority:
         def __init__(self) -> None:
             self.calls: list[dict[str, object]] = []
@@ -2457,7 +2434,30 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
             self.calls.append(values)
             assert values["certificate_serial"] == "serial-a"
             assert values["expires_in_seconds"] == 10
-            return "f" * 64, grant
+            return "f" * 64, SignedHostHelperGrant(
+                schema_version=1,
+                claims=HostHelperGrantClaims(
+                    schema_version=1,
+                    authority="vonk.host-maintenance-helper",
+                    request_id="70000000-0000-4000-8000-000000000007",
+                    node_id=NODE_A,
+                    issued_at=1_800_000_000,
+                    expires_at=1_800_000_010,
+                    operation=ExecuteContainerRuntimeRequestOperation(
+                        type="execute-container-runtime-request",
+                        action="run-inspect",
+                        job_id=values["job_id"],
+                        operation_id=values["operation_id"],
+                        attempt=values["attempt"],
+                        fence=values["fence"],
+                        request_sha256=values["request_sha256"],
+                        observation_identity_sha256="f" * 64,
+                    ),
+                ),
+                signature=HostHelperSignature(
+                    algorithm="ed25519", key_id="0" * 64, value="0" * 128
+                ),
+            )
 
     authority = ExactObservationAuthority()
     object.__setattr__(services, "host_runtime_authority", authority)
@@ -2522,7 +2522,32 @@ def test_exact_recipe_run_observation_grant_api_is_strict_and_authenticated(
     assert accepted.json() == {
         "schema_version": 1,
         "observation_identity_sha256": "f" * 64,
-        "grant": grant.to_mapping(),
+        "grant": {
+            "schema_version": 1,
+            "claims": {
+                "schema_version": 1,
+                "authority": "vonk.host-maintenance-helper",
+                "request_id": "70000000-0000-4000-8000-000000000007",
+                "node_id": NODE_A,
+                "issued_at": 1_800_000_000,
+                "expires_at": 1_800_000_010,
+                "operation": {
+                    "type": "execute-container-runtime-request",
+                    "action": "run-inspect",
+                    "job_id": run_id,
+                    "operation_id": request["operation_id"],
+                    "attempt": request["attempt"],
+                    "fence": request["fence"],
+                    "request_sha256": request["request_sha256"],
+                    "observation_identity_sha256": "f" * 64,
+                },
+            },
+            "signature": {
+                "algorithm": "ed25519",
+                "key_id": "0" * 64,
+                "value": "0" * 128,
+            },
+        },
     }
     assert wrong_node.status_code == 409
     assert unknown_field.status_code == 422

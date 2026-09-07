@@ -42,9 +42,9 @@ class EnrollmentBootstrapResponse(WireModel):
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
     ca_fingerprint: Digest
     ca_pem: str = Field(min_length=1, max_length=64 * 1024)
-    controller_address: str | None = None
-    service_hostnames: list[str] = Field(default_factory=list, max_length=16)
-    host_helper_authority_public_key: Digest | None = None
+    controller_address: str | None
+    service_hostnames: list[str] = Field(max_length=16)
+    host_helper_authority_public_key: Digest
 
 
 class RenewRequest(WireModel):
