@@ -667,6 +667,9 @@ def _validate_revision_reuse_identity(
 
 
 class RuntimeImageStorage(Protocol):
+    def read_receipt(self, archive_sha256: str) -> RuntimeImageReceipt:
+        """Read the current receipt or raise a preparation error."""
+
     def prepare_path(self) -> Path:
         """Return a private path for a new export."""
 
@@ -1104,7 +1107,9 @@ def _prepare_from_build(
     expected_interface_label = _runtime_interface_label(expected_interface)
     try:
         cached = storage.read_receipt(archive_sha)
-    except (RuntimeImagePreparationError, AttributeError):
+    except RuntimeImagePreparationError:
+        # Rebuild absent or invalid metadata from the verified archive and
+        # current build evidence. No alternate receipt shape is accepted.
         cached = None
     if (
         cached is not None
