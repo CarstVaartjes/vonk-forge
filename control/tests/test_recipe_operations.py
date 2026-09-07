@@ -1474,6 +1474,68 @@ def test_distributed_start_rejects_changed_launch_evidence(tmp_path: Path) -> No
         )
 
 
+def test_distributed_start_rejects_missing_run_generation(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2, distributed_lifecycle=True
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="g" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "missing-generation")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="h" * 36,
+    )
+    with sessions.begin() as session:
+        launch = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+        )
+        assert launch is not None
+        payload = {key: value for key, value in launch.payload.items() if key != "run_generation"}
+        launch.payload = payload
+
+    with pytest.raises(RecipeOperationConflict, match="start run generation is invalid"):
+        service.record_node_result(
+            start.id,
+            launch.node_id,
+            succeeded=True,
+            evidence=start_evidence(payload),
+        )
+
+
+def test_tensor_parallel_start_rejects_missing_run_generation(tmp_path: Path) -> None:
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, nodes=2
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="i" * 36
+    )
+    plan = service.preview_run(installation.owner_id, "missing-generation")
+    start = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="j" * 36,
+    )
+    with sessions.begin() as session:
+        child = session.scalar(
+            select(AgentOperation).where(AgentOperation.parent_job_id == start.id)
+        )
+        assert child is not None
+        payload = {key: value for key, value in child.payload.items() if key != "run_generation"}
+        child.payload = payload
+
+    with pytest.raises(RecipeOperationConflict, match="start run generation is invalid"):
+        service.record_node_result(
+            start.id,
+            child.node_id,
+            succeeded=True,
+            evidence=start_evidence(payload),
+        )
+
+
 def test_worker_death_while_owner_is_healthy_never_publishes_route(
     tmp_path: Path,
 ) -> None:

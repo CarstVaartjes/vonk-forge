@@ -2076,10 +2076,7 @@ class RecipeOperationService:
             if job.kind == "recipe.start"
             and (
                 operation.payload.get("phase") == "rank-launch"
-                or (
-                    operation.payload.get("run_generation") is not None
-                    and operation.payload.get("phase") is None
-                )
+                or operation.payload.get("phase") is None
             )
             else "node_evidence"
         )
@@ -3653,6 +3650,9 @@ def _validate_rank_launch_evidence(
     operation: AgentOperation,
     evidence: Mapping[str, object],
 ) -> str:
+    run_generation = operation.payload.get("run_generation")
+    if type(run_generation) is not int or run_generation < 1:
+        raise RecipeOperationConflict("start run generation is invalid")
     expected_fields = {
         "phase",
         "run_id",
@@ -3672,10 +3672,9 @@ def _validate_rank_launch_evidence(
         "fabric_projection_bound",
         "launched",
         "evidence_digest",
+        "run_generation",
+        "runtime_arguments_sha256",
     }
-    exact_inspection = operation.payload.get("run_generation") is not None
-    if exact_inspection:
-        expected_fields |= {"run_generation", "runtime_arguments_sha256"}
     if (
         set(evidence) != expected_fields
         or evidence.get("phase") != "rank-launch"
@@ -3729,8 +3728,7 @@ def _validate_rank_launch_evidence(
         "master_port": operation.payload.get("master_port"),
         "memory_reservation_bytes": operation.payload.get("reserved_memory_bytes"),
     }
-    if exact_inspection:
-        comparisons["run_generation"] = operation.payload.get("run_generation")
+    comparisons["run_generation"] = run_generation
     if any(evidence.get(key) != value for key, value in comparisons.items()):
         raise RecipeOperationConflict(
             "rank launch evidence does not match its fenced request"
@@ -3743,7 +3741,7 @@ def _validate_rank_launch_evidence(
     ):
         raise RecipeOperationConflict("start artifact evidence is invalid")
     runtime_arguments_sha256 = evidence.get("runtime_arguments_sha256")
-    if exact_inspection and (
+    if (
         not isinstance(runtime_arguments_sha256, str)
         or len(runtime_arguments_sha256) != 64
         or any(
@@ -3768,6 +3766,9 @@ def _validate_start_evidence(
     operation: AgentOperation,
     evidence: Mapping[str, object],
 ) -> tuple[str, str]:
+    run_generation = operation.payload.get("run_generation")
+    if type(run_generation) is not int or run_generation < 1:
+        raise RecipeOperationConflict("start run generation is invalid")
     expected_fields = {
         "recipe_revision_id",
         "recipe_content_sha256",
@@ -3780,19 +3781,15 @@ def _validate_start_evidence(
         "memory_reservation_bytes",
         "ready",
         "evidence_digest",
+        "run_generation",
+        "runtime_arguments_sha256",
+        "local_address",
+        "master_address",
+        "master_port",
     }
     phase = operation.payload.get("phase")
     if phase == "collective-readiness":
         expected_fields |= {"phase", "run_id", "role"}
-    exact_inspection = operation.payload.get("run_generation") is not None
-    if exact_inspection:
-        expected_fields |= {
-            "run_generation",
-            "runtime_arguments_sha256",
-            "local_address",
-            "master_address",
-            "master_port",
-        }
     if set(evidence) != expected_fields or evidence.get("ready") is not True:
         raise RecipeOperationConflict("start evidence is invalid")
     run = session.get(RecipeRun, run_id)
@@ -3852,11 +3849,10 @@ def _validate_start_evidence(
                 "role": operation.payload.get("role"),
             }
         )
-    if exact_inspection:
-        comparisons["run_generation"] = operation.payload.get("run_generation")
-        comparisons["local_address"] = operation.payload.get("local_address")
-        comparisons["master_address"] = operation.payload.get("master_address")
-        comparisons["master_port"] = operation.payload.get("master_port")
+    comparisons["run_generation"] = run_generation
+    comparisons["local_address"] = operation.payload.get("local_address")
+    comparisons["master_address"] = operation.payload.get("master_address")
+    comparisons["master_port"] = operation.payload.get("master_port")
     if any(evidence.get(key) != value for key, value in comparisons.items()):
         raise RecipeOperationConflict(
             "start evidence does not match its fenced request"
@@ -3869,7 +3865,7 @@ def _validate_start_evidence(
     ):
         raise RecipeOperationConflict("start artifact evidence is invalid")
     runtime_arguments_sha256 = evidence.get("runtime_arguments_sha256")
-    if exact_inspection and (
+    if (
         not isinstance(runtime_arguments_sha256, str)
         or len(runtime_arguments_sha256) != 64
         or any(
