@@ -3704,7 +3704,7 @@ def _validate_rank_launch_evidence(
         "run_id": run_id,
         "recipe_revision_id": operation.payload.get("recipe_revision_id"),
         "recipe_content_sha256": operation.payload.get("recipe_content_sha256"),
-        "image_digest": installation.image_digest.removeprefix("sha256:"),
+        "image_digest": installation.image_digest,
         "model_identity": model_identity,
         "rank": operation.payload.get("rank"),
         "role": operation.payload.get("role"),
@@ -3804,7 +3804,7 @@ def _validate_start_evidence(
     model = selection.get("model") if isinstance(selection, Mapping) else None
     if not isinstance(model, Mapping):
         raise RecipeOperationConflict("start evidence authority is invalid")
-    image_digest = installation.image_digest.removeprefix("sha256:")
+    image_digest = installation.image_digest
     try:
         model_identity = format_model_identity(
             model["publisher"], model["slug"], model["content_sha256"]
