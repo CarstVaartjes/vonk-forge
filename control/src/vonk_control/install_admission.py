@@ -113,7 +113,7 @@ class InstallAdmissionService:
         self,
         sessions: sessionmaker[Session],
         *,
-        sizes: ArtifactSizeResolver,
+        sizes: ArtifactSizeResolver | None = None,
         inventory_max_age: int = 300,
         disk_floor_bytes: int = 10_000_000_000,
         compiled_plan_provider: Callable[..., Mapping[str, Mapping[str, object]]] | None = None,
