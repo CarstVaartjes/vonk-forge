@@ -103,7 +103,9 @@ def _validate_options(options: RecipeBuildOptions) -> None:
     for entries in (options.annotations, options.labels, options.layer_labels):
         names = [item.name for item in entries]
         if len(set(names)) != len(names) or any(
-            not item.name or len(item.name) > 128 for item in entries
+            not re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$", item.name)
+            or "\x00" in item.value
+            for item in entries
         ):
             raise ValueError("build metadata is invalid")
     environment = [item.name for item in options.environment]
@@ -142,19 +144,26 @@ def _validate_options(options: RecipeBuildOptions) -> None:
         raise ValueError("build OS version is invalid")
     if options.timestamp is not None and options.timestamp > 4_102_444_800:
         raise ValueError("build timestamp is invalid")
-    for values in (options.unset_environment, options.unset_labels):
-        if len(set(values)) != len(values):
-            raise ValueError("build unset options are invalid")
+    if len(set(options.unset_environment)) != len(options.unset_environment) or any(
+        not re.fullmatch(r"^[A-Z][A-Z0-9_]{0,127}$", item)
+        for item in options.unset_environment
+    ):
+        raise ValueError("build unset environment is invalid")
+    if len(set(options.unset_labels)) != len(options.unset_labels) or any(
+        not re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$", item)
+        for item in options.unset_labels
+    ):
+        raise ValueError("build unset labels are invalid")
 
 
 # The Rust producer accepts JSON strings, booleans, and integral numbers for
 # build arguments.  Keeping this union strict prevents Pydantic from turning
 # JSON floats/nulls into an accepted build argument.
-JsonScalar = str | int | bool
+JsonScalar = Annotated[str, StringConstraints(max_length=1024)] | int | bool
 
 
 class RecipeBuildArgument(WireModel):
-    name: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
     value: JsonScalar
 
 
