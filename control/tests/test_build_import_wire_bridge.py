@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import subprocess
 import uuid
@@ -11,12 +11,14 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentClaim,
-    AgentOperation as ProtocolOperation,
     RecipeBuildEvidence,
     RecipeBuildRequest,
     RecipeImageImportEvidence,
     RecipeImageImportRequest,
     canonical_message,
+)
+from vonk_agent_protocol import (
+    AgentOperation as ProtocolOperation,
 )
 from vonk_control.models import (
     AgentOperation,
@@ -169,7 +171,6 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
             )
         )
         assert operation is not None
-        import_payload = dict(operation.payload)
         import_claim = AgentClaim(
             schema_version=1,
             job_id=operation.parent_job_id,
