@@ -452,7 +452,7 @@ async function installLocalFleetFixture(page: Page) {
       schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
       plan_digest: body.plan_digest ?? "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at,
       state: "running", current_operation_id: null, current_step: 1, total_steps: 4,
-      progress: {phase: "transfer", subphase: "model-copy", message: `Copying model to ${nodeId}`, completed_bytes: 32 * GIB, total_bytes: 80 * GIB, total_bytes_known: true, request_key: body.request_key ?? null, members: [{node_id: nodeId, state: "running", completed_bytes: 32 * GIB, total_bytes: 80 * GIB}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: 80 * GIB}]},
+      progress: {completed_steps: 0, total_steps: 3, child_progress: {phase: "target-copy", bytes: 32 * GIB, total_bytes: 80 * GIB, node_ids: [nodeId, borealisId]}},
       status_reason: null, result: null,
     }});
   });
@@ -460,7 +460,7 @@ async function installLocalFleetFixture(page: Page) {
     schema_version: 2, id: "00000000-0000-4000-8000-000000000404", profile_id: profile.id, profile_digest: profile.profile_digest,
     plan_digest: "e".repeat(64), created_at: snapshot.generated_at, updated_at: snapshot.generated_at, state: "running",
     current_operation_id: null, current_step: 1, total_steps: 4,
-    progress: {phase: "transfer", subphase: "model-copy", message: `Copying model to ${nodeId}`, completed_bytes: 32 * GIB, total_bytes: 80 * GIB, total_bytes_known: true, members: [{node_id: nodeId, state: "running", completed_bytes: 32 * GIB, total_bytes: 80 * GIB}, {node_id: borealisId, state: "pending", completed_bytes: 0, total_bytes: 80 * GIB}]},
+      progress: {completed_steps: 0, total_steps: 3, child_progress: {phase: "target-copy", bytes: 32 * GIB, total_bytes: 80 * GIB, node_ids: [nodeId, borealisId]}},
     status_reason: null, result: null,
   }}));
   await page.route("**/api/v1/nodes/*/profile", async route => {
@@ -1027,7 +1027,7 @@ test("Profiles keep the saved view primary and show durable per-Spark switch pro
 
     await saved.getByRole("button", {name: "Switch profile"}).click();
     const progress = page.getByRole("region", {name: "Profile switch progress"});
-    await expect(progress).toContainText("Copying model to Aurora");
+    await expect(progress).toContainText("Copying to Aurora, Borealis");
     await expect(progress).toContainText("32 GiB of 80 GiB");
     await expect(progress.getByRole("list", {name: "Profile switch targets"})).toContainText("Aurora");
     await expect(progress.getByRole("list", {name: "Profile switch targets"})).toContainText("Borealis");
