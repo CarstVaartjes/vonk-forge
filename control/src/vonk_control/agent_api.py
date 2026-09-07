@@ -151,7 +151,10 @@ def _strict_json_datetime(value: object) -> object:
     if isinstance(value, datetime):
         return value
     if not isinstance(value, str):
-        raise TypeError("observed time must be an RFC 3339 string")
+        # Pydantic turns ValueError into the stable request validation response.
+        raise ValueError(  # noqa: TRY004
+            "observed time must be an RFC 3339 string"
+        )
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError as error:

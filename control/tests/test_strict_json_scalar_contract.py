@@ -4,7 +4,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-
 from vonk_control.agent_api import AgentGrantResponse, GrantRequest
 from vonk_control.model_cache_contract import ModelCacheEvictionPreviewRequest
 from vonk_control.operation_contract import AvailabilityOperationFailure
