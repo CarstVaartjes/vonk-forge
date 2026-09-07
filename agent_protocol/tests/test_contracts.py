@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
     validate_result_for_operation,
     validate_schema_message,
 )
+from vonk_agent_protocol.contracts import RESULT_MODELS
 
 
 def valid_claim() -> dict[str, object]:
@@ -767,6 +768,10 @@ def test_known_operation_result_uses_its_typed_result_model() -> None:
             {"stopped": "true"},
             state="succeeded",
         )
+
+
+def test_every_current_operation_has_a_result_model() -> None:
+    assert set(RESULT_MODELS) == set(AgentOperation)
 
 
 def test_distribution_result_cannot_fall_through_to_generic_evidence() -> None:
