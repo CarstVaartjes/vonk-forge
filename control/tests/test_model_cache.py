@@ -984,7 +984,8 @@ def test_same_pin_repair_verifies_before_atomic_replace_and_preserves_old_bytes(
     def fail_final_replace(source_path, target_path):
         nonlocal calls
         calls += 1
-        if calls == 2:
+        assert target.read_bytes() == good
+        if target_path == target:
             raise OSError("simulated atomic publish failure")
         return replace(source_path, target_path)
 
@@ -1335,3 +1336,102 @@ def test_failed_eviction_exposes_durable_failure_after_restart(cache, tmp_path, 
         row.payload = {key: value for key, value in row.payload.items() if key != "result"}
     with pytest.raises(ValidationError, match="requires a result"):
         restarted.get_operation(downloaded.id)
+
+
+def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeypatch):
+    service, sessions = cache
+    data = b"x" * (2 * 1024 * 1024 + 3)
+    artifact = _artifact(tmp_path, data)
+    small = _artifact(tmp_path, b"config", artifact_id="tokenizer", path="config.json")
+    downloaded = _download(service, [small, artifact], model_content_sha256="a" * 64,
+                           request_key="00000000-0000-4000-8000-000000001001")
+    digest = downloaded.artifact_set_sha256
+    preview = service.repair_preview(digest)
+    repair = service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001002",
+                                  artifact_set_sha256=digest, plan_digest=preview["plan_digest"])
+    service._run_download(repair.id, force=True, interrupt_after_bytes=1024 * 1024)
+    assert service.get_operation(repair.id).state == "partial"
+    assert service.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == data
+    service.close()
+    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    offsets = []
+    original = restarted._open_source
+
+    def open_source(spec, offset):
+        offsets.append(offset)
+        return original(spec, offset)
+
+    monkeypatch.setattr(restarted, "_open_source", open_source)
+    restarted.run_pending()
+    assert restarted.get_operation(repair.id).state == "succeeded"
+    assert offsets == [1024 * 1024]
+    assert restarted.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == data
+    restarted.close()
+
+
+def test_atomic_repair_keeps_path_and_open_reader_available(cache, tmp_path, monkeypatch):
+    service, _ = cache
+    data = b"immutable model"
+    artifact = _artifact(tmp_path, data)
+    downloaded = _download(service, [artifact], model_content_sha256="a" * 64,
+                           request_key="00000000-0000-4000-8000-000000001003")
+    digest = downloaded.artifact_set_sha256
+    target, _, _ = service.verified_artifact_file(digest, artifact["sha256"], "weights.bin")
+    original = __import__("os").replace
+    replacements = []
+    with target.open("rb") as reader:
+        def replace(source, destination):
+            assert target.read_bytes() == data
+            assert destination == target
+            original(source, destination)
+            assert target.read_bytes() == data
+            assert reader.read() == data
+            replacements.append(destination)
+        monkeypatch.setattr("vonk_control.model_cache.os.replace", replace)
+        repair = service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001004",
+                                      artifact_set_sha256=digest,
+                                      plan_digest=service.repair_preview(digest)["plan_digest"])
+        service.run_pending()
+    assert service.get_operation(repair.id).state == "succeeded"
+    assert replacements == [target]
+
+
+def test_reconciliation_reuses_verified_bytes_but_detects_same_size_mutation(cache, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from vonk_control.cached_file_verification import CachedFileVerifier
+
+    service, _ = cache
+    artifact = _artifact(tmp_path, b"good")
+    downloaded = _download(service, [artifact], model_content_sha256="a" * 64,
+                           request_key="00000000-0000-4000-8000-000000001005")
+    monkeypatch.setattr("vonk_control.model_cache.verified_files", CachedFileVerifier())
+    calls = []
+    original = hashlib.sha256
+    def sha256():
+        calls.append(1)
+        return original()
+    monkeypatch.setattr("vonk_control.cached_file_verification.hashlib", SimpleNamespace(sha256=sha256))
+    service.reconcile_storage()
+    service.reconcile_storage()
+    service.get_entry(downloaded.artifact_set_sha256)
+    assert len(calls) == 1
+    service._object_path(artifact["sha256"]).write_bytes(b"evil")
+    service.reconcile_storage()
+    assert service.get_entry(downloaded.artifact_set_sha256)["state"] == "needs-repair"
+
+
+def test_repair_capacity_admission_preserves_verified_object(cache, tmp_path, monkeypatch):
+    from collections import namedtuple
+    service, _ = cache
+    artifact = _artifact(tmp_path, b"model")
+    downloaded = _download(service, [artifact], model_content_sha256="a" * 64,
+                           request_key="00000000-0000-4000-8000-000000001006")
+    digest = downloaded.artifact_set_sha256
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr("vonk_control.model_cache.shutil.disk_usage", lambda _: usage(100, 100, 0))
+    with pytest.raises(ModelCacheConflict, match="insufficient-reserved-storage"):
+        service.start_repair(actor="test", request_key="00000000-0000-4000-8000-000000001007",
+                             artifact_set_sha256=digest,
+                             plan_digest=service.repair_preview(digest)["plan_digest"])
+    assert service.read_verified_artifact(digest, artifact["sha256"], "weights.bin") == b"model"
