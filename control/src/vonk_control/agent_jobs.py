@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentResult,
     canonical_message,
+    validate_result_for_operation,
 )
 
 from .agent_upgrade_status import operator_agent_upgrade_reason
@@ -1053,6 +1054,11 @@ class AgentJobService:
                     state=state,
                     result=canonical_result,
                 )
+            validate_result_for_operation(
+                operation.kind,
+                message.result,
+                state=message.state,
+            )
             if state in {"failed", "waiting-for-operator"}:
                 try:
                     message_result = sanitize_failure_evidence(message.result)

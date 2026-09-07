@@ -33,8 +33,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    AgentClaim,
+    AgentDirective,
     AgentProgress,
-    AgentProtocolError,
     AgentResult,
     ContainerRuntimeAction,
     DistributionAssignment,
@@ -1720,7 +1721,10 @@ def install_agent_routes(
         )
         return _json_response(_issued_response(outcome))
 
-    @agent.post("/claim")
+    @agent.post(
+        "/claim", response_model=AgentClaim,
+        responses={204: {"description": "No work available"}},
+    )
     def claim(request: Request, body: ClaimRequest) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -1743,7 +1747,7 @@ def install_agent_routes(
             raise HTTPException(status_code=422, detail=str(error)) from None
         if result is None:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
-        encoded_claim = canonical_message(_wire(result))
+        encoded_claim = canonical_message(AgentClaim.model_validate(result))
         if len(encoded_claim) > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES:
             raise HTTPException(status_code=500, detail="agent claim is too large")
         return Response(content=encoded_claim, media_type="application/json")
@@ -2420,15 +2424,12 @@ def install_agent_routes(
                 status_code=409, detail="workload helper authority rejected request"
             ) from None
 
-    @agent.post("/heartbeat")
-    def heartbeat(body: dict[str, object], request: Request) -> Response:
+    @agent.post("/heartbeat", response_model=AgentDirective)
+    def heartbeat(body: AgentProgress, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        try:
-            message = AgentProgress.parse(body)
-        except AgentProtocolError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+        message = body
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
@@ -2440,17 +2441,14 @@ def install_agent_routes(
             )
         except (StaleAgentAttempt, ValueError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
-        return _json_response(_wire(response))
+        return _json_response(AgentDirective.model_validate(response))
 
     @agent.post("/result", status_code=status.HTTP_204_NO_CONTENT)
-    def result(body: dict[str, object], request: Request) -> Response:
+    def result(body: AgentResult, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        try:
-            message = AgentResult.parse(body)
-        except AgentProtocolError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+        message = body
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:

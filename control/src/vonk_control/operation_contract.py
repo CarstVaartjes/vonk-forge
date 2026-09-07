@@ -14,6 +14,12 @@ from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from vonk_agent_protocol import (
+    OperationCheckpoint,
+    OperationMemberProgress,
+    OperationProgress,
+    normalize_operation_progress,
+)
 
 from .logging import redact_text
 
@@ -43,73 +49,6 @@ class OperationRecoveryAction(StrEnum):
     RESUME = "resume"
     CANCEL = "cancel"
     INSPECT = "inspect"
-
-
-class OperationCheckpoint(BaseModel):
-    """A restart-safe cursor identifying the last completed durable unit."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    key: str = Field(min_length=1, max_length=128)
-    sequence: int = Field(ge=0)
-    cursor: str | None = Field(default=None, max_length=512)
-    digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-
-
-class OperationMemberProgress(BaseModel):
-    """Progress for one node, rank, shard, or other operation member."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    member_id: str = Field(min_length=1, max_length=128)
-    phase: str = Field(min_length=1, max_length=80)
-    completed_bytes: int = Field(default=0, ge=0)
-    total_bytes: int | None = Field(default=None, ge=0)
-    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
-    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
-    state: str = Field(default="running", min_length=1, max_length=32)
-
-    @model_validator(mode="after")
-    def totals_are_consistent(self) -> OperationMemberProgress:
-        if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
-            raise ValueError("completed bytes cannot exceed total bytes")
-        return self
-
-
-class OperationProgress(BaseModel):
-    """Canonical progress payload persisted on the current operation attempt."""
-
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    phase: str = Field(min_length=1, max_length=80)
-    kind: str | None = Field(default=None, min_length=1, max_length=80)
-    object_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    completed_bytes: int = Field(default=0, ge=0)
-    total_bytes: int | None = Field(default=None, ge=0)
-    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
-    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
-    total_bytes_known: bool = False
-    checkpoint: OperationCheckpoint | None = None
-    members: list[OperationMemberProgress] = Field(
-        default_factory=list, max_length=1024
-    )
-
-    @model_validator(mode="after")
-    def totals_are_explicit_and_consistent(self) -> OperationProgress:
-        if self.total_bytes_known != (self.total_bytes is not None):
-            raise ValueError(
-                "total_bytes_known must be false when total_bytes is unknown and true when present"
-            )
-        if (
-            self.completed_bytes > self.total_bytes
-            if self.total_bytes is not None
-            else False
-        ):
-            raise ValueError("completed bytes cannot exceed total bytes")
-        member_ids = [member.member_id for member in self.members]
-        if len(member_ids) != len(set(member_ids)):
-            raise ValueError("operation progress members must be unique")
-        return self
 
 
 class OperationFailureEvidence(BaseModel):
@@ -233,39 +172,6 @@ class OperationRecovery(BaseModel):
     uncertain: bool = False
     actions: list[OperationRecoveryAction] = Field(default_factory=list, max_length=4)
     explanation: str | None = Field(default=None, max_length=512)
-
-
-def _plain_json(value: object) -> object:
-    """Convert immutable protocol mappings to objects Pydantic can validate."""
-
-    if isinstance(value, Mapping):
-        return {key: _plain_json(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain_json(item) for item in value]
-    return value
-
-
-def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, object]:
-    """Validate and canonicalize progress while retaining phase-only updates."""
-
-    parsed = OperationProgress.model_validate(_plain_json(value))
-    document = parsed.model_dump(mode="json", exclude_none=True)
-    # Empty optional collections are omitted so the old phase-only response is
-    # byte-for-byte stable for callers that have not adopted the contract.
-    if not document.get("members"):
-        document.pop("members", None)
-    if parsed.checkpoint is None:
-        document.pop("checkpoint", None)
-    if parsed.completed_bytes == 0 and "completed_bytes" not in value:
-        document.pop("completed_bytes", None)
-    extended = bool(set(value) & set(OperationProgress.model_fields) - {"phase"})
-    if (
-        parsed.total_bytes_known is False
-        and not extended
-        and "total_bytes_known" not in value
-    ):
-        document.pop("total_bytes_known", None)
-    return document
 
 
 def validate_progress_update(

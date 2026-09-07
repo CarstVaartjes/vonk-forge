@@ -138,7 +138,11 @@ def _validate_options(options: RecipeBuildOptions) -> None:
 # The Rust producer accepts JSON strings, booleans, and integral numbers for
 # build arguments.  Keeping this union strict prevents Pydantic from turning
 # JSON floats/nulls into an accepted build argument.
-JsonScalar = Annotated[str, StringConstraints(max_length=1024)] | int | bool
+JsonScalar = (
+    Annotated[str, StringConstraints(max_length=1024)]
+    | Annotated[int, Field(strict=True, ge=-(2**63), le=2**63 - 1)]
+    | bool
+)
 
 
 class RecipeBuildArgument(WireModel):
@@ -235,7 +239,10 @@ class RecipeBuildRequest(WireModel):
             raise ValueError("build Dockerfile path is invalid")
         if (
             any(capability not in _CAPABILITIES for capability in self.capabilities)
-            or len(set(self.capabilities)) != len(self.capabilities)
+        ):
+            raise ValueError("capabilities are not allowed")
+        if (
+            len(set(self.capabilities)) != len(self.capabilities)
             or (not self.base_images and self.base_image_storage_bytes != 0)
             or (
                 self.base_images

@@ -54,7 +54,8 @@ separate results.
   Focused validation: 98 Controller enrollment/rotation tests and 12 Linux
   pairing tests pass. The combined protocol/wire run passed 539 tests, including
   enrollment and renewal through Rust, and exposed one heartbeat 409 failure
-  following progress canonicalization; that failure remains under repair.
+  following progress canonicalization. The host-helper integration fixes that
+  mapping handoff; the current full Controller run passes the heartbeat checks.
 - Bootstrap no longer selects an older response by setup-schema query. Both
   Controller and Spark setup require the complete current document. Seven
   connected bootstrap/enrollment/renewal checks and 47 unprivileged Linux setup
@@ -85,6 +86,13 @@ separate results.
   required telemetry metrics and the explicit null port for artifact jobs.
   The Linux process boundary tests use executable temporary directories; the
   builder test accommodates the existing reserve scaling on small filesystems.
+- The broader Controller run at `9d295cd8` passed 1,944 tests with three
+  expected platform/opt-in skips and exposed three stale fixture/schema
+  assumptions. Their 132 affected checks now pass. Current schema head
+  `0022_current_telemetry_defaults` leaves historical 0016 unchanged and preserves
+  existing row values. It removes the empty new-sample metrics default and uses
+  current Controller provenance for new rollups. A populated PostgreSQL test
+  verifies row preservation and rejection of omitted metrics.
 - Core job-envelope and signed run-observation integration remains in progress.
   The bundled protocol wheel and generated API clients must be refreshed after
   those merges, followed by the combined suite. These focused checks do not

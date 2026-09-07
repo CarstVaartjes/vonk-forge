@@ -3901,6 +3901,11 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
         {
             "schema_version": 1,
             "kind": "recipe.image.import.v1",
+            "build_id": "00000000-0000-4000-8000-000000000010",
+            "mapping_id": "00000000-0000-4000-8000-000000000011",
+            "mapping_generation": 1,
+            "source_node_id": NODE_A,
+            "image_digest": "sha256:" + "b" * 64,
             "oci_layout_sha256": digest,
             "image_bytes": len(payload),
         },
@@ -4309,3 +4314,40 @@ def test_enrollment_listing_paginates_stably_and_can_filter_issuing(
         "/api/v1/agents/enrollments?state=issuing", headers=admin_headers(codec)
     ).json()
     assert [item["state"] for item in issuing["enrollments"]] == ["issuing"]
+
+
+def test_job_wire_routes_publish_the_canonical_model_graph(agent_system) -> None:
+    from vonk_agent_protocol import (
+        AgentClaim,
+        AgentDirective,
+        AgentProgress,
+        AgentResult,
+    )
+    from vonk_agent_protocol.wire_model import OperationProgress
+
+    client, _services, _sessions, _clock = agent_system
+    schema = client.get("/openapi.json").json()
+    paths = schema["paths"]
+    components = schema["components"]["schemas"]
+
+    for path, model in (("heartbeat", AgentProgress), ("result", AgentResult)):
+        reference = paths[f"/agent/v1/{path}"]["post"]["requestBody"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        document = components[reference.rsplit("/", 1)[-1]]
+        assert document["title"] == model.__name__
+        assert set(document["required"]) == set(model.model_json_schema()["required"])
+
+    for path, model in (("claim", AgentClaim), ("heartbeat", AgentDirective)):
+        reference = paths[f"/agent/v1/{path}"]["post"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        assert components[reference.rsplit("/", 1)[-1]]["title"] == model.__name__
+    assert "204" in paths["/agent/v1/claim"]["post"]["responses"]
+
+    # A compact serializer must not erase the outgoing progress structure.
+    progress = OperationProgress.model_json_schema(mode="serialization")
+    assert progress["additionalProperties"] is False
+    assert {"phase", "completed_bytes", "checkpoint", "members"} <= set(
+        progress["properties"]
+    )

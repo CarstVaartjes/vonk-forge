@@ -17,7 +17,7 @@ from typing import Annotated, Any, Literal
 from pydantic import ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import OperationProgress, canonical_message
 
 from .agent_upgrade_status import (
     GENERIC_AGENT_UPGRADE_REASONS,
@@ -39,14 +39,11 @@ from .models import (
     RoutePublicationOwner,
 )
 from .operation_contract import (
-    OperationCheckpoint,
     OperationEvidenceDownload,
     OperationEvidenceProvenance,
     OperationFailureEvidence,
-    OperationMemberProgress,
     OperationRecovery,
     OperationRecoveryAction,
-    normalize_operation_progress,
     recovery_for_operation,
     sanitize_failure_evidence,
 )
@@ -270,27 +267,7 @@ class AgentsResponse(StrictModel):
     agents: list[AgentSummary]
 
 
-class JobOperationProgress(StrictModel):
-    phase: str = Field(min_length=1, max_length=80)
-    kind: str | None = Field(default=None, min_length=1, max_length=80)
-    object_sha256: str | None = Field(default=None, pattern=DIGEST_PATTERN)
-    completed_bytes: int | None = Field(default=None, ge=0)
-    total_bytes: int | None = Field(default=None, ge=0)
-    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
-    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
-    total_bytes_known: bool | None = None
-    checkpoint: OperationCheckpoint | None = None
-    members: list[OperationMemberProgress] | None = Field(default=None, max_length=1024)
-
-    @model_serializer(mode="wrap")
-    def _serialize_without_unset_contract_fields(self, handler):
-        document = handler(self)
-        # Keep old phase-only status responses byte-for-byte stable.
-        return {
-            key: value
-            for key, value in document.items()
-            if value is not None and value != []
-        }
+JobOperationProgress = OperationProgress
 
 
 class JobOperationResponse(StrictModel):
@@ -723,13 +700,16 @@ def _progress_projection(value: object) -> JobOperationProgress | None:
     if not isinstance(value, Mapping):
         return None
     try:
-        normalized = normalize_operation_progress(value)
+        return JobOperationProgress.model_validate(value, strict=True)
     except (TypeError, ValueError):
         return None
-    try:
-        return JobOperationProgress.model_validate(normalized, strict=True)
-    except (TypeError, ValueError):
-        return None
+
+
+def _progress_document(value: object) -> dict[str, object] | None:
+    """Project one durable progress value with a single canonical parse."""
+
+    projected = _progress_projection(value)
+    return None if projected is None else projected.model_dump(mode="json")
 
 
 def _failure_projection(value: object) -> OperationFailureEvidence | None:
@@ -1270,13 +1250,7 @@ class _DurableOperationProjection:
                 "progress": (
                     None
                     if attempts.get(operation.id) is None
-                    else (
-                        None
-                        if _progress_projection(attempts[operation.id].progress) is None
-                        else _progress_projection(
-                            attempts[operation.id].progress
-                        ).model_dump(mode="json")
-                    )
+                    else _progress_document(attempts[operation.id].progress)
                 ),
                 "result": (
                     None

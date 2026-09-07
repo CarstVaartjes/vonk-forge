@@ -644,19 +644,6 @@ impl AgentDirective {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         validate_attempt_identity(self.schema_version, self.attempt, &self.node_id)
     }
-
-    pub fn from_progress(progress: AgentProgress) -> Self {
-        Self {
-            attempt: progress.attempt,
-            cancel_requested: false,
-            deadline: progress.deadline,
-            fence: progress.fence,
-            job_id: progress.job_id,
-            node_id: progress.node_id,
-            operation_id: progress.operation_id,
-            schema_version: progress.schema_version,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
