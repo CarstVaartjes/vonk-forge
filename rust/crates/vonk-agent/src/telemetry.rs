@@ -35,7 +35,7 @@ const MAX_CAPABILITIES: usize = 128;
 /// The exact wire envelope shared by batching and HTTP serialization.
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct TelemetryRequest<'a> {
+pub struct TelemetryRequest<'a> {
     pub schema_version: u8,
     pub samples: &'a [TelemetrySample],
 }
@@ -210,24 +210,6 @@ pub struct TelemetryMetrics {
     pub provenance: TelemetryProvenance,
 }
 
-impl Default for TelemetryMetrics {
-    fn default() -> Self {
-        Self {
-            schema_version: 2,
-            series: Vec::new(),
-            capabilities: Vec::new(),
-            runtimes: Vec::new(),
-            workloads: Vec::new(),
-            provenance: TelemetryProvenance {
-                collector: "legacy".to_owned(),
-                collector_version: "1".to_owned(),
-                host_uptime_seconds: None,
-                source_observed_at: None,
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TelemetrySample {
     pub boot_id: Uuid,
@@ -248,22 +230,11 @@ pub struct TelemetrySample {
     pub network_transmit_bytes_per_second: Option<f64>,
     pub gap_samples: i64,
     pub details: TelemetryDetails,
-    #[serde(default, skip_serializing_if = "TelemetryMetrics::is_empty")]
     pub metrics: TelemetryMetrics,
     #[serde(skip)]
     cpu_counters: Option<CpuCounters>,
     #[serde(skip)]
     network_counters: Option<NetworkCounters>,
-}
-
-impl TelemetryMetrics {
-    fn is_empty(value: &Self) -> bool {
-        value.series.is_empty()
-            && value.capabilities.is_empty()
-            && value.runtimes.is_empty()
-            && value.workloads.is_empty()
-            && value.provenance.collector == "legacy"
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1868,7 +1839,7 @@ pub fn read_boot_id(path: &Path) -> Result<Uuid, TelemetryError> {
     Ok(boot_id)
 }
 
-pub(crate) fn valid_report_batch(samples: &[TelemetrySample]) -> bool {
+pub fn valid_report_batch(samples: &[TelemetrySample]) -> bool {
     if samples.is_empty() || samples.len() > MAX_REPORT_SAMPLES {
         return false;
     }
@@ -2072,16 +2043,16 @@ fn valid_metric_text(value: &str, maximum: usize) -> bool {
     !value.is_empty() && value.chars().count() <= maximum && !value.chars().any(char::is_control)
 }
 
-fn valid_metric_value(value: &serde_json::Value) -> bool {
+/// Return whether a rich metric value satisfies the shared JSON scalar contract.
+pub fn valid_metric_value(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(_) => true,
         serde_json::Value::Number(number) => {
-            if number.as_i64().is_some() {
-                true
-            } else if let Some(value) = number.as_u64() {
-                value <= i64::MAX as u64
-            } else {
+            let representation = number.to_string();
+            if representation.contains(['.', 'e', 'E']) {
                 number.as_f64().is_some_and(f64::is_finite)
+            } else {
+                representation.parse::<i64>().is_ok()
             }
         }
         serde_json::Value::String(value) => value.chars().count() <= 256,
@@ -2106,6 +2077,7 @@ mod scalar_contract_tests {
         assert!(valid_metric_value(&Value::String("x".repeat(256))));
 
         assert!(!valid_metric_value(&json!(i64::MAX as u64 + 1)));
+        assert!(!valid_metric_value(&json!(i64::MIN as i128 - 1)));
         assert!(!valid_metric_value(&Value::String("x".repeat(257))));
         assert!(!valid_metric_value(&Value::Array(Vec::new())));
         assert!(!valid_metric_value(&Value::Object(Default::default())));

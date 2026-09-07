@@ -67,11 +67,6 @@ class WireModel(StrictJSONModel, Mapping[str, Any]):
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True, allow_inf_nan=False)
 
-    def __setattr__(self, name: str, value: Any) -> None:
-        if name in self.__class__.model_fields:
-            raise AttributeError(f"{self.__class__.__name__} is immutable")
-        super().__setattr__(name, value)
-
     def __getitem__(self, key: str) -> Any:
         if key in self.__class__.model_fields:
             return getattr(self, key)

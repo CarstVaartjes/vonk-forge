@@ -154,7 +154,8 @@ pub struct CompiledRuntimePlacement {
     pub master_address: Option<IpAddr>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_port: Option<u16>,
-    pub port: u16,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub port: Option<u16>,
     pub reserved_memory_bytes: u64,
 }
 
@@ -306,6 +307,7 @@ impl CompiledExecutionPlan {
             || self.topology.node_count == 0
             || self.topology.world_size < self.topology.node_count
             || self.endpoint.is_some() == self.job.is_some()
+            || self.endpoint.is_some() != self.runtime.placement.port.is_some()
         {
             return Err(WorkloadError::Invalid("compiled execution identity"));
         }
@@ -385,7 +387,7 @@ impl CompiledModelArtifact {
             || !self.roles.is_empty()
                 && (self.roles.windows(2).any(|pair| pair[0] >= pair[1])
                     || self.roles.iter().any(|role| !valid_role(role)))
-            || !valid_name(&self.model.publisher)
+            || !valid_model_publisher(&self.model.publisher)
             || !valid_name(&self.model.slug)
             || !lower_hex(&self.model.content_sha256, 64)
             || self.distribution_object.kind != "model"
@@ -444,7 +446,7 @@ impl CompiledRuntime {
         if self.placement.world_size == 0
             || self.placement.rank >= self.placement.world_size
             || !valid_role(&self.placement.role)
-            || self.placement.port == 0
+            || self.placement.port.is_some_and(|port| port == 0)
             || self.placement.reserved_memory_bytes == 0
         {
             return Err(WorkloadError::Invalid("compiled runtime placement"));
@@ -638,15 +640,11 @@ pub fn materialized_model_path(
 
 fn valid_model_path(value: &str) -> bool {
     !value.is_empty()
-        && value.len() <= 512
+        && value.chars().count() <= 512
         && !value.contains(['\\', '\0'])
-        && value.split('/').all(|part| {
-            !part.is_empty()
-                && !matches!(part, "." | "..")
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        })
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
 }
 
 fn valid_mount_target(value: &str) -> bool {
@@ -745,6 +743,10 @@ fn valid_name(value: &str) -> bool {
                     || byte.is_ascii_digit()
                     || matches!(byte, b'.' | b'_' | b'-')
             })
+}
+
+fn valid_model_publisher(value: &str) -> bool {
+    !value.is_empty() && value.chars().count() <= 128 && !value.contains('\0')
 }
 
 fn valid_argv(value: &[String]) -> bool {

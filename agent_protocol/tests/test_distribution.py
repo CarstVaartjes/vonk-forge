@@ -84,7 +84,16 @@ def test_distribution_allows_only_the_canonical_empty_model_support_file() -> No
         )
 
 
-@pytest.mark.parametrize("name", ["__init__.py", "weights/model bin", "UPPERCASE.bin", "模型.bin"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "__init__.py",
+        "weights/model bin",
+        "UPPERCASE.bin",
+        "模型.bin",
+        "模型 file_" * 64,
+    ],
+)
 def test_distribution_preserves_safe_object_names(name: str) -> None:
     wire = _assignment().to_mapping()
     wire["objects"][0]["name"] = name

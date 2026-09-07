@@ -1183,6 +1183,12 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         from .recipe_jobs import RecipeJobRunRequest
 
         registry[schema_name] = RecipeJobRunRequest
+    if schema_name == "telemetry-report.schema.json":
+        # Telemetry is registered from the same Pydantic model used by the
+        # parser. The packaged JSON schema is an export artifact.
+        from .telemetry import TelemetryRequest
+
+        registry[schema_name] = TelemetryRequest
     if schema_name in registry:
         document = registry[schema_name].model_json_schema()
     else:
@@ -1337,9 +1343,9 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         "agent-directive.schema.json": AgentDirective.parse,
     }
     if schema_name == "telemetry-report.schema.json":
-        from .telemetry import TelemetryReport
+        from .telemetry import TelemetryRequest
 
-        parsers[schema_name] = TelemetryReport.parse
+        parsers[schema_name] = TelemetryRequest.parse
     if schema_name == "recipe-job-run.schema.json":
         from .recipe_jobs import RecipeJobRunRequest
 

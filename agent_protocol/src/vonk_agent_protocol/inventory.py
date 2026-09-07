@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import ipaddress
-import re
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .wire_model import WireModel
 
-_CAPABILITY = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
+Capability = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,127}$")]
+RuntimeVersion = Annotated[
+    str, Field(min_length=1, max_length=256, pattern=r"^[\x00-\x7f]+$")
+]
 
 
 def _strict_json_datetime(value: object) -> object:
@@ -40,11 +42,11 @@ class InventoryRequest(WireModel):
     gpu_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4)
     gpu_count: int = Field(ge=0, le=64)
     artifact_store_read_only: bool
-    capabilities: list[str] = Field(max_length=64)
+    capabilities: list[Capability] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)
     fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=1_000_000)
-    nvidia_driver_version: str = Field(min_length=1, max_length=256)
-    container_runtime_version: str = Field(min_length=1, max_length=256)
+    nvidia_driver_version: RuntimeVersion
+    container_runtime_version: RuntimeVersion
 
     @field_validator("observed_at", mode="before")
     @classmethod
@@ -59,7 +61,6 @@ class InventoryRequest(WireModel):
             or self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
             or (self.fabric_address is None) != (self.fabric_bandwidth_mbps is None)
             or len(self.capabilities) != len(set(self.capabilities))
-            or any(_CAPABILITY.fullmatch(item) is None for item in self.capabilities)
         ):
             raise ValueError("inventory evidence is inconsistent")
         if self.fabric_address is not None:
@@ -69,14 +70,6 @@ class InventoryRequest(WireModel):
                 raise ValueError("inventory fabric address is invalid") from error
             if str(address) != self.fabric_address:
                 raise ValueError("inventory fabric address is invalid")
-        if any(
-            not value or len(value) > 256 or not value.isascii()
-            for value in (
-                self.nvidia_driver_version,
-                self.container_runtime_version,
-            )
-        ):
-            raise ValueError("inventory runtime evidence is invalid")
         if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
             raise ValueError("inventory observed_at must be timezone-aware")
         return self

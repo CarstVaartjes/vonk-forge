@@ -215,7 +215,7 @@ def test_claim_copies_canonical_payload_before_becoming_frozen() -> None:
     source["payload"]["nested"].append("after")  # type: ignore[index]
 
     assert json.loads(canonical_message(claim))["payload"] == {"nested": ["before"]}
-    with pytest.raises(AttributeError):
+    with pytest.raises(ValidationError):
         claim.attempt = 2  # type: ignore[misc]
 
 

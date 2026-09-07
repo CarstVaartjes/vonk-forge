@@ -146,6 +146,12 @@ def test_fresh_baseline_creates_retained_metadata_with_inert_legacy_storage(
         assert connection.execute(
             text("SELECT singleton_id, last_id FROM fleet_event_cursor")
         ).all() == [(1, 0)]
+        source_default = next(
+            column["default"]
+            for column in inspect(engine).get_columns("node_telemetry_rollup_metrics")
+            if column["name"] == "source"
+        )
+        assert "controller-derived" in (source_default or "")
 
 
 def test_fresh_baseline_is_fixed_and_does_not_import_live_metadata() -> None:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ipaddress
-import re
 from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints, model_validator
@@ -19,7 +18,6 @@ UuidId = Annotated[
     ),
 ]
 NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
-_NAME = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
 BuildArgumentName = Annotated[
     str,
     StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9._-]{0,63}$"),
@@ -116,7 +114,7 @@ def _public_host(value: str) -> bool:
 def _validate_options(options: RecipeBuildOptions) -> None:
     contexts = [item.name for item in options.additional_contexts]
     if len(set(contexts)) != len(contexts) or any(
-        not _NAME.fullmatch(item.name) or not _bundle_path(item.path)
+        not _bundle_path(item.path)
         for item in options.additional_contexts
     ):
         raise ValueError("additional build contexts are invalid")
@@ -148,7 +146,7 @@ JsonScalar = (
 
 
 class RecipeBuildArgument(WireModel):
-    name: str = Field(min_length=1, max_length=128)
+    name: BuildArgumentName
     value: JsonScalar
 
 
@@ -233,21 +231,12 @@ class RecipeBuildRequest(WireModel):
     schema_version: Literal[1]
     source_bundle_bytes: int = Field(ge=1, le=64 * 1024**2)
     source_bundle_sha256: Digest = Field(pattern=r"^[0-9a-f]{64}$")
-    target: str | None = Field(default=None, max_length=64)
+    target: OsFeature | None = None
 
     @model_validator(mode="after")
     def validate_execution_policy(self) -> RecipeBuildRequest:
         if not _bundle_path(self.dockerfile):
             raise ValueError("build Dockerfile path is invalid")
-        if self.target is not None and (
-            not self.target
-            or any(
-                char
-                not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
-                for char in self.target
-            )
-        ):
-            raise ValueError("build target is invalid")
         if (
             any(capability not in _CAPABILITIES for capability in self.capabilities)
         ):
@@ -282,8 +271,6 @@ class RecipeBuildRequest(WireModel):
         ):
             raise ValueError("build hardening limits are invalid")
         _validate_options(self.options)
-        if any(not _NAME.fullmatch(item.name) for item in self.arguments):
-            raise ValueError("build argument name is invalid")
         return self
 
 

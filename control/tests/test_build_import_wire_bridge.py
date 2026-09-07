@@ -245,6 +245,10 @@ def test_build_wire_schema_publishes_runtime_scalar_constraints() -> None:
     }
     environment = schema["$defs"]["RecipeBuildEnvironmentArgument"]
     assert environment["properties"]["name"]["pattern"] == r"^[A-Z][A-Z0-9_]{0,127}$"
+    argument = schema["$defs"]["RecipeBuildArgument"]["properties"]["name"]
+    assert argument["pattern"] == r"^[a-z][a-z0-9._-]{0,63}$"
+    assert argument["maxLength"] == 64
+    assert schema["properties"]["target"]["anyOf"][0]["pattern"] == r"^[A-Za-z0-9._-]+$"
     assert schema["properties"]["schema_version"]["const"] == 1
 
 

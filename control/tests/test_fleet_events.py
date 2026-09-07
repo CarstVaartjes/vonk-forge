@@ -26,6 +26,8 @@ from vonk_control.telemetry import (
     TelemetrySampleInput,
 )
 
+from .telemetry_fixtures import telemetry_metrics
+
 NOW = datetime(2026, 8, 15, 12, tzinfo=UTC)
 
 
@@ -198,6 +200,7 @@ def _telemetry_sample(
         network_transmit_bytes_per_second=None,
         gap_samples=0,
         details=TelemetryDetailsInput(),
+        metrics=telemetry_metrics(),
     )
 
 

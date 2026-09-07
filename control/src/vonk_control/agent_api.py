@@ -13,7 +13,7 @@ import tempfile
 import time
 import uuid
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -43,6 +43,7 @@ from vonk_agent_protocol import (
     SignedPackageObjectReceipt,
     canonical_message,
 )
+from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
     EnrollmentBootstrapResponse,
@@ -50,6 +51,7 @@ from vonk_agent_protocol.enrollment import (
     IssuedCertificateResponse,
     RenewRequest,
 )
+from vonk_agent_protocol.telemetry import TelemetryRequest
 from vonk_agent_protocol.workload_packages import (
     PackageHelperOperation,
 )
@@ -118,7 +120,6 @@ from .telemetry import (
     TelemetryRepository,
     TelemetrySampleInput,
 )
-from .telemetry_contract import TelemetryMetrics, empty_telemetry_metrics
 from .workload_helper_authority import (
     WorkloadHelperAuthorityError,
     WorkloadHelperAuthorityService,
@@ -537,9 +538,14 @@ class AgentGrantResponse(StrictJSONModel):
     grant: dict[str, object]
 
 
+class PackageHelperGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    grant: SignedPackageHelperGrant
+
+
 class PackageHelperReceiptsResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    receipts: list[dict[str, object]]
+    receipts: list[SignedPackageObjectReceipt]
 
 
 class RecipeRunObservationGrantResponse(StrictJSONModel):
@@ -554,17 +560,16 @@ def _host_grant_response(grant: object) -> dict[str, object]:
     return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
 
 
-def _package_grant_response(grant: object) -> dict[str, object]:
-    parsed = SignedPackageHelperGrant.parse(grant.to_mapping())
-    return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
+def _package_grant_response(
+    grant: SignedPackageHelperGrant,
+) -> PackageHelperGrantResponse:
+    return PackageHelperGrantResponse(grant=grant)
 
 
-def _package_receipts_response(receipts: object) -> dict[str, object]:
-    parsed = [
-        SignedPackageObjectReceipt.parse(receipt.to_mapping()).to_mapping()
-        for receipt in receipts
-    ]
-    return PackageHelperReceiptsResponse(receipts=parsed).model_dump()
+def _package_receipts_response(
+    receipts: Sequence[SignedPackageObjectReceipt],
+) -> PackageHelperReceiptsResponse:
+    return PackageHelperReceiptsResponse(receipts=list(receipts))
 
 
 def _agent_upgrade_request_material(
@@ -714,127 +719,6 @@ class RecipeRunObservationsRequest(StrictJSONModel):
         identities = [run.run_id for run in self.runs]
         if len(identities) != len(set(identities)):
             raise ValueError("recipe run observation is duplicated")
-        return self
-
-
-class TelemetryDetailsRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    accelerator_name: str | None = Field(default=None, min_length=1, max_length=256)
-    accelerator_performance_state: str | None = Field(
-        default=None, min_length=1, max_length=32
-    )
-
-
-class TelemetrySampleRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    boot_id: str = Field(
-        pattern=(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
-            r"[0-9a-f]{4}-[0-9a-f]{12}$"
-        )
-    )
-    sequence: int = Field(ge=0, le=2**63 - 1, strict=True)
-    observed_at: datetime
-    cpu_utilization_percent: float | None = Field(
-        ge=0, le=100, allow_inf_nan=False, strict=True
-    )
-    load_average_1m: float | None = Field(
-        ge=0, le=1_000_000, allow_inf_nan=False, strict=True
-    )
-    memory_total_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    memory_available_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    disk_total_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    disk_free_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    gpu_utilization_percent: float | None = Field(
-        ge=0, le=100, allow_inf_nan=False, strict=True
-    )
-    gpu_memory_total_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    gpu_memory_free_bytes: int | None = Field(
-        ge=0, le=_MAX_TELEMETRY_CAPACITY_BYTES, strict=True
-    )
-    temperature_c: float | None = Field(
-        ge=-100, le=300, allow_inf_nan=False, strict=True
-    )
-    power_watts: float | None = Field(
-        ge=0, le=100_000, allow_inf_nan=False, strict=True
-    )
-    network_receive_bytes_per_second: float | None = Field(
-        ge=0, le=_MAX_TELEMETRY_RATE, allow_inf_nan=False, strict=True
-    )
-    network_transmit_bytes_per_second: float | None = Field(
-        ge=0, le=_MAX_TELEMETRY_RATE, allow_inf_nan=False, strict=True
-    )
-    gap_samples: int = Field(ge=0, le=2**63 - 1, strict=True)
-    details: TelemetryDetailsRequest = Field(default_factory=TelemetryDetailsRequest)
-    # ``metrics`` is additive to the active telemetry wire contract.  A
-    # scalar-only sample remains valid for an already enrolled agent while
-    # native agents progressively publish the richer contract.
-    metrics: TelemetryMetrics = Field(default_factory=empty_telemetry_metrics)
-
-    @field_validator("boot_id")
-    @classmethod
-    def nonzero_boot_id(cls, value: str) -> str:
-        if uuid.UUID(value).int == 0:
-            raise ValueError("telemetry boot ID cannot be nil")
-        return value
-
-    @field_validator("observed_at", mode="before")
-    @classmethod
-    def rfc3339_observed_at(cls, value: object) -> object:
-        return _strict_json_datetime(value)
-
-    @model_validator(mode="after")
-    def internally_consistent(self) -> TelemetrySampleRequest:
-        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
-            raise ValueError("telemetry observed time must be timezone-aware")
-        for total, available in (
-            (self.memory_total_bytes, self.memory_available_bytes),
-            (self.disk_total_bytes, self.disk_free_bytes),
-            (self.gpu_memory_total_bytes, self.gpu_memory_free_bytes),
-        ):
-            if (total is None) is not (available is None) or (
-                total is not None and available is not None and available > total
-            ):
-                raise ValueError("telemetry capacity values are inconsistent")
-        return self
-
-
-class TelemetryRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1]
-    samples: list[TelemetrySampleRequest] = Field(min_length=1, max_length=16)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def exact_schema_version(cls, value: object) -> object:
-        if type(value) is not int or value != 1:
-            raise ValueError("telemetry schema version must be integer 1")
-        return value
-
-    @model_validator(mode="after")
-    def ordered_unique_samples(self) -> TelemetryRequest:
-        identities = [(sample.boot_id, sample.sequence) for sample in self.samples]
-        if len(identities) != len(set(identities)):
-            raise ValueError("telemetry sample is duplicated")
-        previous_by_boot: dict[str, int] = {}
-        for previous, current in zip(self.samples, self.samples[1:], strict=False):
-            if current.observed_at <= previous.observed_at:
-                raise ValueError("telemetry observation times must increase")
-        for sample in self.samples:
-            previous_sequence = previous_by_boot.get(sample.boot_id)
-            if previous_sequence is not None and sample.sequence <= previous_sequence:
-                raise ValueError("telemetry sequences must increase within one boot")
-            previous_by_boot[sample.boot_id] = sample.sequence
         return self
 
 
@@ -2170,7 +2054,10 @@ def install_agent_routes(
             },
         )
 
-    @agent.get("/recipe-installations/{installation_id}/spec")
+    @agent.get(
+        "/recipe-installations/{installation_id}/spec",
+        response_model=AgentCompiledExecutionPlan,
+    )
     def recipe_spec(installation_id: str, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -2326,6 +2213,7 @@ def install_agent_routes(
             installation_image_digest = installation.image_digest
         try:
             spec = validate_compiled_launch_payload(candidate)
+            typed_spec = AgentCompiledExecutionPlan.model_validate(spec)
         except (CompiledExecutionPlanError, TypeError, ValueError) as error:
             raise HTTPException(
                 status_code=409,
@@ -2395,7 +2283,7 @@ def install_agent_routes(
                     status_code=409,
                     detail="recipe specification execution receipts are stale",
                 )
-        encoded_spec = canonical_message(spec)
+        encoded_spec = canonical_message(typed_spec)
         if len(encoded_spec) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
             raise HTTPException(
                 status_code=409,
@@ -2479,7 +2367,9 @@ def install_agent_routes(
                 status_code=409, detail="agent upgrade authority rejected request"
             ) from None
 
-    @agent.post("/package-helper/receipts")
+    @agent.post(
+        "/package-helper/receipts", response_model=PackageHelperReceiptsResponse
+    )
     def package_helper_receipts(
         body: PackageHelperReceiptsRequest, request: Request
     ) -> Response:
@@ -2504,7 +2394,7 @@ def install_agent_routes(
                 status_code=409, detail="workload helper authority rejected request"
             ) from None
 
-    @agent.post("/package-helper/grant")
+    @agent.post("/package-helper/grant", response_model=PackageHelperGrantResponse)
     def package_helper_grant(
         body: PackageHelperGrantRequest, request: Request
     ) -> Response:

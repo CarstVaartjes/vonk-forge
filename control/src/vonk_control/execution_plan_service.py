@@ -352,11 +352,16 @@ def _placement(
     reserved = role.resources.memory.startup_peak_bytes
     if type(reserved) is not int or reserved <= 0:
         raise ExecutionPlanCompilationError("canonical recipe role memory is invalid")
-    if not isinstance(endpoint, Mapping):
-        raise ExecutionPlanCompilationError("compiled runtime endpoint is unavailable")
-    port = endpoint.get("port")
-    if type(port) is not int or port <= 0 or port > 65535:
-        raise ExecutionPlanCompilationError("compiled runtime endpoint port is invalid")
+    if recipe.interfaces[0].adapter == "openai":
+        if not isinstance(endpoint, Mapping):
+            raise ExecutionPlanCompilationError("compiled runtime endpoint is unavailable")
+        port = endpoint.get("port")
+        if type(port) is not int or port <= 0 or port > 65535:
+            raise ExecutionPlanCompilationError("compiled runtime endpoint port is invalid")
+    else:
+        if endpoint is not None:
+            raise ExecutionPlanCompilationError("job recipe has an unexpected runtime endpoint")
+        port = None
     return {
         "endpoint_address": None,
         "rank": node.rank,
