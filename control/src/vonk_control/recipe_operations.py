@@ -14,7 +14,12 @@ from typing import Protocol
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    RecipeInstallPayload,
+    RecipeStartPayload,
+    canonical_message,
+    format_model_identity,
+)
 
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
 from .distributed_lifecycle import (
@@ -961,6 +966,8 @@ class RecipeOperationService:
                         "installation_id": plan.installation_id,
                         "recipe_revision_id": plan.recipe_revision_id,
                         "recipe_content_sha256": recipe_digest,
+                        "mapping_id": run.mapping_id,
+                        "mapping_generation": run.mapping_generation,
                         "image_digest": installation.image_digest,
                         "plan_digest": plan.plan_digest,
                         "alias": plan.alias,
@@ -1635,7 +1642,6 @@ class RecipeOperationService:
         installation = session.get(RecipeInstallation, owner_id, with_for_update=True)
         if installation is None or installation.state not in {"partial", "failed"}:
             raise RecipeOperationConflict("recipe installation is not retryable")
-        recipe_revision_id = installation.recipe_revision_id
         nodes = tuple(
             session.scalars(
                 select(InstallationNode)
@@ -1646,6 +1652,18 @@ class RecipeOperationService:
         revision = _active_recipe_revision(session, installation.recipe_revision_id)
         assert revision is not None and revision.content_digest is not None
         recipe_digest = revision.content_digest
+        compiled_plans = (
+            installation.plan.get("compiled_execution_plans")
+            if isinstance(installation.plan, Mapping)
+            else None
+        )
+        if not isinstance(compiled_plans, Mapping) or not nodes or any(
+            not isinstance(compiled_plans.get(node.node_id), Mapping)
+            for node in nodes
+        ):
+            raise RecipeOperationConflict(
+                "stored compiled execution plan is missing for install retry"
+            )
         installation.state = "installing"
         installation.updated_at = now
         for node in nodes:
@@ -1662,18 +1680,13 @@ class RecipeOperationService:
                 (
                     node.node_id,
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "installation_id": owner_id,
-                        "recipe_revision_id": recipe_revision_id,
-                        "recipe_content_sha256": recipe_digest,
-                        "mapping_id": installation.mapping_id,
-                        "mapping_generation": installation.mapping_generation,
-                        "recipe_build_id": installation.recipe_build_id,
-                        "image_digest": installation.image_digest,
                         "plan_digest": previous_plan_digest,
                         "rank": node.rank,
                         "role": node.role,
                         "expected_bytes": node.required_bytes,
+                        "compiled_execution_plan": compiled_plans[node.node_id],
                     },
                 )
                 for node in nodes
@@ -3082,6 +3095,19 @@ class RecipeOperationService:
     ) -> Job:
         if not node_payloads:
             raise RecipeOperationConflict("operation group has no target nodes")
+        if kind in {"recipe.install", "recipe.start"}:
+            payload_model = (
+                RecipeInstallPayload
+                if kind == "recipe.install"
+                else RecipeStartPayload
+            )
+            try:
+                for _node_id, payload in node_payloads:
+                    payload_model.model_validate(payload)
+            except Exception as error:
+                raise RecipeOperationConflict(
+                    f"{kind} payload does not satisfy schema 2"
+                ) from error
         if session.scalar(select(Job.id).where(Job.request_id == request_id)):
             raise RecipeOperationConflict("request key was already used differently")
         job_id = str(uuid.uuid4())
@@ -3653,9 +3679,12 @@ def _validate_rank_launch_evidence(
     model = selection.get("model") if isinstance(selection, Mapping) else None
     if not isinstance(model, Mapping):
         raise RecipeOperationConflict("start evidence authority is invalid")
-    model_identity = "{}/{}/{}".format(
-        model.get("publisher"), model.get("slug"), model.get("content_sha256")
-    )
+    try:
+        model_identity = format_model_identity(
+            model["publisher"], model["slug"], model["content_sha256"]
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise RecipeOperationConflict("start evidence authority is invalid") from error
     comparisons = {
         "phase": "rank-launch",
         "run_id": run_id,
@@ -3762,9 +3791,12 @@ def _validate_start_evidence(
     if not isinstance(model, Mapping):
         raise RecipeOperationConflict("start evidence authority is invalid")
     image_digest = installation.image_digest.removeprefix("sha256:")
-    model_identity = "{}/{}/{}".format(
-        model.get("publisher"), model.get("slug"), model.get("content_sha256")
-    )
+    try:
+        model_identity = format_model_identity(
+            model["publisher"], model["slug"], model["content_sha256"]
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise RecipeOperationConflict("start evidence authority is invalid") from error
     endpoint_address = operation.payload.get("endpoint_address")
     port = operation.payload.get("port")
     try:
