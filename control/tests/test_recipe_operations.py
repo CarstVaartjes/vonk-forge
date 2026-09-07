@@ -31,7 +31,6 @@ from vonk_agent_protocol import (
     recipe_run_observation_receipt_signing_bytes,
 )
 from vonk_agent_protocol.host_helper import HostHelperSignature
-from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.execution_plan_service import (
@@ -605,15 +604,6 @@ def setup_services(
             )
             for node_id in node_ids
         )
-    sizes = StaticArtifactSizeResolver(
-        (
-            ArtifactSize(
-                "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567",
-                "2" * 64,
-                70,
-            ),
-        )
-    )
     canonical_cache = _CanonicalModelCache()
 
     def prepare_canonical_runtime_image(document, runtime_spec, build):
@@ -641,7 +631,6 @@ def setup_services(
     )
     install = InstallAdmissionService(
         sessions,
-        sizes=sizes,
         inventory_max_age=300,
         disk_floor_bytes=10,
         compiled_plan_provider=execution_plans.compile_installation,

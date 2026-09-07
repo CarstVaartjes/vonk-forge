@@ -69,7 +69,7 @@ from .recipe_start_payloads import (
     RecipeStartPlacement,
     build_recipe_start_payload,
 )
-from .run_admission import RunAdmissionService, RunPlan
+from .run_admission import RunAdmissionService, RunNodePlan, RunPlan
 from .source_policy import SourcePolicyReport
 
 
@@ -415,7 +415,9 @@ class RecipeOperationService:
         )
         return job if job is not None and isinstance(job.result, Mapping) else None
 
-    def preview_install(self, mapping_id: str, recipe_build_id: str | None) -> InstallPlan:
+    def preview_install(
+        self, mapping_id: str, recipe_build_id: str | None
+    ) -> InstallPlan:
         return self._install_admission.plan_install(
             mapping_id, recipe_build_id, now=self._clock()
         )
@@ -438,11 +440,16 @@ class RecipeOperationService:
         """
 
         if not plan.allowed:
-            reasons = list(dict.fromkeys(
-                f"{reason.code}: {reason.detail}"[:200]
-                for node in plan.nodes for reason in node.blockers
-            ))
-            raise RecipeOperationConflict("install plan is blocked: " + "; ".join(reasons[:3]))
+            reasons = list(
+                dict.fromkeys(
+                    f"{reason.code}: {reason.detail}"[:200]
+                    for node in plan.nodes
+                    for reason in node.blockers
+                )
+            )
+            raise RecipeOperationConflict(
+                "install plan is blocked: " + "; ".join(reasons[:3])
+            )
         now = self._clock()
         with self._sessions.begin() as session:
             existing = session.scalar(
@@ -551,9 +558,7 @@ class RecipeOperationService:
                 else None
             )
             if not isinstance(raw_plans, Mapping):
-                raise RecipeOperationConflict(
-                    "compiled execution plan is unavailable"
-                )
+                raise RecipeOperationConflict("compiled execution plan is unavailable")
             nodes = tuple(
                 session.scalars(
                     select(InstallationNode)
@@ -928,9 +933,7 @@ class RecipeOperationService:
                 )
             start_order = _topology_order(revision.document, "start_order")
             topology = recipe_topology(revision.document)
-            distributed_readiness = _canonical_distributed_readiness(
-                revision.document
-            )
+            distributed_readiness = _canonical_distributed_readiness(revision.document)
             two_phase_start = (
                 world_size > 1
                 and topology.get("mode") == "distributed"
@@ -967,11 +970,10 @@ class RecipeOperationService:
             run.updated_at = now
             recipe_digest = revision.content_digest
             assert recipe_digest is not None
-            def start_payload(node: object) -> tuple[str, Mapping[str, object]]:
-                endpoint_owner = getattr(node, "endpoint_owner", None)
-                node_id = getattr(node, "node_id", None)
-                if type(endpoint_owner) is not bool or not isinstance(node_id, str):
-                    raise RecipeOperationConflict("recipe run placement is invalid")
+
+            def start_payload(node: RunNodePlan) -> tuple[str, Mapping[str, object]]:
+                endpoint_owner = node.endpoint_owner
+                node_id = node.node_id
                 try:
                     payload = build_recipe_start_payload(
                         run_id=run_id,
@@ -993,16 +995,16 @@ class RecipeOperationService:
                             node.fabric_address,
                         ),
                         endpoint_address=(
-                            presences[node_id] if endpoint_owner else node.fabric_address
+                            presences[node_id]
+                            if endpoint_owner
+                            else node.fabric_address
                         ),
                         compiled_endpoint_address=(
                             presences[node_id] if endpoint_owner else None
                         ),
                         world_size=world_size,
                         compiled_execution_plan=compiled_plans[node_id],
-                        local_address=(
-                            node.fabric_address if world_size > 1 else None
-                        ),
+                        local_address=(node.fabric_address if world_size > 1 else None),
                         master_address=master_address,
                         master_port=master_port,
                         phase="rank-launch" if start_deadline is not None else None,
@@ -1663,9 +1665,13 @@ class RecipeOperationService:
             if isinstance(installation.plan, Mapping)
             else None
         )
-        if not isinstance(compiled_plans, Mapping) or not nodes or any(
-            not isinstance(compiled_plans.get(node.node_id), Mapping)
-            for node in nodes
+        if (
+            not isinstance(compiled_plans, Mapping)
+            or not nodes
+            or any(
+                not isinstance(compiled_plans.get(node.node_id), Mapping)
+                for node in nodes
+            )
         ):
             raise RecipeOperationConflict(
                 "stored compiled execution plan is missing for install retry"
@@ -2076,9 +2082,7 @@ class RecipeOperationService:
                     for operation_id, _node_id, _payload in phases[phase_index]
                 }
                 phase_children = tuple(
-                    child
-                    for child in children
-                    if child.id in phase_operations
+                    child for child in children if child.id in phase_operations
                 )
                 if any(
                     child.state not in _TERMINAL_JOB_STATES for child in phase_children
@@ -3103,9 +3107,7 @@ class RecipeOperationService:
             raise RecipeOperationConflict("operation group has no target nodes")
         if kind in {"recipe.install", "recipe.start"}:
             payload_model = (
-                RecipeInstallPayload
-                if kind == "recipe.install"
-                else RecipeStartPayload
+                RecipeInstallPayload if kind == "recipe.install" else RecipeStartPayload
             )
             try:
                 for _node_id, payload in node_payloads:
@@ -3176,7 +3178,9 @@ class RecipeOperationService:
                     f"compiled execution plan is invalid: {error}"
                 ) from None
             if len(canonical_message(job_payload)) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
-                raise RecipeOperationConflict("recipe operation job payload is too large")
+                raise RecipeOperationConflict(
+                    "recipe operation job payload is too large"
+                )
         job = Job(
             id=job_id,
             request_id=request_id,
@@ -3423,8 +3427,7 @@ def _current_phase_index(
     child_operations = {child.id for child in children}
     for index in range(len(phases) - 1, -1, -1):
         phase_operations = {
-            operation_id
-            for operation_id, _node_id, _payload in phases[index]
+            operation_id for operation_id, _node_id, _payload in phases[index]
         }
         if phase_operations <= child_operations:
             return index

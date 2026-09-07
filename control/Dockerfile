@@ -77,7 +77,6 @@ COPY control/alembic.ini ./alembic.ini
 COPY control/migrations ./migrations
 COPY schemas/global/catalog-entity-v1.schema.json /schemas/global/catalog-entity-v1.schema.json
 COPY schemas/global/harness-evidence-v1.schema.json /schemas/global/harness-evidence-v1.schema.json
-COPY schemas/global/recipe-v1.schema.json /schemas/global/recipe-v1.schema.json
 COPY schemas/global/test-report-v1.schema.json /schemas/global/test-report-v1.schema.json
 COPY config/execution-harnesses /config/execution-harnesses
 COPY --from=web /web/dist ./src/vonk_control/web
@@ -91,7 +90,7 @@ RUN apt-get update \
     && git -C /public-contracts checkout --detach "$public_contracts_revision" \
     && python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels \
         /public-contracts/contracts \
-    && test "$(sha256sum /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl | cut -d' ' -f1)" = "dd056bf504b27b5bb78e29721db2425045c73d642b43a46e4b6801f00a3b5eab" \
+    && test "$(sha256sum /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl | cut -d' ' -f1)" = "c587f1c50c863ed5039b3cbc4f89941b9475a4ecc3d20120daec6afab6f8f628" \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /public-contracts /var/lib/apt/lists/*
 RUN python -m pip install --no-cache-dir --prefix=/install \

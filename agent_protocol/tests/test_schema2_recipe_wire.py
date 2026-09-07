@@ -209,6 +209,44 @@ def test_plan_accepts_canonical_multi_model_mount_projection() -> None:
     assert len(plan.security.mounts) == 5
 
 
+@pytest.mark.parametrize(
+    ("source", "target", "read_only"),
+    [
+        ("model", "/models", True),
+        ("model", "/models/secondary", True),
+        ("inputs", "/inputs", True),
+        ("outputs", "/outputs", False),
+    ],
+)
+def test_mount_source_and_target_policy_accepts_canonical_matrix(
+    source: str, target: str, read_only: bool
+) -> None:
+    value = copy.deepcopy(PLAN)
+    value["security"]["mounts"] = [
+        {"source": source, "target": target, "read_only": read_only}
+    ]
+    CompiledExecutionPlan.parse(value)
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "read_only"),
+    [
+        ("model", "/inputs", True),
+        ("inputs", "/models", True),
+        ("outputs", "/models", False),
+    ],
+)
+def test_mount_source_and_target_policy_rejects_swapped_matrix(
+    source: str, target: str, read_only: bool
+) -> None:
+    value = copy.deepcopy(PLAN)
+    value["security"]["mounts"] = [
+        {"source": source, "target": target, "read_only": read_only}
+    ]
+    with pytest.raises(AgentProtocolError):
+        CompiledExecutionPlan.parse(value)
+
+
 @pytest.mark.parametrize("kind", ["over", "duplicate", "unsafe"])
 def test_plan_rejects_over_duplicate_or_unsafe_mounts(kind: str) -> None:
     value = copy.deepcopy(PLAN)

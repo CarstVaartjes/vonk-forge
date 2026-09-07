@@ -461,7 +461,6 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
 
     admission = InstallAdmissionService(
         sessions,
-        sizes=SimpleNamespace(),
         disk_floor_bytes=10,
         compiled_plan_provider=compiler.compile_installation,
     )

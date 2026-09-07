@@ -36,7 +36,6 @@ def _copy(tmp_path: Path) -> Path:
         "schemas/install-release-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
         "schemas/global/catalog-entity-v1.schema.json",
-        "schemas/global/recipe-v1.schema.json",
         "schemas/global/harness-evidence-v1.schema.json",
         "agent_protocol/pyproject.toml",
         ".dockerignore",
@@ -47,7 +46,6 @@ def _copy(tmp_path: Path) -> Path:
         "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
         ".github/workflows/validate-recipe-library.yml",
         "control/src/vonk_control/catalog_contract.py",
-        "control/src/vonk_control/recipe_contract.py",
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
         "control/src/vonk_control/catalog_api.py",
@@ -388,9 +386,8 @@ def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
 
     for path in (
         "schemas/global/catalog-entity-v1.schema.json",
-        "schemas/global/recipe-v1.schema.json",
         "control/src/vonk_control/catalog_contract.py",
-        "control/src/vonk_control/recipe_contract.py",
+        "control/src/vonk_control/recipe_runtime_specs.py",
         "control/src/vonk_control/catalog_api.py",
         "control/src/vonk_control/auth.py",
         "control/src/vonk_control/recipe_routes.py",
