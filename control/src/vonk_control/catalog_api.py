@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Literal, Protocol
 
 from fastapi import FastAPI, HTTPException, Path, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 from starlette.responses import JSONResponse, Response
 
 from .audit import AuditRecord
@@ -20,6 +20,7 @@ from .catalog_service import (
 from .catalog_sync import CatalogSyncError, CatalogSyncView
 from .library_contract import Digest, UuidId
 from .recipe_library_types import RecipeLibraryError
+from .strict_json import StrictJSONModel
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _SEMVER = (
@@ -72,7 +73,7 @@ class ManagedRecipeCatalogSync(Protocol):
     def latest(self) -> CatalogSyncView | None: ...
 
 
-class StrictModel(BaseModel):
+class StrictModel(StrictJSONModel):
     # API JSON is a typed boundary.  Pydantic's default lax mode would turn
     # values such as ``1`` into ``"1"`` and accept integer flags as booleans,
     # which makes malformed requests indistinguishable from canonical ones.

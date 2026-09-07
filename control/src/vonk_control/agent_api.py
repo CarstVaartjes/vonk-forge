@@ -22,7 +22,6 @@ from typing import Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import (
-    BaseModel,
     ConfigDict,
     Field,
     ValidationError,
@@ -104,6 +103,7 @@ from .recipe_operations import (
 )
 from .runtime_image_preparation import IMAGE_CACHE_DIRECTORY
 from .source_bundles import SourceBundleError, SourceBundleStore
+from .strict_json import StrictJSONModel
 from .telemetry import (
     TelemetryDetailsInput,
     TelemetryRepository,
@@ -315,7 +315,7 @@ class EnrollmentRateLimiter:
             return True
 
 
-class GrantRequest(BaseModel):
+class GrantRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     ttl_seconds: int = Field(ge=1, le=MAX_ENROLLMENT_GRANT_TTL_SECONDS)
     purpose: Literal["new-node", "re-enroll"] = "new-node"
@@ -328,7 +328,7 @@ class GrantRequest(BaseModel):
         return self
 
 
-class EnrollmentSubmitRequest(BaseModel):
+class EnrollmentSubmitRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     grant_token: str = Field(min_length=43, max_length=64)
     csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
@@ -365,7 +365,7 @@ def _enrollment_api_state(enrollment: AgentEnrollment) -> str:
     return enrollment.state
 
 
-class EnrollmentGrantResponse(BaseModel):
+class EnrollmentGrantResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     expires_at: str = Field(min_length=1, max_length=64)
@@ -382,7 +382,7 @@ class EnrollmentGrantResponse(BaseModel):
     ]
 
 
-class EnrollmentBootstrapResponse(BaseModel):
+class EnrollmentBootstrapResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     controller_endpoint: str = Field(min_length=1, max_length=2048)
     enrollment_endpoint: str = Field(min_length=1, max_length=2048)
@@ -395,7 +395,7 @@ class EnrollmentBootstrapResponse(BaseModel):
     )
 
 
-class EnrollmentSummary(BaseModel):
+class EnrollmentSummary(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
@@ -410,13 +410,13 @@ class EnrollmentSummary(BaseModel):
     certificate_fingerprint: str | None = Field(default=None, max_length=512)
 
 
-class EnrollmentListResponse(BaseModel):
+class EnrollmentListResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     enrollments: list[EnrollmentSummary] = Field(max_length=100)
     next_cursor: str | None = Field(default=None, max_length=128)
 
 
-class AgentRuntimeIdentityRequest(BaseModel):
+class AgentRuntimeIdentityRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     architecture: Literal["linux-amd64", "linux-arm64"]
     semantic_version: str = Field(
@@ -444,7 +444,7 @@ class AgentRuntimeIdentityRequest(BaseModel):
         return value
 
 
-class ClaimRequest(BaseModel):
+class ClaimRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     lease_seconds: int = Field(default=30, ge=1, le=300, strict=True)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
@@ -463,7 +463,7 @@ class ClaimRequest(BaseModel):
     wait_seconds: int = Field(default=0, ge=0, le=60, strict=True)
 
 
-class AgentUpgradePackageRequest(BaseModel):
+class AgentUpgradePackageRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     architecture: Literal["linux-arm64"]
     package_bytes: int = Field(ge=1, le=1024**3, strict=True)
@@ -476,7 +476,7 @@ class AgentUpgradePackageRequest(BaseModel):
     target_build_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
 
-class AgentRepairManifestRequest(BaseModel):
+class AgentRepairManifestRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[2]
     kind: Literal["agent-upgrade-repair"]
@@ -485,7 +485,7 @@ class AgentRepairManifestRequest(BaseModel):
     package: AgentUpgradePackageRequest
 
 
-class AgentUpgradePreviewRequest(BaseModel):
+class AgentUpgradePreviewRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     node_ids: list[str] | None = Field(default=None, min_length=1, max_length=64)
     package: AgentUpgradePackageRequest | None = None
@@ -497,7 +497,7 @@ class AgentUpgradeApplyRequest(AgentUpgradePreviewRequest):
     plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class AgentUpgradePreviewResponse(BaseModel):
+class AgentUpgradePreviewResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
     node_ids: list[str] = Field(max_length=64)
@@ -507,13 +507,13 @@ class AgentUpgradePreviewResponse(BaseModel):
     strategy: Literal["one-at-a-time", "all-at-once"]
 
 
-class AgentUpgradeApplyResponse(BaseModel):
+class AgentUpgradeApplyResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     id: str = Field(min_length=1, max_length=128)
     state: str = Field(min_length=1, max_length=32)
 
 
-class AgentGrantRequest(BaseModel):
+class AgentGrantRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     job_id: str = Field(pattern=_UUID4_TEXT)
@@ -533,13 +533,13 @@ class AgentUpgradeGrantRequest(AgentGrantRequest):
     package_signature: str = Field(pattern=r"^[0-9a-f]{128}$")
 
 
-class PackageHelperReceiptObjectRequest(BaseModel):
+class PackageHelperReceiptObjectRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     object_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     size: int = Field(strict=True, gt=0, le=2**63 - 1)
 
 
-class PackageHelperReceiptsRequest(BaseModel):
+class PackageHelperReceiptsRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     job_id: str = Field(pattern=_UUID4_TEXT)
@@ -552,7 +552,7 @@ class PackageHelperReceiptsRequest(BaseModel):
     )
 
 
-class PackageHelperGrantRequest(BaseModel):
+class PackageHelperGrantRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     request_id: str = Field(pattern=_UUID4_TEXT)
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
@@ -569,17 +569,17 @@ class PackageHelperGrantRequest(BaseModel):
     expires_in_seconds: int = Field(ge=1, le=900)
 
 
-class AgentGrantResponse(BaseModel):
+class AgentGrantResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     grant: dict[str, object]
 
 
-class PackageHelperReceiptsResponse(BaseModel):
+class PackageHelperReceiptsResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     receipts: list[dict[str, object]]
 
 
-class RecipeRunObservationGrantResponse(BaseModel):
+class RecipeRunObservationGrantResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -637,7 +637,7 @@ def _agent_upgrade_request_material(
     return package, None
 
 
-class InventoryRequest(BaseModel):
+class InventoryRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     observed_at: datetime
@@ -679,7 +679,7 @@ class InventoryRequest(BaseModel):
         return self
 
 
-class RecipeRunObservationRequest(BaseModel):
+class RecipeRunObservationRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     run_id: str = Field(
         pattern=(
@@ -690,7 +690,7 @@ class RecipeRunObservationRequest(BaseModel):
     ready: bool = Field(strict=True)
 
 
-class RecipeRunObservationIdentityRequest(BaseModel):
+class RecipeRunObservationIdentityRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
@@ -767,7 +767,7 @@ class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
         )
 
 
-class RecipeRunObservationsRequest(BaseModel):
+class RecipeRunObservationsRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1, 2]
     observed_at: datetime
@@ -796,7 +796,7 @@ class RecipeRunObservationsRequest(BaseModel):
         return self
 
 
-class TelemetryDetailsRequest(BaseModel):
+class TelemetryDetailsRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     accelerator_name: str | None = Field(default=None, min_length=1, max_length=256)
     accelerator_performance_state: str | None = Field(
@@ -804,7 +804,7 @@ class TelemetryDetailsRequest(BaseModel):
     )
 
 
-class TelemetrySampleRequest(BaseModel):
+class TelemetrySampleRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     boot_id: str = Field(
         pattern=(
@@ -888,7 +888,7 @@ class TelemetrySampleRequest(BaseModel):
         return self
 
 
-class TelemetryRequest(BaseModel):
+class TelemetryRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     samples: list[TelemetrySampleRequest] = Field(min_length=1, max_length=16)
@@ -917,13 +917,13 @@ class TelemetryRequest(BaseModel):
         return self
 
 
-class RenewRequest(BaseModel):
+class RenewRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     csr: str = Field(min_length=1, max_length=_MAX_CSR_BYTES)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")
 
 
-class ActivateRequest(BaseModel):
+class ActivateRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     generation: int = Field(ge=1)
     node_id: str | None = Field(default=None, pattern=r"^spk_[0-9a-f]{32}$")

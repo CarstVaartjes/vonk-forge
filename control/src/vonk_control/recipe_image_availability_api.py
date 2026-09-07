@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 
 from .auth import CursorCodec
 from .operation_contract import (
@@ -20,9 +20,10 @@ from .recipe_image_availability import (
     RecipeImageAvailabilityService,
     RecipeImageAvailabilityView,
 )
+from .strict_json import StrictJSONModel
 
 
-class RecipeImageAvailabilityStart(BaseModel):
+class RecipeImageAvailabilityStart(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     request_key: str = Field(min_length=1, max_length=36)
@@ -30,13 +31,13 @@ class RecipeImageAvailabilityStart(BaseModel):
     force: bool = False
 
 
-class RecipeImageAvailabilityRetry(BaseModel):
+class RecipeImageAvailabilityRetry(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     request_key: str = Field(min_length=1, max_length=36)
 
 
-class RecipeImageAvailabilityArtifact(BaseModel):
+class RecipeImageAvailabilityArtifact(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     key: str = Field(min_length=1, max_length=256)
@@ -52,7 +53,7 @@ class RecipeImageAvailabilityArtifact(BaseModel):
     model_version_sha256: str | None = None
 
 
-class RecipeImageAvailabilityChild(BaseModel):
+class RecipeImageAvailabilityChild(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     kind: Literal["model-cache", "runtime-image"]
@@ -67,7 +68,7 @@ class RecipeImageAvailabilityChild(BaseModel):
     failure: AvailabilityOperationFailure | None = None
 
 
-class RecipeImageAvailabilityAction(BaseModel):
+class RecipeImageAvailabilityAction(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     key: AvailabilityRecoveryAction
@@ -83,7 +84,7 @@ class RecipeImageAvailabilityAction(BaseModel):
             raise ValueError("key contains an invalid action") from error
 
 
-class RecipeImageAvailabilityResult(BaseModel):
+class RecipeImageAvailabilityResult(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
@@ -103,7 +104,7 @@ class RecipeImageAvailabilityResult(BaseModel):
     build_id: str | None = None
 
 
-class RecipeImageAvailabilityResponse(BaseModel):
+class RecipeImageAvailabilityResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
@@ -123,7 +124,7 @@ class RecipeImageAvailabilityResponse(BaseModel):
     updated_at: str
 
 
-class RecipeImageAvailabilityListResponse(BaseModel):
+class RecipeImageAvailabilityListResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
@@ -132,7 +133,7 @@ class RecipeImageAvailabilityListResponse(BaseModel):
     next_cursor: str | None = None
 
 
-class RecipeImageAvailabilityErrorResponse(BaseModel):
+class RecipeImageAvailabilityErrorResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
