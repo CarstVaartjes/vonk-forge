@@ -1730,7 +1730,11 @@ class FleetProfileService:
                     completed_steps=0,
                     total_steps=len(preview.steps),
                 ).model_dump(mode="json"),
-                result={"changed": False} if not preview.steps else None,
+                result=(
+                    {"changed": False, "completed_steps": 0}
+                    if not preview.steps
+                    else None
+                ),
                 actor=actor,
                 created_at=now,
                 updated_at=now,

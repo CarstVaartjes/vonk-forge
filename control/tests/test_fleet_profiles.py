@@ -1415,6 +1415,23 @@ def test_all_idle_profile_has_explicit_scope_and_no_preparation() -> None:
     assert preview.steps == []
     assert preview.preparations == []
 
+    application = service.apply(
+        profile.id,
+        plan_digest=preview.plan_digest,
+        request_key=_uuid(801),
+        actor="admin",
+    )
+    assert application.state == "succeeded"
+    assert application.result is not None
+    assert application.result.changed is False
+    assert application.result.completed_steps == 0
+    readback = service.application(application.id)
+    assert readback.result is not None
+    assert readback.result.model_dump(mode="json") == {
+        "changed": False,
+        "completed_steps": 0,
+    }
+
 
 def test_production_profile_adapter_binds_one_real_run_switch_child(
     tmp_path: Path,
