@@ -139,7 +139,12 @@ def test_controller_artifact_job_result_crosses_rust_and_python(
         expected_sha256=output_sha256,
         content=output,
     )
-    output_file = RecipeJobFile("output.png", "image/png", len(output), output_sha256)
+    output_file = RecipeJobFile(
+        name="output.png",
+        media_type="image/png",
+        size_bytes=len(output),
+        sha256=output_sha256,
+    )
     result_document = {
         "schema_version": 1,
         "job_id": claim["job_id"],
@@ -191,7 +196,9 @@ def test_controller_artifact_job_result_crosses_rust_and_python(
 
 
 def test_recipe_job_result_accepts_omitted_or_explicit_null_reason() -> None:
-    file = RecipeJobFile("output.png", "image/png", 0, "a" * 64)
+    file = RecipeJobFile(
+        name="output.png", media_type="image/png", size_bytes=0, sha256="a" * 64
+    )
     base = {
         "schema_version": 1,
         "job_id": "00000000-0000-4000-8000-000000000011",

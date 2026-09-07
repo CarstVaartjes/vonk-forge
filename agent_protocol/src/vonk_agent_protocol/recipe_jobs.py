@@ -6,10 +6,11 @@ import hashlib
 import math
 import re
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, ClassVar
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import (
+    BeforeValidator,
     Field,
     StringConstraints,
     ValidationError,
@@ -69,20 +70,6 @@ def _thaw(value: object) -> object:
 
 
 class _RecipeJobModel(WireModel):
-    """Shared frozen model behavior, including legacy positional file calls."""
-
-    _positional_fields: ClassVar[tuple[str, ...]] = ()
-
-    def __init__(self, *args: Any, **data: Any) -> None:
-        if args:
-            fields = self._positional_fields
-            if len(args) > len(fields) or any(
-                name in data for name in fields[: len(args)]
-            ):
-                raise TypeError("recipe job model positional arguments are invalid")
-            data = {**dict(zip(fields, args)), **data}
-        super().__init__(**data)
-
     def to_mapping(self) -> dict[str, object]:
         return self.model_dump(mode="json")
 
@@ -141,8 +128,6 @@ class RecipeJobFile(_RecipeJobModel):
     size_bytes: int = Field(ge=0, le=MAX_OUTPUT_FILE_BYTES)
     sha256: Digest
 
-    _positional_fields = ("name", "media_type", "size_bytes", "sha256")
-
     @field_validator("name", mode="before")
     @classmethod
     def name_is_safe(cls, value: str) -> str:
@@ -168,8 +153,6 @@ class RecipeJobInputFile(_RecipeJobModel):
     media_type: str = Field(pattern=_MEDIA_TYPE, max_length=128)
     size_bytes: int = Field(ge=0, le=MAX_INPUT_FILE_BYTES)
     sha256: Digest
-
-    _positional_fields = ("slot", "name", "media_type", "size_bytes", "sha256")
 
     @field_validator("name", mode="before")
     @classmethod
@@ -218,13 +201,6 @@ class RecipeJobOutputLimits(_RecipeJobModel):
     max_total_bytes: int = Field(ge=1, le=MAX_OUTPUT_TOTAL_BYTES)
     allowed_media_types: tuple[str, ...] = Field(min_length=1, max_length=16)
 
-    _positional_fields = (
-        "max_files",
-        "max_file_bytes",
-        "max_total_bytes",
-        "allowed_media_types",
-    )
-
     @field_validator("allowed_media_types", mode="before")
     @classmethod
     def array_is_immutable(cls, value: object) -> object:
@@ -253,14 +229,9 @@ class RecipeJobOutputLimits(_RecipeJobModel):
 class RecipeJobOutputMapping(_RecipeJobModel):
     slot: str = Field(pattern=_SLOT, max_length=32)
     media_type: str = Field(pattern=_MEDIA_TYPE, max_length=128)
-    extensions: tuple[str, ...] = Field(min_length=1, max_length=16)
-
-    _positional_fields = ("slot", "media_type", "extensions")
-
-    @field_validator("extensions", mode="before")
-    @classmethod
-    def array_is_immutable(cls, value: object) -> object:
-        return _as_tuple(value)
+    extensions: Annotated[tuple[str, ...], BeforeValidator(_as_tuple)] = Field(
+        min_length=1, max_length=16
+    )
 
     @field_validator("extensions")
     @classmethod
@@ -277,7 +248,7 @@ class RecipeJobOutputMapping(_RecipeJobModel):
 
 
 class RecipeJobOutputManifest(_RecipeJobModel):
-    schema_version: int = Field(ge=1, le=1)
+    schema_version: Literal[1]
     manifest_sha256: Digest
     total_bytes: int = Field(ge=0, le=MAX_OUTPUT_TOTAL_BYTES)
     files: tuple[RecipeJobFile, ...] = Field(max_length=MAX_OUTPUT_FILES)
@@ -286,13 +257,6 @@ class RecipeJobOutputManifest(_RecipeJobModel):
     @classmethod
     def array_is_immutable(cls, value: object) -> object:
         return _as_tuple(value)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def schema_version_is_exact(cls, value: object) -> object:
-        if type(value) is not int or value != 1:
-            raise ValueError("output manifest version is invalid")
-        return value
 
     @model_validator(mode="after")
     def manifest_is_canonical(self) -> RecipeJobOutputManifest:
@@ -320,7 +284,7 @@ class RecipeJobEvidence(_RecipeJobModel):
 
 
 class RecipeJobRunRequest(_RecipeJobModel):
-    schema_version: int = Field(ge=1, le=1)
+    schema_version: Literal[1]
     job_id: str
     run_id: str
     installation_id: str
@@ -347,13 +311,6 @@ class RecipeJobRunRequest(_RecipeJobModel):
     @classmethod
     def arrays_are_immutable(cls, value: object) -> object:
         return _as_tuple(value)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def schema_version_is_exact(cls, value: object) -> object:
-        if type(value) is not int or value != 1:
-            raise ValueError("schema version is invalid")
-        return value
 
     @field_validator("job_id", "run_id", "installation_id", "recipe_revision_id")
     @classmethod
@@ -410,7 +367,7 @@ class RecipeJobRunRequest(_RecipeJobModel):
 
 
 class RecipeJobRunResult(_RecipeJobModel):
-    schema_version: int = Field(ge=1, le=1)
+    schema_version: Literal[1]
     job_id: str
     run_id: str
     exit_code: int = Field(ge=0, le=255)
@@ -419,13 +376,6 @@ class RecipeJobRunResult(_RecipeJobModel):
     # Rust uses skip_serializing_if for this optional nullable field. Both an
     # omitted field and explicit JSON null are accepted on input.
     reason: str | None = Field(default=None, min_length=1, max_length=512)
-
-    @field_validator("schema_version", mode="before")
-    @classmethod
-    def schema_version_is_exact(cls, value: object) -> object:
-        if type(value) is not int or value != 1:
-            raise ValueError("schema version is invalid")
-        return value
 
     @field_validator("job_id", "run_id")
     @classmethod
