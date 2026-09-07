@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "collected_at": "2026-09-08T12:00:00+00:00",
+  "phase": "prepare",
+  "category": "platform-policy",
+  "stdout": {
+    "text": "",
+    "truncated": false,
+    "dropped_bytes": 0,
+    "dropped_lines": 0
+  },
+  "stderr": {
+    "text": "Error mounting /proc: permission denied",
+    "truncated": true,
+    "dropped_bytes": null,
+    "dropped_lines": null
+  },
+  "versions": [
+    {
+      "name": "agent",
+      "value": "0.1.1"
+    },
+    {
+      "name": "kernel",
+      "value": "6.12"
+    }
+  ],
+  "sandbox": [
+    {
+      "name": "NoNewPrivileges",
+      "value": "yes"
+    }
+  ],
+  "storage": [
+    {
+      "name": "free-bytes",
+      "value": "4096"
+    }
+  ],
+  "preflight": [],
+  "collector_errors": []
+}

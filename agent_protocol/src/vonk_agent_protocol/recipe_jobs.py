@@ -18,6 +18,7 @@ from pydantic import (
 )
 
 from .contracts import AgentProtocolError, canonical_message
+from .failure_evidence import FailureDiagnostics
 from .wire_model import WireModel
 
 MAX_INPUT_FILES = 32
@@ -352,6 +353,7 @@ class RecipeJobRunResult(_RecipeJobModel):
     exit_code: int = Field(ge=0, le=255)
     output_manifest: RecipeJobOutputManifest
     evidence: RecipeJobEvidence
+    diagnostics: FailureDiagnostics | None = None
     # Rust uses skip_serializing_if for this optional nullable field. Both an
     # omitted field and explicit JSON null are accepted on input.
     reason: str | None = Field(default=None, min_length=1, max_length=512)

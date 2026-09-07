@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod failure_evidence;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, FixedOffset, Utc};
@@ -988,6 +990,8 @@ pub struct RecipeJobRunResult {
     pub evidence: RecipeJobEvidence,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostics: Option<failure_evidence::FailureDiagnostics>,
 }
 
 impl RecipeJobRunResult {
@@ -998,6 +1002,7 @@ impl RecipeJobRunResult {
             "files": self.output_manifest.files,
         });
         let valid = self.schema_version == 1
+            && self.diagnostics.as_ref().is_none_or(|value| value.validate().is_ok())
             && (0..=255).contains(&self.exit_code)
             && self.output_manifest.schema_version == 1
             && self.output_manifest.files.len() <= 32
