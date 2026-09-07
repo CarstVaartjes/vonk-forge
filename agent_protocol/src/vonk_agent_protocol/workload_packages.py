@@ -1127,6 +1127,20 @@ class PackageReleaseLock(WireModel):
         return lock
 
 
+WORKLOAD_RELEASE_LOCK_SCHEMA_ID = (
+    "https://vonk-forge.invalid/schemas/workload-release-lock.schema.json"
+)
+
+
+def workload_release_lock_schema() -> dict[str, object]:
+    """Return the deterministic JSON Schema derived from the canonical wire model."""
+    schema = PackageReleaseLock.model_json_schema()
+    schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
+    schema["$id"] = WORKLOAD_RELEASE_LOCK_SCHEMA_ID
+    schema["title"] = "Vonk Forge immutable workload release lock"
+    return schema
+
+
 class PackageReleaseGraph(WireModel):
     root_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     releases: tuple[PackageReleaseLock, ...]
@@ -1187,6 +1201,7 @@ class PackageReleaseGraph(WireModel):
 __all__ = [
     "MAX_PACKAGE_HELPER_GRANT_SECONDS",
     "PACKAGE_HELPER_AUTHORITY",
+    "WORKLOAD_RELEASE_LOCK_SCHEMA_ID",
     "Compatibility",
     "ComponentEvidence",
     "ComponentDescriptor",
@@ -1208,4 +1223,5 @@ __all__ = [
     "SignedPackageObjectReceipt",
     "package_helper_grant_signing_bytes",
     "package_object_receipt_signing_bytes",
+    "workload_release_lock_schema",
 ]

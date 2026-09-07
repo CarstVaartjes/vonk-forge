@@ -18,7 +18,6 @@ packages = ["src/vonk_agent_protocol"]
 [tool.hatch.build.targets.wheel.force-include]
 "src/vonk_agent_protocol/schemas/agent-job.schema.json" = "vonk_agent_protocol/schemas/agent-job.schema.json"
 "src/vonk_agent_protocol/schemas/agent-result.schema.json" = "vonk_agent_protocol/schemas/agent-result.schema.json"
-"src/vonk_agent_protocol/schemas/workload-release-lock.schema.json" = "vonk_agent_protocol/schemas/workload-release-lock.schema.json"
 "src/vonk_agent_protocol/schemas/agent-directive.schema.json" = "vonk_agent_protocol/schemas/agent-directive.schema.json"
 "src/vonk_agent_protocol/schemas/recipe-job-run.schema.json" = "vonk_agent_protocol/schemas/recipe-job-run.schema.json"
 "src/vonk_agent_protocol/schemas/telemetry-report.schema.json" = "vonk_agent_protocol/schemas/telemetry-report.schema.json"

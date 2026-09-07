@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from importlib.resources import files
+
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
-from vonk_agent_protocol import AgentProtocolError
+from vonk_agent_protocol import AgentProtocolError, workload_release_lock_schema
 from vonk_agent_protocol.workload_packages import (
     ComponentDescriptor,
     PackageReleaseGraph,
@@ -455,12 +455,8 @@ def test_graph_rejects_more_than_256_aggregate_components() -> None:
         PackageReleaseGraph.resolve(root.digest, releases)
 
 
-def test_schema_is_packaged_and_validates_synthetic_lock() -> None:
-    schema = json.loads(
-        files("vonk_agent_protocol.schemas")
-        .joinpath("workload-release-lock.schema.json")
-        .read_text()
-    )
+def test_generated_schema_validates_synthetic_lock() -> None:
+    schema = workload_release_lock_schema()
 
     Draft202012Validator.check_schema(schema)
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
@@ -469,6 +465,7 @@ def test_schema_is_packaged_and_validates_synthetic_lock() -> None:
     )
     assert schema["additionalProperties"] is False
     assert not tuple(Draft202012Validator(schema).iter_errors(lock_document()))
+    assert schema == workload_release_lock_schema()
     assert PackageReleaseLock.parse(lock_document()).family_id == (
         "future-synthetic-stack"
     )
