@@ -2067,6 +2067,7 @@ fn job_result_body(
             peak_memory_bytes: None,
         },
         reason: reason.map(str::to_owned),
+        diagnostics: None,
     };
     debug_assert!(result.validate().is_ok());
     serde_json::to_value(result).unwrap_or_default()
@@ -2331,6 +2332,14 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         return executed;
     }
     if claim.operation == "recipe.job.run.v1" {
+        let diagnostics = crate::failure_evidence::from_failure(&claim.operation, &executed.body);
+        let mut executed = executed;
+        if let Some(reason) = executed.body.get("reason").and_then(Value::as_str) {
+            executed.body["reason"] = Value::String(crate::failure_evidence::sanitize_text(reason));
+        }
+        if let Ok(value) = serde_json::to_value(diagnostics) {
+            executed.body["diagnostics"] = value;
+        }
         return executed;
     }
     let reason = executed
@@ -2338,6 +2347,10 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         .get("reason")
         .and_then(Value::as_str)
         .unwrap_or("agent operation failed");
+    let reason: String = crate::failure_evidence::sanitize_text(reason)
+        .chars()
+        .take(1024)
+        .collect();
     let error_code = match claim.operation.as_str() {
         "agent.upgrade.v1" => "agent_upgrade_failed",
         "artifact.distribution.v1" => "artifact_distribution_failed",
@@ -2358,7 +2371,7 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
     });
     for field in ["stage", "diagnostic"] {
         if let Some(value) = executed.body.get(field).and_then(Value::as_str) {
-            body[field] = Value::String(value.to_owned());
+            body[field] = Value::String(crate::failure_evidence::sanitize_text(value));
         }
     }
     if claim.operation == "agent.upgrade.v1" {
@@ -2396,6 +2409,10 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
             .filter(|code| stable_runtime_helper_error_code(code))
     {
         body["helper_error_code"] = Value::String(code.to_owned());
+    }
+    let diagnostics = crate::failure_evidence::from_failure(&claim.operation, &executed.body);
+    if let Ok(value) = serde_json::to_value(diagnostics) {
+        body["diagnostics"] = value;
     }
     ExecutionResult {
         state: "failed",
@@ -2647,7 +2664,7 @@ mod tests {
         );
 
         assert_eq!(
-            result.body,
+            checked_failure_body(result.body),
             json!({
                 "diagnostic": "temporary-storage-exhausted",
                 "error_code": "recipe_build_failed",
@@ -3071,6 +3088,15 @@ mod tests {
         }
     }
 
+    fn checked_failure_body(mut body: serde_json::Value) -> serde_json::Value {
+        let diagnostics = body.as_object_mut().unwrap().remove("diagnostics").unwrap();
+        serde_json::from_value::<crate::failure_evidence::FailureDiagnostics>(diagnostics)
+            .unwrap()
+            .validate()
+            .unwrap();
+        body
+    }
+
     fn claim() -> AgentClaim {
         let plan: Value = serde_json::from_str(include_str!(
             "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
@@ -3101,6 +3127,28 @@ mod tests {
         };
         RecipeOperationRequest::parse(&claim).unwrap();
         claim
+    }
+
+    #[test]
+    fn artifact_job_failure_keeps_current_result_and_typed_diagnostics() {
+        let mut job_claim = claim();
+        job_claim.operation = "recipe.job.run.v1".to_owned();
+        let envelope: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-result-v1.json"
+        ))
+        .unwrap();
+        let mut body = envelope["result"].clone();
+        body["exit_code"] = json!(1);
+        body["reason"] = json!("runtime failed");
+        let result = normalize_execution_result(
+            &job_claim,
+            ExecutionResult { state: "failed", body },
+        );
+        let typed: vonk_agent_protocol::RecipeJobRunResult =
+            serde_json::from_value(result.body).unwrap();
+        typed.validate().unwrap();
+        assert_eq!(typed.exit_code, 1);
+        assert!(typed.diagnostics.is_some());
     }
 
     #[tokio::test]
@@ -3249,7 +3297,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            client.results.lock().unwrap()[0].result,
+            checked_failure_body(client.results.lock().unwrap()[0].result.clone()),
             json!({
                 "error_code": "recipe_install_failed",
                 "reason": "rootless image build failed",
@@ -3276,7 +3324,7 @@ mod tests {
         );
 
         assert_eq!(
-            result.body,
+            checked_failure_body(result.body),
             json!({
                 "error_code": "agent_upgrade_failed",
                 "reason": "agent upgrade helper rejected the request: package_install_failed",

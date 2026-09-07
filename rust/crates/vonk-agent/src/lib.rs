@@ -9,6 +9,7 @@ pub mod client;
 pub mod compiled_oci;
 pub mod config;
 pub mod executor;
+pub mod failure_evidence;
 pub mod health;
 pub mod host_runtime;
 pub mod identity;

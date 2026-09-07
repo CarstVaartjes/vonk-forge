@@ -23,6 +23,7 @@ from pydantic import (
     model_validator,
 )
 
+from .failure_evidence import FailureDiagnostics
 from .wire_model import OperationProgress, WireModel
 
 MAX_DOCUMENT_BYTES = 64 * 1024
@@ -268,6 +269,7 @@ class ArtifactDistributionResult(WireModel):
 
 
 class AgentFailureResult(WireModel):
+    diagnostics: FailureDiagnostics | None = None
     reason: str | None = Field(default=None, min_length=1, max_length=1024)
     error_code: str | None = Field(default=None, min_length=1, max_length=128)
     summary: str | None = Field(default=None, min_length=1, max_length=1024)
@@ -565,6 +567,18 @@ def _typed_recipe_job_string(path: tuple[str | int, ...], value: str) -> bool:
 
 
 def _typed_result_string(path: tuple[str | int, ...], value: str) -> bool:
+    # These declared leaves are inert captured observations, never authority.
+    # Their enclosing Pydantic model enforces the complete diagnostic byte bound.
+    if path in {("diagnostics", "stdout", "text"), ("diagnostics", "stderr", "text")}:
+        return len(value) <= 2048 and "\x00" not in value
+    if (
+        len(path) == 4
+        and path[0] == "diagnostics"
+        and path[1] in {"versions", "sandbox", "storage", "preflight"}
+        and isinstance(path[2], int)
+        and path[3] == "value"
+    ):
+        return len(value) <= 256 and "\x00" not in value
     if path in {("endpoint",), ("evidence", "endpoint")}:
         return _recipe_endpoint(value)
     if path == ("evidence", "model_identity"):

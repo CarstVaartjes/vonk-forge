@@ -1972,7 +1972,8 @@ fn build_removes_readonly_private_graphroot_after_process_failure() {
     assert!(matches!(
         error,
         RecipeBuildError::ImageBuild {
-            diagnostic: vonk_agent::recipe_builder::PodmanBuildDiagnostic::NonzeroWithoutOutput
+            diagnostic: vonk_agent::recipe_builder::PodmanBuildDiagnostic::NonzeroWithoutOutput,
+            ..
         }
     ));
     assert_eq!(

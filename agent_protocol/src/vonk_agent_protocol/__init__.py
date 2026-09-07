@@ -48,6 +48,7 @@ from .distribution import (
     DistributionAssignment,
     DistributionObject,
 )
+from .failure_evidence import FailureDiagnostics
 from .host_helper import (
     ContainerRuntimeAction,
     CreateManagedDirectoryOperation,
@@ -152,6 +153,7 @@ from .workload_packages import (
 )
 
 __all__ = [
+    "FailureDiagnostics",
     "MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES",
     "MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES",
     "MAX_DOCUMENT_BYTES",
