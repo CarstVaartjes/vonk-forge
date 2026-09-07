@@ -124,7 +124,10 @@ separate results.
   now use one Pydantic receipt. The duplicate class, field-alias property and
   dictionary fallbacks are removed. All declared receipt fields are required,
   with explicit nulls where applicable. The five affected Controller suites
-  pass 125 tests with one optional container check skipped. A current full
+  pass 125 tests; the one Docker-permission skip was then run with access to
+  OrbStack and passed against real PostgreSQL. Current Activity integration
+  and canonical-contract imports are mandatory tests, with the old
+  import-error skip fallbacks removed. A current full
   Rust workspace run passes all 435 tests across 38 executables in offline,
   non-root, read-only ARM64 OrbStack. It also caught and fixed a duplicate
   standard test annotation on an async Tokio test introduced during composition.

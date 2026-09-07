@@ -894,7 +894,6 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
 
 
 def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
-    pytest.importorskip("vonk_forge_contracts")
     from importlib.resources import files
 
     from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256

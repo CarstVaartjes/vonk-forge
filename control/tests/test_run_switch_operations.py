@@ -1807,15 +1807,12 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(tmp_pat
 def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     tmp_path: Path,
 ) -> None:
-    try:
-        from vonk_control.operation_api import (
-            OperationProvider,
-            get_operation_from_providers,
-            merge_operation_providers,
-            operation_detail_response,
-        )
-    except ImportError:
-        pytest.skip("global Activity provider seam is supplied by the integration branch")
+    from vonk_control.operation_api import (
+        OperationProvider,
+        get_operation_from_providers,
+        merge_operation_providers,
+        operation_detail_response,
+    )
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
     service = _service(
