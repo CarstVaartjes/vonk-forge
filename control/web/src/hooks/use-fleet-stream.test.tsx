@@ -1,6 +1,7 @@
 import {act, render, screen} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {ControlApi, TelemetryPoint, VisualFleetSnapshot} from "../api/types";
+import {telemetryMetrics} from "../test-fixtures/telemetry";
 import {useFleetStream} from "./use-fleet-stream";
 
 class FakeEventSource {
@@ -66,6 +67,7 @@ function point(cpu: number): TelemetryPoint {
     network_transmit_bytes_per_second: null,
     gap_samples: 0,
     details: {accelerator_name: null, accelerator_performance_state: null},
+    metrics: telemetryMetrics(),
   };
 }
 

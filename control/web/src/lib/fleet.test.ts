@@ -1,4 +1,5 @@
 import type {VisualFleetNode, VisualFleetSnapshot} from "../api/types";
+import {telemetryMetrics} from "../test-fixtures/telemetry";
 import {
   formatBytes,
   formatMetric,
@@ -74,6 +75,7 @@ function telemetry(observedAt: string, memory = 80): NonNullable<VisualFleetNode
       network_transmit_bytes_per_second: 512,
       gap_samples: 0,
       details: {accelerator_name: "NVIDIA GB10", accelerator_performance_state: "P0"},
+      metrics: telemetryMetrics(observedAt),
     },
   };
 }
