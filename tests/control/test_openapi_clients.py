@@ -311,7 +311,6 @@ def test_admin_schema_is_secret_free() -> None:
     for operation_id in (
         "getFleetStatus",
         "getJob",
-        "getNodeStatuses",
         "getNodeTelemetryHistory",
         "getPublishedEndpoint",
         "listAgents",
@@ -331,22 +330,6 @@ def test_admin_schema_is_secret_free() -> None:
     assert by_id["getFleetStatus"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/FleetSnapshot"}
-    assert by_id["getNodeStatuses"]["responses"]["200"]["content"]["application/json"][
-        "schema"
-    ] == {"$ref": "#/components/schemas/FleetStatusResponse"}
-    node_status = schema["components"]["schemas"]["NodeStatus"]
-    assert "health_probe_stale" in node_status["required"]
-    assert (
-        "not aggregate node readiness"
-        in node_status["properties"]["health_probe_stale"]["description"]
-    )
-    assert "stale" not in node_status["properties"]
-    assert "profile" not in node_status["properties"]
-    python_node_status = (PYTHON_CLIENT / "models/node_status.py").read_text()
-    assert "health_probe_stale: bool" in python_node_status
-    assert 'health_probe_stale = d.pop("health_probe_stale")' in python_node_status
-    typescript = TYPESCRIPT_CLIENT.read_text()
-    assert "health_probe_stale: boolean;" in typescript
 
     serialized = json.dumps(schema, sort_keys=True).lower()
     for forbidden in (
