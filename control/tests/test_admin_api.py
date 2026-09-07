@@ -21,7 +21,7 @@ class Jobs:
 class Repository:
     def head(self): return "a" * 64
     def inspect(self, revision):
-        return type("Snapshot", (), {"revision": revision, "documents": {"inventory/topology.json": "blob"}, "dependencies": {}})()
+        return type("Snapshot", (), {"revision": revision, "documents": {"docs/audits/authority-review.json": "blob"}, "dependencies": {}})()
     def read_document(self, revision, path):
         return type("Document", (), {"revision": revision, "path": path, "sha256": "hash", "parsed": {"schema_version": 2}})()
 
@@ -42,11 +42,11 @@ def test_admin_proposal_returns_canonical_patch_and_digest() -> None:
     token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
     response = client.post("/api/v1/proposals", headers={"Authorization": f"Bearer {token}"}, json={
         "base_revision": "a" * 64,
-        "changes": [{"path": "inventory/topology.json", "document": {"schema_version": 1}}],
+        "changes": [{"path": "docs/audits/authority-review.json", "document": {"kind": "authority-review"}}],
     })
     assert response.status_code == 200
     assert response.json() == {
-        "affected_documents": ["inventory/topology.json"],
+        "affected_documents": ["docs/audits/authority-review.json"],
         "base_revision": "a" * 64,
         "digest": "d" * 64,
         "patch": base64.b64encode(b"canonical diff").decode(),
@@ -70,7 +70,7 @@ def test_admin_json_requests_and_responses_reject_malformed_contract_values() ->
     document = {
         "base_revision": "a" * 64,
         "changes": [
-            {"path": "inventory/topology.json", "document": {"schema_version": 2}}
+            {"path": "docs/audits/authority-review.json", "document": {"kind": "authority-review"}}
         ],
     }
 
@@ -95,7 +95,7 @@ def test_admin_json_requests_and_responses_reject_malformed_contract_values() ->
             base_revision="a" * 64,
             digest="d" * 64,
             patch="eA==",
-            affected_documents=["inventory/topology.json"],
+            affected_documents=["docs/audits/authority-review.json"],
             validation_results=["passed"],
             unexpected=True,
         )
@@ -104,7 +104,7 @@ def test_admin_json_requests_and_responses_reject_malformed_contract_values() ->
             base_revision="a" * 64,
             digest="d" * 64,
             patch="not-base64",
-            affected_documents=["inventory/topology.json"],
+            affected_documents=["docs/audits/authority-review.json"],
             validation_results=["passed"],
         )
     with pytest.raises(ValueError):
