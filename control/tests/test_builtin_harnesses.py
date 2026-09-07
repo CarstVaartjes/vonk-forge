@@ -34,14 +34,14 @@ BUILTINS = (
 
 OPENAI_BUILTINS = {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4"}
 ENTRYPOINTS = {
-    "vllm": ["vllm", "serve", "/models"],
-    "sglang": ["sglang", "serve", "/models"],
-    "tensorrt-llm": ["trtllm-serve", "serve", "/models"],
-    "llama-cpp": ["llama-server", "/models"],
-    "ds4": ["ds4-serve", "/models"],
-    "diffusers": ["diffusers-job"],
-    "comfyui": ["comfyui-job"],
-    "pytorch-pipeline": ["pytorch-pipeline"],
+    "vllm": ["/opt/vonk/bin/vllm", "serve", "/models"],
+    "sglang": ["/opt/vonk/bin/sglang-serve", "serve", "/models"],
+    "tensorrt-llm": ["/opt/vonk/bin/trtllm-serve", "serve", "/models"],
+    "llama-cpp": ["/opt/vonk/bin/llama-server", "/models"],
+    "ds4": ["/opt/vonk/bin/ds4-serve", "/models"],
+    "diffusers": ["/opt/vonk/bin/diffusers-job"],
+    "comfyui": ["/opt/vonk/bin/comfyui-job"],
+    "pytorch-pipeline": ["/opt/vonk/bin/pytorch-pipeline"],
 }
 ARGS = {
     "vllm": [
@@ -202,6 +202,18 @@ def test_builtin_harness_compiles_the_declared_model_and_output_mounts(
     assert projection.output_mount.target == "/outputs"
     assert projection.output_mount.read_only is False
     assert projection.output_mount.isolated is True
+
+
+def test_builtin_harness_executes_a_valid_short_entrypoint_as_authored(
+    model: ModelDefinition,
+) -> None:
+    raw = _recipe("vllm").model_dump(mode="json")
+    raw["runtime"]["entrypoint"] = ["vllm", "serve", "/models"]
+    projection = _projection(
+        "vllm", recipe=RecipeDefinition.model_validate(raw), model=model
+    )
+
+    assert projection.command[0] == "vllm"
 
 
 def test_vllm_preserves_opaque_engine_options(model: ModelDefinition) -> None:

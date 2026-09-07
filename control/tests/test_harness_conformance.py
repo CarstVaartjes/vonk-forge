@@ -10,21 +10,13 @@ from vonk_control.harness_conformance import (
     run_synthetic_conformance,
     validate_terminal_evidence,
 )
+from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
-BUILTINS = (
-    "vllm",
-    "sglang",
-    "tensorrt-llm",
-    "llama-cpp",
-    "ds4",
-    "diffusers",
-    "comfyui",
-    "pytorch-pipeline",
-)
+CANONICAL_SLUGS = tuple(item.slug for item in CANONICAL_HARNESSES)
 
 
-@pytest.mark.parametrize("slug", BUILTINS)
+@pytest.mark.parametrize("slug", CANONICAL_SLUGS)
 def test_canonical_harness_completes_observed_synthetic_lifecycle(slug: str) -> None:
     evidence = run_synthetic_conformance(slug)
 

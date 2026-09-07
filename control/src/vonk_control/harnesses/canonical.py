@@ -365,10 +365,6 @@ def _harness_security(slug: str, topology: object) -> tuple[tuple[str, ...], boo
     return devices, host_network
 
 
-def _harness_digest(slug: str) -> str:
-    return canonical_harness(slug).content_sha256
-
-
 def compile_canonical_harness(
     recipe: RecipeDefinition,
     models: tuple[ModelDefinition, ...],
@@ -396,11 +392,10 @@ def compile_canonical_harness(
     environment = _environment(recipe)
     mounts = _model_mounts(recipe, models, role)
     command = list(_argv(recipe, _settings(recipe, settings)))
-    wrapper = canonical_harness(slug).wrapper
     entry = tuple(recipe.runtime.entrypoint)
-    # Trusted absolute entrypoints remain authored by the recipe repository.
-    # Short names retain the platform wrapper fallback used by examples.
-    command.insert(0, entry[0] if entry[0].startswith("/") else wrapper)
+    # The recipe entrypoint is the sole launch authority.  Short names remain
+    # valid contract values and are executed exactly as authored.
+    command.insert(0, entry[0])
     # Built-in launchers receive the canonical mounted target directly when a
     # recipe names /models. SGLang wrappers are a special case: their
     # packaged entrypoint owns the /models -> target rewrite (some profiles
@@ -444,7 +439,7 @@ def compile_canonical_harness(
         telemetry=telemetry_contract(slug),
         read_only_root=True,
         binding=HarnessBinding(
-            harness_content_sha256=_harness_digest(slug),
+            harness_content_sha256=canonical_harness(slug).content_sha256,
             execution_content_sha256=_digest(recipe.execution.model_dump(mode="json")),
             topology_node_count=topology.node_count,
             role=role,

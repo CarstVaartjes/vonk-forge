@@ -427,14 +427,14 @@ def _fixture_runtime_image(recipe: RecipeDefinition) -> dict[str, object]:
 
 def _fixture_cases() -> dict[str, tuple[list[str], list[dict[str, object]], str]]:
     return {
-        "vllm": (["vllm", "serve", "/models"], [{"name": "max-model-len", "value": 32768}, {"name": "tensor-parallel-size", "value": 1}], "openai"),
-        "sglang": (["sglang", "serve", "/models"], [{"name": "model-path", "value": "/models"}, {"name": "context-length", "value": 32768}, {"name": "tensor-parallel-size", "value": 1}], "openai"),
-        "tensorrt-llm": (["trtllm-serve", "serve", "/models"], [{"name": "backend", "value": "pytorch"}, {"name": "max-batch-size", "value": 8}, {"name": "max-num-tokens", "value": 4096}, {"name": "max-seq-len", "value": 32768}, {"name": "tp-size", "value": 1}, {"name": "pp-size", "value": 1}, {"name": "ep-size", "value": 1}], "openai"),
-        "llama-cpp": (["llama-server", "/models"], [{"name": "model", "value": "/models/model.gguf"}, {"name": "ctx-size", "value": 32768}, {"name": "n-gpu-layers", "value": 999}], "openai"),
-        "ds4": (["ds4-serve", "/models"], [{"name": "model", "value": "/models/target.gguf"}, {"name": "draft-model", "value": "/models/drafter.gguf"}, {"name": "ctx-size", "value": 32768}], "openai"),
-        "diffusers": (["diffusers-job"], [{"name": "pipeline", "value": "text-to-image"}, {"name": "output-mime", "value": "image/png"}], "image-job"),
-        "comfyui": (["comfyui-job"], [{"name": "workflow", "value": "/opt/vonk/source/workflows/image.json"}, {"name": "workflow-sha256", "value": "e" * 64}, {"name": "output-mime", "value": "image/png"}], "image-job"),
-        "pytorch-pipeline": (["pytorch-pipeline"], [{"name": "entrypoint", "value": "/opt/vonk/source/pipelines/run.py"}, {"name": "output-mime", "value": "model/gltf-binary"}], "mesh-job"),
+        "vllm": (["/opt/vonk/bin/vllm", "serve", "/models"], [{"name": "max-model-len", "value": 32768}, {"name": "tensor-parallel-size", "value": 1}], "openai"),
+        "sglang": (["/opt/vonk/bin/sglang-serve", "serve", "/models"], [{"name": "model-path", "value": "/models"}, {"name": "context-length", "value": 32768}, {"name": "tensor-parallel-size", "value": 1}], "openai"),
+        "tensorrt-llm": (["/opt/vonk/bin/trtllm-serve", "serve", "/models"], [{"name": "backend", "value": "pytorch"}, {"name": "max-batch-size", "value": 8}, {"name": "max-num-tokens", "value": 4096}, {"name": "max-seq-len", "value": 32768}, {"name": "tp-size", "value": 1}, {"name": "pp-size", "value": 1}, {"name": "ep-size", "value": 1}], "openai"),
+        "llama-cpp": (["/opt/vonk/bin/llama-server", "/models"], [{"name": "model", "value": "/models/model.gguf"}, {"name": "ctx-size", "value": 32768}, {"name": "n-gpu-layers", "value": 999}], "openai"),
+        "ds4": (["/opt/vonk/bin/ds4-serve", "/models"], [{"name": "model", "value": "/models/target.gguf"}, {"name": "draft-model", "value": "/models/drafter.gguf"}, {"name": "ctx-size", "value": 32768}], "openai"),
+        "diffusers": (["/opt/vonk/bin/diffusers-job"], [{"name": "pipeline", "value": "text-to-image"}, {"name": "output-mime", "value": "image/png"}], "image-job"),
+        "comfyui": (["/opt/vonk/bin/comfyui-job"], [{"name": "workflow", "value": "/opt/vonk/source/workflows/image.json"}, {"name": "workflow-sha256", "value": "e" * 64}, {"name": "output-mime", "value": "image/png"}], "image-job"),
+        "pytorch-pipeline": (["/opt/vonk/bin/pytorch-pipeline"], [{"name": "entrypoint", "value": "/opt/vonk/source/pipelines/run.py"}, {"name": "output-mime", "value": "model/gltf-binary"}], "mesh-job"),
     }
 
 
