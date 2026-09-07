@@ -9,43 +9,49 @@ separate results.
 
 ## Current checkpoint
 
-- At `bef6a88c`, [CI34065413598](https://github.com/CarstVaartjes/vonk-forge/actions/runs/34065413598)
-  passed all 18 active jobs, including complete repository/Controller shards,
-  native Rust tests/lint, generated clients and web behavior.
-- The same checkpoint passed the privileged-helper OCI and agent-recovery
-  workflows. The subsequent Rust schema-2 install/start integration passed
-  247 native tests; explicit-null placement-key presence is now integrated too.
-- All 85 Recipes and 92 Model records pass catalog validation against the
-  integration. The recipe contract source is unchanged by v1.0.4.
-- Artifact verification now has one typed producer/consumer result with the
-  required `verified_build_id`. Controller API responses, CLI/web clients,
-  telemetry values and retry-safe batching use matching contracts. The
-  [contract guide](api-contracts.md) explains ownership and handoff tests.
-- The disposable ARM64 lifecycle test built an image, transferred it through
-  the Controller, imported it, and persisted 143-series telemetry samples.
-  It then exposed an install/start wire mismatch. That correction and its
-  connected Python/Rust test are in progress; full lifecycle acceptance is
-  still pending.
-- Current catalog compilation exposes two distinct remaining issues: 24
-  placements exceed the previous 64 KiB launch-message ceiling, and two LTX
-  recipes mount the same selected file at two valid targets. The latter must
-  preserve both `/models/license-token-preflight` and `/models/target` while
-  materializing the file once. The production NAS cache already deduplicates
-  receipts; the failure is the compiled plan's repeated-file restriction.
-  Passing catalog validation does not establish these runtime projections.
-- Three narrowly scoped corrections await exact user approval after automatic
-  approval review rejected them: allow unbound rendezvous addresses at Install
-  while requiring them at distributed Start; allow the Controller routing alias
-  to differ from the engine model name; recognize only the helper's exact
-  read-only UID10001 model ACL on subsequent Starts. Their unmerged worker
-  branches remain preserved. The ACL correction retains content verification
-  whenever file metadata changes.
+- The current platform changes are on the integration branch, not yet published
+  or deployed. Earlier green CI runs do not cover its subsequent commits.
+- All 85 Recipes and 92 Model records pass the current public contracts. All
+  109 compiled launch projections pass, including the 751-file model, large
+  launch messages, and LTX files projected to multiple declared mounts.
+- Removed the old recipe parser and schema/package assets, unused artifact-size
+  resolver, flat recovery-start conversion, duplicate pairing DTO, retired
+  status aliases, and duplicate historical catalog tests. Recovery now produces
+  the current compiled Start contract directly. Enrollment uses one shared
+  required evidence structure in the real Rust producer and Controller.
+- Current catalog acceptance uses the normal recipe-library checkout and fresh
+  PostgreSQL: two tests pass, including actual package serving and offline reuse.
+  It no longer requires a separate frozen-test receipt or alternate import route.
+- Controller wire models enforce JSON scalar types and closed structure.
+  The current recipe compiler cases run by default rather than through an
+  optional fixture environment. Open content, including engine arguments,
+  remains governed by its declared flexible fields.
+- The complete Rust workspace passed all 424 tests as an ordinary user in an
+  isolated ARM64 OrbStack container. The connected Python/Rust protocol suite
+  passed 519 tests, and the packaged protocol/CLI verification passed 83 tests.
+- The latest disposable lifecycle canary passed image build and distribution,
+  then exposed a model-cache handoff error: distribution used its authority-plan
+  directory and a flat file path, while installation expected its execution-plan
+  directory and a selection-scoped path. The shared cache handoff and a composed
+  distribution-to-install regression are being corrected. Full lifecycle
+  acceptance remains pending.
+- CLI JSON validation now uses generated Controller OpenAPI for requests before
+  transport and for success/error responses. Timestamp, UUID, and tuple JSON
+  decoding remains native while numeric contract tags stay exact. The combined
+  CLI, current Library/PostgreSQL, and strict JSON tests pass: 151 tests.
+  The expanded source/contract verifier passes all 86 tests.
+- Remaining model-domain cleanup spans cache/database identities, deletion
+  planning and execution, public API/CLI/UI fields, and old catalog ModelGroup
+  and ModelVersion admission. Canonical ModelDefinition family/version metadata
+  stays. Companion Model downloads and every selected Model's installation
+  ownership must remain correct; replacing names alone is insufficient.
+- CLI qualification is being moved entirely to the current Library API.
 - The NAS Controller is unchanged. Rollback backups and a fresh database are
   prepared; device identities have not been copied. No selected Model download
   has started. Deployment follows successful publication and acceptance.
 
-The detailed evidence below records earlier implementation checkpoints; the
-current checkpoint above takes precedence for release and deployment status.
+The detailed evidence below records earlier implementation checkpoints; this
+current checkpoint takes precedence for release and deployment status.
 
 ## Published results
 

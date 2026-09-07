@@ -38,9 +38,6 @@ class NodeStatus:
             labels (NodeStatusLabels):
             lifecycle (str):
             memory_available_bytes (int):
-            profile (Union[None, str]):
-            stale (bool): Deprecated compatibility alias for health_probe_stale; this does not represent aggregate node
-                readiness.
             agent_binary_digest (Union[None, Unset, str]):
             agent_build_digest (Union[None, Unset, str]):
             agent_last_seen_at (Union[None, Unset, str]):
@@ -69,8 +66,6 @@ class NodeStatus:
     labels: 'NodeStatusLabels'
     lifecycle: str
     memory_available_bytes: int
-    profile: Union[None, str]
-    stale: bool
     agent_binary_digest: Union[None, Unset, str] = UNSET
     agent_build_digest: Union[None, Unset, str] = UNSET
     agent_last_seen_at: Union[None, Unset, str] = UNSET
@@ -112,11 +107,6 @@ class NodeStatus:
         lifecycle = self.lifecycle
 
         memory_available_bytes = self.memory_available_bytes
-
-        profile: Union[None, str]
-        profile = self.profile
-
-        stale = self.stale
 
         agent_binary_digest: Union[None, Unset, str]
         if isinstance(self.agent_binary_digest, Unset):
@@ -211,8 +201,6 @@ class NodeStatus:
             "labels": labels,
             "lifecycle": lifecycle,
             "memory_available_bytes": memory_available_bytes,
-            "profile": profile,
-            "stale": stale,
         })
         if agent_binary_digest is not UNSET:
             field_dict["agent_binary_digest"] = agent_binary_digest
@@ -281,16 +269,6 @@ class NodeStatus:
         lifecycle = d.pop("lifecycle")
 
         memory_available_bytes = d.pop("memory_available_bytes")
-
-        def _parse_profile(data: object) -> Union[None, str]:
-            if data is None:
-                return data
-            return cast(Union[None, str], data)
-
-        profile = _parse_profile(d.pop("profile"))
-
-
-        stale = d.pop("stale")
 
         def _parse_agent_binary_digest(data: object) -> Union[None, Unset, str]:
             if data is None:
@@ -423,8 +401,6 @@ class NodeStatus:
             labels=labels,
             lifecycle=lifecycle,
             memory_available_bytes=memory_available_bytes,
-            profile=profile,
-            stale=stale,
             agent_binary_digest=agent_binary_digest,
             agent_build_digest=agent_build_digest,
             agent_last_seen_at=agent_last_seen_at,
