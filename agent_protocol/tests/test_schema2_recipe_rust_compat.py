@@ -18,6 +18,11 @@ from vonk_agent_protocol import (
     RecipeStartPayload,
     canonical_message,
 )
+from vonk_agent_protocol.compiled_execution_plan import (
+    CompiledJob,
+    CompiledSecurityMount,
+    CompiledTopology,
+)
 
 PLAN = json.loads(
     (Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json").read_text(
@@ -379,16 +384,7 @@ def _positive_enum_cases() -> Iterator[
     tuple[AgentOperation, type[BaseModel], dict[str, Any]]
 ]:
     yield from _plans_and_models()
-    for mode in (
-        "single",
-        "distributed",
-        "tensor_parallel",
-        "pipeline_parallel",
-        "data_parallel",
-        "hybrid",
-        "ray",
-        "mpi",
-    ):
+    for mode in CompiledTopology.model_json_schema()["properties"]["mode"]["enum"]:
         plan = copy.deepcopy(PLAN)
         plan["topology"]["mode"] = mode
         for backend in ("local", "tcp", "ucx", "future-engine-Δ"):
@@ -400,19 +396,15 @@ def _positive_enum_cases() -> Iterator[
         _install(_published_plan()),
     )
     yield AgentOperation.RECIPE_INSTALL, RecipeInstallPayload, _install(_bridge_plan())
-    for source in ("model", "inputs", "outputs"):
+    for source in CompiledSecurityMount.model_json_schema()["properties"]["source"][
+        "enum"
+    ]:
         yield (
             AgentOperation.RECIPE_INSTALL,
             RecipeInstallPayload,
             _install(_security_mount_plan(source)),
         )
-    for interface in (
-        "image-job",
-        "audio-job",
-        "video-job",
-        "mesh-job",
-        "artifact-job",
-    ):
+    for interface in CompiledJob.model_json_schema()["properties"]["interface"]["enum"]:
         plan = _job_plan()
         plan["job"]["interface"] = interface
         yield AgentOperation.RECIPE_INSTALL, RecipeInstallPayload, _install(plan)
@@ -585,16 +577,9 @@ def test_every_canonical_enum_value_is_accepted_by_both_models(
                     checked.add((operation.value, (*path, name), str(candidate)))
                     if name == "mode":
                         topology_modes.add(str(candidate))
-    assert topology_modes == {
-        "single",
-        "distributed",
-        "tensor_parallel",
-        "pipeline_parallel",
-        "data_parallel",
-        "hybrid",
-        "ray",
-        "mpi",
-    }
+    assert topology_modes == set(
+        CompiledTopology.model_json_schema()["properties"]["mode"]["enum"]
+    )
     assert topology_backends == {"local", "tcp", "ucx", "future-engine-Δ"}
     assert any(path[-1] == "source" for _, path, _ in checked)
     assert any(path[-1] == "interface" for _, path, _ in checked)
