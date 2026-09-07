@@ -644,7 +644,10 @@ class CompiledExecutionPlan(_StrictModel):
             dict(_mapping(endpoint, "endpoint")) if endpoint is not None else None
         )
         payload["job"] = dict(_mapping(job, "job")) if job is not None else None
-        return payload
+        # The projected document is persisted and later served by the agent
+        # route.  Validate it at this producer boundary so the stored payload
+        # is the same canonical schema consumed by agents.
+        return validate_compiled_launch_payload(payload)
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:

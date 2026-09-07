@@ -21,15 +21,22 @@ from threading import Lock
 from typing import Any, Literal, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     AgentProgress,
     AgentProtocolError,
     AgentResult,
-    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     ContainerRuntimeAction,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
@@ -52,8 +59,8 @@ from .auth import (
     agent_source_from_scope,
 )
 from .compiled_execution_plan import (
-    CompiledExecutionPlanError,
     MAX_COMPILED_EXECUTION_PLAN_BYTES,
+    CompiledExecutionPlanError,
     validate_compiled_launch_payload,
 )
 from .distribution import DistributionError, DistributionService
@@ -1848,31 +1855,31 @@ def install_agent_routes(
         if scan.top_level_keys != 1:
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=422, detail="enrollment grant is ambiguous")
-        if not isinstance(body.get("grant_token"), str):
-            _consume_enrollment_denial(required, scan.tokens)
-            raise HTTPException(status_code=422, detail="enrollment grant is required")
-        csr = body.get("csr")
-        evidence = body.get("evidence")
         try:
-            csr_bytes = csr.encode("ascii") if isinstance(csr, str) else b""
+            submitted = EnrollmentSubmitRequest.model_validate(body)
+        except ValidationError:
+            _consume_enrollment_denial(required, scan.tokens)
+            if scan.tokens:
+                # Keep the enrollment oracle closed: a discoverable grant is
+                # consumed and reported as denied even when the request shape
+                # is malformed.  The canonical model handles valid requests;
+                # this branch preserves the bounded burn-on-invalid policy.
+                raise HTTPException(status_code=403, detail="enrollment denied") from None
+            raise HTTPException(status_code=422, detail="enrollment request is invalid") from None
+        try:
+            csr_bytes = submitted.csr.encode("ascii")
         except UnicodeEncodeError:
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(
                 status_code=422, detail="CSR must be ASCII PEM"
             ) from None
-        service_evidence = (
-            evidence
-            if isinstance(evidence, Mapping)
-            and set(body) == {"grant_token", "csr", "evidence"}
-            else {}
-        )
         try:
             outcome = required.enrollment.submit(
-                body["grant_token"], csr_bytes, service_evidence
+                submitted.grant_token, csr_bytes, submitted.evidence
             )
         except EnrollmentIssuanceUncertain as error:
             token_identifier = hashlib.sha256(
-                body["grant_token"].encode("utf-8")
+                submitted.grant_token.encode("utf-8")
             ).hexdigest()
             audits.append(
                 AuditRecord(
@@ -1886,7 +1893,7 @@ def install_agent_routes(
             raise HTTPException(status_code=503, detail=str(error)) from None
         except EnrollmentDenied as error:
             token_identifier = hashlib.sha256(
-                body["grant_token"].encode("utf-8")
+                submitted.grant_token.encode("utf-8")
             ).hexdigest()
             audits.append(
                 AuditRecord(
@@ -1900,7 +1907,7 @@ def install_agent_routes(
             _consume_enrollment_denial(required, scan.tokens)
             raise HTTPException(status_code=403, detail=str(error)) from None
         token_identifier = hashlib.sha256(
-            body["grant_token"].encode("utf-8")
+            submitted.grant_token.encode("utf-8")
         ).hexdigest()
         audits.append(
             AuditRecord(

@@ -1204,6 +1204,16 @@ def test_task_oriented_command_parser_and_dispatch_contract(argv: tuple[str, ...
     assert result == 0
 
 
+@pytest.mark.parametrize("command", ["current", "state"])
+def test_fleet_summary_commands_use_canonical_fleet_snapshot(command: str) -> None:
+    client = _Client({("GET", "/api/v1/fleet"): {"nodes": []}})
+
+    result, _payload = _invoke(client, "--json", "fleet", command)
+
+    assert result == 0
+    assert [call[1] for call in client.calls] == ["/api/v1/fleet"]
+
+
 @pytest.mark.parametrize(
     ("argv", "method", "path"),
     [

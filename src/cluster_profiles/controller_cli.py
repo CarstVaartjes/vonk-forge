@@ -1560,14 +1560,21 @@ def _load_recipe_list(
 
 def _run_fleet(args: argparse.Namespace, client: ControllerClient) -> dict[str, object]:
     command = args.fleet_command
-    if command == "current":
-        return client.request(
-            "GET", "/api/v1/fleet/workloads", query=_query(search=args.search or None, all=True if args.all else None)
-        )
-    if command == "state":
-        return client.request(
-            "GET", "/api/v1/fleet/state", query=_query(search=args.search or None, all=True if args.all else None)
-        )
+    if command in {"current", "state"}:
+        # FleetSnapshot is the canonical source for both workload placement
+        # and node capacity.  The retired split endpoints no longer exist.
+        result = client.request("GET", "/api/v1/fleet")
+        query = args.search.strip().casefold()
+        if not query or not isinstance(result.get("nodes"), list):
+            return result
+        return {
+            **result,
+            "nodes": [
+                node
+                for node in result["nodes"]
+                if isinstance(node, Mapping) and _contains(node, query)
+            ],
+        }
     if command in {"list", "show"}:
         payload = client.request("GET", "/api/v1/fleet")
         if command == "list":
