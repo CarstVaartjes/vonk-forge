@@ -277,7 +277,7 @@ def signed_observation_receipt(
         authority="vonk.recipe-run-observation-helper",
         node_id=node_id,
         request_id=grant.claims.request_id,
-        request_sha256=str(grant.claims.operation.values["request_sha256"]),
+        request_sha256=str(grant.claims.operation.request_sha256),
         observation_identity_sha256=observation_identity_sha256,
         outcome=outcome,
         observed_at=int(observed_at.timestamp()),
@@ -3462,7 +3462,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
         expires_in_seconds=10,
     )
     assert (
-        grant.claims.operation.values["observation_identity_sha256"] == identity_sha256
+        grant.claims.operation.observation_identity_sha256 == identity_sha256
     )
     with pytest.raises(HostHelperAuthorityError, match="pending"):
         authority.issue_recipe_run_observation_grant(

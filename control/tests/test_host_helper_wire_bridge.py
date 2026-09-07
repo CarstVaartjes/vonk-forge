@@ -7,8 +7,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.host_helper import (
-    HostHelperOperation,
-    HostOperationKind,
+    RestartVonkUnitOperation,
     SignedHostHelperGrant,
     SignedRecipeRunObservationReceipt,
     recipe_run_observation_receipt_signing_bytes,
@@ -30,10 +29,7 @@ def test_python_issuer_matches_the_rust_verified_host_grant_fixture() -> None:
     )
     grant = issuer.issue_grant(
         node_id="spk_11111111111111111111111111111111",
-        operation=HostHelperOperation(
-            HostOperationKind.RESTART_VONK_UNIT,
-            {"unit": "agent"},
-        ),
+        operation=RestartVonkUnitOperation(type="restart-vonk-unit", unit="agent"),
         expires_in_seconds=60,
     )
     raw = (FIXTURES / "host-helper-grant-python-issued.json").read_bytes().rstrip(

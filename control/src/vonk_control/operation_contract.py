@@ -228,10 +228,20 @@ class OperationRecovery(BaseModel):
     explanation: str | None = Field(default=None, max_length=512)
 
 
+def _plain_json(value: object) -> object:
+    """Convert immutable protocol mappings to objects Pydantic can validate."""
+
+    if isinstance(value, Mapping):
+        return {key: _plain_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_plain_json(item) for item in value]
+    return value
+
+
 def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, object]:
     """Validate and canonicalize progress while retaining phase-only updates."""
 
-    parsed = OperationProgress.model_validate(value)
+    parsed = OperationProgress.model_validate(_plain_json(value))
     document = parsed.model_dump(mode="json", exclude_none=True)
     # Empty optional collections are omitted so the old phase-only response is
     # byte-for-byte stable for callers that have not adopted the contract.
