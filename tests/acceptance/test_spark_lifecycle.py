@@ -1022,7 +1022,7 @@ class SparkLifecycle:
         return f"{details}; failing service logs:\n{output or 'no output'}"
 
     def _installation_failure(
-        self, stage: str, error: AcceptanceError
+        self, stage: str, error: Exception
     ) -> LifecycleError:
         raw = ""
         if getattr(self, "bundle", None) is not None:
@@ -1033,6 +1033,7 @@ class SparkLifecycle:
                     "--tail",
                     "120",
                     "control-api",
+                    "control-worker",
                     "step-ca",
                     "caddy",
                 )
@@ -2187,7 +2188,7 @@ class SparkLifecycle:
                 plan_digest=uninstall_digest,
             )
             completed.append("uninstalled")
-        except (SliceError, ServingExecutionError) as error:
+        except (SliceError, ServingExecutionError, LifecycleError) as error:
             # Keep the API response concise for the lifecycle client, but make
             # the bounded Controller logs available before cleanup.  This is
             # the only useful evidence for an unexpected 5xx from a fresh
@@ -2242,8 +2243,16 @@ class SparkLifecycle:
             or operation.get("completed_phases") != expected_phases
         ):
             reason = operation.get("status_reason")
+            details = self._redact_diagnostics(json.dumps({
+                key: operation.get(key)
+                for key in (
+                    "operation_id", "state", "failed_phase", "completed_phases",
+                    "progress", "result", "status_reason",
+                )
+            }))
             raise LifecycleError(
-                f"{label} failed: {reason if isinstance(reason, str) else 'incomplete evidence'}"
+                f"{label} failed: {reason if isinstance(reason, str) else 'incomplete evidence'}; "
+                f"operation evidence: {details}"
             )
         return operation
 

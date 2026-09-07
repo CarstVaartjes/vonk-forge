@@ -224,6 +224,7 @@ def nas_responses(
         ("Tailscale OAuth client ID: ", oauth_client_id),
         ("Tailscale OAuth client secret: ", oauth_client_secret),
         ("LiteLLM upstream provider API key: ", upstream_key),
+        ("Hugging Face access token (optional; leave blank for public models): ", ""),
     ]
     for label in (
         "PostgreSQL control password",
@@ -1524,8 +1525,13 @@ def exercise_compose(
     configured = run([*reference_compose(), "config", "--quiet"], cwd=bundle)
     if configured.stdout or configured.stderr:
         raise AcceptanceError("Compose validation emitted output")
-    if compose_services(bundle) != complete:
-        raise AcceptanceError("rendered Compose service topology is not canonical")
+    observed_services = compose_services(bundle)
+    if observed_services != complete:
+        raise AcceptanceError(
+            "rendered Compose service topology is not canonical: "
+            f"missing={sorted(complete - observed_services)}, "
+            f"unexpected={sorted(observed_services - complete)}"
+        )
     base_images = run([reference_compose()[0], "config", "--images"], cwd=bundle).stdout
     for image in base_images.splitlines():
         if not is_channel_image(
