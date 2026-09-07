@@ -15,7 +15,12 @@ from vonk_agent_protocol import (
 )
 
 
-def _claim(payload: dict[str, object], **overrides: object) -> dict[str, object]:
+def _claim(**overrides: object) -> dict[str, object]:
+    payload = {
+        "schema_version": 1,
+        "authority_revision": "a" * 64,
+        "plan_digest": "a" * 64,
+    }
     return {
         "schema_version": 1,
         "job_id": "00000000-0000-4000-8000-000000000001",
@@ -23,7 +28,7 @@ def _claim(payload: dict[str, object], **overrides: object) -> dict[str, object]
         "attempt": 1,
         "fence": "00000000-0000-4000-8000-000000000003",
         "node_id": "spk_00000000000000000000000000000001",
-        "operation": "node.probe",
+        "operation": "artifact.distribution.v1",
         "authority_revision": "a" * 64,
         "payload_digest": hashlib.sha256(canonical_message(payload)).hexdigest(),
         "payload": payload,
@@ -35,11 +40,11 @@ def _claim(payload: dict[str, object], **overrides: object) -> dict[str, object]
 @pytest.mark.parametrize("value", [True, 1.0])
 def test_schema_version_rejects_boolean_and_float_tags(value: object) -> None:
     with pytest.raises(AgentProtocolError):
-        AgentClaim.parse(_claim({}, schema_version=value))
+        AgentClaim.parse(_claim(schema_version=value))
 
 
 def test_claim_rejects_unknown_top_level_fields_and_roundtrips_json() -> None:
-    raw = _claim({"healthy": True})
+    raw = _claim()
     with pytest.raises(AgentProtocolError):
         AgentClaim.parse(raw | {"unexpected": 1})
     parsed = AgentClaim.parse(raw)
