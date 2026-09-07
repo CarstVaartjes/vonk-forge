@@ -1124,24 +1124,31 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
             encoding="utf-8"
         )
     )
+    model = json.loads(
+        (
+            Path("/opt/vonk-forge-recipes")
+            / "model-versions"
+            / "ltx-2-5-22b-distilled-bf16-diffusers.json"
+        ).read_text(encoding="utf-8")
+    )
     raw_artifacts = {item["id"]: item for item in recipe["artifacts"]}
     targets = [
         raw_artifacts["license-token-preflight"]["mount"]["target"],
         raw_artifacts["target"]["mount"]["target"],
     ]
-    payload = b"production LTX filtered snapshot"
-    file_sha256 = hashlib.sha256(payload).hexdigest()
+    physical = model["artifacts"][0]
+    model_content_sha256 = recipe["model"]["content_sha256"]
     model_object = {
-        "model_content_sha256": "e" * 64,
-        "file_id": "filtered-snapshot",
-        "path": "filtered-snapshot",
-        "sha256": file_sha256,
-        "bytes": len(payload),
-        "roles": ["entrypoint", "weights"],
+        "model_content_sha256": model_content_sha256,
+        "file_id": physical["id"],
+        "path": physical["path"],
+        "sha256": physical["sha256"],
+        "bytes": physical["installed_bytes"],
+        "roles": physical["roles"],
         "distribution_object": {
-            "name": "filtered-snapshot",
-            "sha256": file_sha256,
-            "bytes": len(payload),
+            "name": physical["path"],
+            "sha256": physical["sha256"],
+            "bytes": physical["installed_bytes"],
             "kind": "model",
         },
     }
@@ -1149,26 +1156,26 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
     spec["model_dependencies"] = [
         {
             "selection_id": "primary",
-            "publisher": "vonk-forge",
-            "slug": "synthetic-tiny-fp16",
-            "content_sha256": "e" * 64,
-            "artifact_key": "filtered-snapshot",
+            "publisher": model["identity"]["publisher"],
+            "slug": model["identity"]["slug"],
+            "content_sha256": model_content_sha256,
+            "artifact_key": physical["id"],
         }
     ]
     spec["artifacts"] = [
         {
             "id": artifact_id,
             "selection_id": "primary",
-            "file_id": "filtered-snapshot",
-            "path": "filtered-snapshot",
-            "sha256": file_sha256,
-            "bytes": len(payload),
-            "roles": ["entrypoint", "weights"],
+            "file_id": physical["id"],
+            "path": physical["path"],
+            "sha256": physical["sha256"],
+            "bytes": physical["installed_bytes"],
+            "roles": physical["roles"],
             "mount": {"source": "/run/vonk/models/primary", "target": target, "read_only": True},
             "model": {
-                "publisher": "vonk-forge",
-                "slug": "synthetic-tiny-fp16",
-                "content_sha256": "e" * 64,
+                "publisher": recipe["model"]["publisher"],
+                "slug": recipe["model"]["slug"],
+                "content_sha256": model_content_sha256,
             },
         }
         for artifact_id, target in zip(
@@ -1184,7 +1191,7 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
     )
     assert len(plan.artifacts) == 2
     assert [artifact.mount.target for artifact in plan.artifacts] == targets
-    assert plan.artifacts[0].sha256 == plan.artifacts[1].sha256 == file_sha256
+    assert plan.artifacts[0].sha256 == plan.artifacts[1].sha256 == physical["sha256"]
 
 
 def test_qwen_config_collision_binds_model_identity_and_preserves_file_path(
