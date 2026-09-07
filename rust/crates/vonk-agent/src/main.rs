@@ -19,7 +19,7 @@ use vonk_agent::{
     },
     inventory::InventoryCollector,
     oci::OciRuntime,
-    pair::{collect_evidence, complete_pairing_with, pair},
+    pair::{collect_evidence, pair},
     process::SystemProcessRunner,
     readiness::{publish_current, verify_current},
     rotation::rotate_if_due,
@@ -151,21 +151,7 @@ async fn pair_agent(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let executable = std::env::current_exe()?;
     let evidence = collect_evidence(&executable)?;
-    complete_pairing_with(
-        180,
-        std::time::Duration::from_secs(5),
-        || {
-            let evidence = evidence.clone();
-            async move { pair(config, enrollment, token, ca_sha256, evidence).await }
-        },
-        |pending| {
-            println!(
-                "pairing {} is {}; waiting for approval",
-                pending.id, pending.state
-            )
-        },
-    )
-    .await?;
+    pair(config, enrollment, token, ca_sha256, evidence).await?;
     println!("paired {}", config.node_id);
     Ok(())
 }
