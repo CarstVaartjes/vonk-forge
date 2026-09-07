@@ -38,8 +38,6 @@ class _Client:
         *,
         extra_headers: dict[str, str] | None = None,
         query: dict[str, object] | None = None,
-        request_model=None,
-        response_model=None,
     ) -> dict[str, object]:
         self.calls.append((method, path, payload, query))
         self.extra_headers.append(extra_headers)
@@ -57,7 +55,6 @@ class _Client:
         media_type: str,
         expected_sha256: str,
         expected_size: int,
-        response_model=None,
     ) -> dict[str, object]:
         self.uploads.append((path, source, media_type, expected_sha256, expected_size))
         response = self.responses.get(("UPLOAD", path), {"state": "draft"})
@@ -135,8 +132,6 @@ class _StrictTaskClient(_Client):
         *,
         extra_headers=None,
         query=None,
-        request_model=None,
-        response_model=None,
     ):
         allowed = {
             ("POST", "/api/v1/fleet-profiles"): {"name", "scope", "assignments"},

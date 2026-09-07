@@ -16,14 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
-from .control_client import ControlClientError, GeneratedJSONModel
-from .generated_control.models.artifact_job_capabilities_response import (
-    ArtifactJobCapabilitiesResponse,
-)
-from .generated_control.models.artifact_job_create import ArtifactJobCreate
-from .generated_control.models.artifact_job_list_response import ArtifactJobListResponse
-from .generated_control.models.artifact_job_response import ArtifactJobResponse
-from .generated_control.models.cancel_request import CancelRequest
+from .control_client import ControlClientError
 
 ARTIFACT_JOB_INTERFACES = (
     "audio-job",
@@ -152,8 +145,6 @@ class ControllerClient(Protocol):
         *,
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
-        request_model: type[GeneratedJSONModel] | None = None,
-        response_model: type[GeneratedJSONModel] | None = None,
     ) -> dict[str, object]: ...
 
     def upload_file(
@@ -164,7 +155,6 @@ class ControllerClient(Protocol):
         media_type: str,
         expected_sha256: str,
         expected_size: int,
-        response_model: type[GeneratedJSONModel] | None = None,
     ) -> dict[str, object]: ...
 
     def download_file(
@@ -1114,18 +1104,9 @@ def _plan_or_request(
     method: str,
     path: str,
     payload: Mapping[str, object] | None = None,
-    *,
-    request_model: type[GeneratedJSONModel] | None = None,
-    response_model: type[GeneratedJSONModel] | None = None,
 ) -> dict[str, object]:
     if args.apply:
-        return client.request(
-            method,
-            path,
-            payload,
-            request_model=request_model,
-            response_model=response_model,
-        )
+        return client.request(method, path, payload)
     return {
         "mode": "plan",
         "apply": False,
@@ -1821,17 +1802,12 @@ def _run_artifact_job(
     command = args.artifact_job_command
     if command == "capabilities":
         return _artifact_capabilities(
-            client.request(
-                "GET",
-                "/api/v1/artifact-jobs/capabilities",
-                response_model=ArtifactJobCapabilitiesResponse,
-            )
+            client.request("GET", "/api/v1/artifact-jobs/capabilities")
         )
     if command == "list":
         return client.request(
             "GET",
             f"/api/v1/recipes/runs/{_quoted(args.run_id)}/artifact-jobs",
-            response_model=ArtifactJobListResponse,
         )
     if command == "activate":
         apply = args.activate_command == "apply"
@@ -1896,11 +1872,7 @@ def _run_artifact_job(
                 )
             return {"mode": "plan", "steps": steps}
         capabilities = _artifact_capabilities(
-            client.request(
-                "GET",
-                "/api/v1/artifact-jobs/capabilities",
-                response_model=ArtifactJobCapabilitiesResponse,
-            )
+            client.request("GET", "/api/v1/artifact-jobs/capabilities")
         )
         storage_preflight = _artifact_storage_preflight(capabilities, inputs)
         created = client.request(
@@ -1908,8 +1880,6 @@ def _run_artifact_job(
             create_path,
             payload,
             extra_headers={"X-Request-ID": request_key},
-            request_model=ArtifactJobCreate,
-            response_model=ArtifactJobResponse,
         )
         if command == "create":
             return {**created, "storage_preflight": storage_preflight}
@@ -1922,18 +1892,15 @@ def _run_artifact_job(
                 media_type=str(declaration["media_type"]),
                 expected_sha256=str(declaration["sha256"]),
                 expected_size=int(declaration["size_bytes"]),
-                response_model=ArtifactJobResponse,
             )
             uploaded.append(declaration)
         client.request(
             "POST",
             f"/api/v1/artifact-jobs/{_quoted(job_id)}/finalize",
-            response_model=ArtifactJobResponse,
         )
         submitted = client.request(
             "POST",
             f"/api/v1/artifact-jobs/{_quoted(job_id)}/submit",
-            response_model=ArtifactJobResponse,
         )
         return {
             "job": submitted,
@@ -1965,7 +1932,6 @@ def _run_artifact_job(
                 media_type=str(declaration["media_type"]),
                 expected_sha256=str(declaration["sha256"]),
                 expected_size=int(declaration["size_bytes"]),
-                response_model=ArtifactJobResponse,
             )
             for declaration, source in inputs
         ]
@@ -1979,14 +1945,11 @@ def _run_artifact_job(
             client,
             "POST",
             f"{base}/{command}",
-            response_model=ArtifactJobResponse,
         )
     if command == "status":
-        return client.request("GET", base, response_model=ArtifactJobResponse)
+        return client.request("GET", base)
     if command == "result":
-        return client.request(
-            "GET", f"{base}/result", response_model=ArtifactJobResponse
-        )
+        return client.request("GET", f"{base}/result")
     if command == "cancel":
         reason = " ".join(args.reason.split())
         if not reason or len(reason) > 512:
@@ -1997,12 +1960,8 @@ def _run_artifact_job(
             "POST",
             f"{base}/cancel",
             {"reason": reason},
-            request_model=CancelRequest,
-            response_model=ArtifactJobResponse,
         )
-    result = client.request(
-        "GET", f"{base}/result", response_model=ArtifactJobResponse
-    )
+    result = client.request("GET", f"{base}/result")
     outputs = _artifact_output_files(result)
     requested = list(dict.fromkeys(args.sha256))
     if any(_LOWER_SHA256.fullmatch(value) is None for value in requested):

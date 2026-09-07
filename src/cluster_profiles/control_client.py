@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
-import datetime as datetime_module
 import hashlib
-import importlib
 import json
+import math
 import os
 import re
 import stat
 import tempfile
 import time
-import types
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
+from functools import lru_cache
+from importlib.resources import files
 from pathlib import Path
-from typing import Any, ForwardRef, Protocol, Self, get_args, get_origin
+from typing import Any
 
-import attrs
 import httpx
+from jsonschema import Draft202012Validator, FormatChecker, validators
+from jsonschema.exceptions import SchemaError
 
 from .generated_control.api.default import (
     get_job,
@@ -55,21 +56,15 @@ _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
 )
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)[^/@\s]+@")
-
-
-class GeneratedJSONModel(Protocol):
-    """The generated client's canonical JSON model boundary.
-
-    The OpenAPI client deliberately generates attrs models rather than a second
-    hand-maintained DTO layer.  Keeping this small structural contract lets the
-    transport validate a route's request and response with those generated
-    models while preserving the CLI's mapping-shaped presentation boundary.
-    """
-
-    @classmethod
-    def from_dict(cls, src_dict: Mapping[str, Any]) -> Self: ...
-
-    def to_dict(self) -> dict[str, Any]: ...
+_CONTROL_TYPE_CHECKER = Draft202012Validator.TYPE_CHECKER.redefine(
+    "integer", lambda _checker, value: type(value) is int
+).redefine(
+    "number",
+    lambda _checker, value: type(value) in (int, float) and math.isfinite(value),
+)
+_ControlValidator = validators.extend(
+    Draft202012Validator, type_checker=_CONTROL_TYPE_CHECKER
+)
 
 
 class ControlClientError(RuntimeError):
@@ -237,200 +232,202 @@ def _sanitize_remote_text(
     return text
 
 
-def _encode_generated_request(
-    payload: Mapping[str, object], model: type[GeneratedJSONModel]
-) -> dict[str, Any]:
+@lru_cache(maxsize=1)
+def _control_openapi() -> dict[str, object]:
     try:
-        model_validate = getattr(model, "model_validate", None)
-        if callable(model_validate):
-            validated = model_validate(payload)
-            dumped = validated.model_dump(mode="json")
-            if not isinstance(dumped, dict):
-                raise TypeError("validated request is not an object")
-            return dumped
-        _validate_generated_document(payload, model)
-        return model.from_dict(payload).to_dict()
-    except (AttributeError, KeyError, TypeError, ValueError):
-        raise ControlClientError(
-            "control API request does not match the generated schema"
-        ) from None
+        raw = files("cluster_profiles.schemas").joinpath(
+            "control-openapi.json"
+        ).read_text()
+        schema = json.loads(raw)
+        Draft202012Validator.check_schema(schema)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, SchemaError):
+        raise ControlClientError("bundled control API schema is invalid") from None
+    if not isinstance(schema, dict):
+        raise ControlClientError("bundled control API schema must be an object")
+    return schema
 
 
-def _decode_generated_response(
-    decoded: object, model: type[GeneratedJSONModel]
-) -> dict[str, object]:
-    if not isinstance(decoded, Mapping):
-        raise ControlMalformedResponse("control API response must be an object")
-    try:
-        model_validate = getattr(model, "model_validate", None)
-        if callable(model_validate):
-            validated = model_validate(decoded)
-            result = validated.model_dump(mode="json")
-        else:
-            _validate_generated_document(decoded, model)
-            result = model.from_dict(decoded).to_dict()
-    except (AttributeError, KeyError, TypeError, ValueError):
-        raise ControlMalformedResponse(
-            "control API response does not match the generated schema"
-        ) from None
-    if not isinstance(result, dict):
-        raise ControlMalformedResponse(
-            "control API response does not match the generated schema"
-        )
-    return result
+@lru_cache(maxsize=1)
+def _control_validator() -> Draft202012Validator:
+    return _ControlValidator(_control_openapi(), format_checker=FormatChecker())
 
 
-def _generated_model_type(name: str, model: type[GeneratedJSONModel]) -> object:
-    """Resolve a generated forward reference from its sibling model module."""
-    module_name = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-    module = importlib.import_module(
-        f"{model.__module__.rsplit('.', 1)[0]}.{module_name}"
+def _path_pattern(template: str) -> re.Pattern[str]:
+    escaped = re.escape(template)
+    return re.compile(r"^" + re.sub(r"\\\{[^}]+\\\}", r"[^/]+", escaped) + r"$")
+
+
+@lru_cache(maxsize=256)
+def _operation(path: str, method: str) -> dict[str, object]:
+    schema = _control_openapi()
+    paths = schema.get("paths")
+    if not isinstance(paths, dict):
+        raise ControlClientError("bundled control API schema has no paths")
+    candidates = sorted(
+        paths.items(), key=lambda entry: (entry[0].count("{"), -len(entry[0]))
     )
-    return getattr(module, name)
-
-
-def _validate_generated_value(
-    value: object,
-    annotation: object,
-    path: str,
-    owner_model: type[GeneratedJSONModel],
-) -> None:
-    if isinstance(annotation, str):
-        annotation = _generated_model_type(annotation, owner_model)
-    elif isinstance(annotation, ForwardRef):
-        annotation = _generated_model_type(annotation.__forward_arg__, owner_model)
-    if annotation is Any or annotation is object:
-        return
-    origin = get_origin(annotation)
-    args = get_args(annotation)
-    if origin in (types.UnionType,):
-        if any(
-            (candidate is type(None) and value is None)
-            or (
-                candidate is not type(None)
-                and _value_matches(value, candidate, owner_model)
-            )
-            for candidate in args
-        ):
-            return
-        raise TypeError(f"{path} has an invalid type")
-    if origin is not None and str(origin) == "typing.Union":
-        if any(
-            (candidate is type(None) and value is None)
-            or (
-                candidate is not type(None)
-                and _value_matches(value, candidate, owner_model)
-            )
-            for candidate in args
-        ):
-            return
-        raise TypeError(f"{path} has an invalid type")
-    if str(origin) == "typing.Literal":
-        if any(
-            value == candidate and type(value) is type(candidate) for candidate in args
-        ):
-            return
-        raise TypeError(f"{path} has an invalid value")
-    if origin in (list,):
-        if not isinstance(value, list):
-            raise TypeError(f"{path} must be an array")
-        item_annotation = args[0] if args else Any
-        for index, item in enumerate(value):
-            _validate_generated_value(
-                item, item_annotation, f"{path}[{index}]", owner_model
-            )
-        return
-    if origin in (dict,):
-        if not isinstance(value, dict):
-            raise TypeError(f"{path} must be an object")
-        key_annotation, item_annotation = args or (Any, Any)
-        for key, item in value.items():
-            _validate_generated_value(key, key_annotation, f"{path}.<key>", owner_model)
-            _validate_generated_value(item, item_annotation, f"{path}.{key}", owner_model)
-        return
-    if annotation is type(None):
-        if value is not None:
-            raise TypeError(f"{path} must be null")
-        return
-    if annotation is bool:
-        valid = type(value) is bool
-    elif annotation is int:
-        valid = type(value) is int
-    elif annotation is float:
-        valid = type(value) in (int, float) and type(value) is not bool
-    elif annotation is str:
-        valid = isinstance(value, str)
-    elif annotation is datetime_module.datetime:
-        if not isinstance(value, str):
-            valid = False
-        else:
-            try:
-                datetime_module.datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                valid = False
-            else:
-                valid = True
-    elif annotation is types.NoneType:
-        valid = value is None
-    else:
-        valid = _value_matches(value, annotation, owner_model)
-    if not valid:
-        raise TypeError(f"{path} has an invalid type")
-
-
-def _value_matches(
-    value: object, annotation: object, owner_model: type[GeneratedJSONModel]
-) -> bool:
-    if isinstance(annotation, (str, ForwardRef)):
-        try:
-            _validate_generated_value(value, annotation, "value", owner_model)
-        except (TypeError, ValueError, ImportError):
-            return False
-        return True
-    if hasattr(annotation, "__attrs_attrs__"):
-        try:
-            _validate_generated_document(value, annotation)
-        except (TypeError, ValueError, ImportError):
-            return False
-        return True
-    origin = get_origin(annotation)
-    if origin is not None:
-        try:
-            _validate_generated_value(value, annotation, "value", owner_model)
-        except (TypeError, ValueError, ImportError):
-            return False
-        return True
-    try:
-        return isinstance(value, annotation)
-    except TypeError:
-        return True
-
-
-def _validate_generated_document(
-    document: object, model: type[GeneratedJSONModel]
-) -> None:
-    if not isinstance(document, Mapping):
-        raise TypeError("document must be an object")
-    try:
-        model_fields = attrs.fields(model)
-    except (attrs.exceptions.NotAnAttrsClassError, TypeError):
-        return
-    fields_by_name = {
-        field.alias or field.name: field
-        for field in model_fields
-        if field.init
-    }
-    allows_extra = any(field.name == "additional_properties" for field in model_fields)
-    if not allows_extra:
-        unknown = set(document) - set(fields_by_name)
-        if unknown:
-            raise ValueError(f"unknown fields: {sorted(unknown)!r}")
-    for name, field in fields_by_name.items():
-        if name not in document:
-            if field.default is attrs.NOTHING:
-                raise KeyError(name)
+    for template, item in candidates:
+        if not isinstance(template, str) or not isinstance(item, dict):
             continue
-        _validate_generated_value(document[name], field.type, name, model)
+        if _path_pattern(template).match(path):
+            operation = item.get(method.lower())
+            if isinstance(operation, dict):
+                return operation
+    raise ControlClientError("control API route is not in the bundled schema")
+
+
+def _validate_schema(value: object, schema: object, *, message: str) -> None:
+    if not isinstance(schema, dict):
+        return
+    # Keep the generated document as the reference root while validating an
+    # operation-local schema, so component $refs resolve exactly as emitted.
+    operation_schema = {
+        "components": _control_openapi().get("components", {}),
+        "allOf": [schema],
+    }
+    error = next(
+        _control_validator().evolve(schema=operation_schema).iter_errors(value),
+        None,
+    )
+    if error is not None:
+        raise ControlClientError(message) from None
+
+
+def _request_contract(
+    path: str, method: str, payload: Mapping[str, object] | None
+) -> None:
+    operation = _operation(path, method)
+    request_body = operation.get("requestBody")
+    if not isinstance(request_body, dict):
+        if payload is not None:
+            raise ControlClientError(
+                "control API request has no OpenAPI request body"
+            )
+        return
+    if payload is None:
+        if request_body.get("required") is True:
+            raise ControlClientError(
+                "control API request is missing its OpenAPI request body"
+            )
+        return
+    content = request_body.get("content")
+    if not isinstance(content, dict):
+        raise ControlClientError("control API request body media types are invalid")
+    media = content.get("application/json")
+    if not isinstance(media, dict):
+        raise ControlClientError(
+            "control API request body does not accept application/json"
+        )
+    _validate_schema(
+        payload,
+        media.get("schema"),
+        message="control API request does not match the OpenAPI schema",
+    )
+
+
+def _request_media_contract(path: str, method: str, media_type: str) -> None:
+    operation = _operation(path, method)
+    request_body = operation.get("requestBody")
+    if not isinstance(request_body, dict):
+        raise ControlClientError("control API request has no OpenAPI request body")
+    content = request_body.get("content")
+    if not isinstance(content, dict) or media_type not in content:
+        raise ControlClientError(
+            "control API request content type is not documented"
+        )
+
+
+def _response_definition(
+    path: str, method: str, status: int
+) -> dict[str, object]:
+    operation = _operation(path, method)
+    responses = operation.get("responses")
+    if not isinstance(responses, dict):
+        raise ControlMalformedResponse("control API returned an undocumented status")
+    response = responses.get(str(status), responses.get("default"))
+    if not isinstance(response, dict):
+        raise ControlMalformedResponse("control API returned an undocumented status")
+    return response
+
+
+def _response_contract(path: str, method: str, status: int, decoded: object) -> None:
+    response = _response_definition(path, method, status)
+    content = response.get("content")
+    if not isinstance(content, dict):
+        return
+    media = content.get("application/json")
+    if isinstance(media, dict):
+        try:
+            _validate_schema(
+                decoded,
+                media.get("schema"),
+                message="control API response does not match the OpenAPI schema",
+            )
+        except ControlClientError as error:
+            raise ControlMalformedResponse(str(error)) from None
+
+
+def _response_media_contract(
+    path: str, method: str, status: int, media_type: str, *, has_content: bool
+) -> None:
+    if not has_content:
+        return
+    response = _response_definition(path, method, status)
+    content = response.get("content")
+    if not isinstance(content, dict) or media_type not in content:
+        raise ControlMalformedResponse(
+            "control API response content type is not documented"
+        )
+
+
+def _validate_generated_request(request: httpx.Request) -> None:
+    parsed_url = urllib.parse.urlsplit(str(request.url))
+    route_path = parsed_url.path
+    request_media_type = request.headers.get("content-type", "").split(";", 1)[0]
+    if request.content:
+        if request_media_type.strip().lower() == "application/json":
+            try:
+                payload = json.loads(request.content)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                raise ControlClientError(
+                    "control API request contains invalid JSON"
+                ) from None
+            if not isinstance(payload, Mapping):
+                raise ControlClientError(
+                    "control API request must be a JSON object"
+                )
+            _request_contract(route_path, request.method, payload)
+        else:
+            _request_media_contract(
+                route_path, request.method, request_media_type.strip().lower()
+            )
+    else:
+        _request_contract(route_path, request.method, None)
+
+
+def _validate_generated_response(
+    request: httpx.Request, response: httpx.Response
+) -> None:
+    parsed_url = urllib.parse.urlsplit(str(request.url))
+    route_path = parsed_url.path
+    response_media_type = response.headers.get("content-type", "").split(";", 1)[0]
+    _response_media_contract(
+        route_path,
+        request.method,
+        response.status_code,
+        response_media_type.strip().lower(),
+        has_content=bool(response.content),
+    )
+    if response.status_code == 204 or not response.content:
+        _response_contract(route_path, request.method, response.status_code, {})
+    elif response_media_type.strip().lower() == "application/json":
+        try:
+            decoded = json.loads(response.content)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ControlMalformedResponse("control API returned invalid JSON") from None
+        _response_contract(route_path, request.method, response.status_code, decoded)
+    else:
+        _response_definition(route_path, request.method, response.status_code)
 
 
 def _structured_http_error_fields(problem: object) -> dict[str, object]:
@@ -574,13 +571,17 @@ class _OpenerTransport(httpx.BaseTransport):
 class _RecordingTransport(httpx.BaseTransport):
     def __init__(self, transport: httpx.BaseTransport) -> None:
         self._transport = transport
+        self.request: httpx.Request | None = None
         self.response: httpx.Response | None = None
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
+        self.request = request
+        _validate_generated_request(request)
         response = self._transport.handle_request(request)
         self.response = response
         if len(response.content) > _MAX_RESPONSE:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
+        _validate_generated_response(request, response)
         return response
 
 
@@ -773,13 +774,13 @@ class ControlClient:
         *,
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
-        request_model: type[GeneratedJSONModel] | None = None,
-        response_model: type[GeneratedJSONModel] | None = None,
     ) -> dict[str, object]:
         if not path.startswith("/api/v1/") or ".." in path:
             raise ControlClientError("control API path is invalid")
+        route_path = path
         if query:
             path = f"{path}?{urllib.parse.urlencode(query, doseq=True)}"
+        _request_contract(route_path, method, payload)
         data = None
         headers = {
             "Authorization": f"Bearer {self._token}",
@@ -788,13 +789,8 @@ class ControlClient:
         if extra_headers is not None:
             headers.update(extra_headers)
         if payload is not None:
-            encoded_payload = (
-                _encode_generated_request(payload, request_model)
-                if request_model is not None
-                else payload
-            )
             data = json.dumps(
-                encoded_payload, sort_keys=True, separators=(",", ":")
+                payload, sort_keys=True, separators=(",", ":")
             ).encode()
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(
@@ -816,10 +812,28 @@ class ControlClient:
         if len(content) > _MAX_RESPONSE:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
         if not 200 <= status < 300:
+            error_media_type = response_headers.get("content-type", "").split(";", 1)[0]
+            _response_media_contract(
+                route_path,
+                method,
+                status,
+                error_media_type.strip().lower(),
+                has_content=bool(content),
+            )
             try:
                 problem = json.loads(content)
             except (UnicodeDecodeError, json.JSONDecodeError):
+                if error_media_type.strip().lower() == "application/json":
+                    raise ControlMalformedResponse(
+                        "control API returned invalid JSON error"
+                    ) from None
                 problem = None
+            if error_media_type.strip().lower() == "application/json":
+                if not isinstance(problem, dict):
+                    raise ControlMalformedResponse(
+                        "control API error does not match the OpenAPI schema"
+                    )
+                _response_contract(route_path, method, status, problem)
             detail = problem.get("detail") if isinstance(problem, dict) else None
             error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
             fields = _structured_http_error_fields(problem)
@@ -835,15 +849,23 @@ class ControlClient:
                 sensitive_values=(self._token,),
             )
         if status == 204 or not content:
+            _response_contract(route_path, method, status, {})
             return {}
+        response_media_type = response_headers.get("content-type", "").split(";", 1)[0]
+        _response_media_contract(
+            route_path,
+            method,
+            status,
+            response_media_type.strip().lower(),
+            has_content=True,
+        )
         try:
             decoded = json.loads(content)
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise ControlClientError("control API returned invalid JSON") from None
         if not isinstance(decoded, dict):
             raise ControlClientError("control API response must be an object")
-        if response_model is not None:
-            return _decode_generated_response(decoded, response_model)
+        _response_contract(route_path, method, status, decoded)
         return decoded
 
     def upload_file(
@@ -854,11 +876,11 @@ class ControlClient:
         media_type: str,
         expected_sha256: str,
         expected_size: int,
-        response_model: type[GeneratedJSONModel] | None = None,
     ) -> dict[str, object]:
         """Stream one previously declared input after rechecking its identity."""
         if not path.startswith("/api/v1/") or ".." in path:
             raise ControlClientError("control API path is invalid")
+        _request_media_contract(path, "PUT", "application/octet-stream")
         if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
             raise ControlClientError("artifact input SHA-256 is invalid")
         if not 0 <= expected_size <= _MAX_ARTIFACT_INPUT:
@@ -928,10 +950,28 @@ class ControlClient:
         if len(content) > _MAX_RESPONSE:
             raise ControlResponseTooLarge("control API response exceeds safety limit")
         if not 200 <= status < 300:
+            error_media_type = response_headers.get("content-type", "").split(";", 1)[0]
+            _response_media_contract(
+                path,
+                "PUT",
+                status,
+                error_media_type.strip().lower(),
+                has_content=bool(content),
+            )
             try:
                 problem = json.loads(content)
             except (UnicodeDecodeError, json.JSONDecodeError):
+                if error_media_type.strip().lower() == "application/json":
+                    raise ControlMalformedResponse(
+                        "control API returned invalid JSON error"
+                    ) from None
                 problem = None
+            if error_media_type.strip().lower() == "application/json":
+                if not isinstance(problem, dict):
+                    raise ControlMalformedResponse(
+                        "control API error does not match the OpenAPI schema"
+                    )
+                _response_contract(path, "PUT", status, problem)
             detail = problem.get("detail") if isinstance(problem, dict) else None
             error_type = _STATUS_ERRORS.get(status, ControlHTTPError)
             raise error_type(
@@ -946,8 +986,15 @@ class ControlClient:
             raise ControlClientError("control API returned invalid JSON") from None
         if not isinstance(decoded, dict):
             raise ControlClientError("control API response must be an object")
-        if response_model is not None:
-            return _decode_generated_response(decoded, response_model)
+        response_media_type = response_headers.get("content-type", "").split(";", 1)[0]
+        _response_media_contract(
+            path,
+            "PUT",
+            status,
+            response_media_type.strip().lower(),
+            has_content=True,
+        )
+        _response_contract(path, "PUT", status, decoded)
         return decoded
 
     def download_file(
@@ -963,6 +1010,7 @@ class ControlClient:
         """Stream, verify, and atomically publish one result file."""
         if not path.startswith("/api/v1/") or ".." in path:
             raise ControlClientError("control API path is invalid")
+        _operation(path, "GET")
         if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
             raise ControlClientError("artifact output SHA-256 is invalid")
         if not 0 <= expected_size <= _MAX_ARTIFACT_OUTPUT:
@@ -992,10 +1040,28 @@ class ControlClient:
                     raise ControlResponseTooLarge(
                         "control API response exceeds safety limit"
                     )
+                error_media_type = error.headers.get("content-type", "").split(";", 1)[0]
+                _response_media_contract(
+                    path,
+                    "GET",
+                    error.code,
+                    error_media_type.strip().lower(),
+                    has_content=bool(content),
+                )
                 try:
                     problem = json.loads(content)
                 except (UnicodeDecodeError, json.JSONDecodeError):
+                    if error_media_type.strip().lower() == "application/json":
+                        raise ControlMalformedResponse(
+                            "control API returned invalid JSON error"
+                        ) from None
                     problem = None
+                if error_media_type.strip().lower() == "application/json":
+                    if not isinstance(problem, dict):
+                        raise ControlMalformedResponse(
+                            "control API error does not match the OpenAPI schema"
+                        )
+                    _response_contract(path, "GET", error.code, problem)
                 detail = problem.get("detail") if isinstance(problem, dict) else None
                 error_type = _STATUS_ERRORS.get(error.code, ControlHTTPError)
                 fields = _structured_http_error_fields(problem)
@@ -1016,11 +1082,22 @@ class ControlClient:
                 ) from None
             with response_context as response:
                 if not 200 <= response.status < 300:
+                    response_media_type = response.headers.get("content-type", "").split(
+                        ";", 1
+                    )[0]
+                    _response_media_contract(
+                        path,
+                        "GET",
+                        response.status,
+                        response_media_type.strip().lower(),
+                        has_content=True,
+                    )
                     raise ControlHTTPError(
                         response.status,
                         "control API request failed",
                         sensitive_values=(self._token,),
                     )
+                _response_definition(path, "GET", response.status)
                 response_type = response.headers.get("content-type", "").split(";", 1)[
                     0
                 ]
