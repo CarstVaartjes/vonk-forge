@@ -49,6 +49,7 @@ from vonk_control.run_switch_operations import (
     ArtifactInspection,
     PhaseExecution,
     RecipeLifecyclePhaseExecutor,
+    RunSwitchOperationConflict,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
     _transient_distribution_exception,
@@ -831,14 +832,24 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
         expected_runtime_interface="vonk.runtime.v1",
     )
 
+    request_key = str(uuid.uuid4())
     operation = service.apply(
         RunSwitchApplyRequest(
             **request.model_dump(),
             plan_digest=plan.plan_digest,
-            request_key=str(uuid.uuid4()),
+            request_key=request_key,
         ),
         actor="admin",
     )
+    replay = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=request_key,
+        ),
+        actor="admin",
+    )
+    assert replay.operation_id == operation.operation_id
     assert service.tick() is True
     assert service.tick() is True
     assert executor.events == ["model-download", "runtime-image"]
@@ -914,7 +925,16 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         build.image_digest = None
         build.oci_layout_sha256 = None
         build.image_bytes = None
-        build.plan = {"platform": "linux/arm64"}
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
+        assert revision is not None
+        build.plan = {
+            "build_id": build.id,
+            "recipe_revision_id": revision.id,
+            "recipe_content_sha256": revision.content_digest,
+            "source_bundle_sha256": build.source_bundle_sha256,
+            "build_input_sha256": build.build_input_sha256,
+            "platform": "linux/arm64",
+        }
         session.add(
             RecipeSourceBundle(
                 sha256=build.source_bundle_sha256,
@@ -938,8 +958,6 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         )
         assert snapshot is not None
         snapshot.capabilities = ["recipe.build.v1"]
-        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
-        assert revision is not None
         build_plan = RecipeBuildPlan(
             build_id=build.id,
             recipe_revision_id=revision.id,
@@ -953,13 +971,19 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     child_id = str(uuid.uuid4())
     build_preview_calls: list[str] = []
     build_start_calls: list[str] = []
+    build_start_plans: list[RecipeBuildPlan] = []
 
     def preview_build(_revision_id, _builder_id):
         build_preview_calls.append(_builder_id)
-        return build_plan
+        return replace(
+            build_plan,
+            build_id=str(uuid.uuid4()),
+            build_input_sha256="a" * 64,
+        )
 
-    def start_build(*_args, **_kwargs):
+    def start_build(build_plan, **_kwargs):
         build_start_calls.append("start")
+        build_start_plans.append(build_plan)
         return SimpleNamespace(id=child_id, state="running", owner_id=build_id)
 
     lifecycle.preview_build = preview_build
@@ -1002,8 +1026,13 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     assert waiting.current_phase == "prepare"
     assert waiting.progress.subphase == "container-build"
     assert waiting.result["child_operation_id"] == child_id
-    assert build_preview_calls == [nodes[0]]
+    # Apply consumes the plan persisted during preview.  A fresh planner call
+    # would admit mutable builder evidence and can derive a new identity.
+    assert build_preview_calls == []
     assert build_start_calls == ["start"]
+    assert build_start_plans[0].build_id == build_id
+    assert build_start_plans[0].build_input_sha256 == build_plan.build_input_sha256
+    assert build_start_plans[0].agent_payload["recipe_content_sha256"] == revision.content_digest
 
     restarted = RunSwitchOperationService(
         sessions,
@@ -1015,7 +1044,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
         memory_floor_bytes=50,
     )
     assert restarted.tick() is True
-    assert build_preview_calls == [nodes[0]]
+    assert build_preview_calls == []
     assert build_start_calls == ["start"]
 
     executor.children[child_id].state = "succeeded"
@@ -1162,13 +1191,7 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         build.image_digest = None
         build.oci_layout_sha256 = None
         build.image_bytes = None
-        build.plan = {
-            "build_id": build.id,
-            "recipe_revision_id": build.recipe_revision_id,
-            "source_bundle_sha256": source_digest,
-            "build_input_sha256": build.build_input_sha256,
-            "platform": "linux/arm64",
-        }
+        build.source_bundle_sha256 = source_digest
         session.add(
             RecipeSourceBundle(
                 sha256=source_digest,
@@ -1183,6 +1206,14 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         )
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
+        build.plan = {
+            "build_id": build.id,
+            "recipe_revision_id": build.recipe_revision_id,
+            "recipe_content_sha256": revision.content_digest,
+            "source_bundle_sha256": source_digest,
+            "build_input_sha256": build.build_input_sha256,
+            "platform": "linux/arm64",
+        }
         node = session.get(AgentNode, nodes[0])
         assert node is not None
         node.binary_digest = "a" * 64
@@ -1209,14 +1240,11 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         row = session.get(RecipeBuild, build_id)
         assert row is not None
         row.build_input_sha256 = build_plan.build_input_sha256
-
-    def preview_build(_revision_id, _builder_id):
-        return build_plan
+        row.plan["build_input_sha256"] = build_plan.build_input_sha256
 
     def start_build(*_args, **_kwargs):
         return SimpleNamespace(id=child_id, state="running", owner_id=build_id)
 
-    lifecycle_stub.preview_build = preview_build
     lifecycle_stub.build = start_build
     executor = RecipeLifecyclePhaseExecutor(
         lifecycle_stub,
@@ -1248,6 +1276,25 @@ def test_container_phase_delegates_to_existing_recipe_build_child(
         "build_input_sha256": "e" * 64,
         "state": "running",
     }
+
+    # A durable plan mutation is rejected before dispatch; execution never
+    # re-plans around the changed identity.
+    with sessions.begin() as session:
+        row = session.get(RecipeBuild, build_id)
+        assert row is not None
+        row.plan = {**row.plan, "build_input_sha256": "a" * 64}
+    with pytest.raises(
+        RunSwitchOperationConflict,
+        match="run-switch.container-build-plan-invalid",
+    ):
+        executor.execute(
+            plan,
+            phase,
+            item_index=0,
+            actor="admin",
+            request_key=str(uuid.uuid4()),
+            progress={},
+        )
 
 
 def test_resource_constrained_switch_exposes_after_stop_fit_and_orders_stop_before_prepare(
