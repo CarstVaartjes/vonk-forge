@@ -58,13 +58,13 @@ class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
-def _safe_path(value: str, *, absolute: bool) -> str:
+def _safe_path(value: str, *, absolute: bool, max_length: int = 512) -> str:
     parts = (
         value[1:].split("/") if absolute and value.startswith("/") else value.split("/")
     )
     if (
         not value
-        or len(value) > 512
+        or len(value) > max_length
         or "\\" in value
         or "\x00" in value
         or any(part in {"", ".", ".."} for part in parts)
@@ -103,9 +103,16 @@ class ModelCatalogIdentity(_StrictModel):
     They remain Controller/cache inputs and are never sent to a Spark.
     """
 
-    publisher: Identifier
+    publisher: str = Field(min_length=1, max_length=128)
     slug: Identifier
     content_sha256: Digest
+
+    @field_validator("publisher")
+    @classmethod
+    def publisher_is_safe_text(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("model publisher is invalid")
+        return value
 
 
 class DistributionObjectReceipt(_StrictModel):
@@ -184,7 +191,10 @@ class CompiledModelArtifact(_StrictModel):
     bytes: int = Field(ge=0, le=16 * 1024**4)
     roles: list[Identifier] = Field(min_length=1, max_length=32)
     mount: ExecutionMount
-    materialized_path: str = Field(min_length=1, max_length=512)
+    # This is a generated absolute path containing the selection prefix and
+    # the complete canonical file path, so it is bounded separately from the
+    # public ModelFile.path ceiling.
+    materialized_path: str = Field(min_length=1, max_length=1024)
     model: ModelCatalogIdentity
     distribution_object: DistributionObjectReceipt
 
@@ -196,7 +206,7 @@ class CompiledModelArtifact(_StrictModel):
     @field_validator("materialized_path")
     @classmethod
     def materialized_path_is_safe(cls, value: str) -> str:
-        value = _safe_path(value, absolute=True)
+        value = _safe_path(value, absolute=True, max_length=1024)
         if not value.startswith("/run/vonk/models/"):
             raise ValueError("materialized model path must be Controller-owned")
         return value

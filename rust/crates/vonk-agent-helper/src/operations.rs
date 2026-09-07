@@ -28,7 +28,7 @@ const MAX_COMMAND_OUTPUT_BYTES: u64 = 4096;
 const MAX_RUNTIME_REQUEST_BYTES: u64 = 64 * 1024;
 const MAX_RUNTIME_CONFIG_BYTES: usize = 16 * 1024 * 1024;
 const MAX_COMPILED_MODEL_FILES: usize = 4096;
-const MAX_COMPILED_MODEL_PATH_BYTES: usize = 512;
+const MAX_COMPILED_MODEL_PATH_CHARS: usize = 512;
 const MAX_COMPILED_MODEL_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
 const DOCKER_FIREWALL: &str = "/usr/lib/vonk-forge/vonk-forge-docker-firewall";
 const DOCKER_FIREWALL_CONFIG: &str = "/etc/vonk-forge-agent/docker-firewall.conf";
@@ -2419,7 +2419,7 @@ fn finish_timed_out_job(
 }
 
 fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool {
-    if target.len() > MAX_COMPILED_MODEL_PATH_BYTES
+    if target.chars().count() > MAX_COMPILED_MODEL_PATH_CHARS
         || (target != "/models"
             && (!target.starts_with("/models/")
                 || target.ends_with('/')
@@ -2438,10 +2438,10 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
     let new_layout = components.len() >= 3
         && matches!(components[0], Component::Normal(value) if lower_hex(&value.to_string_lossy(), 64))
         && matches!(components[1], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()))
-        && valid_model_path_components(&components[2..]);
+        && valid_model_file_path_components(&components[2..]);
     let selection_layout = components.len() >= 2
         && matches!(components[0], Component::Normal(value) if valid_artifact_id(&value.to_string_lossy()) && value != "sha256")
-        && valid_model_path_components(&components[1..]);
+        && valid_model_file_path_components(&components[1..]);
     if !(new_layout || selection_layout) {
         return false;
     }
@@ -2453,8 +2453,8 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
         .is_some_and(|value| value.split('/').all(valid_model_path_component))
 }
 
-fn valid_model_path_components(components: &[Component<'_>]) -> bool {
-    let mut bytes = 0_usize;
+fn valid_model_file_path_components(components: &[Component<'_>]) -> bool {
+    let mut chars = 0_usize;
     components.iter().all(|component| {
         let Component::Normal(value) = component else {
             return false;
@@ -2462,17 +2462,13 @@ fn valid_model_path_components(components: &[Component<'_>]) -> bool {
         let Some(value) = value.to_str() else {
             return false;
         };
-        bytes = bytes.saturating_add(value.len().saturating_add(1));
-        bytes <= MAX_COMPILED_MODEL_PATH_BYTES && valid_model_path_component(value)
+        chars = chars.saturating_add(value.chars().count().saturating_add(1));
+        chars <= MAX_COMPILED_MODEL_PATH_CHARS && valid_model_path_component(value)
     })
 }
 
 fn valid_model_path_component(value: &str) -> bool {
-    !value.is_empty()
-        && !matches!(value, "." | "..")
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    !value.is_empty() && !matches!(value, "." | "..") && !value.contains(['\\', '\0'])
 }
 
 fn valid_runtime_cache_mount(source: &Path, roots: &ManagedRoots) -> bool {
@@ -3581,6 +3577,24 @@ mod tests {
         let (_temp, roots) = runtime_fixture_with_separate_agent_data();
         let filename =
             "DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731.gguf";
+        let source = runtime_models(&roots).join("primary").join(filename);
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, b"model fixture").unwrap();
+        let target = format!("/models/primary/{filename}");
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(source, &target, true)]),
+                &roots,
+                None,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn runtime_accepts_canonical_unicode_space_and_underscore_model_filename() {
+        let (_temp, roots) = runtime_fixture_with_separate_agent_data();
+        let filename = "模型 weights_file.safetensors";
         let source = runtime_models(&roots).join("primary").join(filename);
         fs::create_dir_all(source.parent().unwrap()).unwrap();
         fs::write(&source, b"model fixture").unwrap();

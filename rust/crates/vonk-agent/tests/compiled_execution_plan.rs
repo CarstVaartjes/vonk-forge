@@ -101,6 +101,53 @@ fn materialized_paths_remain_selection_scoped() {
 }
 
 #[test]
+fn canonical_unicode_space_and_max_length_model_identity_round_trip() {
+    let mut value = fixture();
+    let path = "模型 file_".repeat(64);
+    assert_eq!(path.chars().count(), 512);
+    let publisher = format!("发布者 {}", "_".repeat(124));
+    assert_eq!(publisher.chars().count(), 128);
+    value["artifacts"][0]["path"] = json!(path);
+    value["artifacts"][0]["distribution_object"]["name"] = json!(path);
+    value["artifacts"][0]["model"]["publisher"] = json!(publisher);
+
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    plan.validate().unwrap();
+    assert_eq!(plan.artifacts[0].path.chars().count(), 512);
+    assert_eq!(plan.artifacts[0].model.publisher.chars().count(), 128);
+    assert_eq!(serde_json::to_value(plan).unwrap(), value);
+}
+
+#[test]
+fn unsafe_model_path_and_publisher_values_remain_rejected() {
+    for path in [
+        "/absolute",
+        "../escape",
+        "nested//file",
+        "nested/./file",
+        "nested/../file",
+        "bad\\name",
+        "bad\0name",
+    ] {
+        let mut value = fixture();
+        value["artifacts"][0]["path"] = json!(path);
+        value["artifacts"][0]["distribution_object"]["name"] = json!(path);
+        let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        assert!(plan.validate().is_err(), "{path}");
+    }
+
+    let mut value = fixture();
+    value["artifacts"][0]["model"]["publisher"] = json!("publisher\0");
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    assert!(plan.validate().is_err());
+
+    let mut value = fixture();
+    value["artifacts"][0]["model"]["publisher"] = json!("p".repeat(129));
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    assert!(plan.validate().is_err());
+}
+
+#[test]
 fn duplicate_final_mount_target_is_rejected() {
     let mut value = fixture();
     let duplicate = value["artifacts"][0].clone();

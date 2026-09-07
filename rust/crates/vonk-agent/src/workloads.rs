@@ -385,7 +385,7 @@ impl CompiledModelArtifact {
             || !self.roles.is_empty()
                 && (self.roles.windows(2).any(|pair| pair[0] >= pair[1])
                     || self.roles.iter().any(|role| !valid_role(role)))
-            || !valid_name(&self.model.publisher)
+            || !valid_model_publisher(&self.model.publisher)
             || !valid_name(&self.model.slug)
             || !lower_hex(&self.model.content_sha256, 64)
             || self.distribution_object.kind != "model"
@@ -638,7 +638,7 @@ pub fn materialized_model_path(
 
 fn valid_model_path(value: &str) -> bool {
     !value.is_empty()
-        && value.len() <= 512
+        && value.chars().count() <= 512
         && !value.contains(['\\', '\0'])
         && value.split('/').all(|part| {
             !part.is_empty()
@@ -745,6 +745,10 @@ fn valid_name(value: &str) -> bool {
                     || byte.is_ascii_digit()
                     || matches!(byte, b'.' | b'_' | b'-')
             })
+}
+
+fn valid_model_publisher(value: &str) -> bool {
+    !value.is_empty() && value.chars().count() <= 128 && !value.contains('\0')
 }
 
 fn valid_argv(value: &[String]) -> bool {

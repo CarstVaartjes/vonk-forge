@@ -34,7 +34,7 @@ class DistributionObject(WireModel):
     @classmethod
     def name_is_relative(cls, value: str) -> str:
         if (
-            len(value.encode("utf-8")) > 512
+            len(value) > 512
             or value.startswith("/")
             or "\\" in value
             or "\x00" in value
