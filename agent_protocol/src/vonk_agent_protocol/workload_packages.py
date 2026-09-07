@@ -266,7 +266,7 @@ class ComponentDescriptor(WireModel):
     sources: tuple[ComponentSource, ...] = Field(min_length=1, max_length=MAX_SOURCES)
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     size: int = Field(ge=1, le=MAX_COMPONENT_SIZE)
-    unpacked_size: int | None = Field(default=None, ge=1, le=MAX_COMPONENT_SIZE)
+    unpacked_size: int | None = Field(ge=1, le=MAX_COMPONENT_SIZE)
     platforms: tuple[Platform, ...] = Field(min_length=1, max_length=16)
     materialization: ComponentMaterialization
     evidence: tuple[ComponentEvidence, ...] = Field(max_length=MAX_EVIDENCE)
@@ -282,7 +282,8 @@ class ComponentDescriptor(WireModel):
         try:
             return cls.model_validate_json(canonical_message(value))
         except ValidationError as error:
-            raise AgentProtocolError(f"component is invalid: {error}") from error
+            detail = str(error).replace("oci.reference", "OCI digest reference")
+            raise AgentProtocolError(f"component is invalid: {detail}") from error
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -778,8 +779,12 @@ class PackageReleaseLock(WireModel):
         try:
             return cls.model_validate_json(canonical_message(document))
         except ValidationError as error:
+            detail = str(error)
+            detail = detail.replace("Extra inputs are not permitted", "unknown fields")
+            detail = detail.replace("git.commit", "Git commit")
+            detail = detail.replace("huggingface.revision", "Hugging Face revision")
             raise AgentProtocolError(
-                f"workload release lock is invalid: {error}"
+                f"workload release lock is invalid: {detail}"
             ) from error
 
 
