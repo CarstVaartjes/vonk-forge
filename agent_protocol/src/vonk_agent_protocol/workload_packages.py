@@ -4,15 +4,17 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import PurePosixPath
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from pydantic import Field, ValidationError, field_validator, model_validator
+
 from .contracts import AgentProtocolError, canonical_message
+from .wire_model import WireModel
 
 MAX_RELEASE_LOCK_BYTES = 1024 * 1024
 MAX_COMPONENT_SIZE = 2**63 - 1
@@ -25,6 +27,21 @@ MAX_PACKAGE_HELPER_GRANT_SECONDS = 15 * 60
 PACKAGE_HELPER_AUTHORITY = "vonk.workload-package-helper"
 PACKAGE_HELPER_GRANT_DOMAIN = b"Vonk Forge-WORKLOAD-PACKAGE-HELPER-GRANT-V1\0"
 PACKAGE_OBJECT_RECEIPT_DOMAIN = b"Vonk Forge-WORKLOAD-PACKAGE-OBJECT-RECEIPT-V1\0"
+
+
+class _PositionalWireModel(WireModel):
+    """Keep the established positional constructors while sharing wire validation."""
+
+    def __init__(self, *args: Any, **data: Any) -> None:
+        if args:
+            names = tuple(type(self).model_fields)
+            if len(args) > len(names) or any(
+                name in data for name in names[: len(args)]
+            ):
+                raise TypeError("invalid positional wire model arguments")
+            data.update(zip(names, args))
+        super().__init__(**data)
+
 
 IDENTIFIER = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?\Z")
 PLATFORM = re.compile(r"[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*\Z")
@@ -183,6 +200,14 @@ def _freeze(value: Any) -> Any:
     return value
 
 
+def _thaw(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_thaw(item) for item in value]
+    return value
+
+
 def _sequence(
     value: Any,
     *,
@@ -279,8 +304,7 @@ def _parse_evidence(value: Any, *, name: str) -> Mapping[str, object]:
     )
 
 
-@dataclass(frozen=True)
-class OciBundleMetadata:
+class OciBundleMetadata(_PositionalWireModel):
     """Signed metadata for an immutable OCI-rootfs workload component.
 
     Workload locks carry this metadata in the component's materialization
@@ -290,85 +314,41 @@ class OciBundleMetadata:
     actual generation path from its fixed package root.
     """
 
-    schema_version: int
-    component: str
-    manifest_digest: str
-    config_digest: str
-    rootfs_digest: str
-    architecture: str
-    runtime: str
-    rootfs: str
-    entrypoint: str
+    schema_version: Literal[1]
+    component: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+    manifest_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    config_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    rootfs_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    architecture: str = Field(pattern=r"^(?:linux-arm64|linux-x86_64)$")
+    runtime: Literal["runc"]
+    rootfs: str = Field(min_length=1, max_length=256)
+    entrypoint: str = Field(min_length=1, max_length=256)
 
-    def __post_init__(self) -> None:
-        if self.schema_version != 1 or isinstance(self.schema_version, bool):
-            raise AgentProtocolError("OCI bundle schema_version is invalid")
-        _identifier(self.component, name="OCI bundle component")
-        for value, name in (
-            (self.manifest_digest, "OCI manifest digest"),
-            (self.config_digest, "OCI config digest"),
-            (self.rootfs_digest, "OCI rootfs digest"),
+    @field_validator("rootfs", "entrypoint")
+    @classmethod
+    def relative_path_is_safe(cls, value: str) -> str:
+        if (
+            value.startswith("/")
+            or "\\" in value
+            or any(part in {"", ".", ".."} for part in value.split("/"))
+            or any(
+                ord(character) < 0x20 or ord(character) == 0x7F for character in value
+            )
         ):
-            _sha256(value, name=name, prefixed=True)
-        if not isinstance(self.architecture, str) or OCI_ARCHITECTURE.fullmatch(
-            self.architecture
-        ) is None:
-            raise AgentProtocolError("OCI bundle architecture is invalid")
-        if self.runtime != "runc":
-            raise AgentProtocolError("OCI bundle runtime is unsupported")
-        for value, name in ((self.rootfs, "OCI bundle rootfs"), (self.entrypoint, "OCI bundle entrypoint")):
-            if (
-                not isinstance(value, str)
-                or not 1 <= len(value) <= 256
-                or value.startswith("/")
-                or "\\" in value
-                or any(part in {"", ".", ".."} for part in value.split("/"))
-                or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
-            ):
-                raise AgentProtocolError(f"{name} is invalid")
+            raise ValueError("OCI bundle path is invalid")
+        return value
 
     @classmethod
     def parse(cls, value: Any) -> OciBundleMetadata:
-        document = _mapping(value, name="OCI bundle metadata")
-        _exact_fields(
-            document,
-            required={
-                "schema_version",
-                "component",
-                "manifest_digest",
-                "config_digest",
-                "rootfs_digest",
-                "architecture",
-                "runtime",
-                "rootfs",
-                "entrypoint",
-            },
-            name="OCI bundle metadata",
-        )
-        return cls(
-            document["schema_version"],
-            document["component"],
-            document["manifest_digest"],
-            document["config_digest"],
-            document["rootfs_digest"],
-            document["architecture"],
-            document["runtime"],
-            document["rootfs"],
-            document["entrypoint"],
-        )
+        try:
+            return cls.model_validate_json(canonical_message(value))
+        except ValidationError as error:
+            raise AgentProtocolError(
+                f"OCI bundle metadata is invalid: {error}"
+            ) from error
 
     def to_mapping(self) -> dict[str, object]:
-        return {
-            "schema_version": 1,
-            "component": self.component,
-            "manifest_digest": self.manifest_digest,
-            "config_digest": self.config_digest,
-            "rootfs_digest": self.rootfs_digest,
-            "architecture": self.architecture,
-            "runtime": self.runtime,
-            "rootfs": self.rootfs,
-            "entrypoint": self.entrypoint,
-        }
+        return self.model_dump(mode="json")
 
 
 def _parse_materialization(value: Any) -> Mapping[str, object]:
@@ -398,23 +378,41 @@ def _parse_materialization(value: Any) -> Mapping[str, object]:
         )
         return MappingProxyType({"method": method})
     metadata = OciBundleMetadata.parse(
-        {"schema_version": 1, **{key: value for key, value in materialization.items() if key != "method"}}
+        {
+            "schema_version": 1,
+            **{key: value for key, value in materialization.items() if key != "method"},
+        }
     )
     return MappingProxyType({"method": method, **metadata.to_mapping()})
 
 
-@dataclass(frozen=True)
-class ComponentDescriptor:
+class ComponentDescriptor(_PositionalWireModel):
     name: str
     kind: str
     media_type: str
-    sources: tuple[Mapping[str, object], ...]
-    digest: str
-    size: int
-    unpacked_size: int | None
-    platforms: tuple[str, ...]
+    sources: tuple[Mapping[str, object], ...] = Field(
+        min_length=1, max_length=MAX_SOURCES
+    )
+    digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    size: int = Field(ge=1, le=MAX_COMPONENT_SIZE)
+    unpacked_size: int | None = Field(default=None, ge=1, le=MAX_COMPONENT_SIZE)
+    platforms: tuple[str, ...] = Field(min_length=1, max_length=16)
     materialization: Mapping[str, object]
-    evidence: tuple[Mapping[str, object], ...]
+    evidence: tuple[Mapping[str, object], ...] = Field(max_length=MAX_EVIDENCE)
+
+    @field_validator("materialization", mode="after")
+    @classmethod
+    def materialization_is_immutable(
+        cls, value: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        return _freeze(value)
+
+    @field_validator("sources", "evidence", mode="after")
+    @classmethod
+    def maps_are_immutable(
+        cls, value: tuple[Mapping[str, object], ...]
+    ) -> tuple[Mapping[str, object], ...]:
+        return tuple(_freeze(item) for item in value)
 
     @classmethod
     def parse(cls, value: Any) -> ComponentDescriptor:
@@ -486,6 +484,20 @@ class ComponentDescriptor:
             materialization=_parse_materialization(component["materialization"]),
             evidence=evidence,
         )
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "kind": self.kind,
+            "media_type": self.media_type,
+            "sources": _thaw(self.sources),
+            "digest": self.digest,
+            "size": self.size,
+            "unpacked_size": self.unpacked_size,
+            "platforms": list(self.platforms),
+            "materialization": _thaw(self.materialization),
+            "evidence": _thaw(self.evidence),
+        }
 
 
 def _platform(value: Any) -> str:
@@ -806,9 +818,7 @@ def _parse_resource_envelope(value: Any) -> Mapping[str, object]:
         },
         name="resource_envelope",
     )
-    if envelope["schema_version"] != 1 or isinstance(
-        envelope["schema_version"], bool
-    ):
+    if envelope["schema_version"] != 1 or isinstance(envelope["schema_version"], bool):
         raise AgentProtocolError("resource_envelope schema_version is invalid")
     required_nodes = _positive_integer(
         envelope["required_nodes"],
@@ -857,7 +867,10 @@ def _parse_resource_envelope(value: Any) -> Mapping[str, object]:
         if parsed_rank != expected_rank:
             raise AgentProtocolError("resource_envelope ranks must be contiguous")
         ranks.append(
-            {"rank": parsed_rank, "role": _identifier(rank["role"], name="resource role")}
+            {
+                "rank": parsed_rank,
+                "role": _identifier(rank["role"], name="resource role"),
+            }
         )
     fabric = _mapping(envelope["fabric"], name="resource_envelope fabric")
     _exact_fields(
@@ -921,9 +934,7 @@ def _parse_resource_envelope(value: Any) -> Mapping[str, object]:
         return result
 
     per_node = parse_values(envelope["per_node"], name="resource_envelope per_node")
-    aggregate = parse_values(
-        envelope["aggregate"], name="resource_envelope aggregate"
-    )
+    aggregate = parse_values(envelope["aggregate"], name="resource_envelope aggregate")
     for field in _RESOURCE_FIELDS:
         minimum = per_node[field] * required_nodes
         if aggregate[field] < minimum:
@@ -967,257 +978,146 @@ class PackageHelperOperation(StrEnum):
     VERIFY_RELEASE = "verify-release"
 
 
-@dataclass(frozen=True)
-class PackageHelperSignature:
+class PackageHelperSignature(_PositionalWireModel):
     algorithm: str
     key_id: str
     value: str
 
-    def __post_init__(self) -> None:
-        if (
-            self.algorithm != "ed25519"
-            or not isinstance(self.key_id, str)
-            or SHA256.fullmatch(self.key_id) is None
-            or not isinstance(self.value, str)
-            or ED25519_SIGNATURE.fullmatch(self.value) is None
-        ):
-            raise AgentProtocolError("package helper signature is invalid")
+    @field_validator("algorithm")
+    @classmethod
+    def algorithm_is_ed25519(cls, value: str) -> str:
+        if value != "ed25519":
+            raise ValueError("package helper signature algorithm is invalid")
+        return value
+
+    key_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    value: str = Field(pattern=r"^[0-9a-f]{128}$")
 
     @classmethod
     def parse(cls, value: Any) -> PackageHelperSignature:
-        document = _mapping(value, name="package helper signature")
-        _exact_fields(
-            document,
-            required={"algorithm", "key_id", "value"},
-            name="package helper signature",
-        )
-        return cls(document["algorithm"], document["key_id"], document["value"])
+        try:
+            return cls.model_validate_json(canonical_message(value))
+        except ValidationError as error:
+            raise AgentProtocolError(
+                f"package helper signature is invalid: {error}"
+            ) from error
 
     def to_mapping(self) -> dict[str, object]:
-        return {
-            "algorithm": self.algorithm,
-            "key_id": self.key_id,
-            "value": self.value,
-        }
+        return self.model_dump(mode="json")
 
 
-@dataclass(frozen=True)
-class PackageHelperGrantClaims:
-    schema_version: int
-    authority: str
+class PackageHelperGrantClaims(_PositionalWireModel):
+    schema_version: Literal[1]
+    authority: Literal[PACKAGE_HELPER_AUTHORITY]
     request_id: str
-    node_id: str
+    node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
     job_id: str
     operation_id: str
-    attempt: int
+    attempt: int = Field(ge=1, le=2**31 - 1)
     fence: str
-    release_digest: str
+    release_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     generation: str
     operation: PackageHelperOperation
-    request_digest: str
-    issued_at: int
-    expires_at: int
+    request_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    issued_at: int = Field(ge=1, le=2**63 - 1)
+    expires_at: int = Field(ge=1, le=2**63 - 1)
 
-    def __post_init__(self) -> None:
-        if self.schema_version != 1 or isinstance(self.schema_version, bool):
-            raise AgentProtocolError("package helper grant version is invalid")
-        if self.authority != PACKAGE_HELPER_AUTHORITY:
-            raise AgentProtocolError("package helper grant authority is invalid")
-        _uuid4(self.request_id, name="package helper request ID")
-        if not isinstance(self.node_id, str) or NODE_ID.fullmatch(self.node_id) is None:
-            raise AgentProtocolError("package helper node ID is invalid")
-        _uuid4(self.job_id, name="package helper job ID")
-        _uuid4(self.operation_id, name="package helper operation ID")
-        _positive_integer(
-            self.attempt, name="package helper attempt", maximum=2**31 - 1
-        )
-        _uuid4(self.fence, name="package helper fence")
-        _sha256(self.release_digest, name="package helper release digest", prefixed=False)
-        _identifier(self.generation, name="package helper generation")
-        if type(self.operation) is not PackageHelperOperation:
-            raise AgentProtocolError("package helper operation is invalid")
-        _sha256(self.request_digest, name="package helper request digest", prefixed=False)
-        _positive_integer(
-            self.issued_at, name="package helper issued_at", maximum=2**63 - 1
-        )
-        _positive_integer(
-            self.expires_at, name="package helper expires_at", maximum=2**63 - 1
-        )
-        if not 1 <= self.expires_at - self.issued_at <= MAX_PACKAGE_HELPER_GRANT_SECONDS:
-            raise AgentProtocolError("package helper grant expiry is invalid")
+    @field_validator("request_id", "job_id", "operation_id", "fence")
+    @classmethod
+    def ids_are_uuid4(cls, value: str, info: Any) -> str:
+        return _uuid4(value, name=f"package helper {info.field_name}")
+
+    generation: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+
+    @field_validator("operation", mode="before")
+    @classmethod
+    def operation_is_closed(cls, value: Any) -> PackageHelperOperation:
+        try:
+            return PackageHelperOperation(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError("package helper operation is invalid") from error
+
+    @model_validator(mode="after")
+    def expiry_is_bounded(self) -> PackageHelperGrantClaims:
+        if (
+            not 1
+            <= self.expires_at - self.issued_at
+            <= MAX_PACKAGE_HELPER_GRANT_SECONDS
+        ):
+            raise ValueError("package helper grant expiry is invalid")
+        return self
 
     @classmethod
     def parse(cls, value: Any) -> PackageHelperGrantClaims:
-        document = _mapping(value, name="package helper grant claims")
-        fields = {
-            "schema_version",
-            "authority",
-            "request_id",
-            "node_id",
-            "job_id",
-            "operation_id",
-            "attempt",
-            "fence",
-            "release_digest",
-            "generation",
-            "operation",
-            "request_digest",
-            "issued_at",
-            "expires_at",
-        }
-        _exact_fields(document, required=fields, name="package helper grant claims")
         try:
-            operation = PackageHelperOperation(document["operation"])
-        except (TypeError, ValueError) as error:
-            raise AgentProtocolError("package helper operation is invalid") from error
-        return cls(
-            schema_version=document["schema_version"],
-            authority=document["authority"],
-            request_id=document["request_id"],
-            node_id=document["node_id"],
-            job_id=document["job_id"],
-            operation_id=document["operation_id"],
-            attempt=document["attempt"],
-            fence=document["fence"],
-            release_digest=document["release_digest"],
-            generation=document["generation"],
-            operation=operation,
-            request_digest=document["request_digest"],
-            issued_at=document["issued_at"],
-            expires_at=document["expires_at"],
-        )
+            return cls.model_validate_json(canonical_message(value))
+        except ValidationError as error:
+            raise AgentProtocolError(
+                f"package helper grant claims are invalid: {error}"
+            ) from error
 
     def to_mapping(self) -> dict[str, object]:
-        return {
-            "schema_version": self.schema_version,
-            "authority": self.authority,
-            "request_id": self.request_id,
-            "node_id": self.node_id,
-            "job_id": self.job_id,
-            "operation_id": self.operation_id,
-            "attempt": self.attempt,
-            "fence": self.fence,
-            "release_digest": self.release_digest,
-            "generation": self.generation,
-            "operation": self.operation.value,
-            "request_digest": self.request_digest,
-            "issued_at": self.issued_at,
-            "expires_at": self.expires_at,
-        }
+        return self.model_dump(mode="json")
 
 
-@dataclass(frozen=True)
-class SignedPackageHelperGrant:
+class SignedPackageHelperGrant(_PositionalWireModel):
     claims: PackageHelperGrantClaims
     signature: PackageHelperSignature
 
-    def __post_init__(self) -> None:
-        if type(self.claims) is not PackageHelperGrantClaims or type(
-            self.signature
-        ) is not PackageHelperSignature:
-            raise AgentProtocolError("signed package helper grant is invalid")
-
     @classmethod
     def parse(cls, value: Any) -> SignedPackageHelperGrant:
-        document = _mapping(value, name="signed package helper grant")
-        _exact_fields(
-            document,
-            required={"claims", "signature"},
-            name="signed package helper grant",
-        )
-        return cls(
-            PackageHelperGrantClaims.parse(document["claims"]),
-            PackageHelperSignature.parse(document["signature"]),
-        )
+        try:
+            return cls.model_validate_json(canonical_message(value))
+        except ValidationError as error:
+            raise AgentProtocolError(
+                f"signed package helper grant is invalid: {error}"
+            ) from error
 
     def to_mapping(self) -> dict[str, object]:
-        return {
-            "claims": self.claims.to_mapping(),
-            "signature": self.signature.to_mapping(),
-        }
+        return self.model_dump(mode="json")
 
 
-@dataclass(frozen=True)
-class PackageObjectReceiptClaims:
-    schema_version: int
-    authority: str
-    object_digest: str
-    size: int
+class PackageObjectReceiptClaims(_PositionalWireModel):
+    schema_version: Literal[1]
+    authority: Literal[PACKAGE_HELPER_AUTHORITY]
+    object_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    size: int = Field(ge=1, le=2**63 - 1)
     relative_name: str
 
-    def __post_init__(self) -> None:
-        if self.schema_version != 1 or isinstance(self.schema_version, bool):
-            raise AgentProtocolError("package object receipt version is invalid")
-        if self.authority != PACKAGE_HELPER_AUTHORITY:
-            raise AgentProtocolError("package object receipt authority is invalid")
-        _sha256(self.object_digest, name="package object receipt digest", prefixed=False)
-        _positive_integer(
-            self.size, name="package object receipt size", maximum=2**63 - 1
-        )
+    @model_validator(mode="after")
+    def relative_name_matches_digest(self) -> PackageObjectReceiptClaims:
         if self.relative_name != f"objects/sha256/{self.object_digest}":
-            raise AgentProtocolError("package object receipt relative name is invalid")
+            raise ValueError("package object receipt relative name is invalid")
+        return self
 
     @classmethod
     def parse(cls, value: Any) -> PackageObjectReceiptClaims:
-        document = _mapping(value, name="package object receipt claims")
-        _exact_fields(
-            document,
-            required={
-                "schema_version",
-                "authority",
-                "object_digest",
-                "size",
-                "relative_name",
-            },
-            name="package object receipt claims",
-        )
-        return cls(
-            document["schema_version"],
-            document["authority"],
-            document["object_digest"],
-            document["size"],
-            document["relative_name"],
-        )
+        try:
+            return cls.model_validate_json(canonical_message(value))
+        except ValidationError as error:
+            raise AgentProtocolError(
+                f"package object receipt claims are invalid: {error}"
+            ) from error
 
     def to_mapping(self) -> dict[str, object]:
-        return {
-            "schema_version": self.schema_version,
-            "authority": self.authority,
-            "object_digest": self.object_digest,
-            "size": self.size,
-            "relative_name": self.relative_name,
-        }
+        return self.model_dump(mode="json")
 
 
-@dataclass(frozen=True)
-class SignedPackageObjectReceipt:
+class SignedPackageObjectReceipt(_PositionalWireModel):
     claims: PackageObjectReceiptClaims
     signature: PackageHelperSignature
 
-    def __post_init__(self) -> None:
-        if type(self.claims) is not PackageObjectReceiptClaims or type(
-            self.signature
-        ) is not PackageHelperSignature:
-            raise AgentProtocolError("signed package object receipt is invalid")
-
     @classmethod
     def parse(cls, value: Any) -> SignedPackageObjectReceipt:
-        document = _mapping(value, name="signed package object receipt")
-        _exact_fields(
-            document,
-            required={"claims", "signature"},
-            name="signed package object receipt",
-        )
-        return cls(
-            PackageObjectReceiptClaims.parse(document["claims"]),
-            PackageHelperSignature.parse(document["signature"]),
-        )
+        try:
+            return cls.model_validate_json(canonical_message(value))
+        except ValidationError as error:
+            raise AgentProtocolError(
+                f"signed package object receipt is invalid: {error}"
+            ) from error
 
     def to_mapping(self) -> dict[str, object]:
-        return {
-            "claims": self.claims.to_mapping(),
-            "signature": self.signature.to_mapping(),
-        }
+        return self.model_dump(mode="json")
 
     @property
     def object_digest(self) -> str:
@@ -1246,21 +1146,33 @@ def package_object_receipt_signing_bytes(
     return PACKAGE_OBJECT_RECEIPT_DOMAIN + canonical_message(claims.to_mapping())
 
 
-@dataclass(frozen=True)
-class PackageReleaseLock:
-    schema_version: int
-    family_id: str
-    upstream_version: str
+class PackageReleaseLock(WireModel):
+    schema_version: Literal[1]
+    family_id: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+    upstream_version: str = Field(min_length=1, max_length=128)
     upstream_identity: Mapping[str, object]
-    components: tuple[ComponentDescriptor, ...]
-    dependency_digests: tuple[str, ...]
+    components: tuple[ComponentDescriptor, ...] = Field(max_length=255)
+    dependency_digests: tuple[str, ...] = Field(max_length=256)
     adapter: ComponentDescriptor
-    adapter_abi: int
+    adapter_abi: int = Field(ge=1, le=255)
     compatibility: Mapping[str, object]
     validation: tuple[Mapping[str, object], ...]
     provenance: tuple[Mapping[str, object], ...]
     resolver: Mapping[str, object]
     resource_envelope: Mapping[str, object] | None = None
+
+    @field_validator(
+        "upstream_identity",
+        "compatibility",
+        "resolver",
+        "resource_envelope",
+        mode="after",
+    )
+    @classmethod
+    def nested_maps_are_immutable(
+        cls, value: Mapping[str, object] | None
+    ) -> Mapping[str, object] | None:
+        return None if value is None else _freeze(value)
 
     @property
     def canonical_bytes(self) -> bytes:
@@ -1269,9 +1181,9 @@ class PackageReleaseLock:
             "family_id": self.family_id,
             "upstream_version": self.upstream_version,
             "upstream_identity": self.upstream_identity,
-            "components": self.components,
+            "components": [component.to_mapping() for component in self.components],
             "dependency_digests": self.dependency_digests,
-            "adapter": self.adapter,
+            "adapter": self.adapter.to_mapping(),
             "adapter_abi": self.adapter_abi,
             "compatibility": self.compatibility,
             "validation": self.validation,
@@ -1384,9 +1296,8 @@ class PackageReleaseLock:
         return lock
 
 
-@dataclass(frozen=True)
-class PackageReleaseGraph:
-    root_digest: str
+class PackageReleaseGraph(WireModel):
+    root_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     releases: tuple[PackageReleaseLock, ...]
 
     @property

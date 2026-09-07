@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import replace
 from importlib.resources import files
 from types import MappingProxyType
 
@@ -156,9 +155,17 @@ def test_release_lock_parses_signed_resource_envelope() -> None:
     "mutate, message",
     [
         (lambda envelope: envelope["per_node"].pop("host_memory_bytes"), "host_memory"),
-        (lambda envelope: envelope["per_node"].update({"download_bytes": -1}), "download"),
+        (
+            lambda envelope: envelope["per_node"].update({"download_bytes": -1}),
+            "download",
+        ),
         (lambda envelope: envelope.update({"measurement": "unknown"}), "measurement"),
-        (lambda envelope: envelope.update({"aggregate": {**envelope["aggregate"], "installed_bytes": 1}}), "aggregate"),
+        (
+            lambda envelope: envelope.update(
+                {"aggregate": {**envelope["aggregate"], "installed_bytes": 1}}
+            ),
+            "aggregate",
+        ),
     ],
 )
 def test_release_lock_rejects_unbounded_resource_envelope(mutate, message: str) -> None:
@@ -237,9 +244,9 @@ def test_release_lock_and_components_are_deeply_immutable() -> None:
 
 
 def test_component_descriptor_exposes_exact_contract_fields() -> None:
-    descriptor = ComponentDescriptor.parse(component())
+    ComponentDescriptor.parse(component())
 
-    assert tuple(descriptor.__dataclass_fields__) == (
+    assert tuple(ComponentDescriptor.model_fields) == (
         "name",
         "kind",
         "media_type",
@@ -403,8 +410,8 @@ def test_graph_rejects_dependency_cycle() -> None:
     second = PackageReleaseLock.parse(lock_document("cycle-b"))
     first_key = first.digest
     second_key = second.digest
-    first = replace(first, dependency_digests=(second_key,))
-    second = replace(second, dependency_digests=(first_key,))
+    first = first.model_copy(update={"dependency_digests": (second_key,)})
+    second = second.model_copy(update={"dependency_digests": (first_key,)})
 
     with pytest.raises(AgentProtocolError, match="dependency cycle"):
         PackageReleaseGraph.resolve(

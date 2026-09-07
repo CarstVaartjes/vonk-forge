@@ -575,9 +575,19 @@ class AgentGrantResponse(StrictJSONModel):
     grant: dict[str, object]
 
 
+class PackageHelperGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    grant: SignedPackageHelperGrant
+
+
 class PackageHelperReceiptsResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     receipts: list[dict[str, object]]
+
+
+class PackageHelperTypedReceiptsResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    receipts: list[SignedPackageObjectReceipt]
 
 
 class RecipeRunObservationGrantResponse(StrictJSONModel):
@@ -594,15 +604,15 @@ def _host_grant_response(grant: object) -> dict[str, object]:
 
 def _package_grant_response(grant: object) -> dict[str, object]:
     parsed = SignedPackageHelperGrant.parse(grant.to_mapping())
-    return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
+    return PackageHelperGrantResponse(grant=parsed).model_dump(mode="json")
 
 
 def _package_receipts_response(receipts: object) -> dict[str, object]:
     parsed = [
-        SignedPackageObjectReceipt.parse(receipt.to_mapping()).to_mapping()
+        SignedPackageObjectReceipt.parse(receipt.to_mapping())
         for receipt in receipts
     ]
-    return PackageHelperReceiptsResponse(receipts=parsed).model_dump()
+    return PackageHelperTypedReceiptsResponse(receipts=parsed).model_dump(mode="json")
 
 
 def _agent_upgrade_request_material(
