@@ -574,6 +574,9 @@ def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> 
         assert installation.mapping_id == mapping
         assert installation.recipe_build_id == build
         assert installation.mapping_generation == 1
+        assert installation.model_content_digests == [
+            installation.model_content_sha256
+        ]
         assert reservation.amount_bytes == plan.nodes[0].required_bytes
 
 

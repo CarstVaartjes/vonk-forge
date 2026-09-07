@@ -28,6 +28,7 @@ from urllib.parse import unquote, urljoin, urlsplit
 import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .cached_file_verification import verified_files
 from .logging import redact_text
@@ -63,6 +64,32 @@ _HF_CANONICAL_HOST = "huggingface.co"
 _USE_MANIFEST_BYTES = object()
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
+_ARTIFACT_MANIFEST_FIELDS = frozenset(
+    {
+        "key",
+        "id",
+        "path",
+        "kind",
+        "repository",
+        "source",
+        "revision",
+        "sha256",
+        "download_bytes",
+        "roles",
+        "model_content_sha256",
+    }
+)
+_ARTIFACT_SET_MANIFEST_FIELDS = frozenset(
+    {
+        "schema_version",
+        "source_policy",
+        "model_content_sha256",
+        "recipe_revision_sha256",
+        "model_definition_ref",
+        "model_content_digests",
+        "artifacts",
+    }
+)
 
 
 class ModelCacheError(RuntimeError):
@@ -223,7 +250,7 @@ class ArtifactSpec:
     sha256: str
     expected_bytes: int
     roles: tuple[str, ...]
-    model_version_sha256: str | None = None
+    model_content_sha256: str | None = None
 
     def identity(self) -> dict[str, object]:
         return {
@@ -237,7 +264,7 @@ class ArtifactSpec:
             "sha256": self.sha256,
             "download_bytes": self.expected_bytes,
             "roles": list(self.roles),
-            "model_version_sha256": self.model_version_sha256,
+            "model_content_sha256": self.model_content_sha256,
         }
 
     def cache_identity(self) -> dict[str, object]:
@@ -262,36 +289,39 @@ class ArtifactSpec:
 
     @classmethod
     def from_manifest(cls, value: Mapping[str, object]) -> ArtifactSpec:
+        if set(value) != _ARTIFACT_MANIFEST_FIELDS:
+            raise ModelCacheResolutionError(
+                "model_cache.manifest_invalid",
+                "cache manifest artifact fields are invalid",
+            )
         try:
+            string_fields = ("key", "id", "path", "kind", "source", "sha256")
+            if any(type(value[field]) is not str for field in string_fields):
+                raise TypeError
+            if any(
+                value[field] is not None and type(value[field]) is not str
+                for field in ("repository", "revision", "model_content_sha256")
+            ):
+                raise TypeError
+            if type(value["download_bytes"]) is not int or value["download_bytes"] < 0:
+                raise TypeError
             roles = value["roles"]
-            if not isinstance(roles, list) or not all(
-                isinstance(role, str) and role for role in roles
+            if type(roles) is not list or not all(
+                type(role) is str and role for role in roles
             ):
                 raise TypeError
             result = cls(
-                key=str(value["key"]),
-                artifact_id=str(value["id"]),
-                path=str(value["path"]),
-                kind=str(value["kind"]),
-                repository=(
-                    None
-                    if value.get("repository") is None
-                    else str(value["repository"])
-                ),
-                source=str(value["source"]),
-                revision=(
-                    None
-                    if value.get("revision") is None
-                    else str(value["revision"])
-                ),
-                sha256=str(value["sha256"]),
-                expected_bytes=int(value["download_bytes"]),
+                key=value["key"],
+                artifact_id=value["id"],
+                path=value["path"],
+                kind=value["kind"],
+                repository=value["repository"],
+                source=value["source"],
+                revision=value["revision"],
+                sha256=value["sha256"],
+                expected_bytes=value["download_bytes"],
                 roles=tuple(roles),
-                model_version_sha256=(
-                    None
-                    if value.get("model_version_sha256") is None
-                    else str(value["model_version_sha256"])
-                ),
+                model_content_sha256=value["model_content_sha256"],
             )
         except (KeyError, TypeError, ValueError) as error:
             raise ModelCacheResolutionError(
@@ -303,24 +333,24 @@ class ArtifactSpec:
 
 @dataclass(frozen=True, slots=True)
 class ArtifactSetManifest:
-    model_version_sha256: str | None
+    model_content_sha256: str | None
     recipe_revision_sha256: str | None
-    model_versions: tuple[str, ...]
+    model_content_digests: tuple[str, ...]
     artifacts: tuple[ArtifactSpec, ...]
-    model_version_ref: Mapping[str, object] | None = None
+    model_definition_ref: Mapping[str, object] | None = None
 
     def document(self) -> dict[str, object]:
         return {
             "schema_version": SCHEMA_VERSION,
             "source_policy": SOURCE_POLICY,
-            "model_version_sha256": self.model_version_sha256,
+            "model_content_sha256": self.model_content_sha256,
             "recipe_revision_sha256": self.recipe_revision_sha256,
-            "model_version_ref": (
+            "model_definition_ref": (
                 None
-                if self.model_version_ref is None
-                else dict(self.model_version_ref)
+                if self.model_definition_ref is None
+                else dict(self.model_definition_ref)
             ),
-            "model_versions": list(self.model_versions),
+            "model_content_digests": list(self.model_content_digests),
             "artifacts": [item.identity() for item in self.artifacts],
         }
 
@@ -349,31 +379,46 @@ class ArtifactSetManifest:
             raise ModelCacheResolutionError(
                 "model_cache.schema_unsupported", "cache manifest schema is unsupported"
             )
+        if set(value) != _ARTIFACT_SET_MANIFEST_FIELDS:
+            raise ModelCacheResolutionError(
+                "model_cache.manifest_invalid",
+                "cache manifest fields are invalid",
+            )
         raw_artifacts = value.get("artifacts")
-        raw_versions = value.get("model_versions", [])
-        if not isinstance(raw_artifacts, list) or not isinstance(raw_versions, list):
+        raw_model_content_digests = value["model_content_digests"]
+        if (
+            type(value["schema_version"]) is not int
+            or type(value["source_policy"]) is not str
+            or value["source_policy"] != SOURCE_POLICY
+            or type(raw_artifacts) is not list
+            or type(raw_model_content_digests) is not list
+            or not all(type(item) is str for item in raw_model_content_digests)
+            or (
+                value["model_definition_ref"] is not None
+                and not isinstance(value["model_definition_ref"], Mapping)
+            )
+            or any(
+                value[field] is not None and type(value[field]) is not str
+                for field in ("model_content_sha256", "recipe_revision_sha256")
+            )
+            or any(not isinstance(item, Mapping) for item in raw_artifacts)
+        ):
             raise ModelCacheResolutionError(
                 "model_cache.manifest_invalid", "cache manifest shape is invalid"
             )
         artifacts = tuple(
-            ArtifactSpec.from_manifest(item)
-            for item in raw_artifacts
-            if isinstance(item, Mapping)
+            ArtifactSpec.from_manifest(item) for item in raw_artifacts
         )
-        if len(artifacts) != len(raw_artifacts):
-            raise ModelCacheResolutionError(
-                "model_cache.manifest_invalid", "cache manifest artifacts are invalid"
-            )
         result = cls(
-            model_version_sha256=_optional_digest(value.get("model_version_sha256")),
+            model_content_sha256=_optional_digest(value.get("model_content_sha256")),
             recipe_revision_sha256=_optional_digest(
                 value.get("recipe_revision_sha256")
             ),
-            model_versions=tuple(str(item) for item in raw_versions),
+            model_content_digests=tuple(raw_model_content_digests),
             artifacts=tuple(sorted(artifacts, key=lambda item: item.key)),
-            model_version_ref=(
-                value.get("model_version_ref")
-                if isinstance(value.get("model_version_ref"), Mapping)
+            model_definition_ref=(
+                value.get("model_definition_ref")
+                if isinstance(value.get("model_definition_ref"), Mapping)
                 else None
             ),
         )
@@ -513,9 +558,9 @@ def _validate_manifest(value: ArtifactSetManifest) -> None:
             "model_cache.artifact_duplicate", "cache artifact keys must be unique"
         )
     _unique_artifacts(value.artifacts)
-    if any(not isinstance(item, str) or not _is_hex(item) for item in value.model_versions):
+    if any(not isinstance(item, str) or not _is_hex(item) for item in value.model_content_digests):
         raise ModelCacheResolutionError(
-            "model_cache.model_versions_invalid", "cache model dependency pins are invalid"
+            "model_cache.model_content_digests_invalid", "cache model dependency pins are invalid"
         )
     encoded = json.dumps(value.document(), sort_keys=True, separators=(",", ":")).encode()
     if len(encoded) > _MAX_MANIFEST_BYTES:
@@ -687,17 +732,30 @@ def _parse_iso(value: str) -> datetime:
         ) from error
 
 
-def _recipe_model_digests(document: Mapping[str, object]) -> list[str]:
-    raw_models = document.get("models")
-    if not isinstance(raw_models, list) or not raw_models:
+def _recipe_definition(document: Mapping[str, object] | RecipeDefinition) -> RecipeDefinition:
+    if isinstance(document, RecipeDefinition):
+        return document
+    try:
+        return RecipeDefinition.model_validate(document)
+    except (TypeError, ValueError) as error:
+        raise ModelCacheResolutionError(
+            "model_cache.recipe_invalid", "canonical recipe definition is invalid"
+        ) from error
+
+
+def _recipe_model_content_digests(
+    document: Mapping[str, object] | RecipeDefinition,
+) -> list[str]:
+    recipe = _recipe_definition(document)
+    raw_models = recipe.models
+    if not raw_models:
         raise ModelCacheResolutionError(
             "model_cache.recipe_model_missing",
             "canonical recipe does not declare model selections",
         )
     result: list[str] = []
     for selection in raw_models:
-        reference = selection.get("model") if isinstance(selection, Mapping) else None
-        digest = reference.get("content_sha256") if isinstance(reference, Mapping) else None
+        digest = selection.model.content_sha256
         if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != _DIGEST_LENGTH:
             raise ModelCacheResolutionError(
                 "model_cache.model_pin_invalid", "canonical recipe model pin is invalid"
@@ -710,75 +768,42 @@ def _recipe_model_digests(document: Mapping[str, object]) -> list[str]:
 
 
 def _recipe_model_file_ids(
-    document: Mapping[str, object] | None, digest: str
+    document: Mapping[str, object] | RecipeDefinition | None, digest: str
 ) -> set[str] | None:
     if document is None:
         return None
-    raw_models = document.get("models")
-    if not isinstance(raw_models, list):
-        raise ModelCacheResolutionError(
-            "model_cache.recipe_model_missing", "canonical recipe model selections are invalid"
-        )
+    recipe = _recipe_definition(document)
     selected: set[str] = set()
     found = False
-    for selection in raw_models:
-        if not isinstance(selection, Mapping):
-            raise ModelCacheResolutionError("model_cache.recipe_model_missing", "canonical recipe model selection is invalid")
-        reference = selection.get("model")
-        if not isinstance(reference, Mapping) or reference.get("content_sha256") != digest:
+    for selection in recipe.models:
+        if selection.model.content_sha256 != digest:
             continue
         found = True
-        files = selection.get("files")
-        if not isinstance(files, list):
-            raise ModelCacheResolutionError("model_cache.artifacts_missing", "canonical recipe file selectors are invalid")
-        for value in files:
-            file_id = value.get("file_id") if isinstance(value, Mapping) else None
-            if not isinstance(file_id, str) or not file_id:
-                raise ModelCacheResolutionError("model_cache.artifact_invalid", "canonical recipe file selector is invalid")
-            selected.add(file_id)
+        selected.update(file.file_id for file in selection.files)
     return selected if found else None
 
 
 def _canonical_model_artifacts(row: CatalogDocumentRevision) -> list[dict[str, object]]:
-    document = row.document
-    source = document.get("source") if isinstance(document, Mapping) else None
-    files = document.get("files") if isinstance(document, Mapping) else None
-    if not isinstance(source, Mapping) or not isinstance(files, list) or not files:
+    try:
+        definition = ModelDefinition.model_validate(row.document)
+    except (TypeError, ValueError) as error:
         raise ModelCacheResolutionError(
-            "model_cache.artifacts_missing", "canonical model has no complete file manifest"
-        )
-    repository = source.get("repository")
-    revision = source.get("revision")
-    if not isinstance(repository, str) or not isinstance(revision, str):
-        raise ModelCacheResolutionError("model_cache.source_invalid", "canonical model source is invalid")
+            "model_cache.model_definition_invalid", "canonical model definition is invalid"
+        ) from error
+    repository = definition.source.repository
+    revision = definition.source.revision
     result: list[dict[str, object]] = []
-    for value in files:
-        if not isinstance(value, Mapping):
-            raise ModelCacheResolutionError("model_cache.artifact_invalid", "canonical model file is invalid")
-        file_id = value.get("id")
-        path = value.get("path")
-        digest = value.get("sha256")
-        size = value.get("size_bytes")
-        roles = value.get("roles")
-        if (
-            not isinstance(file_id, str)
-            or not isinstance(path, str)
-            or not isinstance(digest, str)
-            or not isinstance(size, int)
-            or isinstance(size, bool)
-            or not isinstance(roles, list)
-        ):
-            raise ModelCacheResolutionError("model_cache.artifact_invalid", "canonical model file integrity metadata is invalid")
+    for value in definition.files:
         result.append(
             {
-                "id": file_id,
-                "path": path,
+                "id": value.id,
+                "path": value.path,
                 "kind": "huggingface.file",
                 "repository": repository,
                 "revision": revision,
-                "sha256": digest,
-                "download_bytes": size,
-                "roles": list(roles),
+                "sha256": value.sha256,
+                "download_bytes": value.size_bytes,
+                "roles": list(value.roles),
             }
         )
     return result
@@ -803,30 +828,18 @@ def _same_model_artifact_identity(
 
 
 def _model_lineage_signature(document: Mapping[str, object]) -> tuple[object, object, object]:
-    """Return the authoritative logical model and representation identity.
+    """Return the logical model and representation identity from ModelDefinition."""
 
-    Some catalog model-version documents carry a nested ``identity.model``
-    reference while older model documents use the top-level identity. The
-    nested reference is preferred because an upstream revision can legitimately
-    change the display slug without changing the logical model lineage.
-    """
-
-    identity = document.get("identity")
-    identity = identity if isinstance(identity, Mapping) else {}
-    nested = identity.get("model")
-    nested = nested if isinstance(nested, Mapping) else {}
-    publisher = nested.get("publisher", identity.get("publisher"))
-    slug = nested.get("slug", identity.get("slug"))
-    variant = nested.get("variant", identity.get("variant"))
-    if variant is None:
-        variant = document.get("variant")
-    representation = document.get("format")
+    model = ModelDefinition.model_validate(document)
+    identity = model.identity
+    publisher = identity.model.publisher
+    slug = identity.model.slug
+    variant = identity.variant
+    representation = model.format.model_dump(mode="json")
     return (
         (publisher, slug),
         variant,
-        json.dumps(representation, sort_keys=True, separators=(",", ":"))
-        if representation is not None
-        else None,
+        json.dumps(representation, sort_keys=True, separators=(",", ":")),
     )
 
 
@@ -966,12 +979,12 @@ class ModelCacheService:
     def resolve_artifact_set(
         self,
         *,
-        model_version_sha256: str | None = None,
+        model_content_sha256: str | None = None,
         recipe_revision_sha256: str | None = None,
         recipe_revision_id: str | None = None,
         artifacts: Sequence[Mapping[str, object]] | None = None,
     ) -> ArtifactSetManifest:
-        model_digest = _optional_digest(model_version_sha256)
+        model_digest = _optional_digest(model_content_sha256)
         recipe_digest = _optional_digest(recipe_revision_sha256)
         if recipe_digest is not None and recipe_revision_id is not None:
             raise ModelCacheResolutionError(
@@ -985,13 +998,13 @@ class ModelCacheService:
                     "caller-supplied artifact sources are only available to fixture services",
                 )
             specs = tuple(
-                self._artifact_from_input(value, model_version_sha256=model_digest)
+                self._artifact_from_input(value, model_content_sha256=model_digest)
                 for value in artifacts
             )
             manifest = ArtifactSetManifest(
-                model_version_sha256=model_digest,
+                model_content_sha256=model_digest,
                 recipe_revision_sha256=recipe_digest,
-                model_versions=(() if model_digest is None else (model_digest,)),
+                model_content_digests=(() if model_digest is None else (model_digest,)),
                 artifacts=tuple(sorted(specs, key=lambda item: item.key)),
             )
             _validate_manifest(manifest)
@@ -1000,7 +1013,7 @@ class ModelCacheService:
         if model_digest is None and recipe_digest is None and recipe_revision_id is None:
             raise ModelCacheResolutionError(
                 "model_cache.pin_required",
-                "an exact model or recipe revision is required",
+                "an exact model definition or recipe revision is required",
             )
         with self._session() as session:
             recipe_document: Mapping[str, object] | None = None
@@ -1015,29 +1028,29 @@ class ModelCacheService:
                         "exact recipe revision is not resolved",
                     )
                 recipe_digest = resolved_recipe_digest
-                recipe_model_digests = _recipe_model_digests(recipe_document)
+                recipe_model_digests = _recipe_model_content_digests(recipe_document)
                 if not recipe_model_digests:
                     raise ModelCacheResolutionError(
                         "model_cache.recipe_model_missing",
-                        "recipe does not bind an exact model revision",
+                        "recipe does not bind an exact model definition",
                     )
                 if model_digest is not None and model_digest not in recipe_model_digests:
                     raise ModelCacheConflict(
                         "model_cache.pin_mismatch",
-                        "recipe and requested model revisions do not match",
+                        "recipe and requested model definitions do not match",
                     )
                 model_digest = model_digest or recipe_model_digests[0]
             if model_digest is None:
                 raise ModelCacheResolutionError(
                     "model_cache.pin_required",
-                    "an exact model revision is required after recipe resolution",
+                    "an exact model definition is required after recipe resolution",
                 )
             model_rows: dict[str, CatalogDocumentRevision] = {}
             requested_model_digests = (
                 recipe_model_digests if recipe_document is not None else [model_digest]
             )
             for digest in requested_model_digests:
-                self._collect_model_versions(session, digest, model_rows)
+                self._collect_model_definitions(session, digest, model_rows)
             specs: list[ArtifactSpec] = []
             model_ref: Mapping[str, object] | None = None
             for digest, row in sorted(model_rows.items()):
@@ -1057,15 +1070,15 @@ class ModelCacheService:
                     specs.append(
                         self._artifact_from_catalog(
                             raw,
-                            model_version_sha256=digest,
+                            model_content_sha256=digest,
                         )
                     )
             manifest = ArtifactSetManifest(
-                model_version_sha256=model_digest,
+                model_content_sha256=model_digest,
                 recipe_revision_sha256=recipe_digest,
-                model_versions=tuple(sorted(model_rows)),
+                model_content_digests=tuple(sorted(model_rows)),
                 artifacts=tuple(sorted(specs, key=lambda item: item.key)),
-                model_version_ref=model_ref,
+                model_definition_ref=model_ref,
             )
         _validate_manifest(manifest)
         return manifest
@@ -1075,7 +1088,7 @@ class ModelCacheService:
         session: Session,
         digest: str | None,
         revision_id: str | None,
-    ) -> tuple[Mapping[str, object], str, str]:
+    ) -> tuple[RecipeDefinition, str, str]:
         if revision_id is not None:
             revision = session.get(CatalogDocumentRevision, revision_id)
         else:
@@ -1096,20 +1109,40 @@ class ModelCacheService:
                 "model_cache.recipe_revision_missing",
                 "exact recipe revision is not resolved",
             )
-        return revision.document, revision.id, revision.content_digest
+        try:
+            recipe = RecipeDefinition.model_validate(revision.document)
+        except (TypeError, ValueError) as error:
+            raise ModelCacheResolutionError(
+                "model_cache.recipe_invalid", "canonical recipe definition is invalid"
+            ) from error
+        return recipe, revision.id, revision.content_digest
 
-    def _collect_model_versions(
+    def _collect_model_definitions(
         self,
         session: Session,
         digest: str,
         rows: dict[str, CatalogDocumentRevision],
+        *,
+        visiting: set[str] | None = None,
     ) -> None:
         if not isinstance(digest, str) or not _is_hex(digest) or len(digest) != 64:
             raise ModelCacheResolutionError(
                 "model_cache.model_pin_invalid", "model dependency pin is invalid"
             )
         if digest in rows:
+            if visiting is not None and digest in visiting:
+                raise ModelCacheResolutionError(
+                    "model_cache.model_dependency_cycle",
+                    "canonical model dependency graph contains a cycle",
+                )
             return
+        active = visiting if visiting is not None else set()
+        if digest in active:
+            raise ModelCacheResolutionError(
+                "model_cache.model_dependency_cycle",
+                "canonical model dependency graph contains a cycle",
+            )
+        active.add(digest)
         row = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "model",
@@ -1118,21 +1151,38 @@ class ModelCacheService:
             )
         )
         if row is None:
+            active.remove(digest)
             raise ModelCacheResolutionError(
-                "model_cache.model_revision_missing",
-                "exact model revision is not resolved",
+                "model_cache.model_definition_missing",
+                "exact model definition is not resolved",
             )
-        rows[digest] = row
-        if len(rows) > _MAX_ARTIFACTS:
+        try:
+            definition = ModelDefinition.model_validate(row.document)
+            rows[digest] = row
+            if len(rows) > _MAX_ARTIFACTS:
+                raise ModelCacheResolutionError(
+                    "model_cache.dependency_count", "model dependency set is too large"
+                )
+            for dependency in definition.dependencies:
+                self._collect_model_definitions(
+                    session,
+                    dependency.content_sha256,
+                    rows,
+                    visiting=active,
+                )
+        except (TypeError, ValueError) as error:
             raise ModelCacheResolutionError(
-                "model_cache.dependency_count", "model dependency set is too large"
-            )
+                "model_cache.model_definition_invalid",
+                "canonical model definition is invalid",
+            ) from error
+        finally:
+            active.remove(digest)
 
     def _artifact_from_catalog(
         self,
         value: Mapping[str, object],
         *,
-        model_version_sha256: str,
+        model_content_sha256: str,
     ) -> ArtifactSpec:
         raw_id = value.get("id")
         raw_path = value.get("path")
@@ -1169,7 +1219,7 @@ class ModelCacheService:
             sha256=raw_digest,
             expected_bytes=raw_bytes,
             roles=tuple(str(role) for role in roles),
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
         )
         _validate_artifact(spec)
         return spec
@@ -1178,7 +1228,7 @@ class ModelCacheService:
         self,
         value: Mapping[str, object],
         *,
-        model_version_sha256: str | None,
+        model_content_sha256: str | None,
     ) -> ArtifactSpec:
         try:
             artifact_id = str(value["id"])
@@ -1207,8 +1257,8 @@ class ModelCacheService:
             ) from error
         spec = ArtifactSpec(
             key=(
-                f"artifact-{model_version_sha256[:12]}-{artifact_id}"
-                if model_version_sha256 is not None
+                f"artifact-{model_content_sha256[:12]}-{artifact_id}"
+                if model_content_sha256 is not None
                 else f"artifact-input-{artifact_id}"
             ),
             artifact_id=artifact_id,
@@ -1220,7 +1270,7 @@ class ModelCacheService:
             sha256=digest,
             expected_bytes=expected_bytes,
             roles=tuple(str(role) for role in raw_roles),
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
         )
         _validate_artifact(spec)
         return spec
@@ -1232,7 +1282,7 @@ class ModelCacheService:
         request_key: str,
         plan_digest: str,
         artifact_set_sha256: str | None = None,
-        model_version_sha256: str | None = None,
+        model_content_sha256: str | None = None,
         recipe_revision_sha256: str | None = None,
         recipe_revision_id: str | None = None,
         artifacts: Sequence[Mapping[str, object]] | None = None,
@@ -1244,7 +1294,7 @@ class ModelCacheService:
             raise ModelCacheConflict("model_cache.plan_invalid", "download plan digest is invalid")
         manifest = self._resolve_requested_manifest(
             artifact_set_sha256=artifact_set_sha256,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             recipe_revision_sha256=recipe_revision_sha256,
             recipe_revision_id=recipe_revision_id,
             artifacts=artifacts,
@@ -1343,20 +1393,20 @@ class ModelCacheService:
         self,
         *,
         artifact_set_sha256: str | None,
-        model_version_sha256: str | None,
+        model_content_sha256: str | None,
         recipe_revision_sha256: str | None,
         recipe_revision_id: str | None,
         artifacts: Sequence[Mapping[str, object]] | None,
     ) -> ArtifactSetManifest:
         requested_set = _optional_digest(artifact_set_sha256)
         if requested_set is not None and artifacts is None and (
-            model_version_sha256 is None
+            model_content_sha256 is None
             and recipe_revision_sha256 is None
             and recipe_revision_id is None
         ):
             return self._manifest_for_set(requested_set)
         manifest = self.resolve_artifact_set(
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             recipe_revision_sha256=recipe_revision_sha256,
             recipe_revision_id=recipe_revision_id,
             artifacts=artifacts,
@@ -1372,14 +1422,14 @@ class ModelCacheService:
         self,
         *,
         artifact_set_sha256: str | None = None,
-        model_version_sha256: str | None = None,
+        model_content_sha256: str | None = None,
         recipe_revision_sha256: str | None = None,
         recipe_revision_id: str | None = None,
         artifacts: Sequence[Mapping[str, object]] | None = None,
     ) -> dict[str, object]:
         manifest = self._resolve_requested_manifest(
             artifact_set_sha256=artifact_set_sha256,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             recipe_revision_sha256=recipe_revision_sha256,
             recipe_revision_id=recipe_revision_id,
             artifacts=artifacts,
@@ -1541,7 +1591,7 @@ class ModelCacheService:
             row = ModelCacheSet(
                 artifact_set_sha256=set_digest,
                 schema_version=SCHEMA_VERSION,
-                model_version_sha256=manifest.model_version_sha256,
+                model_content_sha256=manifest.model_content_sha256,
                 recipe_revision_sha256=manifest.recipe_revision_sha256,
                 manifest=manifest.document(),
                 expected_bytes=manifest.expected_bytes,
@@ -3671,15 +3721,15 @@ class ModelCacheService:
         assert digest is not None
         entry = self.get_entry(digest)
         manifest = self.manifest_for_artifact_set(digest)
-        if manifest.model_version_sha256 is None:
+        if manifest.model_content_sha256 is None:
             raise ModelCacheResolutionError(
                 "model_cache.model_pin_missing",
-                "preparation evidence requires an exact primary model revision",
+                "preparation evidence requires an exact primary model definition",
             )
         dependencies = sorted(
             value
-            for value in manifest.model_versions
-            if value != manifest.model_version_sha256
+            for value in manifest.model_content_digests
+            if value != manifest.model_content_sha256
         )
         expected_bytes = int(entry["expected_bytes"])
         verified_bytes = int(entry["verified_bytes"])
@@ -3698,11 +3748,11 @@ class ModelCacheService:
             reason = str(entry.get("last_error") or "model cache is not complete")
         return {
             "artifact_set_sha256": digest,
-            "model_version_sha256": manifest.model_version_sha256,
+            "model_content_sha256": manifest.model_content_sha256,
             "recipe_revision_sha256": manifest.recipe_revision_sha256,
             "artifact_count": len(manifest.artifacts),
             "artifact_set_bytes": expected_bytes,
-            "dependency_model_version_sha256": dependencies,
+            "dependency_model_content_sha256": dependencies,
             "completeness": "complete" if complete else "incomplete",
             "controller": {
                 "state": controller_state,
@@ -3868,7 +3918,7 @@ class ModelCacheService:
                     "artifact_set_sha256": digest,
                     "artifact_key": spec.key,
                     "file_id": spec.artifact_id,
-                    "model_content_sha256": spec.model_version_sha256,
+                    "model_content_sha256": spec.model_content_sha256,
                     "path": spec.path,
                     "sha256": object_digest,
                     "bytes": size,
@@ -3948,7 +3998,7 @@ class ModelCacheService:
             return {
                 "schema_version": SCHEMA_VERSION,
                 "artifact_set_sha256": digest,
-                "model_version_sha256": row.model_version_sha256,
+                "model_content_sha256": row.model_content_sha256,
                 "recipe_revision_sha256": row.recipe_revision_sha256,
                 "state": row.state,
                 "coverage": "complete" if row.state == "cached" else "incomplete",
@@ -4061,29 +4111,36 @@ class ModelCacheService:
         # those references so removal of the last reference makes a set
         # evictable without retaining an old flag.
         reasons: set[str] = set()
-        if row.model_version_sha256 is not None:
-            installation = session.scalar(
-                select(RecipeInstallation.id).where(
-                    RecipeInstallation.model_version_sha256 == row.model_version_sha256,
+        if row.model_content_sha256 is not None:
+            cache_model_digests = self._cache_model_content_digests(row)
+            installations = session.scalars(
+                select(RecipeInstallation).where(
                     RecipeInstallation.state.in_(["planned", "installing", "installed", "partial"]),
                 )
             )
-            if installation is not None:
+            if any(
+                self._recipe_references_cache(
+                    session, installation.recipe_revision_id, cache_model_digests
+                )
+                for installation in installations
+            ):
                 reasons.add("recipe-installation")
-            run = session.scalar(
-                select(RecipeRun.id)
-                .join(RecipeInstallation, RecipeRun.installation_id == RecipeInstallation.id)
-                .where(
-                    RecipeInstallation.model_version_sha256 == row.model_version_sha256,
+            running_installation_ids = session.scalars(
+                select(RecipeRun.installation_id).where(
                     RecipeRun.state.in_(["planned", "starting", "running"]),
                 )
             )
-            if run is not None:
+            if any(
+                self._recipe_references_cache(
+                    session, installation_id, cache_model_digests
+                )
+                for installation_id in running_installation_ids
+            ):
                 reasons.add("running-model")
         for profile in session.scalars(select(FleetProfile)):
             if _contains_digest(
                 profile.assignments,
-                row.model_version_sha256,
+                row.model_content_sha256,
                 row.recipe_revision_sha256,
             ) or self._profile_references_cache(session, profile, row):
                 reasons.add("saved-profile")
@@ -4091,7 +4148,37 @@ class ModelCacheService:
         row.protected_reasons = sorted(reasons)
 
     @staticmethod
+    def _cache_model_content_digests(row: ModelCacheSet) -> set[str]:
+        try:
+            manifest = ArtifactSetManifest.from_document(row.manifest)
+        except ModelCacheError:
+            return {row.model_content_sha256} if row.model_content_sha256 is not None else set()
+        return set(manifest.model_content_digests) or (
+            {row.model_content_sha256} if row.model_content_sha256 is not None else set()
+        )
+
+    def _recipe_references_cache(
+        self,
+        session: Session,
+        revision_id: str,
+        cache_model_digests: set[str],
+    ) -> bool:
+        revision = session.get(CatalogDocumentRevision, revision_id)
+        if revision is None or revision.kind != "recipe" or revision.state != "active":
+            return False
+        try:
+            direct_model_digests = set(_recipe_model_content_digests(revision.document))
+            if cache_model_digests.intersection(direct_model_digests):
+                return True
+            model_rows: dict[str, CatalogDocumentRevision] = {}
+            for digest in direct_model_digests:
+                self._collect_model_definitions(session, digest, model_rows)
+        except ModelCacheError:
+            return False
+        return bool(cache_model_digests.intersection(model_rows))
+
     def _profile_references_cache(
+        self,
         session: Session,
         profile: FleetProfile,
         row: ModelCacheSet,
@@ -4114,10 +4201,11 @@ class ModelCacheService:
                 and revision.content_digest == row.recipe_revision_sha256
             ):
                 return True
-            if row.model_version_sha256 is None:
+            if row.model_content_sha256 is None:
                 continue
-            document = revision.document
-            if row.model_version_sha256 in _recipe_model_digests(document):
+            if self._recipe_references_cache(
+                session, revision_id, self._cache_model_content_digests(row)
+            ):
                 return True
         return False
 
@@ -4146,7 +4234,7 @@ class ModelCacheService:
     def _model_update_candidates(
         session: Session, manifest: ArtifactSetManifest
     ) -> tuple[CatalogDocumentRevision | None, list[CatalogDocumentRevision]]:
-        ref = manifest.model_version_ref
+        ref = manifest.model_definition_ref
         if not isinstance(ref, Mapping):
             return None, []
         current_digest = ref.get("content_sha256")
@@ -4293,8 +4381,8 @@ class ModelCacheService:
                     {
                         "schema_version": SCHEMA_VERSION,
                         "artifact_set_sha256": row.artifact_set_sha256,
-                        "model_version_sha256": row.model_version_sha256,
-                        "latest_model_version_sha256": latest_model,
+                        "model_content_sha256": row.model_content_sha256,
+                        "latest_model_content_sha256": latest_model,
                         "model_update_from": model_update_from,
                         "model_update_to": model_update_to,
                         "model_update_ambiguous": model_update_ambiguous,
@@ -4785,9 +4873,8 @@ def _contains_digest(value: object, model_digest: str | None, recipe_digest: str
         return False
     if isinstance(value, Mapping):
         return any(_contains_digest(child, model_digest, recipe_digest) for child in value.values()) or (
-            (model_digest is not None and value.get("model_version_sha256") == model_digest)
+            (model_digest is not None and value.get("model_content_sha256") == model_digest)
             or (recipe_digest is not None and value.get("recipe_revision_sha256") == recipe_digest)
-            or (model_digest is not None and value.get("model_version") == model_digest)
         )
     if isinstance(value, list):
         return any(_contains_digest(child, model_digest, recipe_digest) for child in value)

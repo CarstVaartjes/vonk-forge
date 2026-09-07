@@ -670,7 +670,7 @@ def test_alembic_autogenerate_ignores_only_retained_legacy_storage(
     assert "op.drop_index" not in generated
 
 
-def test_recipe_installation_model_identity_migration_adds_indexed_nullable_column(
+def test_recipe_installation_model_identity_migration_adds_canonical_model_fields(
     tmp_path: Path,
 ) -> None:
     url = f"sqlite:///{tmp_path / 'model-identity-upgrade.sqlite'}"
@@ -685,8 +685,9 @@ def test_recipe_installation_model_identity_migration_adds_indexed_nullable_colu
         column["name"]: column
         for column in inspector.get_columns("recipe_installations")
     }
-    assert columns["model_version_sha256"]["nullable"] is True
-    assert "ix_recipe_installations_model_version_sha256" in {
+    assert columns["model_content_sha256"]["nullable"] is True
+    assert columns["model_content_digests"]["nullable"] is False
+    assert "ix_recipe_installations_model_content_sha256" in {
         index["name"] for index in inspector.get_indexes("recipe_installations")
     }
 
