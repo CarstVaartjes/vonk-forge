@@ -7,6 +7,7 @@ _RUNTIME_SCHEMAS = frozenset(
     {
         "catalog-entity-v1.schema.json",
         "harness-evidence-v1.schema.json",
+        "recipe-v1.schema.json",
         "test-report-v1.schema.json",
     }
 )

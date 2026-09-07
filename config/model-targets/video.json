@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "model-target-set",
+  "identity": {"publisher": "vonk-forge", "slug": "video"},
+  "metadata": {"title": "Video generation targets", "updated": "2026-08-16"},
+  "targets": [
+    {"modality":"video","group":"LTX","model":"LTX 2.5","version":"distilled BF16","status":"candidate","source":"https://github.com/Lightricks/LTX-Video","harnesses":["diffusers","pytorch-pipeline"],"topologies":["single"],"recipe_slugs":[],"notes":"Primary distilled video candidate."},
+    {"modality":"video","group":"LTX","model":"LTX 2.5","version":"dev BF16","status":"candidate","source":"https://github.com/Lightricks/LTX-Video","harnesses":["diffusers","pytorch-pipeline"],"topologies":["single"],"recipe_slugs":[],"notes":"Quality/reference variant."},
+    {"modality":"video","group":"LTX","model":"LTX 2.5","version":"INT8/NVFP4","status":"candidate","source":"https://github.com/Lightricks/LTX-Video","harnesses":["diffusers","pytorch-pipeline"],"topologies":["single"],"recipe_slugs":[],"notes":"Quantized variants enter only after a canary comparison."},
+    {"modality":"video","group":"MOVA","model":"MOVA","version":"360p","status":"candidate","source":"https://github.com","harnesses":["diffusers","pytorch-pipeline"],"topologies":["single"],"recipe_slugs":[],"notes":"Single-host candidate; exact public weights and runtime are pending."},
+    {"modality":"video","group":"MOVA","model":"MOVA","version":"720p","status":"candidate","source":"https://github.com","harnesses":["diffusers","pytorch-pipeline"],"topologies":["single"],"recipe_slugs":[],"notes":"High-resolution candidate; keep resource envelope separate."},
+    {"modality":"video","group":"HunyuanVideo","model":"HunyuanVideo 1.5","version":"T2V","status":"candidate","source":"https://github.com/Tencent-Hunyuan/HunyuanVideo","harnesses":["diffusers","pytorch-pipeline"],"topologies":["single"],"recipe_slugs":[],"notes":"Text-to-video candidate; no cross-Spark default."},
+    {"modality":"video","group":"HunyuanVideo","model":"HunyuanVideo 1.5","version":"I2V","status":"candidate","source":"https://github.com/Tencent-Hunyuan/HunyuanVideo","harnesses":["diffusers","pytorch-pipeline"],"topologies":["single"],"recipe_slugs":[],"notes":"Image-to-video candidate."},
+    {"modality":"video","group":"HunyuanVideo","model":"HunyuanVideo 1.5","version":"distilled","status":"candidate","source":"https://github.com/Tencent-Hunyuan/HunyuanVideo","harnesses":["diffusers","pytorch-pipeline"],"topologies":["single"],"recipe_slugs":[],"notes":"Distilled speed candidate."},
+    {"modality":"video","group":"MiniMax H3","model":"MiniMax H3","version":"FL2VA","status":"candidate","source":"https://github.com/MiniMax-AI","harnesses":["pytorch-pipeline","sglang"],"topologies":["single"],"recipe_slugs":[],"notes":"Worldwide recipe target; operator reviews license terms before use."},
+    {"modality":"video","group":"MiniMax H3","model":"MiniMax H3","version":"Ref2VA","status":"candidate","source":"https://github.com/MiniMax-AI","harnesses":["pytorch-pipeline","sglang"],"topologies":["single"],"recipe_slugs":[],"notes":"Reference-to-video candidate; no cross-Spark default."}
+  ]
+}

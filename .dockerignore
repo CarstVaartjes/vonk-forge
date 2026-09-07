@@ -7,8 +7,6 @@ src/*
 !control/
 !control/Dockerfile
 !control/pyproject.toml
-!control/packaging/
-!control/packaging/**
 control/.venv
 !control/src/
 !control/src/**
@@ -24,6 +22,7 @@ schemas/*
 schemas/global/*
 !schemas/global/catalog-entity-v1.schema.json
 !schemas/global/harness-evidence-v1.schema.json
+!schemas/global/recipe-v1.schema.json
 !schemas/global/test-report-v1.schema.json
 !config/
 config/*
@@ -32,7 +31,6 @@ config/*
 !inventory/
 !inventory/wheels/
 !inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl
-!inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl
 **/__pycache__/**
 **/*.py[cod]
 **/.dev
