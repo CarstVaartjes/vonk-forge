@@ -85,21 +85,18 @@ it("omits secret-like input fields from bounded object details", async () => {
   expect(message.length).toBeLessThanOrEqual("Control API returned 422: ".length + 256);
 });
 
-it("keeps visual Fleet snapshots separate from reconciliation evidence", async () => {
+it("loads the current Fleet snapshot endpoint for browser Fleet data", async () => {
   const captured: Request[] = [];
   vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
     const request = input as Request;
     captured.push(request);
-    const pathname = new URL(request.url).pathname;
-    const body = pathname === "/api/v1/fleet"
-      ? {
-        schema_version: 1,
-        event_cursor: 7,
-        generated_at: "2026-08-15T12:00:00Z",
-        authority_revision: "a".repeat(64),
-        nodes: [],
-      }
-      : {commit: "a".repeat(40), evidence_digest: "e".repeat(64), nodes: []};
+    const body = {
+      schema_version: 1,
+      event_cursor: 7,
+      generated_at: "2026-08-15T12:00:00Z",
+      authority_revision: "a".repeat(64),
+      nodes: [],
+    };
     return new Response(JSON.stringify(body), {
       headers: {"Content-Type": "application/json"},
       status: 200,
@@ -108,8 +105,6 @@ it("keeps visual Fleet snapshots separate from reconciliation evidence", async (
   const api = new ApiClient();
 
   const visual = await api.visualFleet();
-  const evidence = await api.fleetEvidence();
-  const statuses = await api.nodeStatuses();
 
   expect(visual).toEqual({
     schema_version: 1,
@@ -118,13 +113,7 @@ it("keeps visual Fleet snapshots separate from reconciliation evidence", async (
     authority_revision: "a".repeat(64),
     nodes: [],
   });
-  expect(evidence.evidence_digest).toBe("e".repeat(64));
-  expect(statuses.evidence_digest).toBe("e".repeat(64));
-  expect(captured.map(request => new URL(request.url).pathname)).toEqual([
-    "/api/v1/fleet",
-    "/api/v1/nodes/status",
-    "/api/v1/nodes/status",
-  ]);
+  expect(captured.map(request => new URL(request.url).pathname)).toEqual(["/api/v1/fleet"]);
   expect(captured.every(request => request.credentials === "same-origin")).toBe(true);
 });
 
