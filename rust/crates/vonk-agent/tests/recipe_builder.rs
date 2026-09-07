@@ -1435,10 +1435,10 @@ fn failed_base_image_import_uses_accounted_tmpdir_and_safe_diagnostics() {
         let monitored_directory = monitored_directory.as_ref().unwrap();
         assert!(temporary_directory.starts_with(root.path().join("build-staging")));
         assert!(monitored_directory.starts_with(root.path().join("build-staging")));
-        assert!(
-            (4 * 1024 * 1024 * 1024..=64 * 1024 * 1024 * 1024)
-                .contains(&runner.minimum_free_bytes.get())
-        );
+        // Disposable filesystems may scale the reserve below 4 GiB. The
+        // import must still monitor a positive, bounded reserve on its own
+        // temporary filesystem.
+        assert!((1..=64 * 1024 * 1024 * 1024).contains(&runner.minimum_free_bytes.get()));
     }
 }
 

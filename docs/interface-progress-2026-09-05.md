@@ -76,6 +76,15 @@ separate results.
   across Python, Rust, and helper materialization, including a nested path at
   the declared 512-character limit. The 122 affected checks and two focused
   Linux helper path tests pass at integration commit `006fd39a`.
+- Host-helper grants and receipts use shared typed documents in Python and
+  Rust. The actual grant API, Rust verifier/signer, Python signature consumer,
+  authority service, and recipe operation checks pass all 101 focused tests.
+  The unused generic grant response is removed.
+- The composed Rust workspace compiles and its 38 test executables pass after
+  the affected fixture/environment reruns (439 tests). Updated fixtures include
+  required telemetry metrics and the explicit null port for artifact jobs.
+  The Linux process boundary tests use executable temporary directories; the
+  builder test accommodates the existing reserve scaling on small filesystems.
 - Core job-envelope and signed run-observation integration remains in progress.
   The bundled protocol wheel and generated API clients must be refreshed after
   those merges, followed by the combined suite. These focused checks do not
