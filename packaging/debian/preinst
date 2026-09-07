@@ -407,41 +407,10 @@ inside_package_helper() {
         && [ "$(/usr/bin/sed -n '3p' "$helper_dpkg_command_file")" = --force-confold ] \
         || return 1
     helper_candidate=$(/usr/bin/sed -n '4p' "$helper_dpkg_command_file")
-    helper_legacy_incoming=0
     case "$helper_candidate" in
         /run/vonk-forge-package-candidates/*/*.deb) ;;
-        /var/lib/vonk-forge/incoming/[0-9a-f]*.deb)
-            # A pre-509 helper has no root-custody namespace yet.  Bind this
-            # fallback to the agent-owned incoming directory; arm_controller_recovery
-            # immediately re-homes the candidate before writing any state.
-            incoming_uid=$(/usr/bin/stat -Lc %u /var/lib/vonk-forge/incoming \
-                2>/dev/null || true)
-            agent_uid=$(/usr/bin/awk -F: \
-                '$1 == "vonk-agent" { print $3; exit }' /etc/passwd)
-            [ -n "$agent_uid" ] && [ "$incoming_uid" = "$agent_uid" ] \
-                || return 1
-            [ "$(/usr/bin/dirname "$helper_candidate")" = \
-                /var/lib/vonk-forge/incoming ] || return 1
-            helper_incoming_digest=${helper_candidate##*/}
-            helper_incoming_digest=${helper_incoming_digest%.deb}
-            valid_digest "$helper_incoming_digest" || return 1
-            [ "$(/usr/bin/stat -Lc '%u:%a:%h' "$helper_candidate" \
-                2>/dev/null || true)" = "$agent_uid:600:1" ] || return 1
-            helper_legacy_incoming=1
-            ;;
         *) return 1 ;;
     esac
-    if [ "$helper_legacy_incoming" -eq 1 ]; then
-        # The pre-509 helper invokes dpkg directly from the agent-owned
-        # incoming directory.  That path is intentionally accepted only after
-        # the owner, mode, and digest-shaped filename checks above; it has no
-        # per-invocation root custody directory to validate here.  The
-        # controller recovery preflight below immediately re-homes it before
-        # recording durable state.
-        trap - EXIT HUP INT TERM
-        /usr/bin/rm -f -- "$helper_dpkg_command_file"
-        return 0
-    fi
     helper_invocation_dir=$(/usr/bin/dirname "$helper_candidate") || return 1
     [ "$(/usr/bin/dirname "$helper_invocation_dir")" = \
         /run/vonk-forge-package-candidates ] || return 1
@@ -831,63 +800,6 @@ arm_controller_recovery() {
             safe_root_directory "$custody_root" 700 \
                 && safe_root_directory "$invocation_dir" 700 \
                 || arm_failure unsafe-custody-directory
-            ;;
-        /var/lib/vonk-forge/incoming/[0-9a-f]*.deb)
-            # A pre-509 helper may still dispatch from its agent-owned
-            # incoming directory.  Only accept this transitional shape after
-            # inside_package_helper proved the root helper ancestry above,
-            # then copy it into the current root-only custody protocol before
-            # recording recovery state.
-            incoming_dir=/var/lib/vonk-forge/incoming
-            incoming_uid=$(/usr/bin/stat -Lc %u "$incoming_dir" 2>/dev/null || true)
-            agent_uid=$(/usr/bin/awk -F: \
-                '$1 == "vonk-agent" { print $3; exit }' /etc/passwd)
-            [ -n "$agent_uid" ] && [ "$incoming_uid" = "$agent_uid" ] \
-                || arm_failure unsafe-incoming-directory
-            [ "$(/usr/bin/stat -Lc '%u:%a' "$candidate" \
-                2>/dev/null || true)" = "$agent_uid:600" ] \
-                || arm_failure unsafe-incoming-candidate
-            ensure_root_directory "$custody_root" 700 \
-                || arm_failure unsafe-custody-directory
-            invocation=$(/usr/bin/openssl rand -hex 16) \
-                || arm_failure custody-invocation-failed
-            valid_digest "$invocation" \
-                || arm_failure invalid-custody-invocation
-            invocation_dir=$custody_root/$invocation
-            /usr/bin/install -d -o root -g root -m 0700 "$invocation_dir" \
-                || arm_failure custody-directory-create-failed
-            legacy_source=$candidate
-            incoming_digest=${candidate##*/}
-            incoming_digest=${incoming_digest%.deb}
-            valid_digest "$incoming_digest" \
-                || arm_failure invalid-package-digest
-            candidate=$invocation_dir/${candidate##*/}
-            [ ! -e "$candidate" ] && [ ! -L "$candidate" ] \
-                || arm_failure custody-candidate-exists
-            legacy_before=$(/usr/bin/stat -Lc '%d:%i:%u:%g:%a:%h:%s:%Y:%Z' \
-                "$legacy_source") || arm_failure incoming-stat-failed
-            legacy_new=$(/usr/bin/mktemp "$invocation_dir/.candidate.XXXXXX") \
-                || arm_failure custody-staging-failed
-            trap '/usr/bin/rm -f -- "${legacy_new:-}"' EXIT HUP INT TERM
-            /usr/bin/cp --reflink=never -- "$legacy_source" "$legacy_new" \
-                || arm_failure incoming-copy-failed
-            legacy_after=$(/usr/bin/stat -Lc '%d:%i:%u:%g:%a:%h:%s:%Y:%Z' \
-                "$legacy_source") || arm_failure incoming-stat-failed
-            [ "$legacy_before" = "$legacy_after" ] \
-                && [ "$(/usr/bin/sha256sum "$legacy_new" 2>/dev/null \
-                    | /usr/bin/cut -d' ' -f1)" = "$incoming_digest" ] \
-                || arm_failure incoming-copy-changed
-            /usr/bin/chown root:root "$legacy_new" \
-                || arm_failure custody-chown-failed
-            /usr/bin/chmod 0600 "$legacy_new" \
-                || arm_failure custody-chmod-failed
-            /usr/bin/sync -f "$legacy_new" \
-                || arm_failure custody-sync-failed
-            /usr/bin/mv -- "$legacy_new" "$candidate" \
-                || arm_failure custody-rename-failed
-            /usr/bin/sync -f "$invocation_dir" \
-                || arm_failure custody-sync-failed
-            trap - EXIT HUP INT TERM
             ;;
         *) arm_failure invalid-custody-candidate ;;
     esac
@@ -1373,8 +1285,15 @@ esac
 
 if [ -n "$old_version" ] \
     && dpkg --compare-versions "$target_version" lt "$old_version"; then
-    echo "vonk-forge-agent: refusing downgrade from $old_version to $target_version" >&2
-    exit 1
+    # Only the retained root-custody watchdog may restore this exact signed
+    # source in the same failed activation attempt. An arbitrary downgrade,
+    # even with a copied nonce, cannot enter that systemd cgroup.
+    if ! /var/lib/vonk-forge/package-rollback/runner \
+        --validate-package-rollback "$target_version" \
+        "$target_agent_sha256" "$target_helper_sha256"; then
+        echo "vonk-forge-agent: refusing downgrade from $old_version to $target_version" >&2
+        exit 1
+    fi
 fi
 
 if [ -n "${VONK_FORGE_UPGRADE_RECOVERY_NONCE:-}" ]; then

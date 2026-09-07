@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use vonk_agent_protocol::{
-    HostRuntimeAction, HostRuntimeRequest, RecipeRunObservationOutcome, canonical_json, hex_sha256,
-    parse_strict,
+    HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeRunObservationOutcome,
+    canonical_json, hex_sha256, parse_strict,
 };
 use wait_timeout::ChildExt;
 
@@ -44,6 +44,8 @@ pub enum OperationError {
     InvalidArtifact,
     #[error("package metadata verification failed")]
     PackageMetadataInvalid,
+    #[error("package activation prerequisites failed")]
+    PackagePreflightFailed,
     #[error("package installation failed")]
     PackageInstallFailed { exit_code: Option<i32> },
     #[error("compiled command failed")]
@@ -114,6 +116,26 @@ pub struct CommandOutput {
 }
 
 pub trait CommandRunner: Send + Sync {
+    fn arm_package_rollback(
+        &self,
+        node: &str,
+        source: &Path,
+        candidate: &Path,
+        candidate_sha256: &str,
+        authority: &PackageRollbackAuthority,
+    ) -> Result<(), String> {
+        crate::package_rollback::Store::system().prepare(
+            node,
+            source,
+            candidate,
+            candidate_sha256,
+            authority,
+        )
+    }
+    fn package_activation_failed(&self) -> Result<(), String> {
+        crate::package_rollback::Store::system().activation_failed()
+    }
+
     fn run(&self, executable: &Path, arguments: &[String]) -> Result<CommandOutput, String>;
 
     fn run_with_timeout(
@@ -563,9 +585,33 @@ impl<R: CommandRunner> OperationExecutor<R> {
             HostOperation::InstallVonkDeb {
                 package_sha256,
                 package_signature,
+                rollback,
             } => {
-                self.install_package(package_sha256, package_signature)?;
+                self.install_package(
+                    package_sha256,
+                    package_signature,
+                    rollback,
+                    observation_node_id.ok_or(OperationError::InvalidOperation)?,
+                )?;
                 ("package-installed", package_sha256.clone(), None, None)
+            }
+            HostOperation::ConfirmPackageActivation {
+                package_sha256,
+                attempt_nonce,
+            } => {
+                crate::package_rollback::Store::system()
+                    .acknowledge(
+                        observation_node_id.ok_or(OperationError::InvalidOperation)?,
+                        package_sha256,
+                        attempt_nonce,
+                    )
+                    .map_err(|_| OperationError::PackagePreflightFailed)?;
+                (
+                    "package-activation-confirmed",
+                    package_sha256.clone(),
+                    None,
+                    None,
+                )
             }
             HostOperation::RestartVonkUnit { unit } => {
                 let unit_name = self.restart_unit(unit)?;
@@ -676,6 +722,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         &self,
         digest: &str,
         detached_signature: &str,
+        rollback: &PackageRollbackAuthority,
+        node_id: &str,
     ) -> Result<(), OperationError> {
         let _install_guard = self
             .package_install
@@ -684,6 +732,18 @@ impl<R: CommandRunner> OperationExecutor<R> {
         require_safe_directory(&self.roots.incoming, self.package_owner_uid)?;
         let incoming = self.roots.incoming.join(format!("{digest}.deb"));
         let package = self.take_package_custody(&incoming, digest, detached_signature)?;
+        let source = self.take_package_custody(
+            &self
+                .roots
+                .incoming
+                .join(format!("{}.deb", rollback.source.package_sha256)),
+            &rollback.source.package_sha256,
+            &rollback.source.package_signature,
+        )?;
+        self.runner
+            .arm_package_rollback(node_id, source.path(), package.path(), digest, rollback)
+            .map_err(|_| OperationError::PackagePreflightFailed)?;
+        source.cleanup()?;
         let package_name = package.path().to_string_lossy().into_owned();
         self.require_package_field(&package_name, "Package", "vonk-forge-agent")?;
         self.require_package_field(&package_name, "Architecture", "arm64")?;
@@ -699,6 +759,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             )
             .map_err(|_| OperationError::PackageInstallFailed { exit_code: None })?;
         if !result.success {
+            let _ = self.runner.package_activation_failed();
             return Err(OperationError::PackageInstallFailed {
                 exit_code: result.exit_code,
             });

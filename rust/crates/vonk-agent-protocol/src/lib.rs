@@ -1,5 +1,11 @@
 #![forbid(unsafe_code)]
 
+pub mod package_upgrade;
+pub use package_upgrade::{
+    PackageActivationPhase, PackageActivationReceipt, PackageRollbackAuthority,
+    PackageRollbackSource,
+};
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, FixedOffset, Utc};
@@ -55,6 +61,11 @@ pub enum HostHelperOperation {
     InstallVonkDeb {
         package_sha256: String,
         package_signature: String,
+        rollback: PackageRollbackAuthority,
+    },
+    ConfirmPackageActivation {
+        package_sha256: String,
+        attempt_nonce: String,
     },
     RestartVonkUnit {
         unit: HostHelperRestartUnit,
@@ -83,7 +94,17 @@ impl HostHelperOperation {
             Self::InstallVonkDeb {
                 package_sha256,
                 package_signature,
-            } => lower_hex(package_sha256, 64) && lower_hex(package_signature, 128),
+                rollback,
+            } => {
+                lower_hex(package_sha256, 64)
+                    && lower_hex(package_signature, 128)
+                    && rollback.valid()
+                    && rollback.source.package_sha256 != *package_sha256
+            }
+            Self::ConfirmPackageActivation {
+                package_sha256,
+                attempt_nonce,
+            } => lower_hex(package_sha256, 64) && lower_hex(attempt_nonce, 64),
             Self::RestartVonkUnit { .. } => true,
             Self::ScheduleReboot { delay_seconds } => (60..=3600).contains(delay_seconds),
             Self::ExecuteContainerRuntimeRequest {

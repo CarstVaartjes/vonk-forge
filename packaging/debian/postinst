@@ -539,6 +539,7 @@ if [ "$pending_present" -eq 1 ] && [ "$needs_finisher" -ne 1 ] \
 fi
 if [ "${SYSTEMD_OFFLINE:-0}" != 1 ] && [ -d /run/systemd/system ]; then
     systemctl --system daemon-reload >/dev/null || true
+    systemctl --system enable vonk-forge-package-rollback.service >/dev/null
     if [ "$needs_finisher" -eq 1 ]; then
         if ! activate_permanent_helper_unit; then
             echo 'vonk-forge-agent: cannot activate the permanent package-helper sandbox' >&2

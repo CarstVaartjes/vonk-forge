@@ -49,6 +49,7 @@ from .distribution import (
     DistributionObject,
 )
 from .host_helper import (
+    ConfirmPackageActivationOperation,
     ContainerRuntimeAction,
     CreateManagedDirectoryOperation,
     ExecuteContainerRuntimeRequestOperation,
@@ -117,6 +118,7 @@ from .telemetry import (
     TelemetrySeries,
     TelemetryWorkload,
 )
+from .package_upgrade import PackageActivationReceipt, PackageRollbackAuthority, PackageRollbackSource
 from .wire_model import (
     OperationCheckpoint,
     OperationMemberProgress,
@@ -180,6 +182,7 @@ __all__ = [
     "ComponentDescriptor",
     "ComponentEvidence",
     "ComponentSource",
+    "ConfirmPackageActivationOperation",
     "ContainerRuntimeAction",
     "CreateManagedDirectoryOperation",
     "DistributionAssignment",
@@ -196,12 +199,15 @@ __all__ = [
     "OperationCheckpoint",
     "OperationMemberProgress",
     "OperationProgress",
+    "PackageActivationReceipt",
     "PackageHelperGrantClaims",
     "PackageHelperOperation",
     "PackageHelperSignature",
     "PackageObjectReceiptClaims",
     "PackageReleaseGraph",
     "PackageReleaseLock",
+    "PackageRollbackAuthority",
+    "PackageRollbackSource",
     "PythonRuntimeMetadata",
     "RecipeBuildEvidence",
     "RecipeBuildRequest",
