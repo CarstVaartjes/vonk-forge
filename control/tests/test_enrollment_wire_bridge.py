@@ -182,6 +182,25 @@ def test_controller_renewal_uses_the_same_issued_response(
     assert IssuedCertificateResponse.model_validate_json(returned) == issued
 
 
+@pytest.mark.parametrize("path", ["/agent/v1/renew", "/agent/v1/renew/activate"])
+@pytest.mark.parametrize("missing", [True, False])
+def test_certificate_rotation_requires_explicit_node_identity(
+    agent_system, path: str, missing: bool,
+) -> None:
+    from vonk_agent_protocol.enrollment import ActivateRequest, RenewRequest
+
+    client, _services, _sessions, _clock = agent_system
+    body = {"csr": _csr_for(NODE_A).decode()} if path.endswith("renew") else {"generation": 2}
+    if not missing:
+        body["node_id"] = None
+    response = client.post(
+        path, headers=agent_headers(NODE_A, "serial-a"), json=body,
+    )
+    assert response.status_code == 422
+    model = RenewRequest if path.endswith("renew") else ActivateRequest
+    assert "node_id" in model.model_json_schema()["required"]
+
+
 @pytest.mark.parametrize("value", [True, 1.0, "1"])
 def test_issued_generation_rejects_coercible_values(value: object) -> None:
     from pydantic import ValidationError

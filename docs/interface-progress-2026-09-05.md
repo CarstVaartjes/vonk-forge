@@ -93,7 +93,18 @@ separate results.
   existing row values. It removes the empty new-sample metrics default and uses
   current Controller provenance for new rollups. A populated PostgreSQL test
   verifies row preservation and rejection of omitted metrics.
-- Core job-envelope and signed run-observation integration remains in progress.
+- Core job envelopes now use shared Pydantic models on the actual claim,
+  heartbeat and result routes. Result validation also resolves the stored
+  operation kind before accepting successful evidence. The current claim
+  request requires protocol and identity fields instead of filling them from
+  defaults; 78 focused API checks and eight connected Rust enrollment/claim
+  checks pass. Enrollment OpenAPI now exposes its canonical request model.
+- The final operation audit found seven retired Python-agent commands that
+  the current Rust agent rejects. Their old Controller orchestration is
+  superseded by Run/Switch and is being removed together with its definitions
+  and consumers. Current queue/fencing, compiled route authority, inventory,
+  and signed readiness behavior remain owned by their current implementations.
+- Signed run-observation composition and old orchestration removal remain in progress.
   The bundled protocol wheel and generated API clients must be refreshed after
   those merges, followed by the combined suite. These focused checks do not
   constitute a release-wide pass.

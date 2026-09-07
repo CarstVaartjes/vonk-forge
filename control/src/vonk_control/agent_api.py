@@ -779,8 +779,8 @@ def _authenticated_activation_identity(
     return identity
 
 
-def _body_node_matches(value: str | None, identity: AgentIdentity) -> None:
-    if value is not None and value != identity.node_id:
+def _body_node_matches(value: str, identity: AgentIdentity) -> None:
+    if value != identity.node_id:
         raise HTTPException(
             status_code=403, detail="authenticated node identity cannot be overridden"
         )

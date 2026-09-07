@@ -49,12 +49,12 @@ class EnrollmentBootstrapResponse(WireModel):
 
 class RenewRequest(WireModel):
     csr: str = Field(min_length=1, max_length=MAX_CSR_BYTES)
-    node_id: NodeId | None = None
+    node_id: NodeId
 
 
 class ActivateRequest(WireModel):
     generation: int = Field(ge=1)
-    node_id: NodeId | None = None
+    node_id: NodeId
 
 
 class IssuedCertificateResponse(WireModel):
