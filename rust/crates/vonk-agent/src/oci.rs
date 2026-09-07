@@ -446,8 +446,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     /// Materialize only the model files authorized by a compiled Controller
     /// plan. Distribution objects live under the plan-independent,
-    /// content-addressed model artifact-set root; each selected path remains
-    /// an explicit installation projection.
+    /// content-addressed model object root; artifact-set membership remains in
+    /// the typed plan and each selected path is an explicit projection.
     pub fn materialize_compiled_models(
         &self,
         plan: &CompiledExecutionPlan,
@@ -1663,12 +1663,9 @@ fn materialize_compiled_models(
     fs::create_dir_all(&destination_root)?;
     fs::set_permissions(&destination_root, fs::Permissions::from_mode(0o700))?;
 
-    let scoped_root = data_root
-        .join("distribution")
-        .join("models")
-        .join(&plan.identity.model_artifact_set_sha256);
-    let scoped_metadata = fs::symlink_metadata(&scoped_root)?;
-    if scoped_metadata.file_type().is_symlink() || !scoped_metadata.is_dir() {
+    let model_root = data_root.join("distribution").join("models");
+    let model_metadata = fs::symlink_metadata(&model_root)?;
+    if model_metadata.file_type().is_symlink() || !model_metadata.is_dir() {
         return Err(OciError::Artifact);
     }
     let receipt_index = read_installation_metadata(&installation)?
@@ -1736,8 +1733,8 @@ fn materialize_compiled_models(
                 }
             }
         }
-        let source = scoped_root.join(&artifact.sha256);
-        if !source.starts_with(&scoped_root) {
+        let source = model_root.join(&artifact.sha256);
+        if !source.starts_with(&model_root) {
             return Err(OciError::Artifact);
         }
         let (mut source_file, source_metadata) =
@@ -2403,11 +2400,7 @@ mod tests {
             serde_json::from_value(compiled_plan()).unwrap();
         plan.validate().unwrap();
         let data = tempdir().unwrap();
-        let root = data
-            .path()
-            .join("distribution")
-            .join("models")
-            .join(&plan.identity.model_artifact_set_sha256);
+        let root = data.path().join("distribution").join("models");
         fs::create_dir_all(&root).unwrap();
         for (artifact, bytes) in [
             (&plan.artifacts[0], b"primary".as_slice()),
@@ -2458,11 +2451,7 @@ mod tests {
         value["artifacts"] = json!([artifact.clone()]);
         let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let data = tempdir().unwrap();
-        let source = data
-            .path()
-            .join("distribution")
-            .join("models")
-            .join(&plan.identity.model_artifact_set_sha256);
+        let source = data.path().join("distribution").join("models");
         fs::create_dir_all(&source).unwrap();
         let source_file = source.join(&plan.artifacts[0].sha256);
         fs::write(&source_file, []).unwrap();
@@ -2498,11 +2487,7 @@ mod tests {
         value["artifacts"] = json!([value["artifacts"][0].clone(), projection]);
         let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
         let data = tempdir().unwrap();
-        let source = data
-            .path()
-            .join("distribution")
-            .join("models")
-            .join(&plan.identity.model_artifact_set_sha256);
+        let source = data.path().join("distribution").join("models");
         fs::create_dir_all(&source).unwrap();
         let source_file = source.join(&plan.artifacts[0].sha256);
         fs::write(&source_file, b"primary").unwrap();
