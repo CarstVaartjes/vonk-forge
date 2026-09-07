@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from vonk_agent_protocol import (
@@ -9,6 +12,12 @@ from vonk_agent_protocol import (
     canonical_message,
     schema_validator,
     validate_schema_message,
+)
+from vonk_agent_protocol.telemetry import (
+    MAX_TELEMETRY_SCALAR_INTEGER,
+    MAX_TELEMETRY_SCALAR_STRING_CHARS,
+    MIN_TELEMETRY_SCALAR_INTEGER,
+    validate_telemetry_scalar,
 )
 
 NODE_ID = "spk_0123456789abcdef0123456789abcdef"
@@ -118,6 +127,17 @@ def test_telemetry_schema_validator_uses_the_registered_pydantic_model() -> None
     )
 
 
+def test_packaged_telemetry_schema_is_deterministically_generated() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/generate-telemetry-schema", "--check"],
+        cwd=Path(__file__).parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_report_rejects_duplicate_or_out_of_order_samples() -> None:
     duplicate = report(sample_count=2)
     duplicate["samples"][1]["sequence"] = 0  # type: ignore[index]
@@ -140,6 +160,76 @@ def test_report_rejects_unversioned_rich_metrics_and_unknown_fields() -> None:
     unknown["samples"][0]["metrics"]["unexpected"] = True  # type: ignore[index]
     with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
         TelemetryRequest.parse(unknown)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        True,
+        MIN_TELEMETRY_SCALAR_INTEGER,
+        MAX_TELEMETRY_SCALAR_INTEGER,
+        2**53 + 1,
+        1.5,
+        float("1.7976931348623157e308"),
+        "",
+        "café\u0000",
+    ],
+    ids=["null", "bool", "signed64-min", "signed64-max", "large-int", "float", "max-float", "empty-text", "unicode-control-text"],
+)
+def test_metric_scalar_boundary_accepts_json_scalars(value: object) -> None:
+    assert validate_telemetry_scalar(value) == value
+    valid = report()
+    valid["samples"][0]["metrics"]["series"][0]["value"] = value  # type: ignore[index]
+    parsed = TelemetryRequest.parse(valid)
+    assert parsed.samples[0].metrics.series[0].value == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        MIN_TELEMETRY_SCALAR_INTEGER - 1,
+        MAX_TELEMETRY_SCALAR_INTEGER + 1,
+        float("inf"),
+        float("-inf"),
+        float("nan"),
+        [],
+        {},
+        "x" * (MAX_TELEMETRY_SCALAR_STRING_CHARS + 1),
+    ],
+    ids=["signed64-underflow", "signed64-overflow", "positive-infinity", "negative-infinity", "nan", "array", "object", "overlong-text"],
+)
+def test_metric_scalar_boundary_rejects_non_scalars_and_out_of_range_values(value: object) -> None:
+    with pytest.raises(ValueError):
+        validate_telemetry_scalar(value)
+    invalid = report()
+    invalid["samples"][0]["metrics"]["series"][0]["value"] = value  # type: ignore[index]
+    with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)|scalar"):
+        TelemetryRequest.parse(invalid)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("samples", 0, "metrics", "series", 0, "key"), "GPU.utilization"),
+        (("samples", 0, "metrics", "series", 0, "source"), "nvidia smi"),
+        (("samples", 0, "metrics", "series", 0, "aggregation"), "Last"),
+        (("samples", 0, "metrics", "provenance", "collector"), "vonk native"),
+        (("samples", 0, "metrics", "provenance", "collector_version"), "2\n3"),
+    ],
+)
+def test_schema_exposes_canonical_telemetry_identifier_patterns(
+    path: tuple[object, ...], value: str
+) -> None:
+    invalid = report()
+    target: object = invalid
+    for key in path[:-1]:
+        target = target[key]  # type: ignore[index]
+    target[path[-1]] = value  # type: ignore[index]
+
+    assert list(schema_validator("telemetry-report.schema.json").iter_errors(invalid))
+    with pytest.raises(AgentProtocolError, match="schema (validation|is invalid)"):
+        TelemetryRequest.parse(invalid)
 
 
 @pytest.mark.parametrize("value", [None, True, 2.0], ids=["missing", "bool", "float"])

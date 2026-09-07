@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 import uuid
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -45,9 +44,38 @@ TelemetryRunState = Literal[
 TelemetryWorkloadState = Literal[
     "queued", "running", "completed", "failed", "cancelled", "unknown"
 ]
-_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,95}$")
-_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
-_SOURCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_KEY_PATTERN = r"^[a-z][a-z0-9_.-]{0,95}$"
+_IDENTIFIER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+_SOURCE_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+_NO_CONTROL_SCHEMA = {"not": {"pattern": r"[\x00-\x1f\x7f]"}}
+
+TelemetryKey = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=96,
+        pattern=_KEY_PATTERN,
+        json_schema_extra=_NO_CONTROL_SCHEMA,
+    ),
+]
+TelemetrySource = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=128,
+        pattern=_SOURCE_PATTERN,
+        json_schema_extra=_NO_CONTROL_SCHEMA,
+    ),
+]
+TelemetryIdentifier = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=64,
+        pattern=_IDENTIFIER_PATTERN,
+        json_schema_extra=_NO_CONTROL_SCHEMA,
+    ),
+]
 
 
 def validate_telemetry_scalar(value: Any) -> Any:
@@ -103,7 +131,7 @@ class TelemetryDetails(TelemetryWireModel):
 
 class TelemetrySeries(TelemetryWireModel):
     node_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
-    key: Annotated[str, Field(min_length=1, max_length=96)]
+    key: TelemetryKey
     scope: TelemetryScope
     device_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     process_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
@@ -112,7 +140,7 @@ class TelemetrySeries(TelemetryWireModel):
     run_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     value: int | float | str | bool | None
     unit: Annotated[str, Field(min_length=1, max_length=32)]
-    source: Annotated[str, Field(min_length=1, max_length=128)]
+    source: TelemetrySource
     measurement_kind: TelemetryMeasurementKind
     observed_at: datetime
     received_at: datetime | None = None
@@ -120,29 +148,16 @@ class TelemetrySeries(TelemetryWireModel):
     freshness_threshold_seconds: float = Field(gt=0, le=86_400)
     support_status: TelemetrySupport
     reason: Annotated[str, Field(min_length=1, max_length=256)] | None = None
-    aggregation: Annotated[str, Field(min_length=1, max_length=32)]
+    aggregation: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=32,
+            pattern=_KEY_PATTERN,
+            json_schema_extra=_NO_CONTROL_SCHEMA,
+        ),
+    ]
     _parse_observed_at = field_validator("observed_at", "received_at", mode="before")(_rfc3339_datetime)
-
-    @field_validator("key")
-    @classmethod
-    def key_is_canonical(cls, value: str) -> str:
-        if _KEY.fullmatch(value) is None:
-            raise ValueError("telemetry metric key is invalid")
-        return value
-
-    @field_validator("source")
-    @classmethod
-    def source_is_canonical(cls, value: str) -> str:
-        if _SOURCE.fullmatch(value) is None:
-            raise ValueError("telemetry metric source is invalid")
-        return value
-
-    @field_validator("aggregation")
-    @classmethod
-    def aggregation_is_canonical(cls, value: str) -> str:
-        if _KEY.fullmatch(value) is None:
-            raise ValueError("telemetry aggregation is invalid")
-        return value
 
     @field_validator("value", mode="before")
     @classmethod
@@ -166,7 +181,7 @@ class TelemetrySeries(TelemetryWireModel):
 
 class TelemetryCapability(TelemetryWireModel):
     node_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
-    key: Annotated[str, Field(min_length=1, max_length=96)]
+    key: TelemetryKey
     scope: TelemetryScope
     device_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     process_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
@@ -174,25 +189,11 @@ class TelemetryCapability(TelemetryWireModel):
     interface_name: Annotated[str, Field(min_length=1, max_length=64)] | None = None
     run_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
     unit: Annotated[str, Field(min_length=1, max_length=32)]
-    source: Annotated[str, Field(min_length=1, max_length=128)]
+    source: TelemetrySource
     measurement_kind: TelemetryMeasurementKind
     supported: bool
     freshness_threshold_seconds: float = Field(gt=0, le=86_400)
     reason: Annotated[str, Field(min_length=1, max_length=256)] | None = None
-
-    @field_validator("key")
-    @classmethod
-    def key_is_canonical(cls, value: str) -> str:
-        if _KEY.fullmatch(value) is None:
-            raise ValueError("telemetry capability key is invalid")
-        return value
-
-    @field_validator("source")
-    @classmethod
-    def source_is_canonical(cls, value: str) -> str:
-        if _SOURCE.fullmatch(value) is None:
-            raise ValueError("telemetry capability source is invalid")
-        return value
 
     @model_validator(mode="after")
     def supported_reason(self) -> TelemetryCapability:
@@ -208,18 +209,11 @@ class TelemetryCapability(TelemetryWireModel):
 
 
 class TelemetryProvenance(TelemetryWireModel):
-    collector: Annotated[str, Field(min_length=1, max_length=64)]
-    collector_version: Annotated[str, Field(min_length=1, max_length=64)]
+    collector: TelemetryIdentifier
+    collector_version: TelemetryIdentifier
     host_uptime_seconds: int | None = Field(default=None, ge=0, le=2**63 - 1)
     source_observed_at: datetime | None = None
     _parse_source_observed_at = field_validator("source_observed_at", mode="before")(_rfc3339_datetime)
-
-    @field_validator("collector", "collector_version")
-    @classmethod
-    def provenance_text(cls, value: str) -> str:
-        if _IDENTIFIER.fullmatch(value) is None:
-            raise ValueError("telemetry provenance is invalid")
-        return value
 
 
 class TelemetryRuntime(TelemetryWireModel):
@@ -393,6 +387,8 @@ __all__ = [
     "TelemetryCapability",
     "TelemetryDetails",
     "TelemetryFreshness",
+    "TelemetryIdentifier",
+    "TelemetryKey",
     "TelemetryMeasurementKind",
     "TelemetryMetrics",
     "TelemetryProvenance",
@@ -401,6 +397,7 @@ __all__ = [
     "TelemetrySample",
     "TelemetryScope",
     "TelemetrySeries",
+    "TelemetrySource",
     "TelemetrySupport",
     "TelemetryWorkload",
     "TelemetryWorkloadState",

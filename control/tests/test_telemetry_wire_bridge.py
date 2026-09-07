@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import TelemetryRequest
+from vonk_agent_protocol import AgentProtocolError, TelemetryRequest
 from vonk_control.models import NodeTelemetrySample
 
 from .test_agent_api import NODE_A, agent_headers
@@ -53,7 +53,7 @@ def telemetry_wire_probe() -> Path:
     return target
 
 
-def _sample(observed_at: str) -> dict[str, object]:
+def _sample(observed_at: str, *, metric_value: object = 25.0) -> dict[str, object]:
     return {
         "boot_id": "00000000-0000-4000-8000-000000000001",
         "sequence": 1,
@@ -83,7 +83,7 @@ def _sample(observed_at: str) -> dict[str, object]:
                     "key": "gpu.utilization_percent",
                     "scope": "accelerator",
                     "device_id": "0",
-                    "value": 25.0,
+                    "value": metric_value,
                     "unit": "%",
                     "source": "nvidia-smi",
                     "measurement_kind": "measured",
@@ -133,3 +133,62 @@ def test_rust_telemetry_json_crosses_shared_python_and_controller_ack(
         assert row is not None
         assert row.metrics["series"][0]["key"] == "gpu.utilization_percent"
         assert row.metrics["series"][0]["value"] == 25.0
+
+
+@pytest.mark.parametrize(
+    ("metric_value", "valid"),
+    [
+        (None, True),
+        (True, True),
+        (-(2**63), True),
+        (2**63 - 1, True),
+        (2**53 + 1, True),
+        (1.5, True),
+        ("", True),
+        ("café\u0000", True),
+        (-(2**63) - 1, False),
+        (2**63, False),
+        (float("inf"), False),
+        (float("nan"), False),
+        ([], False),
+        ({}, False),
+        ("x" * 257, False),
+    ],
+    ids=[
+        "null",
+        "bool",
+        "signed64-min",
+        "signed64-max",
+        "large-int",
+        "finite-float",
+        "empty-text",
+        "unicode-control-text",
+        "signed64-underflow",
+        "signed64-overflow",
+        "positive-infinity",
+        "nan",
+        "array",
+        "object",
+        "overlong-text",
+    ],
+)
+def test_rust_metric_scalar_contract_matches_python(
+    agent_system, telemetry_wire_probe: Path, metric_value: object, valid: bool
+) -> None:
+    _, _, _, clock = agent_system
+    sample = _sample(clock.now.isoformat(), metric_value=metric_value)
+    produced = subprocess.run(
+        [str(telemetry_wire_probe)],
+        input=json.dumps(sample, separators=(",", ":")),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if valid:
+        assert produced.returncode == 0, produced.stderr
+        report = TelemetryRequest.parse(json.loads(produced.stdout))
+        assert report.samples[0].metrics.series[0].value == metric_value
+    else:
+        assert produced.returncode != 0
+        with pytest.raises(AgentProtocolError):
+            TelemetryRequest.parse(sample)

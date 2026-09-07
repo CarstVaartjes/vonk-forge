@@ -18,6 +18,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
     let sample: TelemetrySample = serde_json::from_str(&input)?;
+    if sample
+        .metrics
+        .series
+        .iter()
+        .any(|series| !vonk_agent::telemetry::valid_metric_value(&series.value))
+    {
+        return Err("telemetry metric value violates scalar contract".into());
+    }
     let report = TelemetryReport {
         schema_version: 1,
         samples: [&sample],

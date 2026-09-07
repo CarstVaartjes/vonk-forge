@@ -2043,16 +2043,16 @@ fn valid_metric_text(value: &str, maximum: usize) -> bool {
     !value.is_empty() && value.chars().count() <= maximum && !value.chars().any(char::is_control)
 }
 
-fn valid_metric_value(value: &serde_json::Value) -> bool {
+/// Return whether a rich metric value satisfies the shared JSON scalar contract.
+pub fn valid_metric_value(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(_) => true,
         serde_json::Value::Number(number) => {
-            if number.as_i64().is_some() {
-                true
-            } else if let Some(value) = number.as_u64() {
-                value <= i64::MAX as u64
-            } else {
+            let representation = number.to_string();
+            if representation.contains(['.', 'e', 'E']) {
                 number.as_f64().is_some_and(f64::is_finite)
+            } else {
+                representation.parse::<i64>().is_ok()
             }
         }
         serde_json::Value::String(value) => value.chars().count() <= 256,
@@ -2077,6 +2077,7 @@ mod scalar_contract_tests {
         assert!(valid_metric_value(&Value::String("x".repeat(256))));
 
         assert!(!valid_metric_value(&json!(i64::MAX as u64 + 1)));
+        assert!(!valid_metric_value(&json!(i64::MIN as i128 - 1)));
         assert!(!valid_metric_value(&Value::String("x".repeat(257))));
         assert!(!valid_metric_value(&Value::Array(Vec::new())));
         assert!(!valid_metric_value(&Value::Object(Default::default())));
