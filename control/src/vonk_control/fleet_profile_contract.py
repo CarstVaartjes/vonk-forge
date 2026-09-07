@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Annotated, Literal, Protocol
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
+from vonk_agent_protocol import OperationProgress
 
 from .preparation_contract import RolloutPreparation
 from .run_switch_contract import RunSwitchOperationResult
@@ -261,6 +262,8 @@ class FleetProfileAssignmentPreparation(_StrictModel):
 
 class FleetProfileChildProgress(_StrictModel):
     """Typed progress emitted by the profile-owned Run switch adapter."""
+
+    operation: OperationProgress | None = None
 
     phase: Literal[
         "model-download",

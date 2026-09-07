@@ -61,7 +61,7 @@ test("keeps unknown byte progress indeterminate and polls the durable operation"
   const next = operation({state: "succeeded", current_phase: "final_verify", progress: {...operation().progress, phase: "final_verify", state: "succeeded", completed_bytes: 0, members: [{node_id: nodeA, phase: "final_verify", state: "succeeded", completed_bytes: 0, total_bytes: null}]}});
   const getOperation = vi.fn(async () => next);
   render(<LibraryRunSwitchProgress api={{getRecipeRunSwitchOperation: getOperation, retryRecipeRunSwitch: vi.fn()}} nodeNames={{[nodeA]: "Spark One"}} onChange={vi.fn()} operation={operation()} title="Qwen Chat"/>);
-  expect(screen.getByRole("progressbar", {name: "Run progress"})).not.toHaveAttribute("aria-valuenow");
+  expect(screen.getByRole("progressbar", {name: "Transfer transfer"})).not.toHaveAttribute("aria-valuenow");
   expect(screen.getAllByText("Total bytes unavailable").length).toBeGreaterThan(0);
   await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
   expect(getOperation).toHaveBeenCalledWith(operation().operation_id, expect.any(AbortSignal));
@@ -162,4 +162,18 @@ test("one Run action previews and applies the exact model and selected Spark gro
   expect(screen.queryByRole("button", {name: "Review Load"})).not.toBeInTheDocument();
   expect(await screen.findByText("Copying model to Spark One")).toBeVisible();
   expect(applyRecipeRunSwitch).toHaveBeenCalledWith(expect.objectContaining({plan_digest: digest, request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)}));
+});
+
+
+test("shows measured phase transfer and keeps verification indeterminate", () => {
+  const current = operation();
+  Object.assign(current.progress, {operation: {phase: "transfer", completed_bytes: 1024, total_bytes: 2048, total_bytes_known: true, smoothed_bytes_per_second: 512, eta_seconds: 2, elapsed_seconds: 30, activity: "active"}});
+  const props = {api: {getRecipeRunSwitchOperation: vi.fn(), retryRecipeRunSwitch: vi.fn()}, nodeNames: {[nodeA]: "Spark One"}, onChange: vi.fn(), title: "Qwen Chat"};
+  const {rerender} = render(<LibraryRunSwitchProgress {...props} operation={current}/>);
+  expect(screen.getByText(/512 B\/s.*2s left/)).toBeVisible();
+  Object.assign(current.progress, {phase: "verify", operation: {phase: "verify", completed_bytes: 2048, total_bytes: 2048, total_bytes_known: true}});
+  rerender(<LibraryRunSwitchProgress {...props} operation={{...current}}/>);
+  expect(screen.getAllByText("Verifying copied artifacts").length).toBeGreaterThan(0);
+  expect(screen.getByRole("progressbar")).not.toHaveAttribute("aria-valuenow");
+  expect(screen.queryByText(/2s left/)).not.toBeInTheDocument();
 });

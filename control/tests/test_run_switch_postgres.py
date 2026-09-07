@@ -188,3 +188,23 @@ def test_postgres_final_verification_has_durable_timeout(tmp_path, migrated_engi
     failed = restarted.get(operation.operation_id)
     assert failed.state == "failed"
     assert failed.status_reason == "run-switch.final-verification-timeout"
+
+
+def test_postgres_duplicate_apply_converges_under_target_lock(tmp_path, migrated_engine):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    sessions, lifecycle, nodes, _ = _installed(tmp_path, migrated_engine)
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    plan = service.preview(_request(sessions, nodes[0]), actor="admin")
+    key = str(uuid.uuid4())
+    barrier = Barrier(2)
+
+    def apply():
+        barrier.wait(timeout=5)
+        return service._apply_plan(plan, request_key=key, actor="admin", kind="recipe.run-switch.v2")
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        futures = [workers.submit(apply) for _ in range(2)]
+        results = [future.result(timeout=10) for future in futures]
+    assert results[0].operation_id == results[1].operation_id

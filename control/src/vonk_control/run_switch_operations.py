@@ -22,13 +22,18 @@ import httpx
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import DistributionAssignment, canonical_message
+from vonk_agent_protocol import (
+    DistributionAssignment,
+    OperationProgress,
+    canonical_message,
+)
 
 from .cluster_mappings import (
     ClusterMappingError,
     ClusterMappingPlan,
     ClusterMappingService,
 )
+from .lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from .model_cache import ModelCacheService
 from .model_cache_contract import ModelCacheDownloadPreviewResponse
 from .models import (
@@ -50,6 +55,7 @@ from .models import (
     RuntimeImageReceipt,
 )
 from .operation_api import OperationListPage, OperationQuery
+from .operation_progress import observe_progress, project_progress
 from .preparation_contract import (
     ControllerAssetState,
     ModelArtifactPreparation,
@@ -83,6 +89,7 @@ from .run_switch_contract import (
     ResourceDemandEvidence,
     RunSwitchApplyRequest,
     RunSwitchBuildEvidence,
+    RunSwitchCancellation,
     RunSwitchMemberProgress,
     RunSwitchOperation,
     RunSwitchOperationResult,
@@ -829,6 +836,23 @@ class RecipeLifecyclePhaseExecutor:
         self._mappings = mappings
         self._clock = clock
         self._artifact_executor = artifact_executor
+        self._preflight = None
+
+    def preflight(self, plan, phase, *, actor, request_key, progress):
+        if phase.kind in {"stop", "cleanup", "final_verify", "verify"} or phase.state != "planned":
+            return None, None
+        with self._sessions() as session:
+            revision = session.get(CatalogDocumentRevision, plan.recipe_revision_id)
+            if revision is None or revision.content_digest != plan.recipe_content_sha256:
+                raise RunSwitchOperationConflict("run-switch.preflight-recipe-changed")
+            document = revision.document
+        nodes = {node.node_id: False for node in plan.spark_group.nodes}
+        if phase.subphase == "container-build" and plan.build.builder_node_id or not progress.get("completed_phases") and plan.build.state in {"planned", "building"} and plan.build.builder_node_id:
+            nodes[plan.build.builder_node_id] = True
+        previous = progress.get("preflight")
+        if self._preflight is None:
+            self._preflight = LifecyclePreflight(self._sessions, self._lifecycle._agent_jobs, self._clock, self._lifecycle._install_admission._disk_floor)
+        return self._preflight.ensure(document=document, nodes=nodes, phase_index=phase.index, request_key=request_key, actor=actor, previous=LifecyclePreflightCheckpoint.model_validate(previous) if previous else None)
 
     def _execute_container_build(
         self,
@@ -1607,6 +1631,34 @@ class RunSwitchOperationService:
             if job is None or job.kind not in _OPERATION_KINDS:
                 raise KeyError(operation_id)
             return self._operation_view(job)
+
+    def cancel(self, operation_id: str, *, actor: str, request_key: str, reason: str) -> RunSwitchOperation:
+        """Stop at the next safe phase boundary, keeping shared immutable work."""
+        cancellation = RunSwitchCancellation(request_key=request_key, actor=actor, reason=" ".join(reason.split()), requested_at=_now(self._clock))
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None or job.kind not in _OPERATION_KINDS:
+                raise KeyError(operation_id)
+            progress = _read_progress(job.result)
+            previous = progress.get("cancellation")
+            if previous:
+                if any(previous.get(key) != getattr(cancellation, key) for key in ("request_key", "actor", "reason")):
+                    raise RunSwitchOperationConflict("run-switch cancellation request was already used differently")
+                return self._operation_view(job)
+            if job.state not in {"queued", "running"}:
+                raise RunSwitchOperationConflict("run-switch operation is not cancellable")
+            plan = _load_plan(job.payload["plan"])
+            phase = plan.phases[min(int(progress.get("phase_index", 0)), len(plan.phases) - 1)]
+            if "start" in progress.get("completed_phases", []) or (job.state == "running" and phase.kind in {"start", "final_verify"}):
+                raise RunSwitchOperationConflict("run-switch runtime is starting or active; use the explicit Stop operation")
+            progress["cancellation"] = cancellation.model_dump(mode="json")
+            job.status_reason = "Cancellation requested; finishing the current preparation safely."
+            if job.state == "queued" and not progress.get("child_operation_id"):
+                _complete_cancellation(job, progress, cancellation.requested_at)
+            else:
+                job.result = _persisted_result(progress)
+                job.updated_at = cancellation.requested_at
+        return self.get(operation_id)
 
     def retry(
         self,
@@ -2556,6 +2608,7 @@ class RunSwitchOperationService:
         require_available: bool = True,
     ) -> tuple[
         RunSwitchBuildEvidence,
+    RunSwitchCancellation,
         RuntimeImageStorageImpact,
         list[RunSwitchReason],
         list[RunSwitchReason],
@@ -3888,6 +3941,7 @@ class RunSwitchOperationService:
             "retry": {"automatic_attempts": 1, "operator_retries": 0},
         }
         with self._sessions.begin() as session:
+            list(session.scalars(select(AgentNode).where(AgentNode.node_id.in_([node.node_id for node in plan.spark_group.nodes])).order_by(AgentNode.node_id).with_for_update()))
             existing = session.scalar(select(Job).where(Job.request_id == request_key))
             if existing is not None:
                 if (
@@ -3946,7 +4000,7 @@ class RunSwitchOperationService:
     def _advance(self, operation_id: str) -> bool:
         now = _now(self._clock)
         with self._sessions() as session:
-            job = session.get(Job, operation_id)
+            job = session.get(Job, operation_id, with_for_update=True)
             if job is None or job.kind not in _OPERATION_KINDS:
                 return True
             if job.state not in {"queued", "running"}:
@@ -3964,6 +4018,10 @@ class RunSwitchOperationService:
             phase_index = progress.get("phase_index", 0)
             item_index = progress.get("item_index", 0)
             child_id = progress.get("child_operation_id")
+            if progress.get("cancellation") and child_id is None:
+                _complete_cancellation(job, progress, now)
+                session.commit()
+                return True
             if type(phase_index) is not int or type(item_index) is not int or phase_index < 0 or item_index < 0:
                 job.state = "failed"
                 job.status_reason = "run-switch persisted progress is invalid"
@@ -3978,17 +4036,20 @@ class RunSwitchOperationService:
                 job.updated_at = now
                 session.commit()
                 return True
+        def fail(reason: str, *, retryable: bool = False) -> None:
+            self._fail(operation_id, reason, retryable=retryable, checkpoint=(phase_index, item_index, child_id))
+
         if child_id is not None:
             if not isinstance(child_id, str):
-                self._fail(operation_id, "run-switch child operation identity is invalid")
+                fail("run-switch child operation identity is invalid")
                 return True
             try:
                 child = self._get_child_operation(child_id)
             except KeyError:
-                self._fail(operation_id, "run-switch child operation disappeared")
+                fail("run-switch child operation disappeared")
                 return True
             if child is None:
-                self._fail(operation_id, "run-switch child operation disappeared")
+                fail("run-switch child operation disappeared")
                 return True
             if child.state in {"queued", "running"}:
                 child_progress = _child_progress_payload(child)
@@ -3997,6 +4058,8 @@ class RunSwitchOperationService:
                     if job is None:
                         return False
                     progress = _read_progress(job.result)
+                    if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
+                        return False
                     persisted_plan = _load_plan(job.payload["plan"])
                     persisted_phase_index = int(progress.get("phase_index", phase_index))
                     persisted_phase = (
@@ -4009,6 +4072,7 @@ class RunSwitchOperationService:
                         persisted_plan,
                         persisted_phase,
                         child_progress,
+                        now,
                     )
                     progress["phase"] = persisted_phase.kind
                     progress["subphase"] = persisted_phase.subphase
@@ -4016,6 +4080,13 @@ class RunSwitchOperationService:
                     job.result = _persisted_result(progress)
                     job.updated_at = now
                 return True
+            if child.state in _TERMINAL_STATES and child.state != "succeeded":
+                with self._sessions.begin() as session:
+                    job = session.get(Job, operation_id, with_for_update=True)
+                    current = _read_progress(job.result) if job is not None else {}
+                    if job is not None and _checkpoint_matches(job, current, phase_index, item_index, child_id) and current.get("cancellation"):
+                        _complete_cancellation(job, current, now)
+                        return True
             if child.state not in _TERMINAL_STATES or child.state != "succeeded":
                 reason = f"run-switch phase operation failed: {child.state if child else 'unknown'}"
                 evidence = _child_progress_payload(child)
@@ -4023,11 +4094,10 @@ class RunSwitchOperationService:
                 if isinstance(detail, str) and detail:
                     reason += ": " + detail[:384]
                 if _transient_distribution_failure(child) and self._queue_transient_retry(
-                    operation_id, child, phase_index=phase_index
+                    operation_id, child, phase_index=phase_index, child_id=child_id
                 ):
                     return True
-                self._fail(
-                    operation_id,
+                fail(
                     reason,
                     retryable=_transient_distribution_failure(child),
                 )
@@ -4037,6 +4107,8 @@ class RunSwitchOperationService:
                 if job is None:
                     return False
                 progress = _read_progress(job.result)
+                if not _checkpoint_matches(job, progress, phase_index, item_index, child_id):
+                    return False
                 phase_index = int(progress.get("phase_index", 0))
                 item_index = int(progress.get("item_index", 0)) + 1
                 persisted_plan = _load_plan(job.payload["plan"])
@@ -4046,6 +4118,7 @@ class RunSwitchOperationService:
                     persisted_plan,
                     phase,
                     _child_progress_payload(child),
+                    now,
                 )
                 # Preserve terminal child receipts for the following verify
                 # phase. Byte/member projection alone cannot prove every
@@ -4100,6 +4173,13 @@ class RunSwitchOperationService:
                     except RunSwitchOperationConflict as error:
                         self._mark_failed(job, str(error), now=now, progress=progress)
                         return True
+                if child_receipts is None and child_result is not None and (phase.kind in {"transfer", "verify", "cleanup"} or phase.subphase == "runtime-image"):
+                    try:
+                        receipt = _phase_result(child_result, phase=phase)
+                    except RunSwitchOperationConflict as error:
+                        self._mark_failed(job, str(error), now=now, progress=progress)
+                        return True
+                    progress["phase_results"] = [*progress.get("phase_results", []), receipt]
                 item_total = len(persisted_plan.stops) if phase.kind == "stop" else 1
                 progress["child_operation_id"] = None
                 if item_index >= item_total:
@@ -4124,13 +4204,19 @@ class RunSwitchOperationService:
                 job.state = "running"
                 job.result = _persisted_result(progress)
                 job.updated_at = now
+                if progress.get("cancellation"):
+                    _complete_cancellation(job, progress, now)
             return True
-        with self._sessions() as session:
-            job = session.get(Job, operation_id)
-            if job is None:
+        with self._sessions.begin() as session:
+            job = session.get(Job, operation_id, with_for_update=True)
+            if job is None or job.state not in {"queued", "running"}:
                 return False
             plan = _load_plan(job.payload["plan"])
             progress = _read_progress(job.result)
+            if progress.get("cancellation"):
+                _complete_cancellation(job, progress, now)
+                return True
+            job.state = "running"
             phase_index = int(progress.get("phase_index", 0))
             item_index = int(progress.get("item_index", 0))
             if phase_index >= len(plan.phases):
@@ -4138,13 +4224,38 @@ class RunSwitchOperationService:
             phase = plan.phases[phase_index]
             actor = job.actor
             request_key = job.request_id
+        gate = getattr(self._phase_executor, "preflight", None)
+        if callable(gate):
+            try:
+                checkpoint, blocked = gate(plan, phase, actor=actor, request_key=request_key, progress=progress)
+            except (RuntimeError, ValueError, KeyError) as error:
+                fail(str(error))
+                return True
+            if checkpoint is not None:
+                with self._sessions.begin() as session:
+                    job = session.get(Job, operation_id, with_for_update=True)
+                    if job is None:
+                        return False
+                    current = _read_progress(job.result)
+                    if not _checkpoint_matches(job, current, phase_index, item_index, None):
+                        return False
+                    current["preflight"] = checkpoint.model_dump(mode="json")
+                    if blocked:
+                        self._mark_failed(job, blocked, now=now, progress=current)
+                        return True
+                    if checkpoint.pending_job_id:
+                        current["operation"] = observe_progress(_progress_mapping(current.get("operation")), {"phase": "runtime-preflight", "completed_bytes": 0, "total_bytes_known": False}, now)
+                    job.result = _persisted_result(current)
+                    job.updated_at = now
+                if checkpoint.pending_job_id:
+                    return True
         if phase.state in {"skipped", "retained"}:
             execution = PhaseExecution()
         elif phase.state == "blocked":
-            self._fail(operation_id, f"run-switch phase blocked: {phase.kind}")
+            fail(f"run-switch phase blocked: {phase.kind}")
             return True
         elif self._phase_executor is None:
-            self._fail(operation_id, f"run-switch phase executor unavailable: {phase.kind}")
+            fail(f"run-switch phase executor unavailable: {phase.kind}")
             return True
         else:
             try:
@@ -4157,11 +4268,10 @@ class RunSwitchOperationService:
                     progress=progress,
                 )
             except RunSwitchOperationConflict as error:
-                self._fail(operation_id, str(error))
+                fail(str(error))
                 return True
             except (OSError, httpx.HTTPError, RuntimeError, TypeError, ValueError, KeyError) as error:
-                self._fail(
-                    operation_id,
+                fail(
                     f"{type(error).__name__}: {error}",
                     retryable=_transient_distribution_exception(error),
                 )
@@ -4171,7 +4281,7 @@ class RunSwitchOperationService:
             and execution.operation_id is None
             and phase.kind != "final_verify"
         ):
-            self._fail(operation_id, f"run-switch.{phase.kind}-waiting-without-child")
+            fail(f"run-switch.{phase.kind}-waiting-without-child")
             return True
         if (
             execution.operation_id is None
@@ -4184,18 +4294,21 @@ class RunSwitchOperationService:
             try:
                 _validate_artifact_execution(plan, phase, execution.result)
             except RunSwitchOperationConflict as error:
-                self._fail(operation_id, str(error))
+                fail(str(error))
                 return True
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None:
                 return False
             progress = _read_progress(job.result)
+            if not _checkpoint_matches(job, progress, phase_index, item_index, None):
+                return False
             _merge_progress_evidence(
                 progress,
                 plan,
                 phase,
                 execution.result,
+                now,
             )
             if execution.waiting:
                 progress["phase"] = phase.kind
@@ -4268,6 +4381,8 @@ class RunSwitchOperationService:
             job.state = "running"
             job.result = _persisted_result(progress)
             job.updated_at = now
+            if progress.get("cancellation") and not progress.get("child_operation_id"):
+                _complete_cancellation(job, progress, now)
         return True
 
     def _get_child_operation(self, operation_id: str) -> Any:
@@ -4289,15 +4404,19 @@ class RunSwitchOperationService:
         child: object,
         *,
         phase_index: int,
+        child_id: str,
     ) -> bool:
         """Requeue one parent attempt while preserving child progress receipts."""
 
+        now = _now(self._clock)
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
             if job is None:
                 return False
             attempt = max(1, int(job.current_attempt or 0))
             progress = _read_progress(job.result)
+            if job.state not in {"queued", "running"} or progress.get("phase_index") != phase_index or progress.get("child_operation_id") != child_id:
+                return False
             plan = _load_plan(job.payload["plan"])
             raw_retry = job.payload.get("retry", {})
             retry = dict(raw_retry) if isinstance(raw_retry, Mapping) else {}
@@ -4310,7 +4429,7 @@ class RunSwitchOperationService:
             if phase_index >= len(plan.phases) or automatic_attempts >= _MAX_RETRY_ATTEMPTS:
                 return False
             phase = plan.phases[phase_index]
-            _merge_progress_evidence(progress, plan, phase, _child_progress_payload(child))
+            _merge_progress_evidence(progress, plan, phase, _child_progress_payload(child), now)
             progress["child_operation_id"] = None
             progress["retryable"] = True
             progress["retry_attempt"] = attempt + 1
@@ -4324,10 +4443,12 @@ class RunSwitchOperationService:
             job.updated_at = _now(self._clock)
             return True
 
-    def _fail(self, operation_id: str, reason: str, *, retryable: bool = False) -> None:
+    def _fail(self, operation_id: str, reason: str, *, retryable: bool = False, checkpoint: tuple[int, int, str | None] | None = None) -> None:
         with self._sessions.begin() as session:
             job = session.get(Job, operation_id, with_for_update=True)
-            if job is None:
+            if job is None or job.state not in {"queued", "running"}:
+                return
+            if checkpoint is not None and not _checkpoint_matches(job, _read_progress(job.result), *checkpoint):
                 return
             self._mark_failed(job, reason, now=_now(self._clock), retryable=retryable)
 
@@ -4466,10 +4587,8 @@ class RunSwitchOperationProvider:
             "created_at": _aware(job.created_at).isoformat(),
             "updated_at": _aware(job.updated_at).isoformat(),
             "supported_actions": (
-                ["retry"]
-                if operation.state == "failed"
-                and isinstance(operation.result, Mapping)
-                and operation.result.get("retryable") is True
+                ["retry"] if operation.state == "failed" and operation.result and operation.result.retryable
+                else ["cancel"] if operation.state in {"queued", "running"} and not (operation.result and operation.result.cancellation) and (operation.state == "queued" or operation.current_phase not in {"start", "final_verify"})
                 else []
             ),
             "result": _activity_result(operation),
@@ -4517,6 +4636,9 @@ def _activity_progress(operation: RunSwitchOperation) -> dict[str, object]:
     }
     if raw.get("total_bytes") is not None:
         progress["total_bytes"] = int(raw["total_bytes"])
+    measured = raw.get("operation")
+    if isinstance(measured, Mapping):
+        progress.update({key: value for key, value in measured.items() if value is not None})
     return progress
 
 
@@ -4881,11 +5003,37 @@ def _progress_member_entries(value: object) -> list[Mapping[str, object]]:
     return []
 
 
+def _complete_cancellation(job: Job, progress: dict[str, object], now: datetime) -> None:
+    job.state = "cancelled"
+    job.status_reason = progress["cancellation"]["reason"]
+    progress["child_operation_id"] = None
+    progress["retryable"] = False
+    job.result = _persisted_result(progress)
+    job.updated_at = now
+
+
+def _checkpoint_matches(
+    job: Job,
+    progress: Mapping[str, object],
+    phase_index: int,
+    item_index: int,
+    child_id: str | None,
+) -> bool:
+    """Accept an out-of-transaction observation only for its original checkpoint."""
+    return (
+        job.state in {"queued", "running"}
+        and progress.get("phase_index", 0) == phase_index
+        and progress.get("item_index", 0) == item_index
+        and progress.get("child_operation_id") == child_id
+    )
+
+
 def _merge_progress_evidence(
     progress: dict[str, object],
     plan: RunSwitchPlan,
     phase: RunSwitchPhase,
     evidence: object,
+    now: datetime | None = None,
 ) -> None:
     """Persist bounded child byte/member evidence for restart-safe polling."""
 
@@ -4894,7 +5042,12 @@ def _merge_progress_evidence(
         return
     nested = _progress_mapping(payload.get("progress"))
     if nested is not None:
-        _merge_progress_evidence(progress, plan, phase, nested)
+        _merge_progress_evidence(progress, plan, phase, nested, now)
+
+    canonical = _progress_mapping(payload.get("operation"))
+    if canonical is not None:
+        progress["operation"] = OperationProgress.model_validate(canonical).model_dump(mode="json", exclude_none=True)
+        progress["operation_phase_index"] = phase.index
 
     current_completed = _progress_int(progress.get("completed_bytes")) or 0
     reported_completed = next(
@@ -4917,6 +5070,25 @@ def _merge_progress_evidence(
             else 0
         )
         progress["completed_bytes"] = max(current_completed, offset + reported_completed)
+    if now is not None and reported_completed is not None and nested is None and canonical is None:
+        prior = _progress_mapping(progress.get("operation"))
+        values = {
+            key: value for key, value in payload.items()
+            if key in OperationProgress.model_fields and key not in {"members", "checkpoint"}
+        }
+        values["phase"] = phase.kind
+        values["completed_bytes"] = reported_completed
+        if "total_bytes" in values:
+            values["total_bytes_known"] = values["total_bytes"] is not None
+        else:
+            values["total_bytes_known"] = False
+        # Child receipts may report phase-local bytes. Keep the nested measurement
+        # phase-local too: an ETA for future build/start work would be invented.
+        current = OperationProgress.model_validate(values).model_dump(mode="json", exclude_none=True)
+        if prior is not None and prior.get("phase") == phase.kind:
+            current["completed_bytes"] = max(int(prior.get("completed_bytes", 0)), reported_completed)
+        progress["operation"] = observe_progress(prior, current, now)
+        progress["operation_phase_index"] = phase.index
     reported_total = next(
         (
             _progress_int(payload.get(key))
@@ -5086,7 +5258,7 @@ def _progress_view(
             candidate_total = _progress_int(raw.get("total_bytes"))
             total = candidate_total
 
-    state = operation_state if operation_state in {"queued", "running", "succeeded", "failed"} else "unknown"
+    state = operation_state if operation_state in {"queued", "running", "succeeded", "failed", "cancelled"} else "unknown"
     if state == "succeeded":
         phase = "final_verify"
         subphase = None
@@ -5095,9 +5267,8 @@ def _progress_view(
     if state == "succeeded" and total is not None:
         completed = total
     elif plan is not None and total is not None:
-        completed_phases = raw.get("completed_phases")
-        if isinstance(completed_phases, Sequence) and "transfer" in completed_phases:
-            completed = total
+        # NAS download and Spark distribution are distinct transfer checkpoints.
+        # Only their persisted byte counters prove how much actually completed.
         completed = min(completed, total)
     raw_members = {
         str(item.get("node_id")): item
@@ -5154,7 +5325,19 @@ def _progress_view(
         # DTO if a corrupted historical row is inspected so the API can still
         # report the operation's durable failure.
         raise RunSwitchOperationConflict("run-switch operation has no target members")
+    measurement = OperationProgress.model_validate(raw["operation"]) if raw.get("operation") else None
+    if measurement is not None:
+        pending_preflight = _progress_mapping(raw.get("preflight"))
+        measuring_preflight = bool(pending_preflight and pending_preflight.get("pending_job_id"))
+        if (raw.get("operation_phase_index") != phase_index and not measuring_preflight) or state not in {"queued", "running"}:
+            measurement = measurement.model_copy(update={
+                "phase": phase or "unknown", "bytes_per_second": None,
+                "smoothed_bytes_per_second": None, "eta_seconds": None, "activity": None,
+            })
+        else:
+            measurement = project_progress(measurement)
     return RunSwitchProgress(
+        operation=measurement,
         phase_index=phase_index,
         phase_count=phase_count,
         phase=phase,

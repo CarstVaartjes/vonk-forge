@@ -163,3 +163,12 @@ test("keeps a blocked profile readable and prevents apply", async () => {
   expect(screen.getByText("Build the selected recipe before applying this profile.")).toBeVisible();
   expect(screen.getByRole("button", {name: "Switch profile"})).toBeDisabled();
 });
+
+
+test("shows the current nested profile transfer measurement", async () => {
+  const active = {...succeeded, state: "running", current_step: 0, progress: {attempt: 1, completed_steps: 0, total_steps: 2, child_progress: {phase: "transfer", node_ids: [NODE_A], bytes: 1024, total_bytes: 2048, operation: {phase: "transfer", completed_bytes: 1024, total_bytes: 2048, total_bytes_known: true, smoothed_bytes_per_second: 512, eta_seconds: 2, activity: "active"}}}};
+  const api = {fleetProfiles: async () => ({profiles: [profile]}), previewFleetProfile: async () => preview, applyFleetProfile: async () => active, getFleetProfileApplication: async () => active} as unknown as ControlApi;
+  render(<FleetOperatingBoard api={api}/>);
+  await userEvent.click(await screen.findByRole("button", {name: "Switch profile"}));
+  expect(await screen.findByText(/512 B\/s.*2s left/)).toBeVisible();
+});
