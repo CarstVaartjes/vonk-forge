@@ -341,6 +341,48 @@ def test_compiled_launch_payload_preserves_missing_endpoint_for_jobs() -> None:
     assert validated["runtime"]["placement"]["port"] is None
 
 
+def test_compiled_launch_payload_allows_distinct_serving_ports() -> None:
+    spec = _spec()
+    payload = _compile().to_compiled_launch_payload(
+        spec,
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": 9000,
+            "reserved_memory_bytes": 1,
+        },
+    )
+
+    validated = validate_compiled_launch_payload(payload)
+    assert validated["endpoint"]["port"] == 8000
+    assert validated["runtime"]["placement"]["port"] == 9000
+
+
+@pytest.mark.parametrize("port", [None, 0, 65536, "9000"])
+def test_compiled_launch_serving_port_is_required_and_in_range(port: object) -> None:
+    with pytest.raises(CompiledExecutionPlanError):
+        payload = _compile().to_compiled_launch_payload(
+            _spec(),
+            placement={
+                "endpoint_address": None,
+                "rank": 0,
+                "role": "entrypoint",
+                "world_size": 1,
+                "local_address": None,
+                "master_address": None,
+                "master_port": None,
+                "port": port,
+                "reserved_memory_bytes": 1,
+            },
+        )
+        validate_compiled_launch_payload(payload)
+
+
 def test_compiled_launch_projection_requires_explicit_placement_fields() -> None:
     placement = {
         "endpoint_address": None,
