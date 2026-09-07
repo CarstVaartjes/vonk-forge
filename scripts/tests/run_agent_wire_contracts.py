@@ -13,6 +13,8 @@ PROBES = {
     "VONK_INSTALL_START_WIRE_PROBE": ("vonk-agent", "install_start_wire_probe"),
     "VONK_HEARTBEAT_WIRE_PROBE": ("vonk-agent", "heartbeat_wire_probe"),
     "VONK_ENROLLMENT_WIRE_PROBE": ("vonk-agent", "enrollment_wire_probe"),
+    "VONK_BOOTSTRAP_WIRE_PROBE": ("vonk-spark-setup", "bootstrap_wire_probe"),
+    "VONK_RECIPE_JOB_WIRE_PROBE": ("vonk-agent-protocol", "recipe_job_wire_probe"),
 }
 
 
