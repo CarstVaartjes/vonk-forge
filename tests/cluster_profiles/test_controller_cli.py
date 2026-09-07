@@ -1033,6 +1033,35 @@ def test_provenance_and_explicit_upstream_check_use_current_routes() -> None:
     assert client.calls[-1][3]["check_upstream"] is True
 
 
+def test_operation_evidence_download_uses_exact_attempt_and_current_bundle(
+    tmp_path,
+) -> None:
+    document = {
+        "schema_version": 2,
+        "context": {"operation_id": "op-1", "attempt": 3},
+        "diagnostics": {"category": "runtime"},
+    }
+    client = _Client(
+        {
+            ("GET", "/api/v1/operations/op-1"): {"attempt": 3},
+            ("GET", "/api/v1/operations/op-1/evidence"): document,
+        }
+    )
+    target = tmp_path / "failure.json"
+    result, payload = _invoke(
+        client, "--json", "operations", "evidence", "op-1", "--file", str(target)
+    )
+    assert result == 0
+    assert json.loads(target.read_text()) == document
+    assert client.calls[-1] == (
+        "GET",
+        "/api/v1/operations/op-1/evidence",
+        None,
+        {"attempt": 3},
+    )
+    assert payload["file"] == str(target)
+
+
 def test_operations_wait_reobserves_until_terminal_without_cancelling() -> None:
     client = _Client(
         {
@@ -1236,7 +1265,7 @@ def test_models_capability_filter_keeps_model_and_recipe_truth_separate() -> Non
         ("profiles", "status", "p"),
         ("operations", "show", "o"),
         ("operations", "watch", "o"),
-        ("operations", "evidence", "o"),
+        ("operations", "evidence", "o", "--attempt", "1"),
     ],
 )
 def test_task_oriented_command_parser_and_dispatch_contract(argv: tuple[str, ...]) -> None:

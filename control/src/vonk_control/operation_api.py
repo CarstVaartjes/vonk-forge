@@ -63,6 +63,7 @@ _ADMIN_OPERATION_IDS = {
     ("post", "/api/v1/agents/upgrades"): "applyAgentUpgrade",
     ("get", "/api/v1/fleet"): "getFleetStatus",
     ("get", "/api/v1/deployment-provenance"): "getDeploymentProvenance",
+    ("get", "/api/v1/operations/{operation_id}/evidence"): "getOperationEvidence",
     ("get", "/api/v1/fleet/stream"): "streamFleetEvents",
     ("get", "/api/v1/fleet-profiles"): "listFleetProfiles",
     ("post", "/api/v1/fleet-profiles"): "createFleetProfile",
@@ -610,7 +611,14 @@ def job_response(
     target_cursor: int,
     limit: int,
     cursors: CursorCodec,
+    evidence_decorator: Callable[[Mapping[str, object]], Mapping[str, object]]
+    | None = None,
 ) -> JobDetailResponse:
+    items = (
+        [evidence_decorator(item) for item in operation_page.items]
+        if evidence_decorator is not None
+        else operation_page.items
+    )
     projected = [
         JobOperationResponse(
             id=item["id"],
@@ -635,7 +643,7 @@ def job_response(
                 ),
             ),
         )
-        for item in operation_page.items
+        for item in items
     ]
     targets = list(job.targets)
     visible_targets = targets[target_cursor : target_cursor + limit]

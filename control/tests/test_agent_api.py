@@ -3462,8 +3462,10 @@ def test_staged_certificate_can_only_activate_and_activation_is_idempotent_after
         assert new is not None and new.state == "active" and new.revoked_at is None
 
 
+@pytest.mark.parametrize("with_diagnostics", [False, True])
 def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
     agent_system,
+    with_diagnostics,
 ) -> None:
     client, services, _, clock = agent_system
     services.operations.enqueue(
@@ -3491,6 +3493,19 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
         "state": "failed",
         "result": {"status": "failed", "error_code": "stop_failed"},
     }
+    if with_diagnostics:
+        import json
+        from pathlib import Path
+
+        fixture = (
+            Path(__file__).parents[2]
+            / "agent_protocol/src/vonk_agent_protocol/vectors/failure-diagnostics-v1.json"
+        )
+        diagnostics = json.loads(fixture.read_text())
+        diagnostics["stderr"]["text"] = (
+            "Authorization: Bearer should-never-persist\n/proc: permission denied"
+        )
+        result["result"]["diagnostics"] = diagnostics
 
     response = client.post(
         "/agent/v1/result", headers=agent_headers(NODE_A, "serial-a"), json=result
@@ -3502,8 +3517,23 @@ def test_failed_result_preserves_canonical_evidence_and_maps_parent_reason(
             session.query(AgentOperationAttempt).filter_by(fence=claim["fence"]).one()
         )
         parent_job = session.get(Job, claim["job_id"])
-        assert attempt.result == {"status": "failed", "error_code": "stop_failed"}
+        assert attempt.result["status"] == "failed"
+        assert attempt.result["error_code"] == "stop_failed"
+        if with_diagnostics:
+            from vonk_agent_protocol import FailureDiagnostics
+
+            typed = FailureDiagnostics.model_validate(attempt.result["diagnostics"])
+            assert "/proc: permission denied" in typed.stderr.text
+            assert "should-never-persist" not in typed.model_dump_json()
         assert parent_job is not None and parent_job.status_reason == "stop_failed"
+    if with_diagnostics:
+        from vonk_control.failure_evidence import FailureEvidenceService
+
+        evidence = FailureEvidenceService(services.sessions, clock=clock)
+        assert evidence.tick()
+        content, _, bundle = evidence.read(claim["operation_id"], claim["attempt"])
+        assert "should-never-persist" not in content.decode()
+        assert "/proc: permission denied" in bundle.diagnostics.stderr.text
 
 
 def test_invalid_failed_result_is_not_reported_as_an_acknowledged_stale_attempt(

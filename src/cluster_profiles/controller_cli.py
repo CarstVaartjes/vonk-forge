@@ -873,6 +873,11 @@ def add_controller_commands(
         _add_json(watch_parser)
     evidence = operation_commands.add_parser("evidence")
     evidence.add_argument("operation_id")
+    evidence.add_argument(
+        "--attempt",
+        type=int,
+        help="Exact failed attempt; defaults to the current attempt",
+    )
     evidence.add_argument("--file", type=Path)
     _add_json(evidence)
 
@@ -3079,7 +3084,15 @@ def _run_operations(
     if command == "show":
         return client.request("GET", f"{base}/{operation_id}")
     if command == "evidence":
-        result = client.request("GET", f"{base}/{operation_id}")
+        attempt = args.attempt
+        if attempt is None:
+            current = client.request("GET", f"{base}/{operation_id}")
+            attempt = current["attempt"]
+        if type(attempt) is not int or attempt < 0:
+            raise ValueError("evidence attempt must be a nonnegative integer")
+        result = client.request(
+            "GET", f"{base}/{operation_id}/evidence", query={"attempt": attempt}
+        )
         if args.file is not None:
             args.file.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n")
             return {"operation_id": args.operation_id, "file": str(args.file)}

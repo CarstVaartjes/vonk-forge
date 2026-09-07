@@ -7,7 +7,7 @@ from .operation_api import bounded_error_responses
 
 
 def install_failure_evidence_routes(
-    app, *, actor_dependency, service: FailureEvidenceService
+    app, *, actor_dependency, service: FailureEvidenceService | None
 ):
     @app.get(
         "/api/v1/operations/{operation_id}/evidence",
@@ -18,6 +18,8 @@ def install_failure_evidence_routes(
     def evidence(
         operation_id: str, attempt: int = Query(ge=0), _actor=actor_dependency
     ):
+        if service is None:
+            raise HTTPException(503, "failure evidence service unavailable")
         try:
             content, digest, _ = service.read(operation_id, attempt)
         except KeyError:

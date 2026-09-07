@@ -2513,3 +2513,7 @@ class ResourceReservation(Base):
         DateTime(timezone=True), nullable=False
     )
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# Register the current evidence tables for both application and Alembic metadata.
+from . import failure_evidence_models as _failure_evidence_models  # noqa: F401

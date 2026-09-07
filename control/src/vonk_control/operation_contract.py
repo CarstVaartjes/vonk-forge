@@ -1,9 +1,4 @@
-"""Shared, bounded contracts for durable Controller operations.
-
-The agent wire protocol intentionally keeps progress as a bounded JSON object.
-This module gives the Controller that object a stable meaning without making
-the older ``{"phase": ...}`` heartbeat shape invalid.
-"""
+"""Current nested contracts for durable Controller operations and progress."""
 
 from __future__ import annotations
 

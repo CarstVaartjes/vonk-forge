@@ -104,6 +104,24 @@ def test_failure_classification_uses_codes(code, expected):
     assert collect_failure(value, now=NOW).diagnostics.category == expected
 
 
+def test_large_fleet_keeps_bounded_evidence_with_explicit_omissions(service):
+    value = item()
+    value["node_ids"] = [f"spk_{index:032x}" for index in range(1024)]
+    service.capture(value)
+    content, _, bundle = service.read(value["id"], 1)
+    assert len(content) <= 32 * 1024
+    assert bundle.context.node_ids == value["node_ids"][:128]
+    assert bundle.context.omitted_node_count == 896
+
+
+def test_corrupt_diagnostics_do_not_hide_primary_operation_failure(service):
+    value = item()
+    service.capture(value)
+    with service.sessions.begin() as session:
+        session.get(FailureEvidenceRecord, (value["id"], 1)).content = b"corrupt"
+    assert service.decorate(value) == value
+
+
 def test_redaction_handles_adversarial_values_before_persistence(service):
     value = item()
     value["result"].update(
@@ -285,6 +303,50 @@ def test_evidence_download_is_authenticated_exact_attempt_and_stable(service):
             {"invalid": True}
         ).encode()
     assert client.get(url, headers={"Authorization": "Bearer test"}).status_code == 503
+
+
+def test_composed_controller_exposes_exact_download_on_operation_projection(service):
+    from vonk_control.api import create_app
+    from vonk_control.audit import MemoryAuditStore
+    from vonk_control.auth import Actor, TokenCodec
+    from vonk_control.operation_api import OperationApiServices, OperationListPage
+
+    from .test_api import Jobs
+
+    value = dict(item(), state="failed", created_at=NOW.isoformat())
+    service.capture(value)
+    codec = TokenCodec(b"k" * 32)
+    operations = OperationApiServices(
+        endpoint=lambda _: {},
+        agents=list,
+        job_operations=lambda *_: None,
+        resume_job=lambda _: None,
+        get_operation=lambda _: value,
+        list_operations=lambda *_: OperationListPage([value], None, 1),
+    )
+    app = create_app(
+        jobs=Jobs(),
+        tokens=codec,
+        audits=MemoryAuditStore(),
+        now=lambda: 10,
+        operations=operations,
+        failure_evidence=service,
+    )
+    client = TestClient(app)
+    token = codec.issue(Actor("admin", "administrator"), ttl_seconds=100, now=0)
+    headers = {"Authorization": f"Bearer {token}"}
+    response = client.get(f"/api/v1/operations/{value['id']}", headers=headers)
+    assert response.status_code == 200
+    download = response.json()["evidence_download"]
+    assert download["href"].endswith("/evidence?attempt=1")
+    listing = client.get("/api/v1/operations", headers=headers)
+    assert listing.json()["operations"][0]["evidence_download"] == download
+    assert client.get(download["href"]).status_code == 401
+    content = client.get(download["href"], headers=headers)
+    assert content.status_code == 200
+    assert (
+        FailureEvidenceBundle.model_validate_json(content.content).context.attempt == 1
+    )
 
 
 def test_storage_byte_budget_is_enforced(service):

@@ -87,7 +87,7 @@ RUN apt-get update \
     && git -C /public-contracts checkout --detach "$public_contracts_revision" \
     && python -m pip wheel --no-cache-dir --no-deps --wheel-dir /wheels \
         /public-contracts/contracts \
-    && test "$(sha256sum /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl | cut -d' ' -f1)" = "36ca88c09bec8389f5c43ac4becca32a326232be28d19e2e6aac545e0ff857e5" \
+    && test "$(sha256sum /wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl | cut -d' ' -f1)" = "c89e574adc15beb57a748df83b61130981ae435224172985e572a5880596532f" \
     && test "$(sha256sum /wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl | cut -d' ' -f1)" = "$(sed -n 's/^sha256 = "//p' packaging/public-contracts.lock | tr -d '"')" \
     && rm -rf /public-contracts /var/lib/apt/lists/*
 RUN python -m pip install --no-cache-dir --prefix=/install \

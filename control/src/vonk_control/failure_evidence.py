@@ -28,7 +28,11 @@ from .models import (
     Job,
     ModelCacheOperation,
 )
-from .operation_contract import OperationEvidenceDownload, OperationEvidenceProvenance
+from .operation_contract import (
+    OperationEvidenceDownload,
+    OperationEvidenceProvenance,
+    OperationFailureEvidence,
+)
 from .strict_json import StrictJSONModel
 
 MAX_BUNDLE_BYTES = 32 * 1024
@@ -54,7 +58,8 @@ class EvidenceContext(EvidenceModel):
     operation_id: str = Field(min_length=1, max_length=128)
     attempt: int = Field(ge=0)
     kind: str = Field(min_length=1, max_length=80)
-    node_ids: list[str] = Field(max_length=1024)
+    node_ids: list[str] = Field(max_length=128)
+    omitted_node_count: int = Field(default=0, ge=0)
     authority_revision: str | None = None
     plan_digest: str | None = None
     payload_digest: str | None = None
@@ -69,7 +74,7 @@ class FailureEvidenceBundle(EvidenceModel):
     collected_at: str
     summary: str = Field(max_length=512)
     diagnostics: FailureDiagnostics
-    receipt: dict[str, object]
+    receipt: OperationFailureEvidence
     collector_errors: list[str] = Field(max_length=8)
 
 
@@ -130,25 +135,35 @@ def log_tail(value: str) -> FailureLogTail:
     )
 
 
-def sanitize(value: object, depth: int = 0) -> object:
-    if depth > 5:
-        return "[truncated]"
-    if isinstance(value, str):
-        return safe_text(value[:4096])[:512]
-    if isinstance(value, Mapping):
-        return {
-            safe_text(str(key))[:64]: (
-                "[redacted]"
-                if _SENSITIVE.search(_plain_text(str(key)))
-                else sanitize(child, depth + 1)
+def failure_receipt(result: Mapping[str, object]) -> OperationFailureEvidence:
+    """Reuse the fixed operation failure contract; never export a loose receipt."""
+    code = result.get("error_code") or result.get("code") or "operation_failed"
+    code = re.sub(r"[^a-z0-9_]", "_", str(code).lower())[:64]
+    if not code or not code[0].isalpha():
+        code = "operation_failed"
+    summary = (
+        safe_text(
+            str(
+                result.get("summary")
+                or result.get("reason")
+                or result.get("detail")
+                or "Operation failed"
             )
-            for key, child in list(value.items())[:24]
-        }
-    if isinstance(value, (list, tuple)):
-        return [sanitize(child, depth + 1) for child in value[:24]]
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    return "[unavailable]"
+        )[:256]
+        or "Operation failed"
+    )
+    detail = (
+        result.get("detail")
+        or result.get("diagnostic")
+        or result.get("helper_error_code")
+    )
+    return OperationFailureEvidence(
+        error_code=code,
+        summary=summary,
+        detail=safe_text(str(detail))[:1024] if detail is not None else None,
+        retryable=result.get("retryable") is True,
+        uncertain=result.get("uncertain") is True,
+    )
 
 
 def classification(kind: str, result: Mapping[str, object]) -> str:
@@ -232,10 +247,7 @@ def collect_failure(
             if item.get("node_ids")
             else [],
         )
-    receipt = sanitize(
-        {key: value for key, value in result.items() if key != "diagnostics"}
-    )
-    assert isinstance(receipt, dict)
+    receipt = failure_receipt(result)
     summary = (
         result.get("summary")
         or result.get("reason")
@@ -248,7 +260,8 @@ def collect_failure(
             operation_id=str(item["id"]),
             attempt=int(item["attempt"]),
             kind=str(item["kind"]),
-            node_ids=list(item.get("node_ids", [])),
+            node_ids=list(item.get("node_ids", []))[:128],
+            omitted_node_count=max(0, len(item.get("node_ids", [])) - 128),
             authority_revision=item.get("authority_revision"),
             plan_digest=item.get("plan_digest"),
             payload_digest=item.get("payload_digest"),
@@ -294,7 +307,8 @@ class FailureEvidenceService:
                     operation_id=str(item["id"]),
                     attempt=int(item["attempt"]),
                     kind=str(item["kind"]),
-                    node_ids=list(item.get("node_ids", [])),
+                    node_ids=list(item.get("node_ids", []))[:128],
+                    omitted_node_count=max(0, len(item.get("node_ids", [])) - 128),
                     updated_at=str(item["updated_at"]),
                     source="agent" if item.get("node_ids") else "controller",
                 ),
@@ -318,21 +332,10 @@ class FailureEvidenceService:
                     preflight=[],
                     collector_errors=[],
                 ),
-                receipt={},
+                receipt=failure_receipt(result),
                 collector_errors=["collector-failed"],
             )
         content = bundle.model_dump_json().encode()
-        if len(content) > MAX_BUNDLE_BYTES:
-            bundle = bundle.model_copy(
-                update={
-                    "receipt": {"truncated": True},
-                    "collector_errors": [
-                        *bundle.collector_errors,
-                        "receipt-size-limit",
-                    ][:8],
-                }
-            )
-            content = bundle.model_dump_json().encode()
         if len(content) > MAX_BUNDLE_BYTES:
             raise ValueError("failure evidence exceeds its storage bound")
         digest = hashlib.sha256(content).hexdigest()
@@ -378,7 +381,7 @@ class FailureEvidenceService:
         result = dict(item.get("result") or {})
         try:
             content, digest, bundle = self.read(str(item["id"]), int(item["attempt"]))
-        except KeyError:
+        except (KeyError, ValueError, OSError):
             return dict(item)
         result["evidence_download"] = OperationEvidenceDownload(
             media_type="application/json",

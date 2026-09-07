@@ -115,7 +115,14 @@ from .enrollment_summary import EnrollmentSummary
 from .enum_parameter import EnumParameter
 from .evidence_age import EvidenceAge
 from .evidence_age_freshness import EvidenceAgeFreshness
+from .evidence_context import EvidenceContext
+from .evidence_context_source import EvidenceContextSource
 from .execution_mount import ExecutionMount
+from .failure_diagnostics import FailureDiagnostics
+from .failure_diagnostics_category import FailureDiagnosticsCategory
+from .failure_evidence_bundle import FailureEvidenceBundle
+from .failure_log_tail import FailureLogTail
+from .failure_property import FailureProperty
 from .fleet_node import FleetNode
 from .fleet_node_identity import FleetNodeIdentity
 from .fleet_node_labels import FleetNodeLabels
@@ -352,7 +359,9 @@ from .operation_evidence_download import OperationEvidenceDownload
 from .operation_evidence_provenance import OperationEvidenceProvenance
 from .operation_failure_evidence import OperationFailureEvidence
 from .operation_member_progress import OperationMemberProgress
+from .operation_member_progress_activity_type_0 import OperationMemberProgressActivityType0
 from .operation_progress import OperationProgress
+from .operation_progress_activity_type_0 import OperationProgressActivityType0
 from .operation_recovery import OperationRecovery
 from .operation_recovery_action import OperationRecoveryAction
 from .operation_response import OperationResponse
@@ -776,7 +785,14 @@ __all__ = (
     "EnumParameter",
     "EvidenceAge",
     "EvidenceAgeFreshness",
+    "EvidenceContext",
+    "EvidenceContextSource",
     "ExecutionMount",
+    "FailureDiagnostics",
+    "FailureDiagnosticsCategory",
+    "FailureEvidenceBundle",
+    "FailureLogTail",
+    "FailureProperty",
     "FleetNode",
     "FleetNodeIdentity",
     "FleetNodeLabels",
@@ -1024,7 +1040,9 @@ __all__ = (
     "OperationEvidenceProvenance",
     "OperationFailureEvidence",
     "OperationMemberProgress",
+    "OperationMemberProgressActivityType0",
     "OperationProgress",
+    "OperationProgressActivityType0",
     "OperationRecovery",
     "OperationRecoveryAction",
     "OperationResponse",

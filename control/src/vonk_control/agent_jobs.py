@@ -27,6 +27,7 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 
 from .agent_upgrade_status import operator_agent_upgrade_reason
 from .auth import AgentSource
+from .failure_evidence import safe_text, sanitize_diagnostics
 from .logging import redact_text
 from .models import (
     AgentCertificate,
@@ -1055,7 +1056,31 @@ class AgentJobService:
             )
             if state in {"failed", "waiting-for-operator"}:
                 try:
-                    message_result = sanitize_failure_evidence(message.result)
+                    raw_result = _document(message.result)
+                    diagnostics = raw_result.pop("diagnostics", None)
+                    if (
+                        operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+                        and "exit_code" in raw_result
+                    ):
+                        # Preserve the typed output manifest and process receipt.
+                        # Generic log truncation must not rewrite their structure.
+                        message_result = raw_result
+                        if isinstance(message_result.get("reason"), str):
+                            message_result["reason"] = safe_text(
+                                message_result["reason"]
+                            )
+                    else:
+                        message_result = sanitize_failure_evidence(raw_result)
+                    if diagnostics is not None:
+                        message_result["diagnostics"] = sanitize_diagnostics(
+                            diagnostics
+                        ).model_dump(mode="json")
+                    message = AgentResult.model_validate(
+                        {
+                            **message.model_dump(mode="json"),
+                            "result": message_result,
+                        }
+                    )
                 except (TypeError, ValueError) as error:
                     raise ValueError(
                         f"operation failure evidence is invalid: {error}"

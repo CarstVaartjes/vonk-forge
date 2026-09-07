@@ -111,6 +111,16 @@
             ],
             "title": "Diagnostic"
           },
+          "diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "error_code": {
             "anyOf": [
               {
@@ -257,6 +267,7 @@
       },
       "AgentOperation": {
         "enum": [
+          "runtime.preflight.v1",
           "agent.upgrade.v1",
           "artifact.distribution.v1",
           "recipe.build.v1",
@@ -4086,6 +4097,109 @@
         "title": "EvidenceAge",
         "type": "object"
       },
+      "EvidenceContext": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt": {
+            "minimum": 0.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
+          "authority_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authority Revision"
+          },
+          "kind": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 128,
+            "title": "Node Ids",
+            "type": "array"
+          },
+          "omitted_node_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Omitted Node Count",
+            "type": "integer"
+          },
+          "operation_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "payload_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload Digest"
+          },
+          "plan_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Digest"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "source": {
+            "enum": [
+              "agent",
+              "controller"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "attempt",
+          "kind",
+          "node_ids",
+          "updated_at",
+          "source"
+        ],
+        "title": "EvidenceContext",
+        "type": "object"
+      },
       "ExecutionMount": {
         "additionalProperties": false,
         "description": "The platform-owned mount used by one selected model file.",
@@ -4113,6 +4227,218 @@
           "read_only"
         ],
         "title": "ExecutionMount",
+        "type": "object"
+      },
+      "FailureDiagnostics": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "enum": [
+              "platform-policy",
+              "capacity",
+              "network",
+              "digest",
+              "timeout",
+              "runtime",
+              "unknown"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "collected_at": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Collected At",
+            "type": "string"
+          },
+          "collector_errors": {
+            "items": {
+              "maxLength": 256,
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Collector Errors",
+            "type": "array"
+          },
+          "phase": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Phase",
+            "type": "string"
+          },
+          "preflight": {
+            "items": {
+              "$ref": "#/components/schemas/FailureProperty"
+            },
+            "maxItems": 8,
+            "title": "Preflight",
+            "type": "array"
+          },
+          "sandbox": {
+            "items": {
+              "$ref": "#/components/schemas/FailureProperty"
+            },
+            "maxItems": 12,
+            "title": "Sandbox",
+            "type": "array"
+          },
+          "schema_version": {
+            "const": 1,
+            "default": 1,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "stderr": {
+            "$ref": "#/components/schemas/FailureLogTail"
+          },
+          "stdout": {
+            "$ref": "#/components/schemas/FailureLogTail"
+          },
+          "storage": {
+            "items": {
+              "$ref": "#/components/schemas/FailureProperty"
+            },
+            "maxItems": 8,
+            "title": "Storage",
+            "type": "array"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/FailureProperty"
+            },
+            "maxItems": 8,
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "collected_at",
+          "phase",
+          "category",
+          "stdout",
+          "stderr",
+          "versions",
+          "sandbox",
+          "storage",
+          "preflight",
+          "collector_errors"
+        ],
+        "title": "FailureDiagnostics",
+        "type": "object"
+      },
+      "FailureEvidenceBundle": {
+        "additionalProperties": false,
+        "properties": {
+          "collected_at": {
+            "title": "Collected At",
+            "type": "string"
+          },
+          "collector_errors": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Collector Errors",
+            "type": "array"
+          },
+          "context": {
+            "$ref": "#/components/schemas/EvidenceContext"
+          },
+          "diagnostics": {
+            "$ref": "#/components/schemas/FailureDiagnostics"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/OperationFailureEvidence"
+          },
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "summary": {
+            "maxLength": 512,
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "context",
+          "collected_at",
+          "summary",
+          "diagnostics",
+          "receipt",
+          "collector_errors"
+        ],
+        "title": "FailureEvidenceBundle",
+        "type": "object"
+      },
+      "FailureLogTail": {
+        "additionalProperties": false,
+        "properties": {
+          "dropped_bytes": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped Bytes"
+          },
+          "dropped_lines": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dropped Lines"
+          },
+          "text": {
+            "maxLength": 2048,
+            "title": "Text",
+            "type": "string"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "text",
+          "truncated",
+          "dropped_bytes",
+          "dropped_lines"
+        ],
+        "title": "FailureLogTail",
+        "type": "object"
+      },
+      "FailureProperty": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "value": {
+            "maxLength": 256,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "FailureProperty",
         "type": "object"
       },
       "FleetNode": {
@@ -7527,6 +7853,16 @@
             "minimum": 0.0,
             "title": "Failed",
             "type": "integer"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "running": {
             "minimum": 0.0,
@@ -12633,6 +12969,22 @@
         "additionalProperties": false,
         "description": "Progress for one node, rank, shard, or other operation member.",
         "properties": {
+          "activity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "waiting",
+                  "possibly_stalled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity"
+          },
           "bytes_per_second": {
             "anyOf": [
               {
@@ -12651,6 +13003,30 @@
             "minimum": 0.0,
             "title": "Completed Bytes",
             "type": "integer"
+          },
+          "completed_items": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed Items"
+          },
+          "elapsed_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Seconds"
           },
           "eta_seconds": {
             "anyOf": [
@@ -12678,6 +13054,18 @@
             ],
             "title": "Kind"
           },
+          "last_progress_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Progress At"
+          },
           "member_id": {
             "maxLength": 128,
             "minLength": 1,
@@ -12696,11 +13084,36 @@
             ],
             "title": "Object Sha256"
           },
+          "observed_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
           "phase": {
             "maxLength": 80,
             "minLength": 1,
             "title": "Phase",
             "type": "string"
+          },
+          "smoothed_bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smoothed Bytes Per Second"
           },
           "state": {
             "default": "running",
@@ -12720,6 +13133,18 @@
               }
             ],
             "title": "Total Bytes"
+          },
+          "total_items": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Items"
           }
         },
         "required": [
@@ -12733,6 +13158,22 @@
         "additionalProperties": false,
         "description": "Canonical durable progress payload shared by Controller and agents.",
         "properties": {
+          "activity": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "waiting",
+                  "possibly_stalled"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity"
+          },
           "bytes_per_second": {
             "anyOf": [
               {
@@ -12762,6 +13203,30 @@
             "title": "Completed Bytes",
             "type": "integer"
           },
+          "completed_items": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed Items"
+          },
+          "elapsed_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Seconds"
+          },
           "eta_seconds": {
             "anyOf": [
               {
@@ -12788,6 +13253,18 @@
             ],
             "title": "Kind"
           },
+          "last_progress_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Progress At"
+          },
           "members": {
             "items": {
               "$ref": "#/components/schemas/OperationMemberProgress"
@@ -12808,11 +13285,36 @@
             ],
             "title": "Object Sha256"
           },
+          "observed_at": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
           "phase": {
             "maxLength": 80,
             "minLength": 1,
             "title": "Phase",
             "type": "string"
+          },
+          "smoothed_bytes_per_second": {
+            "anyOf": [
+              {
+                "maximum": 1000000000000000.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smoothed Bytes Per Second"
           },
           "total_bytes": {
             "anyOf": [
@@ -12830,6 +13332,18 @@
             "default": false,
             "title": "Total Bytes Known",
             "type": "boolean"
+          },
+          "total_items": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Items"
           }
         },
         "required": [
@@ -15921,6 +16435,16 @@
       "RecipeJobRunResult": {
         "additionalProperties": false,
         "properties": {
+          "diagnostics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureDiagnostics"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "evidence": {
             "$ref": "#/components/schemas/RecipeJobEvidence"
           },
@@ -32835,6 +33359,90 @@
           }
         ],
         "summary": "Operation View"
+      }
+    },
+    "/api/v1/operations/{operation_id}/evidence": {
+      "get": {
+        "operationId": "getOperationEvidence",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "title": "Operation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "attempt",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "Attempt",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailureEvidenceBundle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Evidence"
       }
     },
     "/api/v1/proposals": {

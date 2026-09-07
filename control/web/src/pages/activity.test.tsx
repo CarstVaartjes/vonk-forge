@@ -478,6 +478,14 @@ function canonicalApi(operations: OperationDetail[]) {
   return client;
 }
 
+test("downloads diagnostics for the exact failed attempt without losing the error", async () => {
+  const operation = canonicalOperation({attempt: 3, evidence_download: {media_type: "application/json", size_bytes: 128, sha256: "a".repeat(64), href: "/api/v1/operations/profile-attempt-1/evidence?attempt=3"}});
+  render(<ActivityPage api={canonicalApi([operation])} now={NOW}/>);
+  expect(await screen.findByText("Profile installation failed")).toBeVisible();
+  expect(screen.getByRole("link", {name: "Download diagnostics"})).toHaveAttribute("href", "/api/v1/operations/profile-attempt-1/evidence?attempt=3");
+  expect(screen.getByText("Image verification failed on Mia Lab Spark.")).toBeVisible();
+});
+
 test("shows canonical profile failure, attempt, phase and uncertain recovery directly in both views", async () => {
   const user = userEvent.setup();
   const client = canonicalApi([canonicalOperation()]);

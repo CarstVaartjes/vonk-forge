@@ -269,6 +269,7 @@ def assemble_production_worker(
     from .distributed_recovery import DistributedRecoveryCoordinator
     from .distribution import build_distribution_service_from_components
     from .distribution_executor import CompositeDistributionPhaseExecutor
+    from .failure_evidence import FailureEvidenceService
     from .fleet_profiles import FleetProfileService, RunSwitchFleetProfileAdapter
     from .install_admission import InstallAdmissionService
     from .recipe_builds import RecipeBuildService
@@ -362,7 +363,8 @@ def assemble_production_worker(
             clock=clock,
         ),
     )
-    worker_background_services = tuple(background_services)
+    failure_evidence = FailureEvidenceService(sessions, clock=clock)
+    worker_background_services = (*background_services, failure_evidence.tick)
     worker_background_closers = tuple(background_closers)
     if recipe_image_artifact_root is not None:
         from .availability_production import build_recipe_image_availability
