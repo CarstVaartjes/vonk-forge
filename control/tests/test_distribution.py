@@ -66,6 +66,13 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert manifest.status_code == 200
+    assert DistributionAssignment.model_validate_json(manifest.content) == assignment
+    assert manifest.headers["cache-control"] == "no-store"
+    assert manifest.headers["etag"] == f'"plan:{assignment.plan_digest}"'
+    response_schema = client.app.openapi()["paths"][
+        "/agent/v1/distribution/manifests/{plan_digest}"
+    ]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert response_schema == {"$ref": "#/components/schemas/DistributionAssignment"}
     assert {item["sha256"] for item in manifest.json()["objects"]} == {
         model_digest,
         config_digest,
@@ -124,7 +131,7 @@ def test_distribution_assignment_survives_controller_service_restart(agent_syste
     DistributionService(source, clock=clock, sessions=sessions).register(assignment)
 
     restarted = DistributionService(source, clock=clock, sessions=sessions)
-    assert restarted.manifest(node_id=NODE_A, plan_digest=assignment.plan_digest)["assignment_id"] == assignment.assignment_id
+    assert restarted.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest).assignment_id == assignment.assignment_id
     restarted.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
     with pytest.raises(DistributionError) as caught:
         restarted.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
@@ -226,7 +233,7 @@ def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> Non
             return path, len(payload), digest
 
     source = ModelCacheVerifiedObjectSource.from_service(Cache())
-    obj = DistributionObject("weights/model.bin", digest, len(payload), "model")
+    obj = DistributionObject(name="weights/model.bin", sha256=digest, bytes=len(payload), kind="model")
     assert source.verify_artifact_set("b" * 64, (obj,))
     opened = source.open_verified(digest, len(payload))
     assert opened.stream.read() == payload

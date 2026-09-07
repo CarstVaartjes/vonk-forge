@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from .contracts import AgentProtocolError
+from .distribution import DistributionObject
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -188,22 +189,10 @@ class CompiledModelIdentity(_Strict):
         return value
 
 
-class CompiledDistributionObject(_Strict):
-    name: str
-    sha256: Digest
-    bytes: int = Field(ge=0, le=16 * 1024**4)
+class CompiledDistributionObject(DistributionObject):
+    """Distribution objects usable as installed model or runtime inputs."""
+
     kind: Literal["model", "oci-archive"]
-
-    @field_validator("name")
-    @classmethod
-    def name_is_relative(cls, value: str) -> str:
-        return _safe_path(value, absolute=False)
-
-    @model_validator(mode="after")
-    def empty_only_for_model(self) -> CompiledDistributionObject:
-        if self.bytes == 0 and (self.kind != "model" or self.sha256 != _EMPTY_SHA256):
-            raise ValueError("zero-sized distribution object is invalid")
-        return self
 
 
 class CompiledArtifact(_Strict):

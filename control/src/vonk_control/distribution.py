@@ -451,7 +451,6 @@ class ModelCacheVerifiedObjectSource:
                     bytes=int(descriptor["bytes"]),
                     kind="model",
                 )
-                item = DistributionObject.parse(item.to_mapping())
                 path = descriptor["file"]
             except (KeyError, TypeError, ValueError) as error:
                 raise DistributionError("distribution.model_set_mismatch", "NAS cache manifest is malformed") from error
@@ -773,9 +772,6 @@ class DistributionService:
                         row.updated_at = now
             raise DistributionError("distribution.expired", "assignment has expired")
         return assignment
-
-    def manifest(self, *, node_id: str, plan_digest: str) -> dict[str, object]:
-        return self.authorize(node_id=node_id, plan_digest=plan_digest).to_mapping()
 
     def open_object(self, *, node_id: str, plan_digest: str, digest: str) -> tuple[DistributionAssignment, DistributionObject, VerifiedObject]:
         assignment = self.authorize(node_id=node_id, plan_digest=plan_digest)

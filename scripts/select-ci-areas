@@ -63,7 +63,7 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
             (
                 "tests/acceptance/recipe-library-revision.txt",
                 "scripts/tests/check_recipe_launch_contracts.py",
-                "scripts/tests/run_install_start_wire_bridge.py",
+                "scripts/tests/run_agent_wire_contracts.py",
             ),
         ):
             selected["control"] = True

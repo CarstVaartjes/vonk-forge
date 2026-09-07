@@ -475,7 +475,7 @@ def _make_service(tmp_path: Path, *, persist_db: bool = True, tamper_db: str | N
     )
     source = SimpleNamespace(
         objects_for_set=lambda digest: (
-            DistributionObject("model.safetensors", MODEL_DIGEST, 1024, "model"),
+            DistributionObject(name="model.safetensors", sha256=MODEL_DIGEST, bytes=1024, kind="model"),
         )
     )
     executor = _TargetExecutor(

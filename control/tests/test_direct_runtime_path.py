@@ -41,7 +41,7 @@ def test_direct_image_receipt_flows_from_prepare_to_target_verify(tmp_path: Path
     sessions = sessionmaker(engine, expire_on_commit=False)
     revision_id = "revision-direct"
     model_set_digest = "a" * 64
-    model = DistributionObject("weights.bin", "b" * 64, 7, "model")
+    model = DistributionObject(name="weights.bin", sha256="b" * 64, bytes=7, kind="model")
     source = MemoryVerifiedObjectSource()
     source.register_artifact_set(model_set_digest, (model,))
     source.objects_for_set = lambda digest: source.artifact_manifests[digest]
