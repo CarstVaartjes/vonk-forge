@@ -8,7 +8,7 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
-from ...models.http_validation_error import HTTPValidationError
+from ...models.request_validation_problem import RequestValidationProblem
 from ...models.telemetry_current_response import TelemetryCurrentResponse
 from ...types import UNSET, Unset
 from typing import cast
@@ -75,7 +75,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]]:
     if response.status_code == 200:
         response_200 = TelemetryCurrentResponse.from_dict(response.json())
 
@@ -98,7 +98,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_404
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -117,7 +117,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -135,7 +135,7 @@ def sync_detailed(
     interface_name: Union[None, Unset, str] = UNSET,
     run_id: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]]:
+) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]]:
     """ Node Telemetry Current
 
     Args:
@@ -150,7 +150,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]]
+        Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]]
      """
 
 
@@ -178,7 +178,7 @@ def sync(
     interface_name: Union[None, Unset, str] = UNSET,
     run_id: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]]:
+) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]]:
     """ Node Telemetry Current
 
     Args:
@@ -193,7 +193,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]
+        Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]
      """
 
 
@@ -216,7 +216,7 @@ async def asyncio_detailed(
     interface_name: Union[None, Unset, str] = UNSET,
     run_id: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]]:
+) -> Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]]:
     """ Node Telemetry Current
 
     Args:
@@ -231,7 +231,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]]
+        Response[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]]
      """
 
 
@@ -259,7 +259,7 @@ async def asyncio(
     interface_name: Union[None, Unset, str] = UNSET,
     run_id: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]]:
+) -> Optional[Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]]:
     """ Node Telemetry Current
 
     Args:
@@ -274,7 +274,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, HTTPValidationError, TelemetryCurrentResponse]
+        Union[BoundedErrorResponse, RequestValidationProblem, TelemetryCurrentResponse]
      """
 
 

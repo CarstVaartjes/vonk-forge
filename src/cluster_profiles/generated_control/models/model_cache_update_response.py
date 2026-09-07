@@ -13,9 +13,7 @@ from typing import Literal, Union, cast
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.model_cache_update_response_model_update_to_type_0 import ModelCacheUpdateResponseModelUpdateToType0
-  from ..models.model_cache_update_response_model_update_from_type_0 import ModelCacheUpdateResponseModelUpdateFromType0
-  from ..models.model_cache_update_response_model_update_candidates_item import ModelCacheUpdateResponseModelUpdateCandidatesItem
+  from ..models.model_reference import ModelReference
 
 
 
@@ -37,9 +35,9 @@ class ModelCacheUpdateResponse:
             recipe_revision_sha256 (Union[None, str]):
             recipe_update_available (bool):
             model_update_ambiguous (Union[Unset, bool]):  Default: False.
-            model_update_candidates (Union[Unset, list['ModelCacheUpdateResponseModelUpdateCandidatesItem']]):
-            model_update_from (Union['ModelCacheUpdateResponseModelUpdateFromType0', None, Unset]):
-            model_update_to (Union['ModelCacheUpdateResponseModelUpdateToType0', None, Unset]):
+            model_update_candidates (Union[Unset, list['ModelReference']]):
+            model_update_from (Union['ModelReference', None, Unset]):
+            model_update_to (Union['ModelReference', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             updated_at (Union[None, Unset, str]):
      """
@@ -52,9 +50,9 @@ class ModelCacheUpdateResponse:
     recipe_revision_sha256: Union[None, str]
     recipe_update_available: bool
     model_update_ambiguous: Union[Unset, bool] = False
-    model_update_candidates: Union[Unset, list['ModelCacheUpdateResponseModelUpdateCandidatesItem']] = UNSET
-    model_update_from: Union['ModelCacheUpdateResponseModelUpdateFromType0', None, Unset] = UNSET
-    model_update_to: Union['ModelCacheUpdateResponseModelUpdateToType0', None, Unset] = UNSET
+    model_update_candidates: Union[Unset, list['ModelReference']] = UNSET
+    model_update_from: Union['ModelReference', None, Unset] = UNSET
+    model_update_to: Union['ModelReference', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
     updated_at: Union[None, Unset, str] = UNSET
 
@@ -63,9 +61,7 @@ class ModelCacheUpdateResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.model_cache_update_response_model_update_to_type_0 import ModelCacheUpdateResponseModelUpdateToType0
-        from ..models.model_cache_update_response_model_update_from_type_0 import ModelCacheUpdateResponseModelUpdateFromType0
-        from ..models.model_cache_update_response_model_update_candidates_item import ModelCacheUpdateResponseModelUpdateCandidatesItem
+        from ..models.model_reference import ModelReference
         artifact_set_sha256 = self.artifact_set_sha256
 
         latest_model_content_sha256: Union[None, str]
@@ -98,7 +94,7 @@ class ModelCacheUpdateResponse:
         model_update_from: Union[None, Unset, dict[str, Any]]
         if isinstance(self.model_update_from, Unset):
             model_update_from = UNSET
-        elif isinstance(self.model_update_from, ModelCacheUpdateResponseModelUpdateFromType0):
+        elif isinstance(self.model_update_from, ModelReference):
             model_update_from = self.model_update_from.to_dict()
         else:
             model_update_from = self.model_update_from
@@ -106,7 +102,7 @@ class ModelCacheUpdateResponse:
         model_update_to: Union[None, Unset, dict[str, Any]]
         if isinstance(self.model_update_to, Unset):
             model_update_to = UNSET
-        elif isinstance(self.model_update_to, ModelCacheUpdateResponseModelUpdateToType0):
+        elif isinstance(self.model_update_to, ModelReference):
             model_update_to = self.model_update_to.to_dict()
         else:
             model_update_to = self.model_update_to
@@ -150,9 +146,7 @@ class ModelCacheUpdateResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.model_cache_update_response_model_update_to_type_0 import ModelCacheUpdateResponseModelUpdateToType0
-        from ..models.model_cache_update_response_model_update_from_type_0 import ModelCacheUpdateResponseModelUpdateFromType0
-        from ..models.model_cache_update_response_model_update_candidates_item import ModelCacheUpdateResponseModelUpdateCandidatesItem
+        from ..models.model_reference import ModelReference
         d = dict(src_dict)
         artifact_set_sha256 = d.pop("artifact_set_sha256")
 
@@ -197,14 +191,14 @@ class ModelCacheUpdateResponse:
         model_update_candidates = []
         _model_update_candidates = d.pop("model_update_candidates", UNSET)
         for model_update_candidates_item_data in (_model_update_candidates or []):
-            model_update_candidates_item = ModelCacheUpdateResponseModelUpdateCandidatesItem.from_dict(model_update_candidates_item_data)
+            model_update_candidates_item = ModelReference.from_dict(model_update_candidates_item_data)
 
 
 
             model_update_candidates.append(model_update_candidates_item)
 
 
-        def _parse_model_update_from(data: object) -> Union['ModelCacheUpdateResponseModelUpdateFromType0', None, Unset]:
+        def _parse_model_update_from(data: object) -> Union['ModelReference', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -212,19 +206,19 @@ class ModelCacheUpdateResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                model_update_from_type_0 = ModelCacheUpdateResponseModelUpdateFromType0.from_dict(data)
+                model_update_from_type_0 = ModelReference.from_dict(data)
 
 
 
                 return model_update_from_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['ModelCacheUpdateResponseModelUpdateFromType0', None, Unset], data)
+            return cast(Union['ModelReference', None, Unset], data)
 
         model_update_from = _parse_model_update_from(d.pop("model_update_from", UNSET))
 
 
-        def _parse_model_update_to(data: object) -> Union['ModelCacheUpdateResponseModelUpdateToType0', None, Unset]:
+        def _parse_model_update_to(data: object) -> Union['ModelReference', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -232,14 +226,14 @@ class ModelCacheUpdateResponse:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                model_update_to_type_0 = ModelCacheUpdateResponseModelUpdateToType0.from_dict(data)
+                model_update_to_type_0 = ModelReference.from_dict(data)
 
 
 
                 return model_update_to_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['ModelCacheUpdateResponseModelUpdateToType0', None, Unset], data)
+            return cast(Union['ModelReference', None, Unset], data)
 
         model_update_to = _parse_model_update_to(d.pop("model_update_to", UNSET))
 

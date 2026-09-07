@@ -43,6 +43,7 @@ from vonk_control.recipe_runtime_specs import (
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
     RunSwitchApplyRequest,
+    RunSwitchPhase,
     RunSwitchPhaseResult,
     RunSwitchPreviewRequest,
     SparkGroup,
@@ -55,6 +56,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationProvider,
     RunSwitchOperationService,
+    _phase_result,
     _transient_distribution_exception,
     effective_build_receipt,
 )
@@ -70,6 +72,24 @@ from .test_recipe_operations import (
     installed_recipe,
     setup_services,
 )
+
+
+@pytest.mark.parametrize(
+    ("kind", "subphase", "receipt"),
+    [
+        ("stop", None, {"phase": "start", "run_id": "11111111-1111-4111-8111-111111111111"}),
+        ("prepare", "runtime-image", {"phase": "prepare", "subphase": "runtime-plan", "prepared": True}),
+    ],
+)
+def test_valid_receipt_for_another_phase_cannot_enter_current_progress(
+    kind, subphase, receipt
+) -> None:
+    TypeAdapter(RunSwitchPhaseResult).validate_python(receipt, strict=True)
+    expected = RunSwitchPhase(
+        index=0, kind=kind, subphase=subphase, state="planned", detail="Current phase"
+    )
+    with pytest.raises(RunSwitchOperationConflict, match="phase receipt is invalid"):
+        _phase_result(receipt, phase=expected)
 
 
 def test_persisted_phase_receipts_reject_empty_and_cross_phase_shapes() -> None:

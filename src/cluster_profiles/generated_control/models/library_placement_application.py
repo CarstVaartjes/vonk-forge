@@ -19,7 +19,7 @@ import datetime
 
 if TYPE_CHECKING:
   from ..models.library_placement_locations import LibraryPlacementLocations
-  from ..models.library_placement_application_progress import LibraryPlacementApplicationProgress
+  from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
 
 
 
@@ -41,7 +41,7 @@ class LibraryPlacementApplication:
             id (str):
             locations (LibraryPlacementLocations):
             plan_digest (str):
-            progress (LibraryPlacementApplicationProgress):
+            progress (FleetProfileApplicationProgress): Typed progress tree persisted with every profile application.
             recipe_id (str):
             recipe_revision_id (str):
             selected_node_ids (list[str]):
@@ -60,7 +60,7 @@ class LibraryPlacementApplication:
     id: str
     locations: 'LibraryPlacementLocations'
     plan_digest: str
-    progress: 'LibraryPlacementApplicationProgress'
+    progress: 'FleetProfileApplicationProgress'
     recipe_id: str
     recipe_revision_id: str
     selected_node_ids: list[str]
@@ -76,7 +76,7 @@ class LibraryPlacementApplication:
 
     def to_dict(self) -> dict[str, Any]:
         from ..models.library_placement_locations import LibraryPlacementLocations
-        from ..models.library_placement_application_progress import LibraryPlacementApplicationProgress
+        from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
         alias: Union[None, str]
         alias = self.alias
 
@@ -147,7 +147,7 @@ class LibraryPlacementApplication:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.library_placement_locations import LibraryPlacementLocations
-        from ..models.library_placement_application_progress import LibraryPlacementApplicationProgress
+        from ..models.fleet_profile_application_progress import FleetProfileApplicationProgress
         d = dict(src_dict)
         def _parse_alias(data: object) -> Union[None, str]:
             if data is None:
@@ -186,7 +186,7 @@ class LibraryPlacementApplication:
 
         plan_digest = d.pop("plan_digest")
 
-        progress = LibraryPlacementApplicationProgress.from_dict(d.pop("progress"))
+        progress = FleetProfileApplicationProgress.from_dict(d.pop("progress"))
 
 
 

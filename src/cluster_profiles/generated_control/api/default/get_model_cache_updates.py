@@ -8,8 +8,8 @@ from ...types import Response, UNSET
 from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
-from ...models.http_validation_error import HTTPValidationError
 from ...models.model_cache_updates_response import ModelCacheUpdatesResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from ...types import UNSET, Unset
 from typing import cast
 from typing import cast, Union
@@ -61,7 +61,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = ModelCacheUpdatesResponse.from_dict(response.json())
 
@@ -77,7 +77,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_401
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -96,7 +96,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -112,7 +112,7 @@ def sync_detailed(
     limit: Union[Unset, int] = 100,
     cursor: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]]:
+) -> Response[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
     """ Get Updates
 
     Args:
@@ -125,7 +125,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]]
+        Response[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]
      """
 
 
@@ -149,7 +149,7 @@ def sync(
     limit: Union[Unset, int] = 100,
     cursor: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]]:
+) -> Optional[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
     """ Get Updates
 
     Args:
@@ -162,7 +162,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]
+        Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]
      """
 
 
@@ -181,7 +181,7 @@ async def asyncio_detailed(
     limit: Union[Unset, int] = 100,
     cursor: Union[None, Unset, str] = UNSET,
 
-) -> Response[Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]]:
+) -> Response[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
     """ Get Updates
 
     Args:
@@ -194,7 +194,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]]
+        Response[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]
      """
 
 
@@ -218,7 +218,7 @@ async def asyncio(
     limit: Union[Unset, int] = 100,
     cursor: Union[None, Unset, str] = UNSET,
 
-) -> Optional[Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]]:
+) -> Optional[Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]]:
     """ Get Updates
 
     Args:
@@ -231,7 +231,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, HTTPValidationError, ModelCacheUpdatesResponse]
+        Union[BoundedErrorResponse, ModelCacheUpdatesResponse, RequestValidationProblem]
      """
 
 

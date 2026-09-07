@@ -10,7 +10,12 @@ from typing import cast
 from typing import cast, Union
 
 if TYPE_CHECKING:
-  from ..models.operation_response_result_type_0 import OperationResponseResultType0
+  from ..models.recipe_operation_stopped_result import RecipeOperationStoppedResult
+  from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
+  from ..models.recipe_operation_activated_result import RecipeOperationActivatedResult
+  from ..models.recipe_operation_result import RecipeOperationResult
+  from ..models.recipe_job_run_result import RecipeJobRunResult
+  from ..models.recipe_operation_progress_result import RecipeOperationProgressResult
 
 
 
@@ -29,7 +34,8 @@ class OperationResponse:
             nodes (list[str]):
             owner_id (str):
             plan_digest (str):
-            result (Union['OperationResponseResultType0', None]):
+            result (Union['RecipeJobRunResult', 'RecipeOperationActivatedResult', 'RecipeOperationCancellationResult',
+                'RecipeOperationProgressResult', 'RecipeOperationResult', 'RecipeOperationStoppedResult', None]):
             state (str):
      """
 
@@ -38,7 +44,7 @@ class OperationResponse:
     nodes: list[str]
     owner_id: str
     plan_digest: str
-    result: Union['OperationResponseResultType0', None]
+    result: Union['RecipeJobRunResult', 'RecipeOperationActivatedResult', 'RecipeOperationCancellationResult', 'RecipeOperationProgressResult', 'RecipeOperationResult', 'RecipeOperationStoppedResult', None]
     state: str
 
 
@@ -46,7 +52,12 @@ class OperationResponse:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.operation_response_result_type_0 import OperationResponseResultType0
+        from ..models.recipe_operation_stopped_result import RecipeOperationStoppedResult
+        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
+        from ..models.recipe_operation_activated_result import RecipeOperationActivatedResult
+        from ..models.recipe_operation_result import RecipeOperationResult
+        from ..models.recipe_job_run_result import RecipeJobRunResult
+        from ..models.recipe_operation_progress_result import RecipeOperationProgressResult
         id = self.id
 
         kind = self.kind
@@ -60,7 +71,17 @@ class OperationResponse:
         plan_digest = self.plan_digest
 
         result: Union[None, dict[str, Any]]
-        if isinstance(self.result, OperationResponseResultType0):
+        if isinstance(self.result, RecipeOperationResult):
+            result = self.result.to_dict()
+        elif isinstance(self.result, RecipeOperationProgressResult):
+            result = self.result.to_dict()
+        elif isinstance(self.result, RecipeOperationCancellationResult):
+            result = self.result.to_dict()
+        elif isinstance(self.result, RecipeOperationActivatedResult):
+            result = self.result.to_dict()
+        elif isinstance(self.result, RecipeOperationStoppedResult):
+            result = self.result.to_dict()
+        elif isinstance(self.result, RecipeJobRunResult):
             result = self.result.to_dict()
         else:
             result = self.result
@@ -86,7 +107,12 @@ class OperationResponse:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.operation_response_result_type_0 import OperationResponseResultType0
+        from ..models.recipe_operation_stopped_result import RecipeOperationStoppedResult
+        from ..models.recipe_operation_cancellation_result import RecipeOperationCancellationResult
+        from ..models.recipe_operation_activated_result import RecipeOperationActivatedResult
+        from ..models.recipe_operation_result import RecipeOperationResult
+        from ..models.recipe_job_run_result import RecipeJobRunResult
+        from ..models.recipe_operation_progress_result import RecipeOperationProgressResult
         d = dict(src_dict)
         id = d.pop("id")
 
@@ -99,20 +125,70 @@ class OperationResponse:
 
         plan_digest = d.pop("plan_digest")
 
-        def _parse_result(data: object) -> Union['OperationResponseResultType0', None]:
+        def _parse_result(data: object) -> Union['RecipeJobRunResult', 'RecipeOperationActivatedResult', 'RecipeOperationCancellationResult', 'RecipeOperationProgressResult', 'RecipeOperationResult', 'RecipeOperationStoppedResult', None]:
             if data is None:
                 return data
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                result_type_0 = OperationResponseResultType0.from_dict(data)
+                result_type_0 = RecipeOperationResult.from_dict(data)
 
 
 
                 return result_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['OperationResponseResultType0', None], data)
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                result_type_1 = RecipeOperationProgressResult.from_dict(data)
+
+
+
+                return result_type_1
+            except: # noqa: E722
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                result_type_2 = RecipeOperationCancellationResult.from_dict(data)
+
+
+
+                return result_type_2
+            except: # noqa: E722
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                result_type_3 = RecipeOperationActivatedResult.from_dict(data)
+
+
+
+                return result_type_3
+            except: # noqa: E722
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                result_type_4 = RecipeOperationStoppedResult.from_dict(data)
+
+
+
+                return result_type_4
+            except: # noqa: E722
+                pass
+            try:
+                if not isinstance(data, dict):
+                    raise TypeError()
+                result_type_5 = RecipeJobRunResult.from_dict(data)
+
+
+
+                return result_type_5
+            except: # noqa: E722
+                pass
+            return cast(Union['RecipeJobRunResult', 'RecipeOperationActivatedResult', 'RecipeOperationCancellationResult', 'RecipeOperationProgressResult', 'RecipeOperationResult', 'RecipeOperationStoppedResult', None], data)
 
         result = _parse_result(d.pop("result"))
 

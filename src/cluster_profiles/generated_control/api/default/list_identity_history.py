@@ -9,6 +9,7 @@ from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.identity_history_response import IdentityHistoryResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -32,7 +33,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, IdentityHistoryResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = IdentityHistoryResponse.from_dict(response.json())
 
@@ -47,13 +48,20 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
 
         return response_401
 
+    if response.status_code == 422:
+        response_422 = RequestValidationProblem.from_dict(response.json())
+
+
+
+        return response_422
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, IdentityHistoryResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -66,7 +74,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, IdentityHistoryResponse]]:
+) -> Response[Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]]:
     """ Identity History View
 
     Raises:
@@ -74,7 +82,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, IdentityHistoryResponse]]
+        Response[Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]]
      """
 
 
@@ -92,7 +100,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, IdentityHistoryResponse]]:
+) -> Optional[Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]]:
     """ Identity History View
 
     Raises:
@@ -100,7 +108,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, IdentityHistoryResponse]
+        Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]
      """
 
 
@@ -113,7 +121,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, IdentityHistoryResponse]]:
+) -> Response[Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]]:
     """ Identity History View
 
     Raises:
@@ -121,7 +129,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, IdentityHistoryResponse]]
+        Response[Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]]
      """
 
 
@@ -139,7 +147,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, IdentityHistoryResponse]]:
+) -> Optional[Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]]:
     """ Identity History View
 
     Raises:
@@ -147,7 +155,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, IdentityHistoryResponse]
+        Union[BoundedErrorResponse, IdentityHistoryResponse, RequestValidationProblem]
      """
 
 

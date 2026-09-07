@@ -60,6 +60,7 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/catalog_repository.py",
         "control/src/vonk_control/recipe_runtime_specs.py",
         "control/src/vonk_control/compiled_artifact_contract.py",
+        "control/src/vonk_control/recipe_lifecycle_contract.py",
         "control/src/vonk_control/artifact_jobs.py",
         "control/src/vonk_control/fleet_profile_contract.py",
         "control/src/vonk_control/fleet_profiles.py",
@@ -386,6 +387,7 @@ def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
     for path in (
         "control/src/vonk_control/recipe_runtime_specs.py",
         "control/src/vonk_control/compiled_artifact_contract.py",
+        "control/src/vonk_control/recipe_lifecycle_contract.py",
         "control/src/vonk_control/artifact_jobs.py",
         "control/src/vonk_control/fleet_profile_contract.py",
         "control/src/vonk_control/fleet_profiles.py",
@@ -452,6 +454,7 @@ def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
         "control/src/vonk_control/catalog_sync.py",
         "control/src/vonk_control/recipe_runtime_specs.py",
         "control/src/vonk_control/compiled_artifact_contract.py",
+        "control/src/vonk_control/recipe_lifecycle_contract.py",
         "control/src/vonk_control/artifact_jobs.py",
         "control/src/vonk_control/fleet_profile_contract.py",
         "control/src/vonk_control/fleet_profiles.py",

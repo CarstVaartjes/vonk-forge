@@ -72,7 +72,6 @@ from .resource_planning import (
 )
 from .run_switch_contract import (
     ArtifactStorageImpact,
-    ArtifactVerificationResult,
     BuildCompatibilityEvidence,
     BuildSourceEvidence,
     CapabilityEvidence,
@@ -81,22 +80,22 @@ from .run_switch_contract import (
     FreshnessEvidence,
     InvocationMetadata,
     MappingSelection,
-    RunSwitchBuildEvidence,
     ResourceDemandEvidence,
     RunSwitchApplyRequest,
+    RunSwitchBuildEvidence,
     RunSwitchMemberProgress,
     RunSwitchOperation,
     RunSwitchOperationResult,
     RunSwitchPhase,
     RunSwitchPhaseKind,
     RunSwitchPhaseResult,
-    RunSwitchVerifyResult,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
     RunSwitchProgress,
     RunSwitchReason,
     RunSwitchStopApplyRequest,
     RunSwitchStopPreviewRequest,
+    RunSwitchVerifyResult,
     RuntimeImageStorageImpact,
     SparkFit,
     SparkFitNode,
@@ -104,7 +103,9 @@ from .run_switch_contract import (
     SparkGroupNode,
     StopImpact,
 )
-from .runtime_image_preparation import RuntimeImageReceipt
+from .runtime_image_preparation import (
+    RuntimeImageReceipt as RuntimeImageReceiptDocument,
+)
 
 
 class RunSwitchOperationConflict(RuntimeError):
@@ -4759,10 +4760,14 @@ def _phase_result(
     try:
         normalized = dict(value)
         if phase is not None:
+            if "phase" in normalized and normalized["phase"] != phase.kind:
+                raise ValueError("phase receipt belongs to a different phase")
             normalized.setdefault("phase", phase.kind)
             subphase = getattr(phase, "subphase", None)
             if subphase is None and phase.kind in {"transfer", "verify"}:
                 subphase = "target-copy"
+            if "subphase" in normalized and normalized["subphase"] != subphase:
+                raise ValueError("phase receipt belongs to a different subphase")
             normalized.setdefault("subphase", subphase)
         assignments = normalized.get("assignments")
         if isinstance(assignments, Mapping):
@@ -5169,27 +5174,17 @@ def _validate_artifact_execution(
             f"run-switch.{phase.kind}-returned-invalid-evidence"
         )
     if phase.kind == "prepare" and phase.subphase == "runtime-image":
-        raw_receipt = result.get("runtime_image")
-        receipt = raw_receipt if isinstance(raw_receipt, Mapping) else result
         try:
-            RuntimeImageReceipt.model_validate(receipt, strict=True)
+            receipt = RuntimeImageReceiptDocument.model_validate(
+                result.get("runtime_image"), strict=True
+            )
         except (TypeError, ValidationError) as error:
             raise RunSwitchOperationConflict(
                 "run-switch.runtime-image-preparation-receipt-invalid"
             ) from error
-        image_digest = receipt.get("image_digest")
-        layout_digest = receipt.get("oci_layout_sha256", receipt.get("oci_archive_sha256"))
-        image_bytes = receipt.get("image_bytes")
-        if (
-            not _is_oci_digest(image_digest)
-            or not _is_hex_digest(layout_digest)
-            or type(image_bytes) is not int
-            or image_bytes < 1
-        ):
-            raise RunSwitchOperationConflict(
-                "run-switch.runtime-image-preparation-evidence-invalid"
-            )
-        registry_digest = receipt.get("registry_manifest_digest")
+        image_digest = receipt.image_digest
+        layout_digest = receipt.oci_archive_sha256
+        registry_digest = receipt.registry_manifest_digest
         if (
             plan.image_digest is not None
             and image_digest != plan.image_digest

@@ -21,8 +21,8 @@ from typing import Literal, Union, cast
 from typing import Union
 
 if TYPE_CHECKING:
-  from ..models.run_switch_operation_result_type_0 import RunSwitchOperationResultType0
   from ..models.run_switch_progress import RunSwitchProgress
+  from ..models.run_switch_operation_result import RunSwitchOperationResult
 
 
 
@@ -46,7 +46,7 @@ class RunSwitchOperation:
             request_key (str):
             state (str):
             current_phase (Union[None, RunSwitchOperationCurrentPhaseType0, Unset]):
-            result (Union['RunSwitchOperationResultType0', None, Unset]):
+            result (Union['RunSwitchOperationResult', None, Unset]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
             status_reason (Union[None, Unset, str]):
      """
@@ -61,7 +61,7 @@ class RunSwitchOperation:
     request_key: str
     state: str
     current_phase: Union[None, RunSwitchOperationCurrentPhaseType0, Unset] = UNSET
-    result: Union['RunSwitchOperationResultType0', None, Unset] = UNSET
+    result: Union['RunSwitchOperationResult', None, Unset] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
     status_reason: Union[None, Unset, str] = UNSET
 
@@ -70,8 +70,8 @@ class RunSwitchOperation:
 
 
     def to_dict(self) -> dict[str, Any]:
-        from ..models.run_switch_operation_result_type_0 import RunSwitchOperationResultType0
         from ..models.run_switch_progress import RunSwitchProgress
+        from ..models.run_switch_operation_result import RunSwitchOperationResult
         action: str = self.action
 
         completed_phases = []
@@ -108,7 +108,7 @@ class RunSwitchOperation:
         result: Union[None, Unset, dict[str, Any]]
         if isinstance(self.result, Unset):
             result = UNSET
-        elif isinstance(self.result, RunSwitchOperationResultType0):
+        elif isinstance(self.result, RunSwitchOperationResult):
             result = self.result.to_dict()
         else:
             result = self.result
@@ -150,8 +150,8 @@ class RunSwitchOperation:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
-        from ..models.run_switch_operation_result_type_0 import RunSwitchOperationResultType0
         from ..models.run_switch_progress import RunSwitchProgress
+        from ..models.run_switch_operation_result import RunSwitchOperationResult
         d = dict(src_dict)
         action = check_run_switch_operation_action(d.pop("action"))
 
@@ -209,7 +209,7 @@ class RunSwitchOperation:
         current_phase = _parse_current_phase(d.pop("current_phase", UNSET))
 
 
-        def _parse_result(data: object) -> Union['RunSwitchOperationResultType0', None, Unset]:
+        def _parse_result(data: object) -> Union['RunSwitchOperationResult', None, Unset]:
             if data is None:
                 return data
             if isinstance(data, Unset):
@@ -217,14 +217,14 @@ class RunSwitchOperation:
             try:
                 if not isinstance(data, dict):
                     raise TypeError()
-                result_type_0 = RunSwitchOperationResultType0.from_dict(data)
+                result_type_0 = RunSwitchOperationResult.from_dict(data)
 
 
 
                 return result_type_0
             except: # noqa: E722
                 pass
-            return cast(Union['RunSwitchOperationResultType0', None, Unset], data)
+            return cast(Union['RunSwitchOperationResult', None, Unset], data)
 
         result = _parse_result(d.pop("result", UNSET))
 

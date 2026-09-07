@@ -133,7 +133,9 @@ fn compiled_job_input_round_trips_as_a_fixed_nested_contract() {
         } else {
             invalid["job"]["input"]["slots"][0]["max_files"] = mutation.1;
         }
-        assert!(serde_json::from_value::<CompiledExecutionPlan>(invalid).is_err());
+        if let Ok(plan) = serde_json::from_value::<CompiledExecutionPlan>(invalid) {
+            assert!(plan.validate().is_err());
+        }
     }
 }
 

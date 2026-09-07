@@ -7,9 +7,9 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.http_validation_error import HTTPValidationError
 from ...models.model_deletion_plan_response import ModelDeletionPlanResponse
 from ...models.model_deletion_preview_request import ModelDeletionPreviewRequest
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -41,7 +41,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[HTTPValidationError, ModelDeletionPlanResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[ModelDeletionPlanResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = ModelDeletionPlanResponse.from_dict(response.json())
 
@@ -50,7 +50,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_200
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -62,7 +62,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[HTTPValidationError, ModelDeletionPlanResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[ModelDeletionPlanResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -76,7 +76,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: ModelDeletionPreviewRequest,
 
-) -> Response[Union[HTTPValidationError, ModelDeletionPlanResponse]]:
+) -> Response[Union[ModelDeletionPlanResponse, RequestValidationProblem]]:
     """ Preview Model Deletion
 
     Args:
@@ -87,7 +87,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, ModelDeletionPlanResponse]]
+        Response[Union[ModelDeletionPlanResponse, RequestValidationProblem]]
      """
 
 
@@ -107,7 +107,7 @@ def sync(
     client: AuthenticatedClient,
     body: ModelDeletionPreviewRequest,
 
-) -> Optional[Union[HTTPValidationError, ModelDeletionPlanResponse]]:
+) -> Optional[Union[ModelDeletionPlanResponse, RequestValidationProblem]]:
     """ Preview Model Deletion
 
     Args:
@@ -118,7 +118,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, ModelDeletionPlanResponse]
+        Union[ModelDeletionPlanResponse, RequestValidationProblem]
      """
 
 
@@ -133,7 +133,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: ModelDeletionPreviewRequest,
 
-) -> Response[Union[HTTPValidationError, ModelDeletionPlanResponse]]:
+) -> Response[Union[ModelDeletionPlanResponse, RequestValidationProblem]]:
     """ Preview Model Deletion
 
     Args:
@@ -144,7 +144,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, ModelDeletionPlanResponse]]
+        Response[Union[ModelDeletionPlanResponse, RequestValidationProblem]]
      """
 
 
@@ -164,7 +164,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: ModelDeletionPreviewRequest,
 
-) -> Optional[Union[HTTPValidationError, ModelDeletionPlanResponse]]:
+) -> Optional[Union[ModelDeletionPlanResponse, RequestValidationProblem]]:
     """ Preview Model Deletion
 
     Args:
@@ -175,7 +175,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, ModelDeletionPlanResponse]
+        Union[ModelDeletionPlanResponse, RequestValidationProblem]
      """
 
 

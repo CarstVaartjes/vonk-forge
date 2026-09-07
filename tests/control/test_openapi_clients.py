@@ -478,9 +478,7 @@ def test_generated_library_schema_uses_shared_authority_documents() -> None:
         "Readiness",
         "RuntimeDistribution",
     )
-    assert not any(
-        any(token in name for token in forbidden) for name in components
-    )
+    assert set(forbidden).isdisjoint(components)
     assert components["LibraryModel"]["properties"]["model_document"] == {
         "$ref": "#/components/schemas/ModelDefinition"
     }
@@ -658,11 +656,12 @@ def test_generated_python_client_parses_documented_operation_errors() -> None:
 
 def test_generated_python_list_jobs_preserves_cursor_and_typed_rejection() -> None:
     import httpx
+    from vonk_control.operation_api import RequestValidationProblem as ProblemProducer
 
     from cluster_profiles.generated_control.api.default import list_jobs
     from cluster_profiles.generated_control.client import Client
-    from cluster_profiles.generated_control.models.bounded_error_response import (
-        BoundedErrorResponse,
+    from cluster_profiles.generated_control.models.request_validation_problem import (
+        RequestValidationProblem,
     )
 
     cursor = "v1.authenticated.boundary"
@@ -683,8 +682,8 @@ def test_generated_python_list_jobs_preserves_cursor_and_typed_rejection() -> No
         client=Client(base_url="https://control.invalid"),
         response=httpx.Response(
             422,
-            json={"detail": "job cursor is invalid"},
+            json=ProblemProducer(detail="job cursor is invalid", issues=[]).model_dump(mode="json"),
         ),
     )
-    assert isinstance(parsed, BoundedErrorResponse)
+    assert isinstance(parsed, RequestValidationProblem)
     assert parsed.detail == "job cursor is invalid"

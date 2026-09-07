@@ -7,7 +7,7 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.http_validation_error import HTTPValidationError
+from ...models.request_validation_problem import RequestValidationProblem
 from ...models.run_plan_response import RunPlanResponse
 from ...models.run_preview_request import RunPreviewRequest
 from typing import cast
@@ -41,7 +41,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[HTTPValidationError, RunPlanResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[RequestValidationProblem, RunPlanResponse]]:
     if response.status_code == 200:
         response_200 = RunPlanResponse.from_dict(response.json())
 
@@ -50,7 +50,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_200
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -62,7 +62,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[HTTPValidationError, RunPlanResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[RequestValidationProblem, RunPlanResponse]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -76,7 +76,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: RunPreviewRequest,
 
-) -> Response[Union[HTTPValidationError, RunPlanResponse]]:
+) -> Response[Union[RequestValidationProblem, RunPlanResponse]]:
     """ Preview Run
 
     Args:
@@ -87,7 +87,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, RunPlanResponse]]
+        Response[Union[RequestValidationProblem, RunPlanResponse]]
      """
 
 
@@ -107,7 +107,7 @@ def sync(
     client: AuthenticatedClient,
     body: RunPreviewRequest,
 
-) -> Optional[Union[HTTPValidationError, RunPlanResponse]]:
+) -> Optional[Union[RequestValidationProblem, RunPlanResponse]]:
     """ Preview Run
 
     Args:
@@ -118,7 +118,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, RunPlanResponse]
+        Union[RequestValidationProblem, RunPlanResponse]
      """
 
 
@@ -133,7 +133,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: RunPreviewRequest,
 
-) -> Response[Union[HTTPValidationError, RunPlanResponse]]:
+) -> Response[Union[RequestValidationProblem, RunPlanResponse]]:
     """ Preview Run
 
     Args:
@@ -144,7 +144,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, RunPlanResponse]]
+        Response[Union[RequestValidationProblem, RunPlanResponse]]
      """
 
 
@@ -164,7 +164,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: RunPreviewRequest,
 
-) -> Optional[Union[HTTPValidationError, RunPlanResponse]]:
+) -> Optional[Union[RequestValidationProblem, RunPlanResponse]]:
     """ Preview Run
 
     Args:
@@ -175,7 +175,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, RunPlanResponse]
+        Union[RequestValidationProblem, RunPlanResponse]
      """
 
 

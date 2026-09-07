@@ -14,10 +14,10 @@ from typing import Union
 if TYPE_CHECKING:
   from ..models.plan_reason import PlanReason
   from ..models.uninstall_node_impact_response import UninstallNodeImpactResponse
-  from ..models.uninstall_plan_response_recipe_content import UninstallPlanResponseRecipeContent
   from ..models.uninstall_active_run_response import UninstallActiveRunResponse
   from ..models.uninstall_model_impact_response import UninstallModelImpactResponse
   from ..models.uninstall_consequences_response import UninstallConsequencesResponse
+  from ..models.recipe_definition import RecipeDefinition
 
 
 
@@ -44,7 +44,7 @@ class UninstallPlanResponse:
             nodes (list['UninstallNodeImpactResponse']):
             original_plan_digest (str):
             plan_digest (str):
-            recipe_content (UninstallPlanResponseRecipeContent):
+            recipe_content (RecipeDefinition): The sole public recipe authoring contract.
             recipe_content_sha256 (str):
             recipe_id (str):
             recipe_revision_id (str):
@@ -65,7 +65,7 @@ class UninstallPlanResponse:
     nodes: list['UninstallNodeImpactResponse']
     original_plan_digest: str
     plan_digest: str
-    recipe_content: 'UninstallPlanResponseRecipeContent'
+    recipe_content: 'RecipeDefinition'
     recipe_content_sha256: str
     recipe_id: str
     recipe_revision_id: str
@@ -79,10 +79,10 @@ class UninstallPlanResponse:
     def to_dict(self) -> dict[str, Any]:
         from ..models.plan_reason import PlanReason
         from ..models.uninstall_node_impact_response import UninstallNodeImpactResponse
-        from ..models.uninstall_plan_response_recipe_content import UninstallPlanResponseRecipeContent
         from ..models.uninstall_active_run_response import UninstallActiveRunResponse
         from ..models.uninstall_model_impact_response import UninstallModelImpactResponse
         from ..models.uninstall_consequences_response import UninstallConsequencesResponse
+        from ..models.recipe_definition import RecipeDefinition
         active_run_count = self.active_run_count
 
         active_runs = []
@@ -179,10 +179,10 @@ class UninstallPlanResponse:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.plan_reason import PlanReason
         from ..models.uninstall_node_impact_response import UninstallNodeImpactResponse
-        from ..models.uninstall_plan_response_recipe_content import UninstallPlanResponseRecipeContent
         from ..models.uninstall_active_run_response import UninstallActiveRunResponse
         from ..models.uninstall_model_impact_response import UninstallModelImpactResponse
         from ..models.uninstall_consequences_response import UninstallConsequencesResponse
+        from ..models.recipe_definition import RecipeDefinition
         d = dict(src_dict)
         active_run_count = d.pop("active_run_count")
 
@@ -240,7 +240,7 @@ class UninstallPlanResponse:
 
         plan_digest = d.pop("plan_digest")
 
-        recipe_content = UninstallPlanResponseRecipeContent.from_dict(d.pop("recipe_content"))
+        recipe_content = RecipeDefinition.from_dict(d.pop("recipe_content"))
 
 
 

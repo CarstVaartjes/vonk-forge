@@ -10,6 +10,7 @@ from ... import errors
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.fleet_node_identity import FleetNodeIdentity
 from ...models.node_profile_update_request import NodeProfileUpdateRequest
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -42,7 +43,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetNodeIdentity]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = FleetNodeIdentity.from_dict(response.json())
 
@@ -72,7 +73,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_404
 
     if response.status_code == 422:
-        response_422 = BoundedErrorResponse.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -91,7 +92,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetNodeIdentity]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -106,7 +107,7 @@ def sync_detailed(
     client: AuthenticatedClient,
     body: NodeProfileUpdateRequest,
 
-) -> Response[Union[BoundedErrorResponse, FleetNodeIdentity]]:
+) -> Response[Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]]:
     """ Update Node Profile
 
     Args:
@@ -118,7 +119,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetNodeIdentity]]
+        Response[Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]]
      """
 
 
@@ -140,7 +141,7 @@ def sync(
     client: AuthenticatedClient,
     body: NodeProfileUpdateRequest,
 
-) -> Optional[Union[BoundedErrorResponse, FleetNodeIdentity]]:
+) -> Optional[Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]]:
     """ Update Node Profile
 
     Args:
@@ -152,7 +153,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetNodeIdentity]
+        Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]
      """
 
 
@@ -169,7 +170,7 @@ async def asyncio_detailed(
     client: AuthenticatedClient,
     body: NodeProfileUpdateRequest,
 
-) -> Response[Union[BoundedErrorResponse, FleetNodeIdentity]]:
+) -> Response[Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]]:
     """ Update Node Profile
 
     Args:
@@ -181,7 +182,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, FleetNodeIdentity]]
+        Response[Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]]
      """
 
 
@@ -203,7 +204,7 @@ async def asyncio(
     client: AuthenticatedClient,
     body: NodeProfileUpdateRequest,
 
-) -> Optional[Union[BoundedErrorResponse, FleetNodeIdentity]]:
+) -> Optional[Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]]:
     """ Update Node Profile
 
     Args:
@@ -215,7 +216,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, FleetNodeIdentity]
+        Union[BoundedErrorResponse, FleetNodeIdentity, RequestValidationProblem]
      """
 
 

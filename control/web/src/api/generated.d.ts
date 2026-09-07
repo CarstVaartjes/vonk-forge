@@ -1696,6 +1696,40 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentFailureResult */
+        AgentFailureResult: {
+            /** Diagnostic */
+            diagnostic?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Helper Error Code */
+            helper_error_code?: string | null;
+            /** Helper Exit Code */
+            helper_exit_code?: number | null;
+            operation?: components["schemas"]["AgentOperation"] | null;
+            /** Reason */
+            reason?: string | null;
+            /** Recovery */
+            recovery?: string | null;
+            /** Stage */
+            stage?: string | null;
+            /** Status */
+            status?: "failed" | null;
+            /** Summary */
+            summary?: string | null;
+            /** Uncertain */
+            uncertain?: boolean | null;
+        };
+        /** AgentInstallResult */
+        AgentInstallResult: {
+            /** Installed Bytes */
+            installed_bytes: number;
+        };
+        /**
+         * AgentOperation
+         * @enum {string}
+         */
+        AgentOperation: "agent.upgrade.v1" | "artifact.distribution.v1" | "recipe.build.v1" | "recipe.image.import.v1" | "recipe.install" | "recipe.start" | "recipe.job.run.v1" | "recipe.stop" | "recipe.uninstall" | "recipe.model-uninstall.v1";
         /** AgentRepairManifestRequest */
         AgentRepairManifestRequest: {
             /** Authority Sha256 */
@@ -1874,6 +1908,17 @@ export interface components {
             /** Slot */
             slot: string;
         };
+        /** ArtifactInputContract */
+        ArtifactInputContract: {
+            /** Max Bytes */
+            max_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /** Required */
+            required: boolean;
+            /** Slots */
+            slots: components["schemas"]["ArtifactSlotContract"][];
+        };
         /** ArtifactJobCapabilitiesResponse */
         ArtifactJobCapabilitiesResponse: {
             /**
@@ -1906,10 +1951,7 @@ export interface components {
         };
         /** ArtifactJobResponse */
         ArtifactJobResponse: {
-            /** Compiled Contract */
-            compiled_contract: {
-                [key: string]: unknown;
-            };
+            compiled_contract: components["schemas"]["CompiledArtifactContract"];
             /** Contract Sha256 */
             contract_sha256: string;
             /**
@@ -2001,6 +2043,18 @@ export interface components {
             /** Reserved Input Names */
             reserved_input_names: string[];
         };
+        /** ArtifactOutputContract */
+        ArtifactOutputContract: {
+            /** Max Total Bytes */
+            max_total_bytes: number;
+            /**
+             * Path
+             * @constant
+             */
+            path: "/outputs";
+            /** Slots */
+            slots: components["schemas"]["ArtifactSlotContract"][];
+        };
         /** ArtifactOutputFile */
         ArtifactOutputFile: {
             /** Media Type */
@@ -2011,6 +2065,38 @@ export interface components {
             sha256: string;
             /** Size Bytes */
             size_bytes: number;
+        };
+        /** ArtifactOutputLimits */
+        ArtifactOutputLimits: {
+            /** Allowed Media Types */
+            allowed_media_types: string[];
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+        };
+        /** ArtifactSlotContract */
+        ArtifactSlotContract: {
+            /** Description */
+            description: string;
+            /** Extensions */
+            extensions: string[];
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Max Files */
+            max_files: number;
+            /** Max Total Bytes */
+            max_total_bytes: number;
+            /** Media Types */
+            media_types: string[];
+            /** Min Files */
+            min_files: number;
         };
         /**
          * ArtifactStorageImpact
@@ -2072,6 +2158,37 @@ export interface components {
              * @enum {string}
              */
             spark_coverage: "complete" | "partial" | "unknown";
+        };
+        /**
+         * ArtifactVerificationEvidence
+         * @description One node's immutable artifact handoff evidence.
+         */
+        ArtifactVerificationEvidence: {
+            /** Copied Bytes */
+            copied_bytes?: number | null;
+            /** Downloaded Bytes */
+            downloaded_bytes?: number | null;
+            /** Error */
+            error?: string | null;
+            /** Imported Image Digest */
+            imported_image_digest?: string | null;
+            /** Node Id */
+            node_id: string;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Uncertain
+             * @default false
+             */
+            uncertain: boolean;
+            /** Verified */
+            verified?: boolean | null;
+            /** Verified Digests */
+            verified_digests?: string[];
+            /** Verified Image Digest */
+            verified_image_digest?: string | null;
+            /** Verified Oci Layout Sha256 */
+            verified_oci_layout_sha256?: string | null;
         };
         /** AuditEventResponse */
         AuditEventResponse: {
@@ -2155,6 +2272,26 @@ export interface components {
          * @enum {string}
          */
         AvailabilityRecoveryAction: "retry" | "resume" | "download_again" | "force_rebuild" | "open_model_access" | "configure_hf_token" | "check_access_and_resume" | "free_space" | "inspect";
+        /** BooleanParameter */
+        BooleanParameter: {
+            /** Allowed Values */
+            allowed_values?: components["schemas"]["ParameterScalar"][];
+            /** Default */
+            default: boolean;
+            /** Maximum */
+            maximum?: null;
+            /** Minimum */
+            minimum?: null;
+            /** Name */
+            name: string;
+            /** Pattern */
+            pattern?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "boolean";
+        };
         /** BoundedErrorResponse */
         BoundedErrorResponse: {
             /** Detail */
@@ -2490,6 +2627,58 @@ export interface components {
             state: "unknown" | "missing" | "preparing" | "verifying" | "ready" | "failed" | "unsupported";
         };
         /**
+         * CompiledArtifactContract
+         * @description The canonical typed artifact execution contract.
+         */
+        CompiledArtifactContract: {
+            /** Engine */
+            engine?: {
+                [key: string]: unknown;
+            } | null;
+            input: components["schemas"]["ArtifactInputContract"];
+            /**
+             * Interface
+             * @enum {string}
+             */
+            interface: "audio-job" | "video-job" | "image-job" | "mesh-job" | "artifact-job";
+            /** Max Timeout Seconds */
+            max_timeout_seconds: number;
+            output: components["schemas"]["ArtifactOutputContract"];
+            output_limits: components["schemas"]["ArtifactOutputLimits"];
+            /** Parameters */
+            parameters: components["schemas"]["ParameterDefinition"][];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+        };
+        /**
+         * CompiledModelArtifact
+         * @description One exact model file selected by the canonical runtime compiler.
+         */
+        CompiledModelArtifact: {
+            /** Bytes */
+            bytes: number;
+            distribution_object: components["schemas"]["DistributionObjectReceipt"];
+            /** File Id */
+            file_id: string;
+            /** Id */
+            id: string;
+            /** Materialized Path */
+            materialized_path: string;
+            model: components["schemas"]["ModelCatalogIdentity"];
+            mount: components["schemas"]["ExecutionMount"];
+            /** Path */
+            path: string;
+            /** Roles */
+            roles: string[];
+            /** Selection Id */
+            selection_id: string;
+            /** Sha256 */
+            sha256: string;
+        };
+        /**
          * ControllerAssetState
          * @description Availability of one immutable asset in Controller/NAS storage.
          */
@@ -2519,6 +2708,69 @@ export interface components {
             verified_bytes: number;
             /** Verified Sha256 */
             verified_sha256?: string | null;
+        };
+        /**
+         * DistributionAssignment
+         * @description Controller authorization for one node, generation and object set.
+         */
+        DistributionAssignment: {
+            /** Assignment Id */
+            assignment_id: string;
+            /** Expires At */
+            expires_at: string;
+            /** Generation */
+            generation: number;
+            /** Model Artifact Set Sha256 */
+            model_artifact_set_sha256: string;
+            /** Node Id */
+            node_id: string;
+            /** Objects */
+            objects: components["schemas"]["DistributionObject"][];
+            /** Oci Archive Sha256 */
+            oci_archive_sha256: string;
+            /** Oci Image Digest */
+            oci_image_digest: string;
+            /** Plan Digest */
+            plan_digest: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * DistributionObject
+         * @description One model file, OCI archive, or OCI layer referenced by an assignment.
+         */
+        DistributionObject: {
+            /** Bytes */
+            bytes: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "model" | "oci-archive" | "oci-layer";
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
+        };
+        /**
+         * DistributionObjectReceipt
+         * @description A verified immutable object served by the Controller.
+         */
+        DistributionObjectReceipt: {
+            /** Bytes */
+            bytes: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "model" | "oci-archive";
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
         };
         /**
          * EffectiveParallelism
@@ -2644,6 +2896,37 @@ export interface components {
             /** State */
             state: string;
         };
+        /** EnumParameter */
+        EnumParameter: {
+            /** Allowed Values */
+            allowed_values: components["schemas"]["ParameterScalar"][];
+            default: components["schemas"]["ParameterScalar"];
+            /** Maximum */
+            maximum?: null;
+            /** Minimum */
+            minimum?: null;
+            /** Name */
+            name: string;
+            /** Pattern */
+            pattern?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "enum";
+        };
+        /**
+         * ExecutionMount
+         * @description The platform-owned mount used by one selected model file.
+         */
+        ExecutionMount: {
+            /** Read Only */
+            read_only: boolean;
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+        };
         /** FleetNode */
         FleetNode: {
             connection: components["schemas"]["NodeConnection"];
@@ -2682,6 +2965,49 @@ export interface components {
             /** Ip Address */
             ip_address?: string | null;
         };
+        /**
+         * FleetProfileApplicationProgress
+         * @description Typed progress tree persisted with every profile application.
+         */
+        FleetProfileApplicationProgress: {
+            /** Assignments */
+            assignments?: {
+                [key: string]: components["schemas"]["FleetProfileAssignmentContext"];
+            };
+            child_progress?: components["schemas"]["FleetProfileChildProgress"] | null;
+            /** Child Source */
+            child_source?: ("recipe" | "switch-adapter") | null;
+            /**
+             * Completed Steps
+             * @default 0
+             */
+            completed_steps: number;
+            /** Current Label */
+            current_label?: string | null;
+            library_placement?: components["schemas"]["FleetProfileLibraryPlacementContext"] | null;
+            /** Operation Kind */
+            operation_kind?: ("fleet-profile.apply" | "fleet-profile.prepare") | null;
+            /** Step Results */
+            step_results?: {
+                [key: string]: components["schemas"]["FleetProfileStepResult"];
+            };
+            switch_adapter?: components["schemas"]["FleetProfileSwitchAdapterState"] | null;
+            /**
+             * Total Steps
+             * @default 0
+             */
+            total_steps: number;
+        };
+        /**
+         * FleetProfileApplicationResult
+         * @description Terminal result for one profile application.
+         */
+        FleetProfileApplicationResult: {
+            /** Changed */
+            changed: boolean;
+            /** Completed Steps */
+            completed_steps: number;
+        };
         /** FleetProfileApplicationView */
         FleetProfileApplicationView: {
             /**
@@ -2701,14 +3027,8 @@ export interface components {
             profile_digest: string;
             /** Profile Id */
             profile_id: string;
-            /** Progress */
-            progress: {
-                [key: string]: unknown;
-            };
-            /** Result */
-            result: {
-                [key: string]: unknown;
-            } | null;
+            progress: components["schemas"]["FleetProfileApplicationProgress"];
+            result: components["schemas"]["FleetProfileApplicationResult"] | null;
             /**
              * Schema Version
              * @default 2
@@ -2760,6 +3080,18 @@ export interface components {
             recipe_title: string;
             /** Topology Name */
             topology_name: string;
+        };
+        /**
+         * FleetProfileAssignmentContext
+         * @description Persisted mapping and installation identities for one assignment.
+         */
+        FleetProfileAssignmentContext: {
+            /** Installation Id */
+            installation_id?: string | null;
+            /** Mapping Generation */
+            mapping_generation?: number | null;
+            /** Mapping Id */
+            mapping_id?: string | null;
         };
         /** FleetProfileAssignmentInput */
         FleetProfileAssignmentInput: {
@@ -2833,6 +3165,23 @@ export interface components {
             /** Name */
             name: string;
         };
+        /**
+         * FleetProfileChildProgress
+         * @description Typed progress emitted by the profile-owned Run switch adapter.
+         */
+        FleetProfileChildProgress: {
+            /** Bytes */
+            bytes?: number | null;
+            /** Node Ids */
+            node_ids?: string[];
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "model-download" | "container-download" | "container-build" | "target-copy" | "runtime-install" | "start" | "final-verify" | "transfer" | "verify" | "prepare" | "cleanup" | "stop" | "final_verify";
+            /** Total Bytes */
+            total_bytes?: number | null;
+        };
         /** FleetProfileDuplicateInput */
         FleetProfileDuplicateInput: {
             /** Description */
@@ -2867,6 +3216,33 @@ export interface components {
             /** Name */
             name: string;
             scope: components["schemas"]["FleetProfileScope"];
+        };
+        /**
+         * FleetProfileLibraryPlacementContext
+         * @description Identity binding retained for replay of a direct Library placement.
+         */
+        FleetProfileLibraryPlacementContext: {
+            /** Alias */
+            alias?: string | null;
+            /**
+             * Desired State
+             * @enum {string}
+             */
+            desired_state: "installed" | "running";
+            /** Installation Ids */
+            installation_ids?: string[];
+            /** Plan Digest */
+            plan_digest: string;
+            /** Profile Plan Digest */
+            profile_plan_digest: string;
+            /** Recipe Id */
+            recipe_id: string;
+            /** Recipe Revision Id */
+            recipe_revision_id: string;
+            /** Run Ids */
+            run_ids?: string[];
+            /** Selected Node Ids */
+            selected_node_ids: string[];
         };
         /** FleetProfileList */
         FleetProfileList: {
@@ -3050,6 +3426,125 @@ export interface components {
              */
             state: "draft" | "needs-preparation" | "ready" | "matched" | "switching" | "partially-applied" | "blocked" | "drifted";
         };
+        /**
+         * FleetProfileStepResult
+         * @description Result receipt for one completed profile plan step.
+         */
+        FleetProfileStepResult: {
+            /** Kind */
+            kind?: string | null;
+            /** Operation Id */
+            operation_id: string;
+            /** Owner Id */
+            owner_id?: string | null;
+            /** Result */
+            result?: components["schemas"]["FleetProfileSwitchChildResult"] | components["schemas"]["FleetProfileSwitchAdapterResult"] | components["schemas"]["FleetProfileVerificationResult"] | null;
+        };
+        /**
+         * FleetProfileSwitchAdapterResult
+         * @description Complete result of reconciling every assignment in a profile scope.
+         */
+        FleetProfileSwitchAdapterResult: {
+            /** Assignment Ids */
+            assignment_ids: string[];
+            /** Children */
+            children: components["schemas"]["FleetProfileSwitchChildState"][];
+        };
+        /**
+         * FleetProfileSwitchAdapterState
+         * @description Persisted state used to resume a profile switch after restart.
+         */
+        FleetProfileSwitchAdapterState: {
+            /** Active Kind */
+            active_kind?: ("run" | "stop") | null;
+            /** Active Operation Id */
+            active_operation_id?: string | null;
+            /** Actor */
+            actor: string;
+            /** Assignment Ids */
+            assignment_ids: string[];
+            /** Assignments */
+            assignments: components["schemas"]["FleetProfileAssignment"][];
+            /** Child Id */
+            child_id: string;
+            child_progress?: components["schemas"]["FleetProfileChildProgress"] | null;
+            /** Children */
+            children?: components["schemas"]["FleetProfileSwitchChildState"][];
+            /**
+             * Position
+             * @default 0
+             */
+            position: number;
+            /** Queue */
+            queue: components["schemas"]["FleetProfileSwitchQueueItem"][];
+            /** Request Id */
+            request_id: string;
+            result?: components["schemas"]["FleetProfileSwitchAdapterResult"] | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /** Scope Node Ids */
+            scope_node_ids: string[];
+            /**
+             * State
+             * @default queued
+             * @enum {string}
+             */
+            state: "queued" | "running" | "waiting-for-operator" | "succeeded" | "failed" | "cancelled";
+            /** Status Reason */
+            status_reason?: string | null;
+        };
+        /**
+         * FleetProfileSwitchChildResult
+         * @description Profile child receipt containing the public Run/Switch result tree.
+         */
+        FleetProfileSwitchChildResult: {
+            run_switch: components["schemas"]["RunSwitchOperationResult"];
+            /** Run Switch Operation Id */
+            run_switch_operation_id: string;
+        };
+        /**
+         * FleetProfileSwitchChildState
+         * @description Terminal receipt for a child already completed by the adapter.
+         */
+        FleetProfileSwitchChildState: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "run" | "stop";
+            /** Operation Id */
+            operation_id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "succeeded" | "failed" | "cancelled";
+        };
+        /**
+         * FleetProfileSwitchQueueItem
+         * @description One durable Run/Switch child in the profile reconciliation queue.
+         */
+        FleetProfileSwitchQueueItem: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "run" | "stop";
+        };
+        /**
+         * FleetProfileVerificationResult
+         * @description Small result used by profile switch adapters that verify directly.
+         */
+        FleetProfileVerificationResult: {
+            /** Verified */
+            verified: boolean;
+        };
         /** FleetProfileView */
         FleetProfileView: {
             /** Assignments */
@@ -3113,6 +3608,26 @@ export interface components {
              */
             schema_version: 1;
         };
+        /** FloatParameter */
+        FloatParameter: {
+            /** Allowed Values */
+            allowed_values?: components["schemas"]["ParameterScalar"][];
+            /** Default */
+            default: number;
+            /** Maximum */
+            maximum?: number | null;
+            /** Minimum */
+            minimum?: number | null;
+            /** Name */
+            name: string;
+            /** Pattern */
+            pattern?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "float";
+        };
         /** FreshnessEvidence */
         FreshnessEvidence: {
             /** Age Seconds */
@@ -3161,11 +3676,6 @@ export interface components {
             purpose: "new-node" | "re-enroll";
             /** Ttl Seconds */
             ttl_seconds: number;
-        };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
         };
         /** IdentityHistoryItem */
         IdentityHistoryItem: {
@@ -3281,9 +3791,7 @@ export interface components {
             allowed: boolean;
             /** Compiled Execution Plans */
             compiled_execution_plans?: {
-                [key: string]: {
-                    [key: string]: unknown;
-                };
+                [key: string]: components["schemas"]["vonk_control__compiled_execution_plan__CompiledExecutionPlan"];
             };
             /** Image Digest */
             image_digest: string;
@@ -3335,6 +3843,26 @@ export interface components {
             recipe_build_id?: string | null;
             /** Request Key */
             request_key: string;
+        };
+        /** IntegerParameter */
+        IntegerParameter: {
+            /** Allowed Values */
+            allowed_values?: components["schemas"]["ParameterScalar"][];
+            /** Default */
+            default: number;
+            /** Maximum */
+            maximum?: number | null;
+            /** Minimum */
+            minimum?: number | null;
+            /** Name */
+            name: string;
+            /** Pattern */
+            pattern?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "integer";
         };
         /** InventoryState */
         InventoryState: {
@@ -3645,10 +4173,7 @@ export interface components {
             locations: components["schemas"]["LibraryPlacementLocations"];
             /** Plan Digest */
             plan_digest: string;
-            /** Progress */
-            progress: {
-                [key: string]: unknown;
-            };
+            progress: components["schemas"]["FleetProfileApplicationProgress"];
             /** Recipe Id */
             recipe_id: string;
             /** Recipe Revision Id */
@@ -3989,6 +4514,16 @@ export interface components {
             schema_version: 2;
             /** Unlinked Recipes */
             unlinked_recipes: components["schemas"]["LibraryRecipeSummary"][];
+        };
+        /**
+         * LifecycleCodeFailureResult
+         * @description Bounded failure marker used by the Controller's node projector.
+         */
+        LifecycleCodeFailureResult: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail?: string | null;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -4341,6 +4876,21 @@ export interface components {
              */
             source_policy: "nas-first";
         };
+        /** ModelCacheDownloadResult */
+        ModelCacheDownloadResult: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /**
+             * Coverage
+             * @constant
+             */
+            coverage: "complete";
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+        };
         /** ModelCacheEvictRequest */
         ModelCacheEvictRequest: {
             /** Plan Digest */
@@ -4410,6 +4960,18 @@ export interface components {
             storage_before: components["schemas"]["CacheStorageResponse"];
             /** Target Bytes */
             target_bytes: number;
+        };
+        /** ModelCacheEvictionResult */
+        ModelCacheEvictionResult: {
+            /** Reclaimed Bytes */
+            reclaimed_bytes: number;
+            /** Removed Entries */
+            removed_entries: string[];
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
         };
         /** ModelCacheInventoryResponse */
         ModelCacheInventoryResponse: {
@@ -4492,9 +5054,7 @@ export interface components {
             /** Request Key */
             request_key: string;
             /** Result */
-            result?: {
-                [key: string]: unknown;
-            } | null;
+            result?: components["schemas"]["ModelCacheDownloadResult"] | components["schemas"]["ModelCacheEvictionResult"] | null;
             /**
              * Schema Version
              * @default 2
@@ -4615,17 +5175,9 @@ export interface components {
             /** Model Update Available */
             model_update_available: boolean;
             /** Model Update Candidates */
-            model_update_candidates?: {
-                [key: string]: unknown;
-            }[];
-            /** Model Update From */
-            model_update_from?: {
-                [key: string]: unknown;
-            } | null;
-            /** Model Update To */
-            model_update_to?: {
-                [key: string]: unknown;
-            } | null;
+            model_update_candidates?: components["schemas"]["ModelReference"][];
+            model_update_from?: components["schemas"]["ModelReference"] | null;
+            model_update_to?: components["schemas"]["ModelReference"] | null;
             /** Recipe Revision Sha256 */
             recipe_revision_sha256: string | null;
             /** Recipe Update Available */
@@ -4700,6 +5252,21 @@ export interface components {
             source_revision: string;
             /** Source Url */
             source_url: string;
+        };
+        /**
+         * ModelCatalogIdentity
+         * @description Safe model identity used for display and execution evidence.
+         *
+         *     Upstream repository and revision fields deliberately do not exist here.
+         *     They remain Controller/cache inputs and are never sent to a Spark.
+         */
+        ModelCatalogIdentity: {
+            /** Content Sha256 */
+            content_sha256: string;
+            /** Publisher */
+            publisher: string;
+            /** Slug */
+            slug: string;
         };
         /**
          * ModelDefinition
@@ -5177,9 +5744,7 @@ export interface components {
             /** Plan Digest */
             plan_digest: string;
             /** Result */
-            result: {
-                [key: string]: unknown;
-            } | null;
+            result: components["schemas"]["RecipeOperationResult"] | components["schemas"]["RecipeOperationProgressResult"] | components["schemas"]["RecipeOperationCancellationResult"] | components["schemas"]["RecipeOperationActivatedResult"] | components["schemas"]["RecipeOperationStoppedResult"] | components["schemas"]["RecipeJobRunResult"] | null;
             /** State */
             state: string;
         };
@@ -5306,6 +5871,8 @@ export interface components {
             /** Max Total Bytes */
             max_total_bytes: number;
         };
+        ParameterDefinition: components["schemas"]["StringParameter"] | components["schemas"]["IntegerParameter"] | components["schemas"]["FloatParameter"] | components["schemas"]["BooleanParameter"] | components["schemas"]["EnumParameter"];
+        ParameterScalar: boolean | number | string;
         /** PlacementEvidenceCounts */
         PlacementEvidenceCounts: {
             /** Builds */
@@ -5569,29 +6136,16 @@ export interface components {
             target?: string | null;
         };
         /** RecipeBuildEvidence */
-        "RecipeBuildEvidence-Output": {
-            /** Build Id */
-            build_id: string | null;
+        RecipeBuildEvidence: {
             /** Build Input Sha256 */
-            build_input_sha256?: string | null;
-            /** Builder Node Id */
-            builder_node_id?: string | null;
-            compatibility: components["schemas"]["BuildCompatibilityEvidence"];
-            /** Detail */
-            detail?: string | null;
+            build_input_sha256: string;
             /** Image Bytes */
-            image_bytes?: number | null;
+            image_bytes: number;
             /** Image Digest */
-            image_digest: string | null;
+            image_digest: string;
             /** Oci Layout Sha256 */
-            oci_layout_sha256?: string | null;
-            runtime: components["schemas"]["RuntimeImageStorageImpact"];
-            source: components["schemas"]["BuildSourceEvidence"];
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "available" | "planned" | "building" | "failed" | "missing" | "incompatible" | "unknown";
+            oci_layout_sha256: string;
+            policy: components["schemas"]["RecipeBuildPolicy"];
         };
         /** RecipeBuildExecution */
         RecipeBuildExecution: {
@@ -5601,6 +6155,26 @@ export interface components {
              * @enum {string}
              */
             mode: "build";
+        };
+        /** RecipeBuildPolicy */
+        RecipeBuildPolicy: {
+            /** Dockerfile */
+            dockerfile: string;
+            /** Findings */
+            findings: components["schemas"]["RecipeBuildPolicyFinding"][];
+            /** Passed */
+            passed: boolean;
+        };
+        /** RecipeBuildPolicyFinding */
+        RecipeBuildPolicyFinding: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /** Line */
+            line?: number | null;
+            /** Path */
+            path: string;
         };
         /**
          * RecipeDefinition
@@ -5924,6 +6498,17 @@ export interface components {
              */
             mode: "image";
         };
+        /** RecipeImageImportEvidence */
+        RecipeImageImportEvidence: {
+            /** Build Id */
+            build_id: string;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256: string;
+        };
         /** RecipeInputSlot */
         RecipeInputSlot: {
             /** Description */
@@ -5954,6 +6539,24 @@ export interface components {
             change_effect: "none" | "restart" | "reprepare" | "rebuild";
             /** Value */
             value: number;
+        };
+        /** RecipeJobEvidence */
+        RecipeJobEvidence: {
+            /** Elapsed Milliseconds */
+            elapsed_milliseconds: number;
+            /** Peak Memory Bytes */
+            peak_memory_bytes: number | null;
+        };
+        /** RecipeJobFile */
+        RecipeJobFile: {
+            /** Media Type */
+            media_type: string;
+            /** Name */
+            name: string;
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
         };
         /** RecipeJobInput */
         RecipeJobInput: {
@@ -5997,6 +6600,38 @@ export interface components {
             path: "/outputs";
             /** Slots */
             slots: components["schemas"]["RecipeOutputSlot"][];
+        };
+        /** RecipeJobOutputManifest */
+        RecipeJobOutputManifest: {
+            /** Files */
+            files: components["schemas"]["RecipeJobFile"][];
+            /** Manifest Sha256 */
+            manifest_sha256: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
+            /** Total Bytes */
+            total_bytes: number;
+        };
+        /** RecipeJobRunResult */
+        RecipeJobRunResult: {
+            evidence: components["schemas"]["RecipeJobEvidence"];
+            /** Exit Code */
+            exit_code: number;
+            /** Job Id */
+            job_id: string;
+            output_manifest: components["schemas"]["RecipeJobOutputManifest"];
+            /** Reason */
+            reason?: string | null;
+            /** Run Id */
+            run_id: string;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 1;
         };
         /** RecipeJobServingRequest */
         RecipeJobServingRequest: {
@@ -6071,6 +6706,13 @@ export interface components {
             /** Title */
             title: string;
         };
+        /** RecipeModelCleanupResult */
+        RecipeModelCleanupResult: {
+            /** Removed Model Bytes */
+            removed_model_bytes: number;
+            /** Uninstalled Installations */
+            uninstalled_installations: number;
+        };
         /** RecipeModelFile */
         RecipeModelFile: {
             /** File Id */
@@ -6112,6 +6754,85 @@ export interface components {
             model_aliases: string[];
             /** Port */
             port: number;
+        };
+        /** RecipeOperationActivatedResult */
+        RecipeOperationActivatedResult: {
+            /**
+             * Activated
+             * @constant
+             */
+            activated: true;
+        };
+        /**
+         * RecipeOperationCancellationResult
+         * @description Cancellation metadata merged into a pending lifecycle result.
+         */
+        RecipeOperationCancellationResult: {
+            /** Cancel Actor */
+            cancel_actor: string;
+            /** Cancel Request Id */
+            cancel_request_id: string;
+            /**
+             * Cancel Requested
+             * @constant
+             */
+            cancel_requested: true;
+            /** Cancelled */
+            cancelled?: true | null;
+            /** Launch Evidence */
+            launch_evidence?: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["RecipeModelCleanupResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+            /** Node Evidence */
+            node_evidence?: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["RecipeModelCleanupResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+            /** Reason */
+            reason: string;
+            /** Recovery */
+            recovery?: "retry creates a new operation" | null;
+        };
+        /**
+         * RecipeOperationProgressResult
+         * @description Partial evidence retained while a multi-node operation is running.
+         */
+        RecipeOperationProgressResult: {
+            /** Launch Evidence */
+            launch_evidence?: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["RecipeModelCleanupResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+            /** Node Evidence */
+            node_evidence?: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["RecipeModelCleanupResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+        };
+        /**
+         * RecipeOperationResult
+         * @description Terminal aggregate emitted by the durable lifecycle job projector.
+         */
+        RecipeOperationResult: {
+            /** Failed Nodes */
+            failed_nodes: string[];
+            /** Launch Evidence */
+            launch_evidence?: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["RecipeModelCleanupResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            } | null;
+            /** Node Evidence */
+            node_evidence: {
+                [key: string]: components["schemas"]["AgentInstallResult"] | components["schemas"]["RecipeBuildEvidence"] | components["schemas"]["RecipeImageImportEvidence"] | components["schemas"]["RecipeStartSingleEvidence"] | components["schemas"]["RecipeStartRankLaunchEvidence"] | components["schemas"]["RecipeStartCollectiveReadinessEvidence"] | components["schemas"]["TensorParallelStartEvidence"] | components["schemas"]["RecipeStopResult"] | components["schemas"]["RecipeUninstallResult"] | components["schemas"]["RemovedRecipeNodeResult"] | components["schemas"]["RecipeModelCleanupResult"] | components["schemas"]["AgentFailureResult"] | components["schemas"]["LifecycleCodeFailureResult"];
+            };
+            /** Recovery Error */
+            recovery_error?: string | null;
+            /** Successful Nodes */
+            successful_nodes: string[];
+        };
+        /** RecipeOperationStoppedResult */
+        RecipeOperationStoppedResult: {
+            /**
+             * Stopped
+             * @constant
+             */
+            stopped: true;
         };
         /** RecipeOutputSlot */
         RecipeOutputSlot: {
@@ -6290,6 +7011,175 @@ export interface components {
             /** Value */
             value: string | number | boolean;
         };
+        /** RecipeStartCollectiveReadinessEvidence */
+        RecipeStartCollectiveReadinessEvidence: {
+            /** Artifact Set Digest */
+            artifact_set_digest: string;
+            /** Endpoint */
+            endpoint: string;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Address */
+            local_address: string | null;
+            /** Master Address */
+            master_address: string | null;
+            /** Master Port */
+            master_port?: number | null;
+            /** Memory Reservation Bytes */
+            memory_reservation_bytes: number;
+            /** Model Identity */
+            model_identity?: string | null;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "collective-readiness";
+            /** Rank */
+            rank: number;
+            /**
+             * Ready
+             * @constant
+             */
+            ready: true;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /**
+             * Recipe Revision Id
+             * Format: uuid
+             */
+            recipe_revision_id: string;
+            /** Role */
+            role: string;
+            /** Run Generation */
+            run_generation: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Runtime Arguments Sha256 */
+            runtime_arguments_sha256: string;
+            /** World Size */
+            world_size: number;
+        };
+        /** RecipeStartRankLaunchEvidence */
+        RecipeStartRankLaunchEvidence: {
+            /** Artifact Set Digest */
+            artifact_set_digest: string;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /**
+             * Fabric Projection Bound
+             * @constant
+             */
+            fabric_projection_bound: true;
+            /** Image Digest */
+            image_digest: string;
+            /**
+             * Launched
+             * @constant
+             */
+            launched: true;
+            /** Local Address */
+            local_address: string | null;
+            /** Master Address */
+            master_address: string | null;
+            /** Master Port */
+            master_port?: number | null;
+            /** Memory Reservation Bytes */
+            memory_reservation_bytes: number;
+            /** Model Identity */
+            model_identity?: string | null;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "rank-launch";
+            /**
+             * Process Running
+             * @constant
+             */
+            process_running: true;
+            /** Rank */
+            rank: number;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /**
+             * Recipe Revision Id
+             * Format: uuid
+             */
+            recipe_revision_id: string;
+            /** Role */
+            role: string;
+            /** Run Generation */
+            run_generation: number;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Runtime Arguments Sha256 */
+            runtime_arguments_sha256: string;
+            /** World Size */
+            world_size: number;
+        };
+        /** RecipeStartSingleEvidence */
+        RecipeStartSingleEvidence: {
+            /** Artifact Set Digest */
+            artifact_set_digest: string;
+            /** Endpoint */
+            endpoint: string;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Address */
+            local_address: null;
+            /** Master Address */
+            master_address: null;
+            /** Master Port */
+            master_port: null;
+            /** Memory Reservation Bytes */
+            memory_reservation_bytes: number;
+            /** Model Identity */
+            model_identity?: string | null;
+            /**
+             * Rank
+             * @constant
+             */
+            rank: 0;
+            /**
+             * Ready
+             * @constant
+             */
+            ready: true;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /**
+             * Recipe Revision Id
+             * Format: uuid
+             */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /** Runtime Arguments Sha256 */
+            runtime_arguments_sha256: string;
+            /**
+             * World Size
+             * @constant
+             */
+            world_size: 1;
+        };
+        /** RecipeStopResult */
+        RecipeStopResult: {
+            /**
+             * Stopped
+             * @constant
+             */
+            stopped: true;
+        };
         /** RecipeTopology */
         RecipeTopology: {
             fabric: components["schemas"]["RecipeFabric"];
@@ -6320,6 +7210,16 @@ export interface components {
             name: string;
             resources: components["schemas"]["RecipeRoleResources"];
         };
+        /** RecipeUninstallResult */
+        RecipeUninstallResult: {
+            /** Removed Model Bytes */
+            removed_model_bytes: number;
+            /**
+             * Uninstalled
+             * @constant
+             */
+            uninstalled: true;
+        };
         /** RecipeValidation */
         RecipeValidation: {
             /** Benchmarks */
@@ -6347,10 +7247,40 @@ export interface components {
             /** Reasons */
             reasons: components["schemas"]["vonk_control__library_contract__ProjectionReason"][];
         };
+        /**
+         * RemovedRecipeNodeResult
+         * @description Result emitted by the Controller's logical uninstall projection.
+         */
+        RemovedRecipeNodeResult: {
+            /**
+             * Removed
+             * @constant
+             */
+            removed: true;
+        };
         /** RequestKey */
         RequestKey: {
             /** Request Key */
             request_key: string;
+        };
+        /**
+         * RequestValidationIssue
+         * @description A structural input error without the submitted input or validator context.
+         */
+        RequestValidationIssue: {
+            /** Loc */
+            loc: (string | number)[];
+            /** Msg */
+            msg: string;
+            /** Type */
+            type: string;
+        };
+        /** RequestValidationProblem */
+        RequestValidationProblem: {
+            /** Detail */
+            detail: string;
+            /** Issues */
+            issues: components["schemas"]["RequestValidationIssue"][];
         };
         /**
          * ResourceDemandEvidence
@@ -6614,6 +7544,184 @@ export interface components {
             schema_version: 2;
             spark_group: components["schemas"]["SparkGroup"];
         };
+        /** RunSwitchBuildEvidence */
+        RunSwitchBuildEvidence: {
+            /** Build Id */
+            build_id: string | null;
+            /** Build Input Sha256 */
+            build_input_sha256?: string | null;
+            /** Builder Node Id */
+            builder_node_id?: string | null;
+            compatibility: components["schemas"]["BuildCompatibilityEvidence"];
+            /** Detail */
+            detail?: string | null;
+            /** Image Bytes */
+            image_bytes?: number | null;
+            /** Image Digest */
+            image_digest: string | null;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256?: string | null;
+            runtime: components["schemas"]["RuntimeImageStorageImpact"];
+            source: components["schemas"]["BuildSourceEvidence"];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "available" | "planned" | "building" | "failed" | "missing" | "incompatible" | "unknown";
+        };
+        /** RunSwitchCachedTransferResult */
+        RunSwitchCachedTransferResult: {
+            /** Cached Nodes */
+            cached_nodes: string[];
+            /** Cached Target Totals */
+            cached_target_totals: {
+                [key: string]: number;
+            };
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "transfer";
+            /**
+             * Skipped
+             * @constant
+             */
+            skipped: true;
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "target-copy";
+            /**
+             * Verified
+             * @constant
+             */
+            verified: false;
+            /** Verified Build Id */
+            verified_build_id: string | null;
+            /** Verified Digests */
+            verified_digests: string[];
+            /** Verified Image Digest */
+            verified_image_digest: string;
+            /** Verified Oci Layout Sha256 */
+            verified_oci_layout_sha256: string;
+        };
+        /**
+         * RunSwitchChildProgress
+         * @description Progress nested in a durable child receipt.
+         */
+        RunSwitchChildProgress: {
+            /**
+             * Completed Bytes
+             * @default 0
+             */
+            completed_bytes: number;
+            /** Members */
+            members?: components["schemas"]["RunSwitchMemberReceipt"][];
+            /** Phase */
+            phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify" | "container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+            /** Total Bytes */
+            total_bytes?: number | null;
+            /**
+             * Total Bytes Known
+             * @default false
+             */
+            total_bytes_known: boolean;
+        };
+        /** RunSwitchCleanupResult */
+        RunSwitchCleanupResult: {
+            /** Nas Evicted */
+            nas_evicted: boolean;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "cleanup";
+            /** Protected Digests */
+            protected_digests?: string[];
+            /**
+             * Protected Referenced Bytes
+             * @default 0
+             */
+            protected_referenced_bytes: number;
+            /** Reclaimed Bytes */
+            reclaimed_bytes: number;
+            /** Reclaimed Digests */
+            reclaimed_digests?: string[];
+            /**
+             * Scope
+             * @constant
+             */
+            scope: "spark-local";
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+        };
+        /**
+         * RunSwitchConflictResponse
+         * @description The conflict document returned by mutating Run/Switch routes.
+         */
+        RunSwitchConflictResponse: {
+            /**
+             * Code
+             * @default run-switch.operation_conflict
+             * @constant
+             */
+            code: "run-switch.operation_conflict";
+            /** Detail */
+            detail: string;
+            /** Request Id */
+            request_id: string;
+        };
+        /** RunSwitchContainerBuildResult */
+        RunSwitchContainerBuildResult: {
+            /** Build Id */
+            build_id: string;
+            /** Build Input Sha256 */
+            build_input_sha256: string;
+            /** Image Bytes */
+            image_bytes?: number | null;
+            /** Image Digest */
+            image_digest?: string | null;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256?: string | null;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "prepare";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "planned" | "building" | "succeeded" | "failed";
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "container-build";
+        };
+        /** RunSwitchFinalVerifyResult */
+        RunSwitchFinalVerifyResult: {
+            /** Final Verified */
+            final_verified: boolean;
+            /** Healthy */
+            healthy: boolean;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "final_verify";
+            /** Ranks */
+            ranks: components["schemas"]["RunSwitchRankReceipt"][];
+            /** Route State */
+            route_state: string;
+            /** Run Id */
+            run_id: string;
+            /** State */
+            state: string;
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+        };
         /** RunSwitchMemberProgress */
         RunSwitchMemberProgress: {
             /**
@@ -6632,6 +7740,102 @@ export interface components {
              * @enum {string}
              */
             state: "pending" | "running" | "succeeded" | "failed" | "unknown";
+            /** Total Bytes */
+            total_bytes?: number | null;
+        };
+        /**
+         * RunSwitchMemberReceipt
+         * @description Durable member projection emitted by a child distribution operation.
+         */
+        RunSwitchMemberReceipt: {
+            /**
+             * Cached
+             * @default false
+             */
+            cached: boolean;
+            /**
+             * Completed Bytes
+             * @default 0
+             */
+            completed_bytes: number;
+            /** Error */
+            error?: string | null;
+            /** Node Id */
+            node_id: string;
+            /** Phase */
+            phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "running" | "succeeded" | "failed" | "unknown";
+            /** Total Bytes */
+            total_bytes?: number | null;
+        };
+        /** RunSwitchModelDownloadPendingResult */
+        RunSwitchModelDownloadPendingResult: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /** Downloaded Bytes */
+            downloaded_bytes: number;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "transfer";
+            progress: components["schemas"]["RunSwitchChildProgress"];
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "model-download";
+            /** Total Bytes */
+            total_bytes?: number | null;
+        };
+        /** RunSwitchModelDownloadResult */
+        RunSwitchModelDownloadResult: {
+            /** Artifact Set Sha256 */
+            artifact_set_sha256: string;
+            /**
+             * Coverage
+             * @constant
+             */
+            coverage: "complete";
+            /** Downloaded Bytes */
+            downloaded_bytes: number;
+            evidence?: components["schemas"]["ModelCacheDownloadResult"] | null;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "transfer";
+            progress: components["schemas"]["RunSwitchChildProgress"];
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Skipped
+             * @default true
+             * @constant
+             */
+            skipped: true;
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "model-download";
             /** Total Bytes */
             total_bytes?: number | null;
         };
@@ -6660,10 +7864,7 @@ export interface components {
             progress: components["schemas"]["RunSwitchProgress"];
             /** Request Key */
             request_key: string;
-            /** Result */
-            result?: {
-                [key: string]: unknown;
-            } | null;
+            result?: components["schemas"]["RunSwitchOperationResult"] | null;
             /**
              * Schema Version
              * @default 2
@@ -6674,6 +7875,61 @@ export interface components {
             state: string;
             /** Status Reason */
             status_reason?: string | null;
+        };
+        /**
+         * RunSwitchOperationResult
+         * @description Exact durable result tree stored in ``Job.result``.
+         */
+        RunSwitchOperationResult: {
+            /** Child Operation Id */
+            child_operation_id?: string | null;
+            /**
+             * Completed Bytes
+             * @default 0
+             */
+            completed_bytes: number;
+            /** Completed Phases */
+            completed_phases?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify")[];
+            /** Failed Phase */
+            failed_phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
+            /** Final Observation */
+            final_observation?: components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchFinalVerifyResult"] | null;
+            /** Final Verify Started At */
+            final_verify_started_at?: number | null;
+            /**
+             * Item Index
+             * @default 0
+             */
+            item_index: number;
+            /** Members */
+            members?: components["schemas"]["RunSwitchMemberReceipt"][];
+            /** Phase */
+            phase?: ("transfer" | "verify" | "prepare" | "cleanup" | "stop" | "start" | "final_verify") | null;
+            /**
+             * Phase Index
+             * @default 0
+             */
+            phase_index: number;
+            /** Phase Results */
+            phase_results?: (components["schemas"]["RunSwitchContainerBuildResult"] | components["schemas"]["RunSwitchRuntimeImageResult"] | components["schemas"]["RunSwitchModelDownloadResult"] | components["schemas"]["RunSwitchModelDownloadPendingResult"] | components["schemas"]["RunSwitchTargetTransferResult"] | components["schemas"]["RunSwitchCachedTransferResult"] | components["schemas"]["RunSwitchTargetTransferEvidenceResult"] | components["schemas"]["RunSwitchVerifyResult"] | components["schemas"]["RunSwitchCleanupResult"] | components["schemas"]["RunSwitchRuntimePlanResult"] | components["schemas"]["RunSwitchPreparedResult"] | components["schemas"]["RunSwitchRuntimeInstallResult"] | components["schemas"]["RunSwitchStopResult"] | components["schemas"]["RunSwitchStartResult"] | components["schemas"]["RunSwitchFinalVerifyResult"])[];
+            /** Retry Attempt */
+            retry_attempt?: number | null;
+            /** Retry Reason */
+            retry_reason?: string | null;
+            /**
+             * Retryable
+             * @default false
+             */
+            retryable: boolean;
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+            /** Total Bytes */
+            total_bytes?: number | null;
+            /**
+             * Total Bytes Known
+             * @default false
+             */
+            total_bytes_known: boolean;
         };
         /** RunSwitchPhase */
         RunSwitchPhase: {
@@ -6711,7 +7967,7 @@ export interface components {
             allowed: boolean;
             /** Blockers */
             blockers: components["schemas"]["RunSwitchReason"][];
-            build: components["schemas"]["RecipeBuildEvidence-Output"];
+            build: components["schemas"]["RunSwitchBuildEvidence"];
             /** Conflicts */
             conflicts: components["schemas"]["RunSwitchReason"][];
             effective_settings?: components["schemas"]["EffectiveSettingsSelection"] | null;
@@ -6780,6 +8036,24 @@ export interface components {
             /** Warnings */
             warnings: components["schemas"]["RunSwitchReason"][];
         };
+        /** RunSwitchPreparedResult */
+        RunSwitchPreparedResult: {
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "prepare";
+            /**
+             * Prepared
+             * @constant
+             */
+            prepared: true;
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "runtime-plan";
+        };
         /** RunSwitchPreviewRequest */
         RunSwitchPreviewRequest: {
             /**
@@ -6836,6 +8110,19 @@ export interface components {
             /** Total Bytes Known */
             total_bytes_known: boolean;
         };
+        /** RunSwitchRankReceipt */
+        RunSwitchRankReceipt: {
+            /** Fresh */
+            fresh?: boolean | null;
+            /** Node Id */
+            node_id: string;
+            /** Rank */
+            rank: number;
+            /** Role */
+            role: string;
+            /** State */
+            state: string;
+        };
         /** RunSwitchReason */
         RunSwitchReason: {
             /** Code */
@@ -6871,6 +8158,85 @@ export interface components {
              */
             schema_version: 2;
         };
+        /** RunSwitchRuntimeImageResult */
+        RunSwitchRuntimeImageResult: {
+            /** Build Id */
+            build_id?: string | null;
+            /** Effective Execution Key */
+            effective_execution_key?: string | null;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256: string;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "prepare";
+            runtime_image: components["schemas"]["RuntimeImageReceipt"];
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "runtime-image";
+        };
+        /** RunSwitchRuntimeInstallResult */
+        RunSwitchRuntimeInstallResult: {
+            /** Installation Id */
+            installation_id: string;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "prepare";
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "runtime-install";
+        };
+        /** RunSwitchRuntimePlanResult */
+        RunSwitchRuntimePlanResult: {
+            /**
+             * Compiled Plan Persisted
+             * @constant
+             */
+            compiled_plan_persisted: true;
+            /** Install Plan Digest */
+            install_plan_digest: string;
+            /** Installation Id */
+            installation_id: string;
+            /** Mapping Id */
+            mapping_id: string;
+            /** Model Artifact Set Bytes */
+            model_artifact_set_bytes?: number | null;
+            /** Model Artifact Set Sha256 */
+            model_artifact_set_sha256?: string | null;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "prepare";
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "runtime-plan";
+        };
+        /** RunSwitchStartResult */
+        RunSwitchStartResult: {
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "start";
+            /** Run Id */
+            run_id: string;
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+        };
         /** RunSwitchStopApplyRequest */
         RunSwitchStopApplyRequest: {
             invocation?: components["schemas"]["InvocationMetadata"];
@@ -6899,6 +8265,110 @@ export interface components {
              */
             schema_version: 2;
         };
+        /** RunSwitchStopResult */
+        RunSwitchStopResult: {
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "stop";
+            /** Run Id */
+            run_id: string;
+            /** Subphase */
+            subphase?: ("container-build" | "model-download" | "runtime-image" | "runtime-plan" | "target-copy" | "runtime-install") | null;
+        };
+        /** RunSwitchTargetTransferEvidenceResult */
+        RunSwitchTargetTransferEvidenceResult: {
+            /** Copied Bytes */
+            copied_bytes?: number | null;
+            /** Downloaded Bytes */
+            downloaded_bytes?: number | null;
+            /** Imported Image Digest */
+            imported_image_digest: string;
+            /** Node Id */
+            node_id: string;
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "transfer";
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "target-copy";
+            /**
+             * Verified
+             * @constant
+             */
+            verified: true;
+            /** Verified Digests */
+            verified_digests: string[];
+            /** Verified Image Digest */
+            verified_image_digest: string;
+            /** Verified Oci Layout Sha256 */
+            verified_oci_layout_sha256: string;
+        };
+        /** RunSwitchTargetTransferResult */
+        RunSwitchTargetTransferResult: {
+            /** Assignments */
+            assignments: {
+                [key: string]: components["schemas"]["DistributionAssignment"];
+            };
+            /** Cached Nodes */
+            cached_nodes?: string[];
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "transfer";
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "target-copy";
+        };
+        /** RunSwitchVerifyResult */
+        RunSwitchVerifyResult: {
+            /** Cached Nodes */
+            cached_nodes?: string[];
+            /** Cached Target Totals */
+            cached_target_totals?: {
+                [key: string]: number;
+            };
+            /** Evidence */
+            evidence?: components["schemas"]["ArtifactVerificationEvidence"][];
+            /**
+             * Phase
+             * @constant
+             */
+            phase: "verify";
+            /**
+             * Skipped
+             * @default false
+             */
+            skipped: boolean;
+            /**
+             * Subphase
+             * @constant
+             */
+            subphase: "target-copy";
+            /**
+             * Verified
+             * @constant
+             */
+            verified: true;
+            /** Verified Build Id */
+            verified_build_id: string | null;
+            /** Verified Digests */
+            verified_digests: string[];
+            /** Verified Image Digest */
+            verified_image_digest: string;
+            /** Verified Oci Layout Sha256 */
+            verified_oci_layout_sha256: string;
+            /** Verified Registry Manifest Digest */
+            verified_registry_manifest_digest?: string | null;
+        };
         RuntimeArgumentValue: string | number | boolean | components["schemas"]["JsonValue"][] | {
             [key: string]: components["schemas"]["JsonValue"];
         };
@@ -6925,6 +8395,68 @@ export interface components {
             runtime_interface: string;
             /** Targets */
             targets: components["schemas"]["TargetAssetState"][];
+        };
+        /**
+         * RuntimeImageReceipt
+         * @description Strict schema-2 receipt persisted by the Controller image cache.
+         *
+         *     ``oci_archive_sha256`` is the established filesystem/SQL receipt field.
+         *     The compiled launch plan uses its own ``oci_layout_sha256`` field; the
+         *     execution-plan service performs that one explicit typed projection at the
+         *     plan boundary.
+         */
+        RuntimeImageReceipt: {
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Archive Path */
+            archive_path: string;
+            /** Build Id */
+            build_id: string | null;
+            /** Distribution Content Sha256 */
+            distribution_content_sha256: string;
+            /** Distribution Publisher */
+            distribution_publisher: string;
+            /** Distribution Slug */
+            distribution_slug: string;
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Image Config Id */
+            local_image_config_id: string | null;
+            /** Local Image Reference */
+            local_image_reference: string | null;
+            /** Oci Archive Sha256 */
+            oci_archive_sha256: string;
+            /** Platform Manifest Digest */
+            platform_manifest_digest: string;
+            /** Recorded At */
+            recorded_at: string;
+            /** Registry Manifest Digest */
+            registry_manifest_digest: string | null;
+            /**
+             * Runtime Interface
+             * @constant
+             */
+            runtime_interface: "vonk.runtime.v1";
+            /**
+             * Runtime Interface Label
+             * @constant
+             */
+            runtime_interface_label: "v1";
+            /**
+             * Schema Version
+             * @constant
+             */
+            schema_version: 2;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "published" | "controller-build";
         };
         /** RuntimeImageStorageImpact */
         RuntimeImageStorageImpact: {
@@ -7155,6 +8687,26 @@ export interface components {
             plan_digest: string;
             /** Request Key */
             request_key: string;
+        };
+        /** StringParameter */
+        StringParameter: {
+            /** Allowed Values */
+            allowed_values?: components["schemas"]["ParameterScalar"][];
+            /** Default */
+            default: string;
+            /** Maximum */
+            maximum?: null;
+            /** Minimum */
+            minimum?: null;
+            /** Name */
+            name: string;
+            /** Pattern */
+            pattern?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "string";
         };
         /**
          * TargetAssetState
@@ -7701,6 +9253,50 @@ export interface components {
             /** Workloads */
             workloads: components["schemas"]["TelemetryWorkload"][];
         };
+        /**
+         * TensorParallelStartEvidence
+         * @description Exact endpoint evidence for a phase-free tensor-parallel start.
+         */
+        TensorParallelStartEvidence: {
+            /** Artifact Set Digest */
+            artifact_set_digest: string;
+            /** Endpoint */
+            endpoint: string;
+            /** Evidence Digest */
+            evidence_digest: string;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Address */
+            local_address: string;
+            /** Master Address */
+            master_address: string;
+            /** Master Port */
+            master_port: number;
+            /** Memory Reservation Bytes */
+            memory_reservation_bytes: number;
+            /** Model Identity */
+            model_identity?: string | null;
+            /** Rank */
+            rank: number;
+            /**
+             * Ready
+             * @constant
+             */
+            ready: true;
+            /** Recipe Content Sha256 */
+            recipe_content_sha256: string;
+            /**
+             * Recipe Revision Id
+             * Format: uuid
+             */
+            recipe_revision_id: string;
+            /** Run Generation */
+            run_generation: number;
+            /** Runtime Arguments Sha256 */
+            runtime_arguments_sha256: string;
+            /** World Size */
+            world_size: number;
+        };
         /** TopologyPlacement */
         TopologyPlacement: {
             /** Candidate Node Ids */
@@ -7802,10 +9398,7 @@ export interface components {
             original_plan_digest: string;
             /** Plan Digest */
             plan_digest: string;
-            /** Recipe Content */
-            recipe_content: {
-                [key: string]: unknown;
-            };
+            recipe_content: components["schemas"]["RecipeDefinition"];
             /** Recipe Content Sha256 */
             recipe_content_sha256: string;
             /** Recipe Id */
@@ -7827,14 +9420,67 @@ export interface components {
             /** Request Key */
             request_key: string;
         };
-        /** ValidationError */
-        ValidationError: {
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
+        /**
+         * CompiledExecutionPlan
+         * @description Internal verified execution plan consumed by distribution/install.
+         */
+        vonk_control__compiled_execution_plan__CompiledExecutionPlan: {
+            /** Artifacts */
+            artifacts: components["schemas"]["CompiledModelArtifact"][];
+            /** Execution Sha256 */
+            execution_sha256: string;
+            /** Harness Sha256 */
+            harness_sha256: string;
+            /** Model Artifact Set Bytes */
+            model_artifact_set_bytes: number;
+            /** Model Artifact Set Sha256 */
+            model_artifact_set_sha256: string;
+            /** Recipe Revision Sha256 */
+            recipe_revision_sha256: string;
+            runtime_image: components["schemas"]["vonk_control__compiled_execution_plan__CompiledRuntimeImage"];
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: 2;
+        };
+        /**
+         * CompiledRuntimeImage
+         * @description The exact OCI archive that the Controller gives to each Spark.
+         */
+        vonk_control__compiled_execution_plan__CompiledRuntimeImage: {
+            /**
+             * Architecture
+             * @constant
+             */
+            architecture: "linux-arm64";
+            /** Build Id */
+            build_id?: string | null;
+            distribution_object: components["schemas"]["DistributionObjectReceipt"];
+            /** Image Bytes */
+            image_bytes: number;
+            /** Image Digest */
+            image_digest: string;
+            /** Local Image Config Id */
+            local_image_config_id: string;
+            /** Local Image Reference */
+            local_image_reference?: string | null;
+            /** Oci Layout Sha256 */
+            oci_layout_sha256: string;
+            /** Platform Manifest Digest */
+            platform_manifest_digest: string;
+            /** Registry Manifest Digest */
+            registry_manifest_digest?: string | null;
+            /** Runtime Interface */
+            runtime_interface: string;
+            /** Runtime Interface Label */
+            runtime_interface_label: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "published" | "controller-build";
         };
         /** ProjectionReason */
         vonk_control__fleet_projection__ProjectionReason: {
@@ -7899,6 +9545,15 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
             /** @description Service Unavailable */
             503: {
                 headers: {
@@ -7950,13 +9605,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8010,13 +9665,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8075,13 +9730,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8144,13 +9799,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8198,6 +9853,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8260,13 +9924,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8305,6 +9969,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8362,7 +10035,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8442,7 +10115,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8518,7 +10191,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8585,7 +10258,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8661,7 +10334,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8700,6 +10373,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -8753,6 +10435,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
         };
     };
     getBrowserSession: {
@@ -8771,6 +10462,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthSession"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -8804,13 +10504,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -8936,6 +10636,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogProblem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9071,7 +10780,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9123,13 +10832,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9168,6 +10877,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9225,7 +10943,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9264,6 +10982,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9332,7 +11059,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9401,7 +11128,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9459,7 +11186,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9539,7 +11266,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9613,7 +11340,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9693,7 +11420,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9773,7 +11500,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9853,7 +11580,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -9933,7 +11660,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10013,7 +11740,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10071,7 +11798,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10151,7 +11878,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10204,13 +11931,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10249,6 +11976,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -10291,7 +12027,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -10344,7 +12080,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -10396,13 +12132,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10476,13 +12212,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10532,7 +12268,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10568,13 +12304,13 @@ export interface operations {
                     "application/json": components["schemas"]["ModelDeletionPlanResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -10603,13 +12339,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -10678,7 +12414,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10756,7 +12492,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10814,7 +12550,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -10851,13 +12587,40 @@ export interface operations {
                     "application/json": components["schemas"]["RecipeImageAvailabilityListResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
         };
@@ -10884,6 +12647,24 @@ export interface operations {
                     "application/json": components["schemas"]["RecipeImageAvailabilityResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
             /** @description Conflict */
             409: {
                 headers: {
@@ -10893,13 +12674,22 @@ export interface operations {
                     "application/json": components["schemas"]["RecipeImageAvailabilityErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
         };
@@ -10924,6 +12714,24 @@ export interface operations {
                     "application/json": components["schemas"]["RecipeImageAvailabilityResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
             /** @description Conflict */
             409: {
                 headers: {
@@ -10933,13 +12741,22 @@ export interface operations {
                     "application/json": components["schemas"]["RecipeImageAvailabilityErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
         };
@@ -10968,6 +12785,33 @@ export interface operations {
                     "application/json": components["schemas"]["RecipeImageAvailabilityResponse"];
                 };
             };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                };
+            };
             /** @description Conflict */
             409: {
                 headers: {
@@ -10977,13 +12821,22 @@ export interface operations {
                     "application/json": components["schemas"]["RecipeImageAvailabilityErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
         };
@@ -11024,7 +12877,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11082,7 +12935,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11126,13 +12979,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11210,7 +13063,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11288,7 +13141,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11346,7 +13199,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11424,7 +13277,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11493,7 +13346,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11537,13 +13390,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11601,7 +13454,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11681,7 +13534,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11761,7 +13614,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11839,7 +13692,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11917,7 +13770,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -11962,13 +13815,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -12039,7 +13892,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -12106,7 +13959,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -12163,13 +14016,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -12226,13 +14079,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -12293,7 +14146,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -12345,7 +14198,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -12397,13 +14250,13 @@ export interface operations {
                     "application/json": components["schemas"]["BoundedErrorResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -12463,7 +14316,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -12499,13 +14352,13 @@ export interface operations {
                     "application/json": components["schemas"]["BuildPlanResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12532,13 +14385,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12565,13 +14418,13 @@ export interface operations {
                     "application/json": components["schemas"]["ImageDistributionPlanResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12598,13 +14451,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12631,13 +14484,13 @@ export interface operations {
                     "application/json": components["schemas"]["InstallPlanResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12664,13 +14517,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12699,13 +14552,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12732,13 +14585,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12765,13 +14618,13 @@ export interface operations {
                     "application/json": components["schemas"]["MappingPlanResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12798,13 +14651,13 @@ export interface operations {
                     "application/json": components["schemas"]["MappingResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12829,13 +14682,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12864,13 +14717,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12897,13 +14750,13 @@ export interface operations {
                     "application/json": components["schemas"]["RunPlanResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -12972,7 +14825,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -13041,7 +14894,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RunSwitchConflictResponse"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -13050,7 +14903,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -13128,7 +14981,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -13197,7 +15050,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RunSwitchConflictResponse"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -13206,7 +15059,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -13264,7 +15117,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -13335,7 +15188,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RunSwitchConflictResponse"];
                 };
             };
             /** @description Unprocessable Entity */
@@ -13344,7 +15197,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -13380,13 +15233,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -13411,13 +15264,13 @@ export interface operations {
                     "application/json": components["schemas"]["RunStatusResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -13466,7 +15319,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -13546,7 +15399,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BoundedErrorResponse"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
             /** @description Service Unavailable */
@@ -13584,13 +15437,13 @@ export interface operations {
                     "application/json": components["schemas"]["OperationResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -13617,13 +15470,13 @@ export interface operations {
                     "application/json": components["schemas"]["SourcePolicyResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -13650,13 +15503,13 @@ export interface operations {
                     "application/json": components["schemas"]["StopPlanResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };
@@ -13683,13 +15536,13 @@ export interface operations {
                     "application/json": components["schemas"]["UninstallPlanResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Unprocessable Entity */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["RequestValidationProblem"];
                 };
             };
         };

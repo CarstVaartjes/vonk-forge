@@ -7,9 +7,10 @@ from ...client import AuthenticatedClient, Client
 from ...types import Response, UNSET
 from ... import errors
 
-from ...models.http_validation_error import HTTPValidationError
+from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.recipe_image_availability_error_response import RecipeImageAvailabilityErrorResponse
 from ...models.recipe_image_availability_response import RecipeImageAvailabilityResponse
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -34,13 +35,27 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = RecipeImageAvailabilityResponse.from_dict(response.json())
 
 
 
         return response_200
+
+    if response.status_code == 401:
+        response_401 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_401
+
+    if response.status_code == 404:
+        response_404 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_404
 
     if response.status_code == 409:
         response_409 = RecipeImageAvailabilityErrorResponse.from_dict(response.json())
@@ -50,11 +65,18 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_409
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
         return response_422
+
+    if response.status_code == 503:
+        response_503 = BoundedErrorResponse.from_dict(response.json())
+
+
+
+        return response_503
 
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
@@ -62,7 +84,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -76,7 +98,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]]:
+) -> Response[Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     """ Get
 
     Args:
@@ -87,7 +109,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]]
+        Response[Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]
      """
 
 
@@ -107,7 +129,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]]:
+) -> Optional[Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     """ Get
 
     Args:
@@ -118,7 +140,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]
+        Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]
      """
 
 
@@ -133,7 +155,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]]:
+) -> Response[Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     """ Get
 
     Args:
@@ -144,7 +166,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]]
+        Response[Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]
      """
 
 
@@ -164,7 +186,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]]:
+) -> Optional[Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]]:
     """ Get
 
     Args:
@@ -175,7 +197,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[HTTPValidationError, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse]
+        Union[BoundedErrorResponse, RecipeImageAvailabilityErrorResponse, RecipeImageAvailabilityResponse, RequestValidationProblem]
      """
 
 

@@ -9,7 +9,7 @@ from ... import errors
 
 from ...models.bounded_error_response import BoundedErrorResponse
 from ...models.endpoint_response import EndpointResponse
-from ...models.http_validation_error import HTTPValidationError
+from ...models.request_validation_problem import RequestValidationProblem
 from typing import cast
 
 
@@ -34,7 +34,7 @@ def _get_kwargs(
 
 
 
-def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]]:
+def _parse_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Optional[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
     if response.status_code == 200:
         response_200 = EndpointResponse.from_dict(response.json())
 
@@ -57,7 +57,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return response_404
 
     if response.status_code == 422:
-        response_422 = HTTPValidationError.from_dict(response.json())
+        response_422 = RequestValidationProblem.from_dict(response.json())
 
 
 
@@ -76,7 +76,7 @@ def _parse_response(*, client: Union[AuthenticatedClient, Client], response: htt
         return None
 
 
-def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]]:
+def _build_response(*, client: Union[AuthenticatedClient, Client], response: httpx.Response) -> Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -90,7 +90,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]]:
+) -> Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
     """ Endpoint View
 
     Args:
@@ -101,7 +101,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]]
+        Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]
      """
 
 
@@ -121,7 +121,7 @@ def sync(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]]:
+) -> Optional[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
     """ Endpoint View
 
     Args:
@@ -132,7 +132,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]
+        Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]
      """
 
 
@@ -147,7 +147,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient,
 
-) -> Response[Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]]:
+) -> Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
     """ Endpoint View
 
     Args:
@@ -158,7 +158,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]]
+        Response[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]
      """
 
 
@@ -178,7 +178,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient,
 
-) -> Optional[Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]]:
+) -> Optional[Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]]:
     """ Endpoint View
 
     Args:
@@ -189,7 +189,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Union[BoundedErrorResponse, EndpointResponse, HTTPValidationError]
+        Union[BoundedErrorResponse, EndpointResponse, RequestValidationProblem]
      """
 
 
