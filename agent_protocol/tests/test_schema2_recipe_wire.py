@@ -14,12 +14,14 @@ from vonk_agent_protocol import (
     AgentProtocolError,
     CompiledExecutionPlan,
     RecipeOperationRequest,
+    RecipeStartResult,
     canonical_message,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     MAX_COMPILED_EXECUTION_PLAN_MOUNTS,
     CompiledJobInput,
 )
+from vonk_agent_protocol.contracts import TensorParallelStartEvidence
 
 PLAN = json.loads(
     (Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json").read_text()
@@ -108,6 +110,46 @@ def test_sanitized_compiled_plan_and_current_outer_payloads_round_trip() -> None
     start = RecipeOperationRequest.parse(AgentOperation.RECIPE_START, _start())
     assert install.schema_version == start.schema_version == 2
     assert start.mapping_id == MAPPING_ID
+
+
+def test_tensor_parallel_start_result_requires_exact_run_identity_fields() -> None:
+    evidence = {
+        "recipe_revision_id": REVISION_ID,
+        "recipe_content_sha256": PLAN["identity"]["recipe_revision_sha256"],
+        "image_digest": PLAN["runtime"]["image_digest"],
+        "artifact_set_digest": "d" * 64,
+        "model_identity": "vonk-forge/synthetic-tiny-fp16@" + "e" * 64,
+        "rank": 1,
+        "world_size": 2,
+        "memory_reservation_bytes": 67108864,
+        "evidence_digest": "f" * 64,
+        "endpoint": "http://100.100.20.31:8000",
+        "ready": True,
+        "run_generation": 1,
+        "runtime_arguments_sha256": "a" * 64,
+        "local_address": "100.100.20.31",
+        "master_address": "100.100.20.30",
+        "master_port": 29500,
+    }
+    result = RecipeStartResult.model_validate(
+        {
+            "endpoint": evidence["endpoint"],
+            "evidence": evidence,
+            "evidence_digest": evidence["evidence_digest"],
+        }
+    )
+    assert isinstance(result.evidence, TensorParallelStartEvidence)
+    for field in ("run_generation", "runtime_arguments_sha256"):
+        missing = dict(evidence)
+        missing.pop(field)
+        with pytest.raises(ValueError):
+            RecipeStartResult.model_validate(
+                {
+                    "endpoint": evidence["endpoint"],
+                    "evidence": missing,
+                    "evidence_digest": evidence["evidence_digest"],
+                }
+            )
 
 
 @pytest.mark.parametrize(
