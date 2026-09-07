@@ -94,9 +94,7 @@ def _queued_children(sessions, operation_id: str) -> tuple[AgentOperation, ...]:
         )
 
 
-def _bridge(
-    probe: Path, rows: tuple[AgentOperation, ...]
-) -> tuple[AgentResult, ...]:
+def _bridge(probe: Path, rows: tuple[AgentOperation, ...]) -> tuple[AgentResult, ...]:
     assert rows
     input_document = "".join(
         json.dumps(_claim(row), separators=(",", ":")) + "\n" for row in rows
@@ -277,7 +275,9 @@ def test_controller_explicit_multi_model_cleanup_payload_crosses_rust_and_back(
         request_id="70000000-0000-4000-8000-000000000004",
     )
 
-    model_digest = service.preview_uninstall(first.owner_id).model_impact.model_content_sha256
+    model_digest = service.preview_uninstall(
+        first.owner_id
+    ).model_impact.model_content_sha256
     assert model_digest is not None
     preview = service.preview_model_deletion(model_digest)
     operation = service.delete_model(
@@ -290,9 +290,10 @@ def test_controller_explicit_multi_model_cleanup_payload_crosses_rust_and_back(
     assert len(rows) == 1
     assert rows[0].kind == "recipe.model-uninstall.v1"
     assert rows[0].payload["model_content_sha256"] == model_digest
-    assert {
-        item["installation_id"] for item in rows[0].payload["installations"]
-    } == {first.owner_id, second.owner_id}
+    assert {item["installation_id"] for item in rows[0].payload["installations"]} == {
+        first.owner_id,
+        second.owner_id,
+    }
 
     results = _bridge(install_start_wire_probe, rows)
     _project(service, sessions, rows, results)
