@@ -58,6 +58,9 @@ facts must remain visible until the implementations are consolidated; adding
 Pydantic elsewhere does not fix drift. Distribution, enrollment, and certificate
 rotation already use shared Pydantic wire models. Enrollment returns the issued
 certificate directly; there is no pending-approval response or polling fallback.
+Bootstrap also has one response: the helper authority key is required, and the
+address and hostname list are explicit even when they are `null` and `[]`.
+There is no setup-schema selector or older bootstrap variant.
 
 `scripts/generate-control-clients` derives the Controller OpenAPI document and
 Python/TypeScript clients from the actual API. Never fix drift by hand-editing
@@ -83,7 +86,7 @@ recipe revision, runtime compiler, or harness configuration changes.
   through the agent's shared result builders, and consumes those results back
   into persisted Controller state. It covers single-node starts and distributed
   rank-launch/collective-readiness starts, distribution manifests, heartbeat
-  directives, enrollment, and certificate renewal. No old heartbeat response
+  directives, bootstrap, enrollment, and certificate renewal. No old heartbeat response
   shape is accepted.
   The same required job runs the complete `agent_protocol/tests` suite,
   including schema-derived required-field, type, nullable, unknown-field and
