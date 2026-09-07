@@ -266,3 +266,10 @@ Internal planning, staging and verification remain automatic implementation mech
 ## Navigation correction — 2026-09-05
 
 Explicit user feedback: the large left Fleet/Library sidebar wastes screen space and is visually unappealing. Remove the permanent sidebar. Use a compact horizontal app header with small Vonk Forge identity, Fleet and Library navigation, and secondary account/connection controls. Library has a compact second navigation row: Models, Recipes, NAS cache, Profiles. Main content uses the recovered width. On mobile keep Fleet/Library directly reachable, with secondary account/admin actions in an accessible menu; do not replace the sidebar with an oversized header. Preserve active-route indication, semantic navigation, keyboard focus, skip link and access to existing administration routes. This supersedes earlier sidebar width/layout prescriptions in the design reference. Verify desktop1280 and mobile360 after the combined visual correction batch.
+
+## Implementation review
+
+See [launch consolidation](launch-consolidation-2026-09-07.md) and the
+[current API/product review](audits/2026-09-07-api-goal-alignment.md) for implemented
+work, evidence and remaining gaps. The explicit simple-workflow and compact
+navigation decisions above supersede earlier design proposals.
