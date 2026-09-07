@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, Self
 
 import httpx
 
@@ -51,6 +51,21 @@ _SENSITIVE_ASSIGNMENT = re.compile(
     r"(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
 )
 _URL_CREDENTIALS = re.compile(r"(?i)(https?://)[^/@\s]+@")
+
+
+class GeneratedJSONModel(Protocol):
+    """The generated client's canonical JSON model boundary.
+
+    The OpenAPI client deliberately generates attrs models rather than a second
+    hand-maintained DTO layer.  Keeping this small structural contract lets the
+    transport validate a route's request and response with those generated
+    models while preserving the CLI's mapping-shaped presentation boundary.
+    """
+
+    @classmethod
+    def from_dict(cls, src_dict: Mapping[str, Any]) -> Self: ...
+
+    def to_dict(self) -> dict[str, Any]: ...
 
 
 class ControlClientError(RuntimeError):
@@ -216,6 +231,47 @@ def _sanitize_remote_text(
     if len(text) > _MAX_REMOTE_TEXT:
         text = text[: _MAX_REMOTE_TEXT - len(marker)] + marker
     return text
+
+
+def _encode_generated_request(
+    payload: Mapping[str, object], model: type[GeneratedJSONModel]
+) -> dict[str, Any]:
+    try:
+        model_validate = getattr(model, "model_validate", None)
+        if callable(model_validate):
+            validated = model_validate(payload)
+            dumped = validated.model_dump(mode="json")
+            if not isinstance(dumped, dict):
+                raise TypeError("validated request is not an object")
+            return dumped
+        return model.from_dict(payload).to_dict()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise ControlClientError(
+            "control API request does not match the generated schema"
+        ) from None
+
+
+def _decode_generated_response(
+    decoded: object, model: type[GeneratedJSONModel]
+) -> dict[str, object]:
+    if not isinstance(decoded, Mapping):
+        raise ControlMalformedResponse("control API response must be an object")
+    try:
+        model_validate = getattr(model, "model_validate", None)
+        if callable(model_validate):
+            validated = model_validate(decoded)
+            result = validated.model_dump(mode="json")
+        else:
+            result = model.from_dict(decoded).to_dict()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise ControlMalformedResponse(
+            "control API response does not match the generated schema"
+        ) from None
+    if not isinstance(result, dict):
+        raise ControlMalformedResponse(
+            "control API response does not match the generated schema"
+        )
+    return result
 
 
 def _structured_http_error_fields(problem: object) -> dict[str, object]:
@@ -558,6 +614,8 @@ class ControlClient:
         *,
         extra_headers: Mapping[str, str] | None = None,
         query: Mapping[str, object] | None = None,
+        request_model: type[GeneratedJSONModel] | None = None,
+        response_model: type[GeneratedJSONModel] | None = None,
     ) -> dict[str, object]:
         if not path.startswith("/api/v1/") or ".." in path:
             raise ControlClientError("control API path is invalid")
@@ -571,7 +629,14 @@ class ControlClient:
         if extra_headers is not None:
             headers.update(extra_headers)
         if payload is not None:
-            data = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            encoded_payload = (
+                _encode_generated_request(payload, request_model)
+                if request_model is not None
+                else payload
+            )
+            data = json.dumps(
+                encoded_payload, sort_keys=True, separators=(",", ":")
+            ).encode()
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(
             self._base + path, data=data, headers=headers, method=method
@@ -618,6 +683,8 @@ class ControlClient:
             raise ControlClientError("control API returned invalid JSON") from None
         if not isinstance(decoded, dict):
             raise ControlClientError("control API response must be an object")
+        if response_model is not None:
+            return _decode_generated_response(decoded, response_model)
         return decoded
 
     def upload_file(
@@ -628,6 +695,7 @@ class ControlClient:
         media_type: str,
         expected_sha256: str,
         expected_size: int,
+        response_model: type[GeneratedJSONModel] | None = None,
     ) -> dict[str, object]:
         """Stream one previously declared input after rechecking its identity."""
         if not path.startswith("/api/v1/") or ".." in path:
@@ -719,6 +787,8 @@ class ControlClient:
             raise ControlClientError("control API returned invalid JSON") from None
         if not isinstance(decoded, dict):
             raise ControlClientError("control API response must be an object")
+        if response_model is not None:
+            return _decode_generated_response(decoded, response_model)
         return decoded
 
     def download_file(

@@ -38,6 +38,8 @@ class _Client:
         *,
         extra_headers: dict[str, str] | None = None,
         query: dict[str, object] | None = None,
+        request_model=None,
+        response_model=None,
     ) -> dict[str, object]:
         self.calls.append((method, path, payload, query))
         self.extra_headers.append(extra_headers)
@@ -55,6 +57,7 @@ class _Client:
         media_type: str,
         expected_sha256: str,
         expected_size: int,
+        response_model=None,
     ) -> dict[str, object]:
         self.uploads.append((path, source, media_type, expected_sha256, expected_size))
         response = self.responses.get(("UPLOAD", path), {"state": "draft"})
@@ -124,7 +127,17 @@ def test_availability_error_json_uses_shared_failure_fields() -> None:
 class _StrictTaskClient(_Client):
     """Fixture transport that rejects route, query, and body drift."""
 
-    def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+    def request(
+        self,
+        method,
+        path,
+        payload=None,
+        *,
+        extra_headers=None,
+        query=None,
+        request_model=None,
+        response_model=None,
+    ):
         allowed = {
             ("POST", "/api/v1/fleet-profiles"): {"name", "scope", "assignments"},
             ("POST", "/api/v1/fleet-profiles/profile-1/duplicate"): {"name", "scope", "request_key"},

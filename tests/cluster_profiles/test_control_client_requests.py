@@ -16,6 +16,10 @@ from cluster_profiles.control_client import (
     ControlMalformedResponse,
     ControlUnauthorized,
 )
+from cluster_profiles.generated_control.models.artifact_job_capabilities_response import (
+    ArtifactJobCapabilitiesResponse,
+)
+from cluster_profiles.generated_control.models.cancel_request import CancelRequest
 
 
 class _Response:
@@ -160,6 +164,78 @@ def test_raw_request_preserves_shared_availability_error_metadata(tmp_path: Path
     assert raised.value.required_bytes == 200
     assert raised.value.free_bytes == 100
     assert raised.value.shortfall_bytes == 100
+
+
+def test_request_validates_canonical_route_models_and_preserves_204(
+    tmp_path: Path,
+) -> None:
+    capabilities = {
+        "schema_version": 1,
+        "storage": {
+            "in_flight_uploads": 0,
+            "max_stored_bytes": 1024,
+            "remaining_bytes": 1024,
+            "reserved_bytes": 0,
+            "used_bytes": 0,
+        },
+        "transport": {
+            "max_input_file_bytes": 512,
+            "max_input_files": 32,
+            "max_input_total_bytes": 1024,
+            "max_output_file_bytes": 1024,
+            "max_output_files": 32,
+            "max_output_total_bytes": 2048,
+            "max_timeout_seconds": 3600,
+            "reserved_input_names": ["manifest.json"],
+        },
+    }
+    observed: list[bytes | None] = []
+
+    def opener(request, *, timeout: float):
+        observed.append(request.data)
+        if request.full_url.endswith("/artifact-jobs/capabilities"):
+            return _Response(200, capabilities)
+        return _Response(204, None)
+
+    client = ControlClient(
+        "https://forge.example.test", _token(tmp_path), opener=opener
+    )
+
+    result = client.request(
+        "GET",
+        "/api/v1/artifact-jobs/capabilities",
+        response_model=ArtifactJobCapabilitiesResponse,
+    )
+    assert result == capabilities
+
+    assert (
+        client.request(
+            "POST",
+            "/api/v1/artifact-jobs/job-1/cancel",
+            {"reason": "operator requested cancellation"},
+            request_model=CancelRequest,
+        )
+        == {}
+    )
+    assert observed[-1] == b'{"reason":"operator requested cancellation"}'
+
+
+def test_request_rejects_response_outside_canonical_route_model(tmp_path: Path) -> None:
+    client = ControlClient(
+        "https://forge.example.test",
+        _token(tmp_path),
+        opener=lambda *_args, **_kwargs: _Response(
+            200,
+            {"schema_version": 1, "storage": {}, "transport": {}},
+        ),
+    )
+
+    with pytest.raises(ControlMalformedResponse, match="generated schema"):
+        client.request(
+            "GET",
+            "/api/v1/artifact-jobs/capabilities",
+            response_model=ArtifactJobCapabilitiesResponse,
+        )
 
 
 def test_artifact_input_upload_streams_the_reverified_local_file(
