@@ -308,10 +308,6 @@ impl CompiledExecutionPlan {
             || self.topology.world_size < self.topology.node_count
             || self.endpoint.is_some() == self.job.is_some()
             || self.endpoint.is_some() != self.runtime.placement.port.is_some()
-            || self
-                .endpoint
-                .as_ref()
-                .is_some_and(|endpoint| self.runtime.placement.port != Some(endpoint.port))
         {
             return Err(WorkloadError::Invalid("compiled execution identity"));
         }
