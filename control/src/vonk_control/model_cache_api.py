@@ -418,18 +418,18 @@ def install_model_cache_routes(
                 limit=limit,
                 boundary=boundary,
             )
-            return {
-                "schema_version": 2,
-                "source_policy": "nas-first",
-                "updates": result["updates"],
-                "total": result["total"],
-                "next_cursor": encode_cursor(
+            return ModelCacheUpdatesResponse(
+                schema_version=2,
+                source_policy="nas-first",
+                updates=list(result["updates"]),
+                total=result["total"],
+                next_cursor=encode_cursor(
                     result.get("_next_boundary"),
                     resource="model-cache-updates",
                     order="updated-at-desc/digest-desc/v1",
                     context=context,
                 ),
-            }
+            )
         except HTTPException:
             raise
         except (OSError, RuntimeError, TypeError, ValueError) as exc:

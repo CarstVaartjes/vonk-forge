@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -47,6 +47,7 @@ from .models import (
     RunNode,
 )
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
+from .strict_json import StrictJSONModel
 
 MAX_INPUT_FILES = 32
 MAX_INPUT_FILE_BYTES = 512 * 1024**2
@@ -90,7 +91,7 @@ def _active_recipe_revision(
     return revision, recipe
 
 
-class ArtifactJobContractModel(BaseModel):
+class ArtifactJobContractModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 

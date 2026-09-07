@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException, Path, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 from starlette.responses import JSONResponse
 
 from .audit import AuditRecord
@@ -20,6 +20,7 @@ from .recipe_operations import (
     RecipeOperationView,
     RecipeRunStatus,
 )
+from .strict_json import StrictJSONModel
 
 _UUID = r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 _DIGEST = r"^[0-9a-f]{64}$"
@@ -68,7 +69,7 @@ class AuditSink(Protocol):
     def append(self, record: AuditRecord) -> None: ...
 
 
-class StrictModel(BaseModel):
+class StrictModel(StrictJSONModel):
     # Keep every JSON request/response model strict.  In particular, the
     # control surface must not silently coerce strings to IDs or integers to
     # booleans at the HTTP boundary.

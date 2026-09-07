@@ -550,6 +550,18 @@ pub struct EnrollmentEvidence {
     pub hardware_fingerprint: String,
     pub host_key_fingerprint: String,
     pub node_id: String,
+    pub observation_receipt_public_key: String,
+}
+
+impl EnrollmentEvidence {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if !lower_hex(&self.observation_receipt_public_key, 64) {
+            return Err(ProtocolError::Identity(
+                "enrollment observation receipt public key",
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

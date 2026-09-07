@@ -12,8 +12,10 @@ import re
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 from vonk_agent_protocol.telemetry import validate_telemetry_scalar
+
+from .strict_json import StrictJSONModel
 
 TelemetryScope = Literal[
     "node",
@@ -42,7 +44,7 @@ _SOURCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 _MAX_TELEMETRY_BYTES = 16 * 1024**4
 
 
-class TelemetryContractModel(BaseModel):
+class TelemetryContractModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid")
 
 

@@ -13,12 +13,13 @@ import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentOperation as ProtocolAgentOperation,
+)
+from vonk_agent_protocol import (
     AgentProtocolError,
     AgentResult,
     RecipeOperationRequest,
     canonical_message,
 )
-
 from vonk_control.models import AgentOperation, InstallationNode, RunNode
 
 from control.tests.test_recipe_operations import (
@@ -165,7 +166,7 @@ def _project(
 def test_controller_queued_install_and_start_payloads_cross_rust_and_back(
     tmp_path: Path, install_start_wire_probe: Path
 ) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    sessions, service, _queue, mapping_id, build_id, _nodes = setup_services(tmp_path)
 
     install_plan = service.preview_install(mapping_id, build_id)
     install_operation = service.install(

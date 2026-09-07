@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
+from pydantic import ConfigDict, Field, field_validator, model_serializer
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -52,6 +52,7 @@ from .operation_contract import (
     sanitize_failure_evidence,
 )
 from .route_runtime import verify_active_route_bundle
+from .strict_json import StrictJSONModel
 
 COMMIT_PATTERN = r"^[0-9a-f]{40}$"
 DIGEST_PATTERN = r"^[0-9a-f]{64}$"
@@ -146,7 +147,7 @@ class OperationProjectionError(RuntimeError):
     """Durable operation state cannot be safely projected."""
 
 
-class StrictModel(BaseModel):
+class StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
@@ -1700,15 +1701,7 @@ class NodeStatus(StrictModel):
             "use Fleet connection, inventory, and telemetry fields for live readiness."
         )
     )
-    stale: bool = Field(
-        deprecated=True,
-        description=(
-            "Deprecated compatibility alias for health_probe_stale; this does not "
-            "represent aggregate node readiness."
-        ),
-    )
     labels: dict[str, str]
-    profile: str | None
     memory_available_bytes: int = Field(ge=0)
     disk_available_bytes: int = Field(ge=0)
     probe_age_seconds: float | None = Field(
