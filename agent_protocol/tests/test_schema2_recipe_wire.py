@@ -192,6 +192,36 @@ def test_plan_rejects_non_boolean_security_values() -> None:
         CompiledExecutionPlan.parse(value)
 
 
+def test_plan_preserves_one_physical_file_as_distinct_mount_projections() -> None:
+    value = copy.deepcopy(PLAN)
+    projection = copy.deepcopy(value["artifacts"][0])
+    projection["mount"]["target"] = "/models/target"
+    value["artifacts"].append(projection)
+    plan = CompiledExecutionPlan.parse(value)
+    assert [(item.mount.target, item.path) for item in plan.artifacts] == [
+        ("/models", "weights.bin"),
+        ("/models/target", "weights.bin"),
+    ]
+
+
+def test_plan_rejects_conflicting_duplicate_physical_identity() -> None:
+    value = copy.deepcopy(PLAN)
+    projection = copy.deepcopy(value["artifacts"][0])
+    projection["mount"]["target"] = "/models/target"
+    projection["file_id"] = "different-file"
+    value["artifacts"].append(projection)
+    with pytest.raises(AgentProtocolError):
+        CompiledExecutionPlan.parse(value)
+
+
+def test_plan_rejects_duplicate_final_projection_target() -> None:
+    value = copy.deepcopy(PLAN)
+    projection = copy.deepcopy(value["artifacts"][0])
+    value["artifacts"].append(projection)
+    with pytest.raises(AgentProtocolError):
+        CompiledExecutionPlan.parse(value)
+
+
 def test_schema_version_is_an_integer_discriminator() -> None:
     value = copy.deepcopy(PLAN)
     value["schema_version"] = 2.0

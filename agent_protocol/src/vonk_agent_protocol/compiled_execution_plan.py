@@ -484,16 +484,36 @@ class CompiledExecutionPlan(_Strict):
         ):
             raise ValueError("single-node rendezvous is invalid")
         by_digest: dict[str, int] = {}
-        selected: set[tuple[str, str]] = set()
+        physical_by_path: dict[tuple[str, str], tuple[object, ...]] = {}
+        file_paths: dict[tuple[str, str], str] = {}
         paths: set[tuple[str, str]] = set()
         for artifact in self.artifacts:
-            if (artifact.selection_id, artifact.file_id) in selected or (
-                artifact.selection_id,
-                artifact.path,
-            ) in paths:
-                raise ValueError("compiled artifact identity is duplicated")
-            selected.add((artifact.selection_id, artifact.file_id))
-            paths.add((artifact.selection_id, artifact.path))
+            physical = (
+                artifact.file_id,
+                artifact.sha256,
+                artifact.size_bytes,
+                artifact.model.publisher,
+                artifact.model.slug,
+                artifact.model.content_sha256,
+                artifact.distribution_object.name,
+                artifact.distribution_object.sha256,
+                artifact.distribution_object.bytes,
+                artifact.distribution_object.kind,
+            )
+            physical_key = (artifact.selection_id, artifact.path)
+            previous = physical_by_path.get(physical_key)
+            if previous is not None and previous != physical:
+                raise ValueError("compiled artifact physical identity conflicts")
+            physical_by_path[physical_key] = physical
+            file_key = (artifact.selection_id, artifact.file_id)
+            previous_path = file_paths.get(file_key)
+            if previous_path is not None and previous_path != artifact.path:
+                raise ValueError("compiled artifact file identity conflicts")
+            file_paths[file_key] = artifact.path
+            mount_path = (artifact.mount.target, artifact.path)
+            if mount_path in paths:
+                raise ValueError("compiled artifact mount target is duplicated")
+            paths.add(mount_path)
             previous = by_digest.setdefault(artifact.sha256, artifact.size_bytes)
             if previous != artifact.size_bytes:
                 raise ValueError("compiled artifact digest sizes conflict")

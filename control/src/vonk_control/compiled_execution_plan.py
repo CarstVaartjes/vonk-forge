@@ -308,18 +308,45 @@ class CompiledExecutionPlan(_StrictModel):
     @model_validator(mode="after")
     def artifact_set_bytes_are_exact(self) -> CompiledExecutionPlan:
         by_digest: dict[str, int] = {}
+        by_physical: dict[tuple[str, str], tuple[object, ...]] = {}
+        selected: dict[tuple[str, str], str] = {}
+        projection_ids: set[str] = set()
+        mount_paths: set[tuple[str, str]] = set()
         for artifact in self.artifacts:
+            if artifact.id in projection_ids:
+                raise ValueError("compiled model artifact projections must be unique")
+            projection_ids.add(artifact.id)
+            physical = (
+                artifact.file_id,
+                artifact.sha256,
+                artifact.bytes,
+                artifact.model.publisher,
+                artifact.model.slug,
+                artifact.model.content_sha256,
+                artifact.distribution_object.name,
+                artifact.distribution_object.sha256,
+                artifact.distribution_object.bytes,
+                artifact.distribution_object.kind,
+            )
+            physical_key = (artifact.selection_id, artifact.path)
+            previous = by_physical.get(physical_key)
+            if previous is not None and previous != physical:
+                raise ValueError("compiled model artifact physical identity conflicts")
+            by_physical[physical_key] = physical
+            selected_key = (artifact.selection_id, artifact.file_id)
+            previous_path = selected.get(selected_key)
+            if previous_path is not None and previous_path != artifact.path:
+                raise ValueError("compiled model artifact file identity conflicts")
+            selected[selected_key] = artifact.path
             previous = by_digest.setdefault(artifact.sha256, artifact.bytes)
             if previous != artifact.bytes:
                 raise ValueError("one model digest cannot have multiple byte counts")
+            mount_path = (artifact.mount.target, artifact.path)
+            if mount_path in mount_paths:
+                raise ValueError("compiled model artifacts repeat a mount target")
+            mount_paths.add(mount_path)
         if sum(by_digest.values()) != self.model_artifact_set_bytes:
             raise ValueError("model artifact-set bytes do not match selected receipts")
-        keys = [(item.selection_id, item.file_id) for item in self.artifacts]
-        if len(keys) != len(set(keys)):
-            raise ValueError("compiled model artifacts repeat a selected file")
-        paths = [(item.selection_id, item.path) for item in self.artifacts]
-        if len(paths) != len(set(paths)):
-            raise ValueError("compiled model artifacts repeat a materialized path")
         return self
 
     def reusable_identity_document(self) -> dict[str, object]:
@@ -821,6 +848,7 @@ def compile_verified_execution_plan(
 
     artifacts: list[CompiledModelArtifact] = []
     selected_keys: set[tuple[str, str]] = set()
+    selected_physical: dict[tuple[str, str], tuple[object, ...]] = {}
     for raw in raw_artifacts:
         item = _mapping(raw, "runtime model artifact")
         allowed = {
@@ -868,6 +896,26 @@ def compile_verified_execution_plan(
             raise CompiledExecutionPlanError(
                 "runtime model selection identity is invalid"
             )
+        physical = (
+            model_identity,
+            file_id,
+            path,
+            source.sha256,
+            source.bytes,
+            model.get("publisher"),
+            model.get("slug"),
+            source.distribution_object.name,
+            source.distribution_object.sha256,
+            source.distribution_object.bytes,
+            source.distribution_object.kind,
+        )
+        physical_key = (selection_id, path)
+        previous_physical = selected_physical.get(physical_key)
+        if previous_physical is not None and previous_physical != physical:
+            raise CompiledExecutionPlanError(
+                "runtime model artifact physical identity conflicts"
+            )
+        selected_physical[physical_key] = physical
         selected_keys.add((model_identity, file_id))
         artifact_data = {
             "id": item.get("id"),
