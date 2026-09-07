@@ -102,7 +102,6 @@ from .operation_api import (
     JobDetailResponse,
     JobLogsResponse,
     JobProgress,
-    JobResponse,
     JobResumeResponse,
     JobsResponse,
     OperationApiServices,
@@ -438,16 +437,6 @@ def refresh_fleet_metrics(
         )
 
 
-class JobRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    kind: str = Field(min_length=1, max_length=80)
-    authority_revision: str = Field(min_length=1, max_length=128)
-    targets: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(
-        max_length=64
-    )
-    payload: dict[str, object] = Field(max_length=128)
-
-
 class ProposalChangeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     path: str = Field(min_length=1, max_length=512)
@@ -494,9 +483,6 @@ def create_app(
     agent: AgentApiServices | None = None,
     trusted_agent_proxy_auth: bytes = b"",
     enrollment_rate_limiter: EnrollmentRateLimiter | None = None,
-    worker_authority: Any | None = None,
-    worker_api_token: bytes = b"",
-    generic_jobs_enabled: bool = False,
     operations: OperationApiServices | None = None,
     catalog: CatalogService | None = None,
     recipe_library: Any | None = None,
@@ -726,14 +712,6 @@ def create_app(
         upgrades=agent_upgrades,
         enrollment_rate_limiter=enrollment_rate_limiter,
     )
-    if worker_authority is not None:
-        from .worker_authority import install_worker_authority_routes
-
-        install_worker_authority_routes(
-            app,
-            worker_authority,
-            token=worker_api_token,
-        )
     authenticated_actor = Depends(actor)
     authenticated_browser_actor = Depends(browser_session_actor)
 
@@ -1191,45 +1169,6 @@ def create_app(
         )
         return ChangeResponse.model_validate(result)
 
-    @app.post(
-        "/api/v1/jobs",
-        response_model=JobResponse,
-        status_code=status.HTTP_202_ACCEPTED,
-        include_in_schema=False,
-    )
-    def enqueue(
-        body: JobRequest, request: Request, authenticated: Actor = authenticated_actor
-    ) -> JobResponse:
-        require_mutation_role(authenticated, "/api/v1/jobs")
-        if not generic_jobs_enabled:
-            raise HTTPException(
-                status_code=422,
-                detail="generic jobs are disabled; use an immutable reconciliation plan",
-            )
-        if body.kind == "reconcile":
-            raise HTTPException(
-                status_code=422,
-                detail="reconciliations require an accepted immutable plan",
-            )
-        job = jobs.enqueue(
-            body.kind,
-            authenticated.subject,
-            body.authority_revision,
-            body.targets,
-            body.payload,
-            request_id=request.state.request_id,
-        )
-        audits.append(
-            AuditRecord(
-                request.state.request_id,
-                authenticated.subject,
-                f"job.enqueue:{body.kind}",
-                body.authority_revision,
-                tuple(body.targets),
-            )
-        )
-        return JobResponse(id=job.id, state=job.state)
-
     @app.get(
         "/api/v1/jobs",
         response_model=JobsResponse,
@@ -1509,10 +1448,6 @@ def production_app() -> FastAPI:
     from sqlalchemy import func, select
     from vonk_forge_contracts import RecipeDefinition, content_sha256
 
-    from .agent_reconciliation import (
-        bind_reconciliation_result_consumer,
-        load_reconciliation_authority_input,
-    )
     from .agent_upgrades import AgentUpgradeService
     from .audit import SqlAuditStore
     from .availability_production import build_recipe_image_availability
@@ -1549,7 +1484,6 @@ def production_app() -> FastAPI:
     )
     from .settings import Settings
     from .telemetry import TelemetryRepository
-    from .worker_authority import WorkerAuthorityService
 
     settings = Settings.from_env_and_secrets()
     sessions = session_factory(build_engine(settings.database_url))
@@ -1733,38 +1667,6 @@ def production_app() -> FastAPI:
         runtime_image_resolver=resolve_runtime_image_receipt,
     )
 
-    def reconciliation_authority_input(
-        reconciliation_id: str,
-    ) -> tuple[str, str, tuple[Any, ...], str]:
-        def endpoint(session: Any, node_id: str) -> tuple[str, Any]:
-            observation = agent_services.presence.latest_in_session(
-                session,
-                node_id,
-                maximum_age_seconds=300,
-            )
-            return observation.address, observation.observed_at
-
-        with sessions() as session:
-            snapshot = load_reconciliation_authority_input(
-                session,
-                reconciliation_id,
-                endpoint,
-            )
-        return (
-            snapshot.authority_revision,
-            snapshot.plan_digest,
-            snapshot.routes,
-            snapshot.fleet_evidence_digest,
-        )
-
-    worker_authority = WorkerAuthorityService(
-        current_revision=current_revision,
-        revision_eligible=revision_eligible,
-        reconciliation_input=reconciliation_authority_input,
-        current_fleet_evidence=lambda: (
-            fleet_response(dashboard.fleet()).evidence_digest
-        ),
-    )
     recipe_route_runtime = AtomicRouteBundlePublisher(
         Path("/routes"),
         management_policy=ManagementAddressPolicy.parse(
@@ -1869,15 +1771,7 @@ def production_app() -> FastAPI:
         recipe_operations.consume_agent_result(session, operation, attempt, message)
         agent_upgrades.consume_agent_result(session, operation, attempt, message)
 
-    bind_reconciliation_result_consumer(
-        sessions,
-        operations=agent_services.operations,
-        presence=agent_services.presence,
-        clock=clock,
-        revision_eligible=revision_eligible,
-        current_revision=current_revision,
-        additional_result_consumer=consume_agent_result,
-    )
+    agent_services.operations.set_result_consumer(consume_agent_result)
 
     def refresh_metrics() -> None:
         operational_metrics.refresh()
@@ -1944,12 +1838,6 @@ def production_app() -> FastAPI:
         job_logs=DatabaseJobLogStore(sessions, clock=clock),
         agent=(agent_services if settings.agent_runtime == "enabled" else None),
         trusted_agent_proxy_auth=settings.agent_proxy_auth,
-        worker_authority=(
-            worker_authority if settings.agent_runtime == "enabled" else None
-        ),
-        worker_api_token=(
-            settings.worker_api_token if settings.agent_runtime == "enabled" else b""
-        ),
         operations=register_model_cache_operation_provider(
             durable_operation_services(
                 sessions,
