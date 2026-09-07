@@ -42,6 +42,11 @@ UUID4 = Annotated[
         pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     ),
 ]
+HttpsUrl = Annotated[str, Field(min_length=1, max_length=2048)]
+RelativePath = Annotated[str, Field(min_length=1, max_length=256)]
+PackageObjectRelativeName = Annotated[
+    str, Field(pattern=r"^objects/sha256/[0-9a-f]{64}$")
+]
 
 
 def _duplicate_free_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -119,7 +124,7 @@ def _https_url(value: Any, *, name: str) -> str:
 
 class _HttpsSource(WireModel):
     provider: Literal["https"]
-    url: str = Field(min_length=1, max_length=2048)
+    url: HttpsUrl
 
     @field_validator("url")
     @classmethod
@@ -136,7 +141,7 @@ class _OciSource(WireModel):
 
 class _GitSource(WireModel):
     provider: Literal["git"]
-    repository: str = Field(min_length=1, max_length=2048)
+    repository: HttpsUrl
     commit: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
     @field_validator("repository")
@@ -155,7 +160,7 @@ class _HuggingFaceSource(WireModel):
 
 class _IndexSource(WireModel):
     provider: Literal["python-index", "signed-http-index"]
-    url: str = Field(min_length=1, max_length=2048)
+    url: HttpsUrl
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
     @field_validator("url")
@@ -196,8 +201,8 @@ class OciBundleMetadata(WireModel):
     rootfs_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     architecture: str = Field(pattern=r"^(?:linux-arm64|linux-x86_64)$")
     runtime: Literal["runc"]
-    rootfs: str = Field(min_length=1, max_length=256)
-    entrypoint: str = Field(min_length=1, max_length=256)
+    rootfs: RelativePath
+    entrypoint: RelativePath
 
     @field_validator("rootfs", "entrypoint")
     @classmethod
@@ -307,7 +312,7 @@ class _PythonIndexIdentity(WireModel):
 
 class _SignedHttpIndexIdentity(WireModel):
     provider: Literal["signed-http-index"]
-    url: str = Field(min_length=1, max_length=2048)
+    url: HttpsUrl
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
     @field_validator("url")
@@ -338,7 +343,7 @@ class PythonRuntimeMetadata(WireModel):
         pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
     )
     interpreter_component_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    interpreter_entrypoint: str = Field(min_length=1, max_length=256)
+    interpreter_entrypoint: RelativePath
     interpreter_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
 
     @field_validator("interpreter_entrypoint")
@@ -623,7 +628,7 @@ class PackageObjectReceiptClaims(WireModel):
     authority: Literal[PACKAGE_HELPER_AUTHORITY]
     object_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     size: int = Field(ge=1, le=2**63 - 1)
-    relative_name: str = Field(pattern=r"^objects/sha256/[0-9a-f]{64}$")
+    relative_name: PackageObjectRelativeName
 
     @model_validator(mode="after")
     def relative_name_matches_digest(self) -> PackageObjectReceiptClaims:
