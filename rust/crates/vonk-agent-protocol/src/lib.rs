@@ -968,7 +968,10 @@ impl RecipeOperationRequest {
             Self::Start(value) => {
                 let valid_phase = match (&value.phase, &value.start_deadline, value.run_generation)
                 {
-                    (None, None, None) => value.world_size == 1,
+                    // Role-ordered distributed starts are deliberately
+                    // unphased.  The collective readiness variant carries
+                    // the complete phase envelope below.
+                    (None, None, None) => true,
                     (Some(RecipeStartPhase::RankLaunch), Some(deadline), Some(generation)) => {
                         generation > 0
                             && value.world_size > 1
@@ -1120,14 +1123,14 @@ mod recipe_start_tests {
     }
 
     #[test]
-    fn schema_two_start_payload_requires_phases_for_distributed_runs() {
+    fn schema_two_start_payload_allows_unphased_distributed_role_ordering() {
         let single = parsed_start(start_payload(1, 0, None, None, None)).unwrap();
         assert_eq!(single.phase, None);
         assert_eq!(single.start_deadline, None);
         assert_eq!(single.run_generation, None);
-        let legacy_wire = serde_json::to_value(single).unwrap();
-        assert!(legacy_wire.get("phase").is_none());
-        assert!(legacy_wire.get("start_deadline").is_none());
+        let unphased_wire = serde_json::to_value(single).unwrap();
+        assert!(unphased_wire.get("phase").is_none());
+        assert!(unphased_wire.get("start_deadline").is_none());
 
         for field in ["local_address", "master_address", "master_port"] {
             let mut omitted = start_payload(1, 0, None, None, None);
@@ -1144,8 +1147,11 @@ mod recipe_start_tests {
             Some("192.168.100.3"),
             Some("192.168.100.2"),
             None,
-        ));
-        assert!(distributed.is_err());
+        ))
+        .unwrap();
+        assert_eq!(distributed.phase, None);
+        assert_eq!(distributed.start_deadline, None);
+        assert_eq!(distributed.run_generation, None);
     }
 
     #[test]
@@ -1240,13 +1246,23 @@ mod recipe_start_tests {
             .remove("run_generation");
         assert!(parsed_start(missing_generation).is_err());
 
-        let mut legacy_with_deadline =
+        let mut missing_phase = start_payload(
+            2,
+            1,
+            Some("192.168.100.3"),
+            Some("192.168.100.2"),
+            Some("rank-launch"),
+        );
+        missing_phase.as_object_mut().unwrap().remove("phase");
+        assert!(parsed_start(missing_phase).is_err());
+
+        let mut unphased_with_deadline =
             start_payload(2, 1, Some("192.168.100.3"), Some("192.168.100.2"), None);
-        legacy_with_deadline.as_object_mut().unwrap().insert(
+        unphased_with_deadline.as_object_mut().unwrap().insert(
             "start_deadline".to_owned(),
             Value::String("2026-09-01T12:00:00+00:00".to_owned()),
         );
-        assert!(parsed_start(legacy_with_deadline).is_err());
+        assert!(parsed_start(unphased_with_deadline).is_err());
 
         let mut non_utc_deadline = start_payload(
             2,

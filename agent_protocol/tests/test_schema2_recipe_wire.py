@@ -212,8 +212,15 @@ def test_start_phase_shape_matches_single_and_distributed_controller_modes() -> 
     unphased_distributed = _distributed_start()
     for key in ("phase", "start_deadline", "run_generation"):
         del unphased_distributed[key]
-    with pytest.raises(AgentProtocolError):
-        RecipeOperationRequest.parse(AgentOperation.RECIPE_START, unphased_distributed)
+    unphased = RecipeOperationRequest.parse(
+        AgentOperation.RECIPE_START, unphased_distributed
+    )
+    assert unphased.phase is None
+    for key in ("phase", "start_deadline", "run_generation"):
+        partial = _distributed_start()
+        del partial[key]
+        with pytest.raises(AgentProtocolError):
+            RecipeOperationRequest.parse(AgentOperation.RECIPE_START, partial)
 
     assert (
         RecipeOperationRequest.parse(
