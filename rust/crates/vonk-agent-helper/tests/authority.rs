@@ -686,12 +686,12 @@ fn accepted_docker_archive_does_not_depend_on_load_output_format() {
 fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
     let (_temp, roots, runner, release) = fixture();
     let run_id = "40000000-0000-4000-8000-000000000004";
-    let image = "localhost/vonk/recipe-build-20000000-0000-4000-8000-000000000002";
     let registry_index_digest = format!("sha256:{}", "a".repeat(64));
     let platform_manifest_digest = format!("sha256:{}", "c".repeat(64));
-    let image_reference = format!("{image}@{platform_manifest_digest}");
     let (archive_body, image_id) = runtime_image_archive();
     let archive_sha256 = hex_sha256(&archive_body);
+    let image = format!("localhost/vonk/compiled-runtime-{archive_sha256}");
+    let image_reference = format!("{image}@{platform_manifest_digest}");
     let state = roots.agent_data.join("runs").join(run_id);
     let outputs = state.join("outputs");
     let metadata = roots.agent_data.join("run-metadata").join(run_id);
@@ -700,8 +700,8 @@ fn accepted_runtime_is_compiled_to_hardened_docker_without_socket_authority() {
         .join("installations")
         .join("installation-1")
         .join("models")
-        .join("sha256")
-        .join("a".repeat(64));
+        .join("primary")
+        .join("artifact-a.bin");
     fs::create_dir_all(&outputs).unwrap();
     fs::create_dir_all(&metadata).unwrap();
     fs::create_dir_all(&model).unwrap();
