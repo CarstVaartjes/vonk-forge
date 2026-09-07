@@ -64,6 +64,32 @@ _HF_CANONICAL_HOST = "huggingface.co"
 _USE_MANIFEST_BYTES = object()
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
+_ARTIFACT_MANIFEST_FIELDS = frozenset(
+    {
+        "key",
+        "id",
+        "path",
+        "kind",
+        "repository",
+        "source",
+        "revision",
+        "sha256",
+        "download_bytes",
+        "roles",
+        "model_content_sha256",
+    }
+)
+_ARTIFACT_SET_MANIFEST_FIELDS = frozenset(
+    {
+        "schema_version",
+        "source_policy",
+        "model_content_sha256",
+        "recipe_revision_sha256",
+        "model_definition_ref",
+        "model_content_digests",
+        "artifacts",
+    }
+)
 
 
 class ModelCacheError(RuntimeError):
@@ -263,41 +289,39 @@ class ArtifactSpec:
 
     @classmethod
     def from_manifest(cls, value: Mapping[str, object]) -> ArtifactSpec:
-        if "model_version_sha256" in value:
+        if set(value) != _ARTIFACT_MANIFEST_FIELDS:
             raise ModelCacheResolutionError(
                 "model_cache.manifest_invalid",
-                "retired model-version artifact identity is not accepted",
+                "cache manifest artifact fields are invalid",
             )
         try:
+            string_fields = ("key", "id", "path", "kind", "source", "sha256")
+            if any(type(value[field]) is not str for field in string_fields):
+                raise TypeError
+            if any(
+                value[field] is not None and type(value[field]) is not str
+                for field in ("repository", "revision", "model_content_sha256")
+            ):
+                raise TypeError
+            if type(value["download_bytes"]) is not int or value["download_bytes"] < 0:
+                raise TypeError
             roles = value["roles"]
-            if not isinstance(roles, list) or not all(
-                isinstance(role, str) and role for role in roles
+            if type(roles) is not list or not all(
+                type(role) is str and role for role in roles
             ):
                 raise TypeError
             result = cls(
-                key=str(value["key"]),
-                artifact_id=str(value["id"]),
-                path=str(value["path"]),
-                kind=str(value["kind"]),
-                repository=(
-                    None
-                    if value.get("repository") is None
-                    else str(value["repository"])
-                ),
-                source=str(value["source"]),
-                revision=(
-                    None
-                    if value.get("revision") is None
-                    else str(value["revision"])
-                ),
-                sha256=str(value["sha256"]),
-                expected_bytes=int(value["download_bytes"]),
+                key=value["key"],
+                artifact_id=value["id"],
+                path=value["path"],
+                kind=value["kind"],
+                repository=value["repository"],
+                source=value["source"],
+                revision=value["revision"],
+                sha256=value["sha256"],
+                expected_bytes=value["download_bytes"],
                 roles=tuple(roles),
-                model_content_sha256=(
-                    None
-                    if value.get("model_content_sha256") is None
-                    else str(value["model_content_sha256"])
-                ),
+                model_content_sha256=value["model_content_sha256"],
             )
         except (KeyError, TypeError, ValueError) as error:
             raise ModelCacheResolutionError(
@@ -355,43 +379,42 @@ class ArtifactSetManifest:
             raise ModelCacheResolutionError(
                 "model_cache.schema_unsupported", "cache manifest schema is unsupported"
             )
-        if any(
-            key in value
-            for key in ("model_version_sha256", "model_versions", "model_version_ref")
-        ):
+        if set(value) != _ARTIFACT_SET_MANIFEST_FIELDS:
             raise ModelCacheResolutionError(
                 "model_cache.manifest_invalid",
-                "retired model-version identity fields are not accepted",
-            )
-        if not all(
-            key in value
-            for key in ("model_content_sha256", "model_content_digests", "model_definition_ref")
-        ):
-            raise ModelCacheResolutionError(
-                "model_cache.manifest_invalid",
-                "canonical model identity fields are required",
+                "cache manifest fields are invalid",
             )
         raw_artifacts = value.get("artifacts")
-        raw_model_content_digests = value.get("model_content_digests", [])
-        if not isinstance(raw_artifacts, list) or not isinstance(raw_model_content_digests, list):
+        raw_model_content_digests = value["model_content_digests"]
+        if (
+            type(value["schema_version"]) is not int
+            or type(value["source_policy"]) is not str
+            or value["source_policy"] != SOURCE_POLICY
+            or type(raw_artifacts) is not list
+            or type(raw_model_content_digests) is not list
+            or not all(type(item) is str for item in raw_model_content_digests)
+            or (
+                value["model_definition_ref"] is not None
+                and not isinstance(value["model_definition_ref"], Mapping)
+            )
+            or any(
+                value[field] is not None and type(value[field]) is not str
+                for field in ("model_content_sha256", "recipe_revision_sha256")
+            )
+            or any(not isinstance(item, Mapping) for item in raw_artifacts)
+        ):
             raise ModelCacheResolutionError(
                 "model_cache.manifest_invalid", "cache manifest shape is invalid"
             )
         artifacts = tuple(
-            ArtifactSpec.from_manifest(item)
-            for item in raw_artifacts
-            if isinstance(item, Mapping)
+            ArtifactSpec.from_manifest(item) for item in raw_artifacts
         )
-        if len(artifacts) != len(raw_artifacts):
-            raise ModelCacheResolutionError(
-                "model_cache.manifest_invalid", "cache manifest artifacts are invalid"
-            )
         result = cls(
             model_content_sha256=_optional_digest(value.get("model_content_sha256")),
             recipe_revision_sha256=_optional_digest(
                 value.get("recipe_revision_sha256")
             ),
-            model_content_digests=tuple(str(item) for item in raw_model_content_digests),
+            model_content_digests=tuple(raw_model_content_digests),
             artifacts=tuple(sorted(artifacts, key=lambda item: item.key)),
             model_definition_ref=(
                 value.get("model_definition_ref")

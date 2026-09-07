@@ -20,7 +20,10 @@ from vonk_control.distribution import (
     ModelCacheVerifiedObjectSource,
 )
 from vonk_control.model_cache import (
+    ArtifactSetManifest,
+    ArtifactSpec,
     ModelCacheConflict,
+    ModelCacheResolutionError,
     ModelCacheService,
     _retry_after_seconds,
     _retryable_failure,
@@ -152,6 +155,58 @@ def _download(
         service.run_pending()
         operation = service.get_operation(operation.id)
     return operation
+
+
+def _manifest_document(tmp_path: Path) -> dict[str, object]:
+    data = b"manifest bytes"
+    source = tmp_path / "manifest.source"
+    source.write_bytes(data)
+    artifact = ArtifactSpec(
+        key="weights",
+        artifact_id="weights",
+        path="weights.bin",
+        kind="file",
+        repository=None,
+        source=source.as_uri(),
+        revision=None,
+        sha256=hashlib.sha256(data).hexdigest(),
+        expected_bytes=len(data),
+        roles=("model",),
+        model_content_sha256="a" * 64,
+    )
+    return ArtifactSetManifest(
+        model_content_sha256="a" * 64,
+        recipe_revision_sha256=None,
+        model_content_digests=("a" * 64,),
+        artifacts=(artifact,),
+    ).document()
+
+
+def test_cache_manifest_requires_exact_canonical_field_sets(tmp_path: Path) -> None:
+    document = _manifest_document(tmp_path)
+
+    with pytest.raises(ModelCacheResolutionError, match="manifest fields are invalid"):
+        ArtifactSetManifest.from_document({**document, "unexpected": True})
+    missing = dict(document)
+    missing.pop("model_content_digests")
+    with pytest.raises(ModelCacheResolutionError, match="manifest fields are invalid"):
+        ArtifactSetManifest.from_document(missing)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("download_bytes", 1.0), ("download_bytes", True), ("roles", ("model",))],
+)
+def test_cache_manifest_rejects_coercible_artifact_types(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    document = _manifest_document(tmp_path)
+    artifact = dict(document["artifacts"][0])
+    artifact[field] = value
+    document["artifacts"] = [artifact]
+
+    with pytest.raises(ModelCacheResolutionError, match="manifest"):
+        ArtifactSetManifest.from_document(document)
 
 
 def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> None:
