@@ -84,6 +84,13 @@ from .recipe_jobs import (
 from .recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
+from .recipe_observations import (
+    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
+    RecipeRunObservationGrantRequest,
+    RecipeRunObservationGrantWire,
+    RecipeRunObservationsWire,
+    RecipeRunObservationWire,
+)
 from .recipe_operations import (
     RECIPE_OPERATIONS,
     RecipeInstallPayload,
@@ -148,6 +155,7 @@ __all__ = [
     "MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES",
     "MAX_DOCUMENT_BYTES",
     "RECIPE_OPERATIONS",
+    "RECIPE_RUN_OBSERVATION_SCHEMA_VERSION",
     "WORKLOAD_RELEASE_LOCK_SCHEMA_ID",
     "AgentClaim",
     "AgentDirective",
@@ -210,7 +218,11 @@ __all__ = [
     "RecipeModelCleanupPayload",
     "RecipeModelCleanupResult",
     "RecipeOperationRequest",
+    "RecipeRunObservationGrantRequest",
+    "RecipeRunObservationGrantWire",
     "RecipeRunObservationReceiptClaims",
+    "RecipeRunObservationWire",
+    "RecipeRunObservationsWire",
     "RecipeStartCollectiveReadinessEvidence",
     "RecipeStartEvidence",
     "RecipeStartPayload",

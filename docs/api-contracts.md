@@ -52,9 +52,10 @@ document satisfies the contract.
 
 Rust uses `serde` structs and enums, with explicit semantic validation where
 types alone are insufficient. The current Rust protocol definitions are
-handwritten; they are not generated from Pydantic. The remaining job-envelope and signed observation
-consolidation is tracked in the launch progress document; adding Pydantic
-elsewhere does not fix drift. Distribution, enrollment, certificate rotation,
+handwritten; they are not generated from Pydantic. Job envelopes and signed
+observations use the shared model graph and connected wire checks. The retired
+operation graph removal is tracked in the launch progress document.
+Distribution, enrollment, certificate rotation,
 bootstrap, inventory, build/import, package and host-helper grants, compiled
 launch plans, and telemetry use shared Pydantic wire models. Enrollment returns the issued
 certificate directly; there is no pending-approval response or polling fallback.

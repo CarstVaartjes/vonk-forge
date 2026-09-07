@@ -176,12 +176,6 @@ class RecipeRunStatus:
     ranks: tuple[RecipeRunRankStatus, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class RecipeRunObservation:
-    run_id: str
-    ready: bool
-
-
 _TERMINAL_JOB_STATES = frozenset({"succeeded", "failed", "expired", "cancelled"})
 _DISTRIBUTED_OBSERVATION_GRACE_SECONDS = 120
 _RETRYABLE_IMAGE_DISTRIBUTION_STATES = frozenset({"failed", "waiting-for-operator"})
@@ -2071,7 +2065,13 @@ class RecipeOperationService:
         evidence_field = (
             "launch_evidence"
             if job.kind == "recipe.start"
-            and operation.payload.get("phase") == "rank-launch"
+            and (
+                operation.payload.get("phase") == "rank-launch"
+                or (
+                    operation.payload.get("run_generation") is not None
+                    and operation.payload.get("phase") is None
+                )
+            )
             else "node_evidence"
         )
         raw_node_evidence = recorded_result.get(evidence_field, {})
@@ -3709,8 +3709,8 @@ def _validate_rank_launch_evidence(
         "rank": operation.payload.get("rank"),
         "role": operation.payload.get("role"),
         "world_size": operation.payload.get("world_size"),
-        "local_address": str(operation.payload.get("local_address")),
-        "master_address": str(operation.payload.get("master_address")),
+        "local_address": operation.payload.get("local_address"),
+        "master_address": operation.payload.get("master_address"),
         "master_port": operation.payload.get("master_port"),
         "memory_reservation_bytes": operation.payload.get("reserved_memory_bytes"),
     }
@@ -3839,8 +3839,8 @@ def _validate_start_evidence(
         )
     if exact_inspection:
         comparisons["run_generation"] = operation.payload.get("run_generation")
-        comparisons["local_address"] = str(operation.payload.get("local_address"))
-        comparisons["master_address"] = str(operation.payload.get("master_address"))
+        comparisons["local_address"] = operation.payload.get("local_address")
+        comparisons["master_address"] = operation.payload.get("master_address")
         comparisons["master_port"] = operation.payload.get("master_port")
     if any(evidence.get(key) != value for key, value in comparisons.items()):
         raise RecipeOperationConflict(
@@ -3877,47 +3877,6 @@ def _aware(value: datetime) -> datetime:
     return (
         value if value.tzinfo is not None else value.replace(tzinfo=UTC)
     ).astimezone(UTC)
-
-
-def record_recipe_run_observations(
-    sessions: sessionmaker[Session],
-    node_id: str,
-    observed_at: datetime,
-    observations: tuple[RecipeRunObservation, ...],
-) -> None:
-    """Project one authenticated node's complete local recipe-run snapshot."""
-
-    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
-        raise ValueError("recipe run observation time must be timezone-aware")
-    observed = observed_at.astimezone(UTC)
-    by_run: dict[str, bool] = {}
-    for observation in observations:
-        if not isinstance(observation.ready, bool):
-            raise TypeError("recipe run readiness must be boolean")
-        if observation.run_id in by_run:
-            raise ValueError("recipe run observation is duplicated")
-        by_run[observation.run_id] = observation.ready
-    with sessions.begin() as session:
-        assigned = tuple(
-            session.scalars(
-                select(RunNode)
-                .join(RecipeRun, RecipeRun.id == RunNode.run_id)
-                .where(
-                    RunNode.node_id == node_id,
-                    RecipeRun.state == "running",
-                )
-                .order_by(RunNode.run_id)
-            )
-        )
-        for node in assigned:
-            run = session.get(RecipeRun, node.run_id)
-            if run is not None and run.plan.get("observation_schema_version") == 2:
-                continue
-            if _aware(node.updated_at) > observed:
-                continue
-            if node.state != "failed":
-                node.state = "running" if by_run.get(node.run_id, False) else "failed"
-            node.updated_at = observed
 
 
 def prepare_exact_recipe_run_observation_nodes(
@@ -3959,9 +3918,7 @@ __all__ = [
     "RecipeOperationConflict",
     "RecipeOperationService",
     "RecipeOperationView",
-    "RecipeRunObservation",
     "RecipeRunRankStatus",
     "RecipeRunStatus",
     "prepare_exact_recipe_run_observation_nodes",
-    "record_recipe_run_observations",
 ]

@@ -9,11 +9,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ConfigDict, Field, ValidationError
-from vonk_control.agent_api import (
-    GrantRequest,
-    HostHelperGrantResponse,
-    RecipeRunObservationsRequest,
-)
+from vonk_agent_protocol import RecipeRunObservationsWire
+from vonk_control.agent_api import GrantRequest, HostHelperGrantResponse
 from vonk_control.library_contract import (
     FreshnessPolicy,
     LibraryRecipeIdentity,
@@ -142,12 +139,12 @@ def test_representative_wire_models_reject_scalar_coercion() -> None:
         )
 
     with pytest.raises(ValidationError):
-        RecipeRunObservationsRequest.model_validate(
+        RecipeRunObservationsWire.model_validate(
             {"schema_version": True, "observed_at": "2026-01-01T00:00:00Z", "runs": []}
         )
     with pytest.raises(ValidationError):
-        RecipeRunObservationsRequest.model_validate(
-            {"schema_version": 1.0, "observed_at": "2026-01-01T00:00:00Z", "runs": []}
+        RecipeRunObservationsWire.model_validate(
+            {"schema_version": 2.0, "observed_at": "2026-01-01T00:00:00Z", "runs": []}
         )
     with pytest.raises(ValidationError):
         RecipeImageAvailabilityStart.model_validate_json(
@@ -185,8 +182,8 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
     def grant(body: GrantRequest) -> GrantRequest:
         return body
 
-    @app.post("/observations", response_model=RecipeRunObservationsRequest)
-    def observations(body: RecipeRunObservationsRequest) -> RecipeRunObservationsRequest:
+    @app.post("/observations", response_model=RecipeRunObservationsWire)
+    def observations(body: RecipeRunObservationsWire) -> RecipeRunObservationsWire:
         return body
 
     with TestClient(app) as client:
@@ -216,7 +213,7 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
             client.post(
                 "/observations",
                 json={
-                    "schema_version": 1.0,
+                    "schema_version": 2.0,
                     "observed_at": "2026-01-01T00:00:00Z",
                     "runs": [],
                 },
@@ -228,7 +225,7 @@ def test_fastapi_body_routes_reject_coercion_and_openapi_keeps_scalar_shapes() -
             client.post(
                 "/observations",
                 json={
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "observed_at": "2026-01-01T00:00:00Z",
                     "runs": [],
                 },

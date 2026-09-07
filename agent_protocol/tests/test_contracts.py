@@ -714,6 +714,7 @@ def test_authenticated_recipe_launch_claims_have_dedicated_document_ceiling(
             ],
             "mapping_id": "00000000-0000-4000-8000-000000000007",
             "mapping_generation": 1,
+            "run_generation": 1,
             "image_digest": compiled_plan["runtime"]["image_digest"],
             "plan_digest": "b" * 64,
             "alias": "synthetic-tiny",

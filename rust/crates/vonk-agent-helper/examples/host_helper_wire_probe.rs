@@ -6,16 +6,21 @@ use vonk_agent_helper::protocol::{
 };
 use vonk_agent_protocol::{RecipeRunObservationOutcome, canonical_json};
 
-const NOW: i64 = 2_100_000_000;
 const ALLOWED_GID: u32 = 971;
-const GRANT_PUBLIC_KEY: &str = "66cd608b928b88e50e0efeaa33faf1c43cefe07294b0b87e9fe0aba6a3cf7633";
 
 fn main() {
     let mut raw = Vec::new();
     io::stdin().read_to_end(&mut raw).unwrap();
     let raw = raw.strip_suffix(b"\n").unwrap_or(&raw);
     let grant = parse_request(raw).unwrap();
-    let public_key = hex::decode(GRANT_PUBLIC_KEY).unwrap();
+    let now = std::env::var("VONK_HOST_HELPER_WIRE_NOW")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(2_100_000_000);
+    let public_key = std::env::var("VONK_HOST_HELPER_GRANT_PUBLIC_KEY").unwrap_or_else(|_| {
+        "66cd608b928b88e50e0efeaa33faf1c43cefe07294b0b87e9fe0aba6a3cf7633".to_owned()
+    });
+    let public_key = hex::decode(public_key).unwrap();
     GrantVerifier::new(&public_key, ALLOWED_GID)
         .unwrap()
         .authorize(
@@ -25,7 +30,7 @@ fn main() {
                 primary_gid: ALLOWED_GID,
                 supplementary_gids: Vec::new(),
             },
-            NOW + 1,
+            now + 1,
         )
         .unwrap();
 
@@ -49,7 +54,7 @@ fn main() {
         request_sha256,
         observation_identity_sha256,
         RecipeRunObservationOutcome::Running,
-        NOW + 1,
+        now + 1,
     )
     .unwrap();
     println!(

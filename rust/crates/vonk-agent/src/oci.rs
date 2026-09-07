@@ -83,13 +83,6 @@ pub const MAX_MANAGED_RECIPE_RUNS: usize = 64;
 const MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES;
 const MAX_RUN_DIRECTORY_ENTRIES: usize = 4096;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservation {
-    pub run_id: String,
-    pub ready: bool,
-}
-
 #[derive(Debug, Clone)]
 pub struct RecipeRunInspectionPlan {
     pub binding: RecipeRunInspectionBinding,
@@ -190,13 +183,6 @@ struct RunLifecycle {
     placement: Placement,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     observation: Option<RecipeRunInspectionBinding>,
-}
-
-struct RecipeRunProbe {
-    run_id: String,
-    address: Option<IpAddr>,
-    port: u16,
-    health_path: String,
 }
 
 pub struct RuntimeStartPlan {
@@ -607,11 +593,16 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .collect::<Result<Vec<_>, _>>()?;
         let observation = identity
             .map(|identity| {
-                let local_address = placement.local_address.ok_or(OciError::Artifact)?;
-                let master_address = placement.master_address.ok_or(OciError::Artifact)?;
-                let master_port = placement.master_port.ok_or(OciError::Artifact)?;
-                if placement.world_size <= 1
-                    || identity.mapping_generation == 0
+                let (local_address, master_address, master_port) = if placement.world_size == 1 {
+                    (None, None, None)
+                } else {
+                    (
+                        Some(placement.local_address.ok_or(OciError::Artifact)?),
+                        Some(placement.master_address.ok_or(OciError::Artifact)?),
+                        Some(placement.master_port.ok_or(OciError::Artifact)?),
+                    )
+                };
+                if identity.mapping_generation == 0
                     || identity.run_generation == 0
                     || identity.recipe_content_sha256 != self.recipe_digest(installation_id)?
                 {
@@ -896,9 +887,24 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 || binding.rank != placement.rank
                 || binding.role != placement.role
                 || binding.world_size != placement.world_size
-                || Some(binding.local_address) != placement.local_address
-                || Some(binding.master_address) != placement.master_address
-                || Some(binding.master_port) != placement.master_port
+                || binding.local_address
+                    != if placement.world_size == 1 {
+                        None
+                    } else {
+                        placement.local_address
+                    }
+                || binding.master_address
+                    != if placement.world_size == 1 {
+                        None
+                    } else {
+                        placement.master_address
+                    }
+                || binding.master_port
+                    != if placement.world_size == 1 {
+                        None
+                    } else {
+                        placement.master_port
+                    }
                 || binding.port != placement.port
                 || binding.recipe_content_sha256 != self.recipe_digest(&installation_id)?
                 || binding.artifact_set_digest != self.artifact_set_digest(&installation_id)?
@@ -955,94 +961,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             });
         }
         Ok(plans)
-    }
-
-    pub fn recipe_run_observations(&self) -> Result<Vec<RecipeRunObservation>, OciError> {
-        let probes = self.recipe_run_probes()?;
-        probes
-            .into_iter()
-            .map(|probe| {
-                let ready = probe.address.is_some_and(|address| {
-                    self.readiness_request(address, probe.port, &probe.health_path)
-                });
-                Ok(RecipeRunObservation {
-                    run_id: probe.run_id,
-                    ready,
-                })
-            })
-            .collect()
-    }
-
-    fn recipe_run_probes(&self) -> Result<Vec<RecipeRunProbe>, OciError> {
-        let runs = self.data_root.join("runs");
-        let metadata = match fs::symlink_metadata(&runs) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-            Err(error) => return Err(error.into()),
-        };
-        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-            return Err(OciError::Artifact);
-        }
-        let mut run_ids = Vec::new();
-        for entry in fs::read_dir(&runs)? {
-            if run_ids.len() == MAX_RUN_DIRECTORY_ENTRIES {
-                return Err(OciError::Artifact);
-            }
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            let run_id = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| OciError::Artifact)?;
-            if !canonical_uuid(&run_id) || !file_type.is_dir() || file_type.is_symlink() {
-                return Err(OciError::Artifact);
-            }
-            run_ids.push(run_id);
-        }
-        run_ids.sort_unstable();
-
-        let mut probes = Vec::with_capacity(run_ids.len());
-        for run_id in run_ids {
-            let lifecycle = match self.load_run_lifecycle(&run_id) {
-                Ok(lifecycle) => lifecycle,
-                Err(OciError::Artifact | OciError::Json(_) | OciError::Workload(_)) => continue,
-                Err(error) => return Err(error),
-            };
-            let Some((spec, _, placement, observation)) = lifecycle else {
-                continue;
-            };
-            if observation.is_some() {
-                continue;
-            }
-            if placement.world_size > 1 {
-                return Err(OciError::Artifact);
-            }
-            let Some(endpoint) = spec.endpoint.as_ref() else {
-                continue;
-            };
-            if endpoint.health_path.contains(['?', '#', '\0'])
-                || !endpoint
-                    .health_path
-                    .bytes()
-                    .all(|byte| byte.is_ascii_graphic())
-            {
-                continue;
-            }
-            if probes.len() == MAX_MANAGED_RECIPE_RUNS {
-                return Err(OciError::Artifact);
-            }
-            probes.push(RecipeRunProbe {
-                run_id,
-                address: Some(
-                    placement
-                        .endpoint_address
-                        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
-                ),
-                port: placement.port,
-                health_path: endpoint.health_path.clone(),
-            });
-        }
-        Ok(probes)
     }
 
     pub(crate) fn readiness_request(&self, address: IpAddr, port: u16, health_path: &str) -> bool {
@@ -2065,6 +1983,7 @@ mod tests {
         time::Duration,
     };
     use tempfile::tempdir;
+    use uuid::Uuid;
 
     struct NoProcess;
 
@@ -2241,6 +2160,56 @@ mod tests {
 
     fn authorize_installation(installation: &Path, recipe_digest: &str) {
         fs::write(installation.join("recipe-content.sha256"), recipe_digest).unwrap();
+    }
+
+    #[test]
+    fn singleton_start_persists_authoritative_observation_binding_without_rendezvous_defaults() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        let recipe_digest = "9".repeat(64);
+        authorize_installation(&installation, &recipe_digest);
+        let run_id = Uuid::new_v4().to_string();
+        let placement: crate::workloads::Placement =
+            serde_json::from_value(serde_json::to_value(&plan.runtime.placement).unwrap()).unwrap();
+        let identity = super::RecipeRunStartIdentity {
+            mapping_generation: 12,
+            mapping_id: Uuid::new_v4(),
+            recipe_content_sha256: recipe_digest,
+            recipe_revision_id: Uuid::new_v4(),
+            run_generation: 7,
+        };
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+
+        runtime
+            .prepare_start_with_inspection_identity(
+                &plan,
+                &installation_id,
+                &run_id,
+                &placement,
+                &identity,
+            )
+            .unwrap();
+
+        let lifecycle: Value = serde_json::from_slice(
+            &fs::read(
+                data.path()
+                    .join("run-metadata")
+                    .join(&run_id)
+                    .join("lifecycle.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let observation = lifecycle["observation"].clone();
+        assert!(observation["local_address"].is_null());
+        assert!(observation["master_address"].is_null());
+        assert!(observation["master_port"].is_null());
+        assert_eq!(observation["run_generation"], 7);
+        assert_eq!(observation["mapping_generation"], 12);
+        let binding: vonk_agent_protocol::RecipeRunInspectionBinding =
+            serde_json::from_value(observation).unwrap();
+        binding.validate().unwrap();
     }
 
     #[test]

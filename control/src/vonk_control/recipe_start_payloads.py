@@ -86,6 +86,8 @@ def build_recipe_start_payload(
                     "run_generation": run_generation,
                 }
             )
+        elif run_generation is not None:
+            payload["run_generation"] = run_generation
         RecipeStartPayload.model_validate(payload)
     except (KeyError, TypeError, ValueError) as error:
         raise RecipeStartPayloadError("recipe start payload is invalid") from error

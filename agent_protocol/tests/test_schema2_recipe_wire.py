@@ -66,6 +66,7 @@ def _start() -> dict[str, object]:
         "local_address": None,
         "master_address": None,
         "master_port": None,
+        "run_generation": 1,
     }
 
 
@@ -412,6 +413,13 @@ def test_schema_version_is_an_integer_discriminator() -> None:
 
 
 def test_start_phase_shape_matches_single_and_distributed_controller_modes() -> None:
+    singleton_with_generation = _start()
+    singleton_with_generation["run_generation"] = 1
+    singleton = RecipeOperationRequest.parse(
+        AgentOperation.RECIPE_START, singleton_with_generation
+    )
+    assert singleton.run_generation == 1
+
     phased_single = _start()
     phased_single.update(
         phase="rank-launch",

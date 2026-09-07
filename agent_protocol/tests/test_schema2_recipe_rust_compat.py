@@ -73,6 +73,7 @@ def _start(plan: dict[str, Any] | None = None) -> dict[str, Any]:
         "local_address": None,
         "master_address": None,
         "master_port": None,
+        "run_generation": 1,
     }
 
 
@@ -145,6 +146,7 @@ def _bridge_plan() -> dict[str, Any]:
 def _job_plan() -> dict[str, Any]:
     plan = copy.deepcopy(PLAN)
     plan["endpoint"] = None
+    plan["runtime"]["placement"]["port"] = None
     plan["job"] = {
         "interface": "artifact-job",
         "input": {"path": "/inputs", "declared_content": {"vendor": "free-form"}},

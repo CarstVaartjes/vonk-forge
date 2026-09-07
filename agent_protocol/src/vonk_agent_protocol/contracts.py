@@ -196,8 +196,15 @@ class _RecipeStartEvidenceCommon(WireModel):
 
 
 class RecipeStartSingleEvidence(_RecipeStartEvidenceCommon):
+    rank: Literal[0]
+    world_size: Literal[1]
     endpoint: str
     ready: Literal[True]
+    run_generation: int = Field(strict=True, ge=1)
+    runtime_arguments_sha256: DigestText
+    local_address: None
+    master_address: None
+    master_port: None
 
 
 class RecipeStartRankLaunchEvidence(_RecipeStartEvidenceCommon):

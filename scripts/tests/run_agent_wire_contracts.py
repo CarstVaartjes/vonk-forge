@@ -19,6 +19,7 @@ PROBES = {
     "VONK_INVENTORY_WIRE_PROBE": ("vonk-agent-protocol", "inventory_wire_probe"),
     "VONK_TELEMETRY_WIRE_PROBE": ("vonk-agent", "telemetry_wire_probe"),
     "VONK_HOST_HELPER_WIRE_PROBE": ("vonk-agent-helper", "host_helper_wire_probe"),
+    "VONK_RECIPE_OBSERVATION_WIRE_PROBE": ("vonk-agent", "recipe_observation_wire_probe"),
     "VONK_COMPILED_PLAN_WIRE_PROBE": ("vonk-agent", "compiled_plan_wire_probe"),
 }
 

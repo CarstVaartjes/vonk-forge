@@ -122,9 +122,12 @@ class RecipeStartPayload(_StrictPayload):
         if self.world_size == 1 and (
             self.phase is not None
             or self.start_deadline is not None
-            or self.run_generation is not None
         ):
             raise ValueError("single-node start phases are invalid")
+        if self.world_size == 1 and (
+            self.run_generation is None or self.run_generation < 1
+        ):
+            raise ValueError("single-node run generation is required")
         if self.phase is not None:
             try:
                 deadline = datetime.fromisoformat(self.start_deadline or "")
@@ -132,7 +135,7 @@ class RecipeStartPayload(_StrictPayload):
                 raise ValueError("start deadline is invalid") from error
             if deadline.tzinfo is None or deadline.utcoffset() != UTC.utcoffset(deadline):
                 raise ValueError("start deadline must be UTC")
-        if self.phase is None and (self.start_deadline is not None or self.run_generation is not None):
+        if self.phase is None and self.start_deadline is not None:
             raise ValueError("start phase binding is invalid")
         if self.phase is not None and (self.start_deadline is None or self.run_generation is None or self.run_generation < 1):
             raise ValueError("start phase binding is invalid")

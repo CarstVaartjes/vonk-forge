@@ -123,10 +123,10 @@ def _bridge(probe: Path, rows: tuple[AgentOperation, ...]) -> tuple[AgentResult,
         if row.kind == "recipe.install":
             assert set(result.result) == {"installed_bytes"}
         elif row.kind == "recipe.stop":
-            assert result.result == {"stopped": True}
+            assert result.result.model_dump(mode="json") == {"stopped": True}
         elif row.kind == "recipe.uninstall":
             assert set(result.result) == {"uninstalled", "removed_model_bytes"}
-            assert result.result == {
+            assert result.result.model_dump(mode="json") == {
                 "uninstalled": True,
                 "removed_model_bytes": 0,
             }

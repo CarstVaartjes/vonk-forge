@@ -1043,7 +1043,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
 ) -> None:
     client, _services, _, clock = agent_system
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "observed_at": clock.now.isoformat(),
         "runs": [],
     }
@@ -1059,6 +1059,14 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
     assert (
         client.post("/agent/v1/recipe-runs/observations", json=payload).status_code
         == 401
+    )
+    assert (
+        client.post(
+            "/agent/v1/recipe-runs/observations",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=payload | {"schema_version": 1},
+        ).status_code
+        == 422
     )
     assert (
         client.post(

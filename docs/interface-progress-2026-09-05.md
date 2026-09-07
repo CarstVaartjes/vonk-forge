@@ -104,7 +104,19 @@ separate results.
   superseded by Run/Switch and is being removed together with its definitions
   and consumers. Current queue/fencing, compiled route authority, inventory,
   and signed readiness behavior remain owned by their current implementations.
-- Signed run-observation composition and old orchestration removal remain in progress.
+- Signed run observations now use one current envelope and shared Python/Rust
+  structures. Singleton observations carry explicit null rendezvous fields;
+  omissions are rejected by both parsers. The complete composed wire suite
+  passes 647 checks using newly built Rust probes in unprivileged ARM64
+  OrbStack. The focused Python/API/lifecycle composition passes 583 tests
+  with seven opt-in skips. Connected readiness checks pass actual start results
+  through Controller persistence, grant issuance, helper signing, Rust
+  serialization and Controller consumption. They do not execute a model.
+- Old orchestration removal remains in progress. Its complete retirement is
+  explicitly authorized. Automatic review rejected deleting still-referenced
+  modules, so the current route authority and API/worker wiring are being
+  made independent first; old modules are not being preserved as a supported
+  execution path.
   The bundled protocol wheel and generated API clients must be refreshed after
   those merges, followed by the combined suite. These focused checks do not
   constitute a release-wide pass.

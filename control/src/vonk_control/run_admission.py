@@ -576,10 +576,10 @@ class RunAdmissionService:
             and interfaces[0].get("adapter")
             in {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
         )
-        topology = recipe_topology(revision.document)
-        observation_schema_version = (
-            2 if len(plan.nodes) > 1 and topology.get("mode") == "distributed" else 1
-        )
+        # Exact signed observation is the sole current run contract for every
+        # topology.  Singleton runs retain a durable generation while their
+        # rendezvous fields remain explicitly nullable.
+        observation_schema_version = 2
         run = RecipeRun(
             installation_id=plan.installation_id,
             mapping_id=plan.mapping_id,
