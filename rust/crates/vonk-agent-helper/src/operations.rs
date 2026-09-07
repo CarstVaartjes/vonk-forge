@@ -4349,7 +4349,7 @@ mod tests {
         let target = "/models/primary";
         assert!(
             validate_docker_run(
-                &runtime_arguments(&roots, &[(source, &target, true)]),
+                &runtime_arguments(&roots, &[(source, target, true)]),
                 &roots,
                 None,
             )
