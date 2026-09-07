@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, FixedOffset, Utc};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize, de::DeserializeOwned, de::Error as DeError};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -297,31 +297,77 @@ pub struct InventoryRequest {
     pub gpu_count: u32,
     pub artifact_store_read_only: bool,
     pub capabilities: Vec<String>,
+    #[serde(deserialize_with = "deserialize_canonical_ip")]
     pub fabric_address: Option<std::net::IpAddr>,
     pub fabric_bandwidth_mbps: Option<u64>,
     pub nvidia_driver_version: String,
     pub container_runtime_version: String,
 }
 
+fn deserialize_canonical_ip<'de, D>(deserializer: D) -> Result<Option<std::net::IpAddr>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    raw.map(|value| {
+        let parsed: std::net::IpAddr = value
+            .parse()
+            .map_err(|_| D::Error::custom("invalid IP address"))?;
+        if parsed.to_string() != value {
+            return Err(D::Error::custom("non-canonical IP address"));
+        }
+        Ok(parsed)
+    })
+    .transpose()
+}
+
 impl InventoryRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
+            || self.disk_total_bytes > 16 * 1024_u64.pow(4)
+            || self.disk_free_bytes > 16 * 1024_u64.pow(4)
+            || self.host_memory_total_bytes > 16 * 1024_u64.pow(4)
+            || self.host_memory_free_bytes > 16 * 1024_u64.pow(4)
+            || self.gpu_memory_total_bytes > 16 * 1024_u64.pow(4)
+            || self.gpu_memory_free_bytes > 16 * 1024_u64.pow(4)
+            || self.gpu_count > 64
             || self.disk_free_bytes > self.disk_total_bytes
             || self.host_memory_free_bytes > self.host_memory_total_bytes
             || self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
-            || self.capabilities.iter().any(|value| value.is_empty())
+            || self.capabilities.len() > 64
+            || self
+                .capabilities
+                .iter()
+                .any(|value| !valid_inventory_capability(value))
             || {
                 let mut unique = BTreeSet::new();
                 self.capabilities.iter().any(|value| !unique.insert(value))
             }
             || self.nvidia_driver_version.is_empty()
             || self.container_runtime_version.is_empty()
+            || self.nvidia_driver_version.len() > 256
+            || self.container_runtime_version.len() > 256
+            || !self.nvidia_driver_version.is_ascii()
+            || !self.container_runtime_version.is_ascii()
             || (self.fabric_address.is_none() != self.fabric_bandwidth_mbps.is_none())
+            || self
+                .fabric_bandwidth_mbps
+                .is_some_and(|value| !(1..=1_000_000).contains(&value))
         {
             return Err(ProtocolError::Identity("inventory request"));
         }
         Ok(())
     }
+}
+
+fn valid_inventory_capability(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value.bytes().enumerate().all(|(index, byte)| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
+        })
 }
 
 impl ArtifactDistributionRequest {
@@ -1140,6 +1186,50 @@ impl RecipeOperationRequest {
         } else {
             Err(ProtocolError::Identity("recipe payload"))
         }
+    }
+}
+
+#[cfg(test)]
+mod inventory_tests {
+    use super::*;
+
+    fn inventory() -> InventoryRequest {
+        InventoryRequest {
+            schema_version: 1,
+            observed_at: "2026-08-03T00:00:00Z".parse().unwrap(),
+            disk_total_bytes: 2 * 1024_u64.pow(4),
+            disk_free_bytes: 1024_u64.pow(4),
+            host_memory_total_bytes: 2 * 1024_u64.pow(4),
+            host_memory_free_bytes: 1024_u64.pow(4),
+            gpu_memory_total_bytes: 100_000,
+            gpu_memory_free_bytes: 80_000,
+            gpu_count: 1,
+            artifact_store_read_only: false,
+            capabilities: vec!["recipe.build.v1".to_owned()],
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+            nvidia_driver_version: "550.1".to_owned(),
+            container_runtime_version: "podman-5".to_owned(),
+        }
+    }
+
+    #[test]
+    fn inventory_validation_matches_python_bounds_and_shapes() {
+        let value = inventory();
+        value.validate().unwrap();
+
+        let mut invalid = value.clone();
+        invalid.gpu_count = 65;
+        assert!(invalid.validate().is_err());
+        let mut invalid = value.clone();
+        invalid.capabilities = vec!["Recipe.Build".to_owned()];
+        assert!(invalid.validate().is_err());
+        let mut invalid = value.clone();
+        invalid.fabric_bandwidth_mbps = Some(0);
+        assert!(invalid.validate().is_err());
+        let mut invalid = value;
+        invalid.nvidia_driver_version = "é".to_owned();
+        assert!(invalid.validate().is_err());
     }
 }
 

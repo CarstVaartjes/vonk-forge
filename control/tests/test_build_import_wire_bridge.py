@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import subprocess
 import uuid
@@ -9,12 +10,21 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
+    AgentClaim,
+    AgentOperation as ProtocolOperation,
     RecipeBuildEvidence,
     RecipeBuildRequest,
     RecipeImageImportEvidence,
     RecipeImageImportRequest,
+    canonical_message,
 )
-from vonk_control.models import AgentOperation, Job, NodeArtifact, RecipeBuild
+from vonk_control.models import (
+    AgentOperation,
+    ClusterMapping,
+    ClusterMappingNode,
+    NodeArtifact,
+    RecipeBuild,
+)
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_operations import (
     RecipeOperationService,
@@ -88,6 +98,16 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
         )
         return json.loads(completed.stdout)
 
+    def probe_claim(claim: AgentClaim) -> dict[str, object]:
+        completed = subprocess.run(
+            [str(build_import_wire_probe)],
+            input=json.dumps({"claim": json.loads(canonical_message(claim))}) + "\n",
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        return json.loads(completed.stdout)
+
     build_wire = probe("recipe.build.v1", plan.agent_payload)
     build_request = RecipeBuildRequest.model_validate(build_wire["payload"])
     build_evidence = RecipeBuildEvidence.model_validate(build_wire["evidence"])
@@ -104,56 +124,78 @@ def test_queued_build_and_import_cross_rust_parser_and_typed_evidence(
             now=now,
         )
 
-    import_payload = {
-        "schema_version": 1,
-        "kind": "recipe.image.import.v1",
-        "build_id": plan.build_id,
-        "mapping_id": str(uuid.uuid4()),
-        "mapping_generation": 1,
-        "source_node_id": node_id,
-        "image_digest": build_evidence.image_digest,
-        "oci_layout_sha256": build_evidence.oci_layout_sha256,
-        "image_bytes": build_evidence.image_bytes,
-    }
-    import_wire = probe("recipe.image.import.v1", import_payload)
+    with sessions.begin() as session:
+        mapping = ClusterMapping(
+            recipe_revision_id=revision.id,
+            topology_name="wire-bridge",
+            generation=1,
+            node_count=1,
+            state="ready",
+            parameters={},
+            placement_digest="e" * 64,
+            endpoint_owner_node_id=node_id,
+            created_by="test",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(mapping)
+        session.flush()
+        session.add(
+            ClusterMappingNode(
+                mapping_id=mapping.id,
+                node_id=node_id,
+                rank=0,
+                role="entrypoint",
+                endpoint_owner=True,
+                created_at=now,
+            )
+        )
+        mapping_id = mapping.id
+    preview = operations.preview_image_distribution(
+        plan.build_id, mapping_id, mapping_generation=1
+    )
+    import_operation = operations.distribute_image(
+        plan.build_id,
+        mapping_id,
+        mapping_generation=1,
+        plan_digest=preview.plan_digest,
+        actor="test",
+        request_id=str(uuid.uuid4()),
+    )
+    with sessions() as session:
+        operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == import_operation.id
+            )
+        )
+        assert operation is not None
+        import_payload = dict(operation.payload)
+        import_claim = AgentClaim(
+            schema_version=1,
+            job_id=operation.parent_job_id,
+            operation_id=operation.id,
+            attempt=1,
+            fence=str(uuid.uuid4()),
+            node_id=operation.node_id,
+            operation=ProtocolOperation.RECIPE_IMAGE_IMPORT,
+            authority_revision=operation.authority_revision,
+            payload_digest=hashlib.sha256(canonical_message(operation.payload)).hexdigest(),
+            payload=operation.payload,
+            deadline=now,
+        )
+    import_wire = probe_claim(import_claim)
     import_request = RecipeImageImportRequest.model_validate(import_wire["payload"])
     import_evidence = RecipeImageImportEvidence.model_validate(import_wire["evidence"])
     assert import_request.build_id == plan.build_id
     assert import_evidence.build_id == plan.build_id
 
     with sessions.begin() as session:
-        job_id = str(uuid.uuid4())
-        session.add(
-            Job(
-                id=job_id,
-                request_id=str(uuid.uuid4()),
-                kind="recipe.image.import.v1",
-                state="running",
-                actor="test",
-                authority_revision="a" * 64,
-                targets=[node_id],
-                payload_digest="c" * 64,
-                payload=import_payload,
-                current_attempt=1,
-                created_at=now,
-                updated_at=now,
+        operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == import_operation.id
             )
         )
-        operation = AgentOperation(
-            id=str(uuid.uuid4()),
-            parent_job_id=job_id,
-            node_id=node_id,
-            kind="recipe.image.import.v1",
-            payload_digest="d" * 64,
-            payload=import_payload,
-            authority_revision="a" * 64,
-            state="running",
-            current_attempt=1,
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(operation)
-        session.flush()
+        assert operation is not None
         _record_image_import_evidence(
             session,
             operation,
@@ -185,5 +227,33 @@ def test_build_wire_rejects_scalar_coercion(tmp_path: Path) -> None:
             RecipeBuildRequest.model_validate(malformed)
     malformed = dict(payload)
     malformed["arguments"] = [{"name": "build_arg", "value": 1.0}]
+    with pytest.raises(ValueError):
+        RecipeBuildRequest.model_validate(malformed)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    (
+        (("capabilities",), ["SYS_ADMIN"]),
+        (("capabilities",), ["DAC_OVERRIDE", "DAC_OVERRIDE"]),
+        (("network", "mode"), "public"),
+        (("limits", "gpu"), 1),
+        (("options", "layer_compression"), "zstd"),
+    ),
+)
+def test_build_wire_preserves_rust_security_invariants(
+    tmp_path: Path, path: tuple[str, ...], value: object
+) -> None:
+    sessions, bundles, now, node_id, revision = setup(tmp_path)
+    payload = (
+        RecipeBuildService(sessions, bundles=bundles)
+        .plan(revision.id, node_id, now=now)
+        .agent_payload
+    )
+    malformed = json.loads(json.dumps(payload))
+    target = malformed
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
     with pytest.raises(ValueError):
         RecipeBuildRequest.model_validate(malformed)

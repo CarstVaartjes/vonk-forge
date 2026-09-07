@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
@@ -17,7 +17,7 @@ _CAPABILITY = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}\Z")
 def _strict_json_datetime(value: object) -> object:
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return datetime.fromisoformat(value)
         except ValueError as error:
             raise ValueError("inventory observed_at is invalid") from error
     return value
@@ -42,9 +42,7 @@ class InventoryRequest(WireModel):
     artifact_store_read_only: bool
     capabilities: list[str] = Field(max_length=64)
     fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: int | None = Field(
-        default=None, ge=1, le=1_000_000
-    )
+    fabric_bandwidth_mbps: int | None = Field(default=None, ge=1, le=1_000_000)
     nvidia_driver_version: str = Field(min_length=1, max_length=256)
     container_runtime_version: str = Field(min_length=1, max_length=256)
 
@@ -82,4 +80,3 @@ class InventoryRequest(WireModel):
         if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
             raise ValueError("inventory observed_at must be timezone-aware")
         return self
-
