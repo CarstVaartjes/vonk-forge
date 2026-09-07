@@ -234,6 +234,20 @@ def test_build_wire_rejects_scalar_coercion(tmp_path: Path) -> None:
         RecipeBuildRequest.model_validate(malformed)
 
 
+def test_build_wire_schema_publishes_runtime_scalar_constraints() -> None:
+    schema = RecipeBuildRequest.model_json_schema()
+    options = schema["$defs"]["RecipeBuildOptions"]["properties"]
+    assert options["layer_compression"]["enum"] == ["disabled", "gzip"]
+    assert options["timestamp"]["anyOf"][0] == {
+        "maximum": 4_102_444_800,
+        "minimum": 0,
+        "type": "integer",
+    }
+    environment = schema["$defs"]["RecipeBuildEnvironmentArgument"]
+    assert environment["properties"]["name"]["pattern"] == r"^[A-Z][A-Z0-9_]{0,127}$"
+    assert schema["properties"]["schema_version"]["const"] == 1
+
+
 @pytest.mark.parametrize(
     ("path", "value"),
     (

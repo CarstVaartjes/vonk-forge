@@ -20,6 +20,26 @@ UuidId = Annotated[
 ]
 NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
 _NAME = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
+BuildArgumentName = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9._-]{0,63}$"),
+]
+EnvironmentName = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=128, pattern=r"^[A-Z][A-Z0-9_]{0,127}$"),
+]
+MetadataName = Annotated[
+    str,
+    StringConstraints(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$"
+    ),
+]
+OsFeature = Annotated[
+    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+]
+OsVersion = Annotated[
+    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._+-]+$")
+]
 _CAPABILITIES = {
     "CHOWN",
     "DAC_OVERRIDE",
@@ -102,57 +122,18 @@ def _validate_options(options: RecipeBuildOptions) -> None:
         raise ValueError("additional build contexts are invalid")
     for entries in (options.annotations, options.labels, options.layer_labels):
         names = [item.name for item in entries]
-        if len(set(names)) != len(names) or any(
-            not re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$", item.name)
-            or "\x00" in item.value
-            for item in entries
-        ):
+        if len(set(names)) != len(names):
             raise ValueError("build metadata is invalid")
     environment = [item.name for item in options.environment]
-    if len(set(environment)) != len(environment) or any(
-        not re.fullmatch(r"^[A-Z][A-Z0-9_]{0,127}$", item) for item in environment
-    ):
+    if len(set(environment)) != len(environment):
         raise ValueError("build environment is invalid")
     if options.ignorefile is not None and not _bundle_path(options.ignorefile):
         raise ValueError("build ignorefile is invalid")
-    if options.layer_compression not in {"disabled", "gzip"} or options.squash not in {
-        "none",
-        "new",
-        "all",
-    }:
-        raise ValueError("build layer options are invalid")
-    if any(
-        not item
-        or len(item) > 64
-        or any(
-            char
-            not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
-            for char in item
-        )
-        for item in options.os_features
-    ) or len(set(options.os_features)) != len(options.os_features):
+    if len(set(options.os_features)) != len(options.os_features):
         raise ValueError("build OS features are invalid")
-    if options.os_version is not None and (
-        not options.os_version
-        or len(options.os_version) > 64
-        or any(
-            char
-            not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-"
-            for char in options.os_version
-        )
-    ):
-        raise ValueError("build OS version is invalid")
-    if options.timestamp is not None and options.timestamp > 4_102_444_800:
-        raise ValueError("build timestamp is invalid")
-    if len(set(options.unset_environment)) != len(options.unset_environment) or any(
-        not re.fullmatch(r"^[A-Z][A-Z0-9_]{0,127}$", item)
-        for item in options.unset_environment
-    ):
+    if len(set(options.unset_environment)) != len(options.unset_environment):
         raise ValueError("build unset environment is invalid")
-    if len(set(options.unset_labels)) != len(options.unset_labels) or any(
-        not re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$", item)
-        for item in options.unset_labels
-    ):
+    if len(set(options.unset_labels)) != len(options.unset_labels):
         raise ValueError("build unset labels are invalid")
 
 
@@ -167,6 +148,11 @@ class RecipeBuildArgument(WireModel):
     value: JsonScalar
 
 
+class RecipeBuildEnvironmentArgument(WireModel):
+    name: EnvironmentName
+    value: JsonScalar
+
+
 class RecipeBuildBaseImage(WireModel):
     manifest_digest: OciDigest
     reference: str = Field(min_length=1, max_length=512)
@@ -178,38 +164,38 @@ class RecipeBuildNetwork(WireModel):
 
 
 class RecipeBuildAdditionalContext(WireModel):
-    name: str = Field(min_length=1, max_length=64)
+    name: BuildArgumentName
     path: str = Field(min_length=1, max_length=512)
 
 
 class RecipeBuildMetadata(WireModel):
-    name: str = Field(min_length=1, max_length=128)
-    value: str = Field(max_length=1024)
+    name: MetadataName
+    value: Annotated[str, StringConstraints(max_length=1024, pattern=r"^[^\x00]*$")]
 
 
 class RecipeBuildOptions(WireModel):
     additional_contexts: list[RecipeBuildAdditionalContext] = Field(max_length=16)
     annotations: list[RecipeBuildMetadata] = Field(max_length=64)
-    environment: list[RecipeBuildArgument] = Field(max_length=64)
+    environment: list[RecipeBuildEnvironmentArgument] = Field(max_length=64)
     format: Literal["oci", "docker"]
     identity_label: bool
     ignorefile: str | None = Field(default=None, max_length=512)
     jobs: int = Field(ge=1, le=32)
     labels: list[RecipeBuildMetadata] = Field(max_length=64)
-    layer_compression: str = Field(min_length=1, max_length=64)
+    layer_compression: Literal["disabled", "gzip"]
     layer_labels: list[RecipeBuildMetadata] = Field(max_length=64)
     layers: bool
     no_hostname: bool
     no_hosts: bool
     omit_history: bool
-    os_features: list[str] = Field(max_length=32)
-    os_version: str | None = Field(default=None, max_length=64)
+    os_features: list[OsFeature] = Field(max_length=32)
+    os_version: OsVersion | None = None
     shm_bytes: int = Field(ge=65_536, le=16 * 1024**4)
     skip_unused_stages: bool
     squash: Literal["none", "new", "all"]
-    timestamp: int | None = Field(default=None, ge=0)
-    unset_environment: list[str] = Field(max_length=64)
-    unset_labels: list[str] = Field(max_length=64)
+    timestamp: int | None = Field(default=None, ge=0, le=4_102_444_800)
+    unset_environment: list[EnvironmentName] = Field(max_length=64)
+    unset_labels: list[MetadataName] = Field(max_length=64)
 
 
 class RecipeBuildLimits(WireModel):
