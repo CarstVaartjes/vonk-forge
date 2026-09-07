@@ -124,7 +124,15 @@ def test_availability_error_json_uses_shared_failure_fields() -> None:
 class _StrictTaskClient(_Client):
     """Fixture transport that rejects route, query, and body drift."""
 
-    def request(self, method, path, payload=None, *, extra_headers=None, query=None):
+    def request(
+        self,
+        method,
+        path,
+        payload=None,
+        *,
+        extra_headers=None,
+        query=None,
+    ):
         allowed = {
             ("POST", "/api/v1/fleet-profiles"): {"name", "scope", "assignments"},
             ("POST", "/api/v1/fleet-profiles/profile-1/duplicate"): {"name", "scope", "request_key"},
