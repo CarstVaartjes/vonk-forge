@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from email.message import Message
 from pathlib import Path
 from typing import Self
@@ -307,6 +308,50 @@ def test_request_rejects_scalar_and_unknown_request_fields(
             payload,
             request_model=CancelRequest,
         )
+
+
+def test_nested_generated_models_validate_concurrently_without_context_leaks(
+    tmp_path: Path,
+) -> None:
+    capabilities = {
+        "schema_version": 1,
+        "storage": {
+            "in_flight_uploads": 0,
+            "max_stored_bytes": 1024,
+            "remaining_bytes": 1024,
+            "reserved_bytes": 0,
+            "used_bytes": 0,
+        },
+        "transport": {
+            "max_input_file_bytes": 512,
+            "max_input_files": 32,
+            "max_input_total_bytes": 1024,
+            "max_output_file_bytes": 1024,
+            "max_output_files": 32,
+            "max_output_total_bytes": 2048,
+            "max_timeout_seconds": 3600,
+            "reserved_input_names": ["manifest.json"],
+        },
+    }
+    client = ControlClient(
+        "https://forge.example.test",
+        _token(tmp_path),
+        opener=lambda *_args, **_kwargs: _Response(200, capabilities),
+    )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(
+            executor.map(
+                lambda _index: client.request(
+                    "GET",
+                    "/api/v1/artifact-jobs/capabilities",
+                    response_model=ArtifactJobCapabilitiesResponse,
+                ),
+                range(32),
+            )
+        )
+
+    assert results == [capabilities] * 32
 
 
 def test_artifact_input_upload_streams_the_reverified_local_file(

@@ -289,11 +289,16 @@ def _generated_model_type(name: str, model: type[GeneratedJSONModel]) -> object:
     return getattr(module, name)
 
 
-def _validate_generated_value(value: object, annotation: object, path: str) -> None:
+def _validate_generated_value(
+    value: object,
+    annotation: object,
+    path: str,
+    owner_model: type[GeneratedJSONModel],
+) -> None:
     if isinstance(annotation, str):
-        annotation = _generated_model_type(annotation, _validation_model)
+        annotation = _generated_model_type(annotation, owner_model)
     elif isinstance(annotation, ForwardRef):
-        annotation = _generated_model_type(annotation.__forward_arg__, _validation_model)
+        annotation = _generated_model_type(annotation.__forward_arg__, owner_model)
     if annotation is Any or annotation is object:
         return
     origin = get_origin(annotation)
@@ -301,7 +306,10 @@ def _validate_generated_value(value: object, annotation: object, path: str) -> N
     if origin in (types.UnionType,):
         if any(
             (candidate is type(None) and value is None)
-            or (candidate is not type(None) and _value_matches(value, candidate))
+            or (
+                candidate is not type(None)
+                and _value_matches(value, candidate, owner_model)
+            )
             for candidate in args
         ):
             return
@@ -309,7 +317,10 @@ def _validate_generated_value(value: object, annotation: object, path: str) -> N
     if origin is not None and str(origin) == "typing.Union":
         if any(
             (candidate is type(None) and value is None)
-            or (candidate is not type(None) and _value_matches(value, candidate))
+            or (
+                candidate is not type(None)
+                and _value_matches(value, candidate, owner_model)
+            )
             for candidate in args
         ):
             return
@@ -325,15 +336,17 @@ def _validate_generated_value(value: object, annotation: object, path: str) -> N
             raise TypeError(f"{path} must be an array")
         item_annotation = args[0] if args else Any
         for index, item in enumerate(value):
-            _validate_generated_value(item, item_annotation, f"{path}[{index}]")
+            _validate_generated_value(
+                item, item_annotation, f"{path}[{index}]", owner_model
+            )
         return
     if origin in (dict,):
         if not isinstance(value, dict):
             raise TypeError(f"{path} must be an object")
         key_annotation, item_annotation = args or (Any, Any)
         for key, item in value.items():
-            _validate_generated_value(key, key_annotation, f"{path}.<key>")
-            _validate_generated_value(item, item_annotation, f"{path}.{key}")
+            _validate_generated_value(key, key_annotation, f"{path}.<key>", owner_model)
+            _validate_generated_value(item, item_annotation, f"{path}.{key}", owner_model)
         return
     if annotation is type(None):
         if value is not None:
@@ -360,13 +373,19 @@ def _validate_generated_value(value: object, annotation: object, path: str) -> N
     elif annotation is types.NoneType:
         valid = value is None
     else:
-        valid = _value_matches(value, annotation)
+        valid = _value_matches(value, annotation, owner_model)
     if not valid:
         raise TypeError(f"{path} has an invalid type")
 
 
-def _value_matches(value: object, annotation: object) -> bool:
-    if isinstance(annotation, str):
+def _value_matches(
+    value: object, annotation: object, owner_model: type[GeneratedJSONModel]
+) -> bool:
+    if isinstance(annotation, (str, ForwardRef)):
+        try:
+            _validate_generated_value(value, annotation, "value", owner_model)
+        except (TypeError, ValueError, ImportError):
+            return False
         return True
     if hasattr(annotation, "__attrs_attrs__"):
         try:
@@ -377,7 +396,7 @@ def _value_matches(value: object, annotation: object) -> bool:
     origin = get_origin(annotation)
     if origin is not None:
         try:
-            _validate_generated_value(value, annotation, "value")
+            _validate_generated_value(value, annotation, "value", owner_model)
         except (TypeError, ValueError, ImportError):
             return False
         return True
@@ -387,13 +406,9 @@ def _value_matches(value: object, annotation: object) -> bool:
         return True
 
 
-_validation_model: type[GeneratedJSONModel]
-
-
 def _validate_generated_document(
     document: object, model: type[GeneratedJSONModel]
 ) -> None:
-    global _validation_model
     if not isinstance(document, Mapping):
         raise TypeError("document must be an object")
     try:
@@ -410,13 +425,12 @@ def _validate_generated_document(
         unknown = set(document) - set(fields_by_name)
         if unknown:
             raise ValueError(f"unknown fields: {sorted(unknown)!r}")
-    _validation_model = model
     for name, field in fields_by_name.items():
         if name not in document:
             if field.default is attrs.NOTHING:
                 raise KeyError(name)
             continue
-        _validate_generated_value(document[name], field.type, name)
+        _validate_generated_value(document[name], field.type, name, model)
 
 
 def _structured_http_error_fields(problem: object) -> dict[str, object]:
