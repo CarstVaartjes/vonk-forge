@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import re
 import stat
 import tempfile
 import time
+import types
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Protocol, Self
+from typing import Any, Protocol, Self, get_args, get_origin
 
+import attrs
 import httpx
 
 from .generated_control.api.default import (
@@ -244,6 +247,7 @@ def _encode_generated_request(
             if not isinstance(dumped, dict):
                 raise TypeError("validated request is not an object")
             return dumped
+        _validate_generated_document(payload, model)
         return model.from_dict(payload).to_dict()
     except (AttributeError, KeyError, TypeError, ValueError):
         raise ControlClientError(
@@ -262,6 +266,7 @@ def _decode_generated_response(
             validated = model_validate(decoded)
             result = validated.model_dump(mode="json")
         else:
+            _validate_generated_document(decoded, model)
             result = model.from_dict(decoded).to_dict()
     except (AttributeError, KeyError, TypeError, ValueError):
         raise ControlMalformedResponse(
@@ -272,6 +277,133 @@ def _decode_generated_response(
             "control API response does not match the generated schema"
         )
     return result
+
+
+def _generated_model_type(name: str, model: type[GeneratedJSONModel]) -> object:
+    """Resolve a generated forward reference from its sibling model module."""
+    module_name = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+    module = importlib.import_module(
+        f"{model.__module__.rsplit('.', 1)[0]}.{module_name}"
+    )
+    return getattr(module, name)
+
+
+def _validate_generated_value(value: object, annotation: object, path: str) -> None:
+    if isinstance(annotation, str):
+        annotation = _generated_model_type(annotation, _validation_model)
+    if annotation is Any or annotation is object:
+        return
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin in (types.UnionType,):
+        if any(
+            (candidate is type(None) and value is None)
+            or (candidate is not type(None) and _value_matches(value, candidate))
+            for candidate in args
+        ):
+            return
+        raise TypeError(f"{path} has an invalid type")
+    if origin is not None and str(origin) == "typing.Union":
+        if any(
+            (candidate is type(None) and value is None)
+            or (candidate is not type(None) and _value_matches(value, candidate))
+            for candidate in args
+        ):
+            return
+        raise TypeError(f"{path} has an invalid type")
+    if str(origin) == "typing.Literal":
+        if any(
+            value == candidate and type(value) is type(candidate) for candidate in args
+        ):
+            return
+        raise TypeError(f"{path} has an invalid value")
+    if origin in (list,):
+        if not isinstance(value, list):
+            raise TypeError(f"{path} must be an array")
+        item_annotation = args[0] if args else Any
+        for index, item in enumerate(value):
+            _validate_generated_value(item, item_annotation, f"{path}[{index}]")
+        return
+    if origin in (dict,):
+        if not isinstance(value, dict):
+            raise TypeError(f"{path} must be an object")
+        key_annotation, item_annotation = args or (Any, Any)
+        for key, item in value.items():
+            _validate_generated_value(key, key_annotation, f"{path}.<key>")
+            _validate_generated_value(item, item_annotation, f"{path}.{key}")
+        return
+    if annotation is type(None):
+        if value is not None:
+            raise TypeError(f"{path} must be null")
+        return
+    if annotation is bool:
+        valid = type(value) is bool
+    elif annotation is int:
+        valid = type(value) is int
+    elif annotation is float:
+        valid = type(value) in (int, float) and type(value) is not bool
+    elif annotation is str:
+        valid = isinstance(value, str)
+    elif annotation is types.NoneType:
+        valid = value is None
+    else:
+        valid = _value_matches(value, annotation)
+    if not valid:
+        raise TypeError(f"{path} has an invalid type")
+
+
+def _value_matches(value: object, annotation: object) -> bool:
+    if isinstance(annotation, str):
+        return True
+    if hasattr(annotation, "__attrs_attrs__"):
+        try:
+            _validate_generated_document(value, annotation)
+        except (TypeError, ValueError, ImportError):
+            return False
+        return True
+    origin = get_origin(annotation)
+    if origin is not None:
+        try:
+            _validate_generated_value(value, annotation, "value")
+        except (TypeError, ValueError, ImportError):
+            return False
+        return True
+    try:
+        return isinstance(value, annotation)
+    except TypeError:
+        return True
+
+
+_validation_model: type[GeneratedJSONModel]
+
+
+def _validate_generated_document(
+    document: object, model: type[GeneratedJSONModel]
+) -> None:
+    global _validation_model
+    if not isinstance(document, Mapping):
+        raise TypeError("document must be an object")
+    try:
+        model_fields = attrs.fields(model)
+    except (attrs.exceptions.NotAnAttrsClassError, TypeError):
+        return
+    fields_by_name = {
+        field.alias or field.name: field
+        for field in model_fields
+        if field.init
+    }
+    allows_extra = any(field.name == "additional_properties" for field in model_fields)
+    if not allows_extra:
+        unknown = set(document) - set(fields_by_name)
+        if unknown:
+            raise ValueError(f"unknown fields: {sorted(unknown)!r}")
+    _validation_model = model
+    for name, field in fields_by_name.items():
+        if name not in document:
+            if field.default is attrs.NOTHING:
+                raise KeyError(name)
+            continue
+        _validate_generated_value(document[name], field.type, name)
 
 
 def _structured_http_error_fields(problem: object) -> dict[str, object]:

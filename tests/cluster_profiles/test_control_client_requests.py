@@ -12,6 +12,7 @@ import pytest
 
 from cluster_profiles.control_client import (
     ControlClient,
+    ControlClientError,
     ControlForbidden,
     ControlMalformedResponse,
     ControlUnauthorized,
@@ -235,6 +236,76 @@ def test_request_rejects_response_outside_canonical_route_model(tmp_path: Path) 
             "GET",
             "/api/v1/artifact-jobs/capabilities",
             response_model=ArtifactJobCapabilitiesResponse,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload["storage"].update(max_stored_bytes="1024"),
+        lambda payload: payload.update(unexpected=True),
+    ],
+)
+def test_request_rejects_scalar_and_unknown_response_fields(
+    tmp_path: Path, mutation
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "storage": {
+            "in_flight_uploads": 0,
+            "max_stored_bytes": 1024,
+            "remaining_bytes": 1024,
+            "reserved_bytes": 0,
+            "used_bytes": 0,
+        },
+        "transport": {
+            "max_input_file_bytes": 512,
+            "max_input_files": 32,
+            "max_input_total_bytes": 1024,
+            "max_output_file_bytes": 1024,
+            "max_output_files": 32,
+            "max_output_total_bytes": 2048,
+            "max_timeout_seconds": 3600,
+            "reserved_input_names": ["manifest.json"],
+        },
+    }
+    mutation(payload)
+    client = ControlClient(
+        "https://forge.example.test",
+        _token(tmp_path),
+        opener=lambda *_args, **_kwargs: _Response(200, payload),
+    )
+
+    with pytest.raises(ControlMalformedResponse, match="generated schema"):
+        client.request(
+            "GET",
+            "/api/v1/artifact-jobs/capabilities",
+            response_model=ArtifactJobCapabilitiesResponse,
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"reason": 7},
+        {"reason": "operator requested cancellation", "unexpected": True},
+    ],
+)
+def test_request_rejects_scalar_and_unknown_request_fields(
+    tmp_path: Path, payload: dict[str, object]
+) -> None:
+    client = ControlClient(
+        "https://forge.example.test",
+        _token(tmp_path),
+        opener=lambda *_args, **_kwargs: _Response(204, None),
+    )
+
+    with pytest.raises(ControlClientError, match="generated schema"):
+        client.request(
+            "POST",
+            "/api/v1/artifact-jobs/job-1/cancel",
+            payload,
+            request_model=CancelRequest,
         )
 
 
