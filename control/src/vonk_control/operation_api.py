@@ -1700,15 +1700,7 @@ class NodeStatus(StrictModel):
             "use Fleet connection, inventory, and telemetry fields for live readiness."
         )
     )
-    stale: bool = Field(
-        deprecated=True,
-        description=(
-            "Deprecated compatibility alias for health_probe_stale; this does not "
-            "represent aggregate node readiness."
-        ),
-    )
     labels: dict[str, str]
-    profile: str | None
     memory_available_bytes: int = Field(ge=0)
     disk_available_bytes: int = Field(ge=0)
     probe_age_seconds: float | None = Field(
