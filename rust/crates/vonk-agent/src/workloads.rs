@@ -640,13 +640,9 @@ fn valid_model_path(value: &str) -> bool {
     !value.is_empty()
         && value.chars().count() <= 512
         && !value.contains(['\\', '\0'])
-        && value.split('/').all(|part| {
-            !part.is_empty()
-                && !matches!(part, "." | "..")
-                && part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        })
+        && value
+            .split('/')
+            .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
 }
 
 fn valid_mount_target(value: &str) -> bool {

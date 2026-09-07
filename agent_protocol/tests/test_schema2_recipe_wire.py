@@ -233,23 +233,29 @@ def test_plan_rejects_unsafe_or_oversized_model_publisher(publisher: str) -> Non
 @pytest.fixture(scope="session")
 def compiled_plan_wire_probe() -> Path:
     repository = Path(__file__).resolve().parents[2]
-    subprocess.run(
-        [
-            "cargo",
-            "build",
-            "--locked",
-            "--package",
-            "vonk-agent",
-            "--example",
-            "compiled_plan_wire_probe",
-        ],
-        cwd=repository,
-        check=True,
-    )
-    target_root = Path(os.environ.get("CARGO_TARGET_DIR", repository / "target"))
-    if not target_root.is_absolute():
-        target_root = repository / target_root
-    probe = target_root / "debug" / "examples" / "compiled_plan_wire_probe"
+    configured_probe = os.environ.get("VONK_COMPILED_PLAN_WIRE_PROBE")
+    if configured_probe:
+        probe = Path(configured_probe)
+        if not probe.is_absolute():
+            probe = repository / probe
+    else:
+        target_root = Path(os.environ.get("CARGO_TARGET_DIR", repository / "target"))
+        if not target_root.is_absolute():
+            target_root = repository / target_root
+        probe = target_root / "debug" / "examples" / "compiled_plan_wire_probe"
+        subprocess.run(
+            [
+                "cargo",
+                "build",
+                "--locked",
+                "--package",
+                "vonk-agent",
+                "--example",
+                "compiled_plan_wire_probe",
+            ],
+            cwd=repository,
+            check=True,
+        )
     if not probe.is_file() or not os.access(probe, os.X_OK):
         raise AssertionError(f"compiled plan wire probe is not executable: {probe}")
     return probe

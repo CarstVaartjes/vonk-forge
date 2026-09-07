@@ -13,6 +13,7 @@ PROBES = {
     "VONK_INSTALL_START_WIRE_PROBE": ("vonk-agent", "install_start_wire_probe"),
     "VONK_HEARTBEAT_WIRE_PROBE": ("vonk-agent", "heartbeat_wire_probe"),
     "VONK_ENROLLMENT_WIRE_PROBE": ("vonk-agent", "enrollment_wire_probe"),
+    "VONK_COMPILED_PLAN_WIRE_PROBE": ("vonk-agent", "compiled_plan_wire_probe"),
 }
 
 

@@ -2455,14 +2455,17 @@ fn valid_model_mount(source: &Path, target: &str, roots: &ManagedRoots) -> bool 
 
 fn valid_model_file_path_components(components: &[Component<'_>]) -> bool {
     let mut chars = 0_usize;
-    components.iter().all(|component| {
+    components.iter().enumerate().all(|(index, component)| {
         let Component::Normal(value) = component else {
             return false;
         };
         let Some(value) = value.to_str() else {
             return false;
         };
-        chars = chars.saturating_add(value.chars().count().saturating_add(1));
+        chars = chars.saturating_add(value.chars().count());
+        if index > 0 {
+            chars = chars.saturating_add(1);
+        }
         chars <= MAX_COMPILED_MODEL_PATH_CHARS && valid_model_path_component(value)
     })
 }
@@ -2983,10 +2986,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        CommandOutput, CommandRunner, JobCancellationFence, ManagedRoots, OperationError,
-        OperationExecutor, RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION, RuntimeImageReceipt,
-        bounded_container_exit_code, finish_timed_out_job, hex_sha256, loaded_image_source,
-        parse_publication, parse_runtime_stop, validate_docker_run,
+        CommandOutput, CommandRunner, JobCancellationFence, MAX_COMPILED_MODEL_PATH_CHARS,
+        ManagedRoots, OperationError, OperationExecutor, RUNTIME_IMAGE_RECEIPT_SCHEMA_VERSION,
+        RuntimeImageReceipt, bounded_container_exit_code, finish_timed_out_job, hex_sha256,
+        loaded_image_source, parse_publication, parse_runtime_stop, validate_docker_run,
     };
 
     const RUN_ID: &str = "40000000-0000-4000-8000-000000000004";
@@ -4138,7 +4141,6 @@ mod tests {
             (model.clone(), "/model", true),
             (model.clone(), "/models/..", true),
             (model.clone(), "/models/model/", true),
-            (model.clone(), "/models/model name", true),
         ];
         for mount in invalid_single_mounts {
             assert!(
@@ -4330,6 +4332,29 @@ mod tests {
                 .is_err()
             );
         }
+    }
+
+    #[test]
+    fn runtime_accepts_canonical_nested_model_path_at_512_characters() {
+        let (_temp, roots) = runtime_fixture_with_separate_agent_data();
+        let segment = format!("模_{}", "a".repeat(61));
+        let final_segment = format!("模_{}", "a".repeat(62));
+        let mut segments = vec![segment; 7];
+        segments.push(final_segment);
+        let relative = segments.join("/");
+        assert_eq!(relative.chars().count(), MAX_COMPILED_MODEL_PATH_CHARS);
+        let source = runtime_models(&roots).join("primary").join(&relative);
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, b"model fixture").unwrap();
+        let target = "/models/primary";
+        assert!(
+            validate_docker_run(
+                &runtime_arguments(&roots, &[(source, &target, true)]),
+                &roots,
+                None,
+            )
+            .is_ok()
+        );
     }
 
     #[test]
