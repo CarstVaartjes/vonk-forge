@@ -192,7 +192,7 @@ function ProfileApplicationProgress({application, nodeNames, onRetry, retrying}:
     <div className={`library-profile-application-progress${value === undefined ? " is-indeterminate" : ""}`} role="progressbar" aria-label="Profile switch progress" aria-valuemin={0} aria-valuemax={100} {...(value === undefined ? {"aria-valuetext": "Progress total unavailable"} : {"aria-valuenow": value})}><span style={value === undefined ? undefined : {transform: `scaleX(${value / 100})`}}/></div>
     {members.length > 0 && <ul className="library-profile-application-members" aria-label="Profile switch targets">{members.map(nodeId => <li key={nodeId}><span>{nodeNames[nodeId] ?? nodeId}</span><small>Participating</small></li>)}</ul>}
     {application.status_reason && <p>{application.status_reason}</p>}
-    {TERMINAL_APPLICATION_STATES.has(application.state) && application.state !== "succeeded" && <button type="button" className="button secondary" onClick={onRetry} disabled={retrying}>{retrying ? "Retrying remaining work…" : "Retry remaining work"}</button>}
+    {["failed", "waiting-for-operator"].includes(application.state) && <button type="button" className="button secondary" onClick={onRetry} disabled={retrying}>{retrying ? "Retrying remaining work…" : "Retry remaining work"}</button>}
   </section>;
 }
 
@@ -557,7 +557,7 @@ export function LibraryProfilesView({api, entries, fleet, initialCreate = false,
   }
 
   async function retryApplication() {
-    if (!application || applying || !["failed", "cancelled"].includes(application.state)) return;
+    if (!application || applying || !["failed", "waiting-for-operator"].includes(application.state)) return;
     const key = retryRequest?.applicationId === application.id ? retryRequest.key : crypto.randomUUID();
     setRetryRequest({applicationId: application.id, key});
     setApplying(true);

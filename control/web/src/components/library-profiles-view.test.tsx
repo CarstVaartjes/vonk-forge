@@ -244,3 +244,12 @@ test("keeps failed application evidence and reuses the request key after an unce
   expect(retryFleetProfileApplication).toHaveBeenCalledTimes(2);
   expect(retryFleetProfileApplication.mock.calls[1]).toEqual(retryFleetProfileApplication.mock.calls[0]);
 });
+
+test.each(["waiting-for-operator", "cancelled"] as const)("offers only supported recovery for %s profile applications", async state => {
+  const user = userEvent.setup();
+  const api = {...editingApi(), applyFleetProfile: vi.fn(async () => ({...application, state})), fleetProfileApplication: vi.fn(() => new Promise(() => undefined))};
+  render(<LibraryProfilesView api={api as unknown as ControlApi} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Switch profile"}));
+  if (state === "cancelled") expect(screen.queryByRole("button", {name: "Retry remaining work"})).not.toBeInTheDocument();
+  else expect(screen.getByRole("button", {name: "Retry remaining work"})).toBeEnabled();
+});
