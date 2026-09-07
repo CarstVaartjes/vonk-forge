@@ -1,3 +1,5 @@
+> Historical review of intermediate branches. The current implementation and validation status are recorded in [Launch consolidation](../launch-consolidation-2026-09-07.md); proposals below are not instructions to restore retired code.
+
 # Seven retired agent operations: removal review
 
 Initial snapshot reviewed: platform commit `6651e420b`; the route-persistence

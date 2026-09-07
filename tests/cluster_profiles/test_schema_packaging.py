@@ -12,7 +12,6 @@ STANDALONE_SCHEMAS = {
     "install-release-manifest.schema.json",
     "workload-artifact-build.schema.json",
 }
-RECIPE_PRESETS = ROOT / "src/cluster_profiles/resources/custom-recipe-presets.json"
 
 
 def test_repository_schema_mirrors_match_canonical_package_schemas() -> None:
@@ -51,7 +50,4 @@ def test_built_wheel_contains_every_canonical_schema(tmp_path: Path) -> None:
                 archive.read(f"cluster_profiles/schemas/{schema.name}")
                 == schema.read_bytes()
             )
-        assert (
-            archive.read("cluster_profiles/resources/custom-recipe-presets.json")
-            == RECIPE_PRESETS.read_bytes()
-        )
+        assert "cluster_profiles/resources/custom-recipe-presets.json" not in archive.namelist()

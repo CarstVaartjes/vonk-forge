@@ -45,15 +45,6 @@ _REQUIRED_TEST_CHECKS = frozenset(
 
 
 @dataclass(frozen=True, slots=True)
-class RecipeDraftInput:
-    """Retained as a non-authoritative input type for callers being retired."""
-
-    slug: str
-    document: Mapping[str, object]
-    source_kind: str = "local"
-
-
-@dataclass(frozen=True, slots=True)
 class RecipeRevisionView:
     id: str
     recipe_id: str
