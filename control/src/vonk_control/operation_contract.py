@@ -143,7 +143,9 @@ class AvailabilityOperationFailure(BaseModel):
 
     code: str = Field(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")
     detail: str = Field(min_length=1, max_length=512)
-    recovery_actions: list[AvailabilityRecoveryAction] = Field(default_factory=list, max_length=8)
+    recovery_actions: list[AvailabilityRecoveryAction] = Field(
+        default_factory=list, max_length=8
+    )
     retryable: bool = False
     retry_time: str | None = Field(default=None, max_length=64)
     retry_after_seconds: int | None = Field(default=None, ge=0)
@@ -179,10 +181,13 @@ class AvailabilityOperationFailure(BaseModel):
         if self.retry_after_seconds is not None and self.retry_time is None:
             raise ValueError("retry_after_seconds requires retry_time")
         if self.retry_time is not None:
-            if re.fullmatch(
-                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
-                self.retry_time,
-            ) is None:
+            if (
+                re.fullmatch(
+                    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+                    self.retry_time,
+                )
+                is None
+            ):
                 raise ValueError("retry_time must be RFC3339")
             try:
                 parsed = datetime.fromisoformat(self.retry_time)
@@ -198,7 +203,9 @@ class AvailabilityOperationFailure(BaseModel):
             assert self.free_bytes is not None
             assert self.shortfall_bytes is not None
             if self.shortfall_bytes != max(0, self.required_bytes - self.free_bytes):
-                raise ValueError("shortfall_bytes does not match required and free bytes")
+                raise ValueError(
+                    "shortfall_bytes does not match required and free bytes"
+                )
         return self
 
 
@@ -233,7 +240,7 @@ def _plain_json(value: object) -> object:
 
     if isinstance(value, Mapping):
         return {key: _plain_json(item) for key, item in value.items()}
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_plain_json(item) for item in value]
     return value
 
@@ -249,10 +256,7 @@ def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, objec
         document.pop("members", None)
     if parsed.checkpoint is None:
         document.pop("checkpoint", None)
-    if (
-        parsed.completed_bytes == 0
-        and "completed_bytes" not in value
-    ):
+    if parsed.completed_bytes == 0 and "completed_bytes" not in value:
         document.pop("completed_bytes", None)
     extended = bool(set(value) & set(OperationProgress.model_fields) - {"phase"})
     if (

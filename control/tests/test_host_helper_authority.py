@@ -88,7 +88,9 @@ def test_controller_refuses_unbounded_host_grants(seconds: object) -> None:
     with pytest.raises(HostHelperAuthorityError, match="expiry"):
         issuer().issue_grant(
             node_id="spk_" + "1" * 32,
-            operation=ScheduleRebootOperation(type="schedule-reboot", delay_seconds=120),
+            operation=ScheduleRebootOperation(
+                type="schedule-reboot", delay_seconds=120
+            ),
             expires_in_seconds=seconds,
         )
 

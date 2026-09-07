@@ -32,9 +32,7 @@ def test_python_issuer_matches_the_rust_verified_host_grant_fixture() -> None:
         operation=RestartVonkUnitOperation(type="restart-vonk-unit", unit="agent"),
         expires_in_seconds=60,
     )
-    raw = (FIXTURES / "host-helper-grant-python-issued.json").read_bytes().rstrip(
-        b"\n"
-    )
+    raw = (FIXTURES / "host-helper-grant-python-issued.json").read_bytes().rstrip(b"\n")
 
     assert canonical_message(grant.to_mapping()) == raw
     parsed = SignedHostHelperGrant.parse(json.loads(raw))
@@ -46,9 +44,7 @@ def test_python_issuer_matches_the_rust_verified_host_grant_fixture() -> None:
 
 
 def test_rust_signed_receipt_fixture_is_a_controller_verifiable_wire_message() -> None:
-    raw = (FIXTURES / "recipe-run-observation-receipt.json").read_bytes().rstrip(
-        b"\n"
-    )
+    raw = (FIXTURES / "recipe-run-observation-receipt.json").read_bytes().rstrip(b"\n")
     receipt = SignedRecipeRunObservationReceipt.parse(json.loads(raw))
 
     assert canonical_message(receipt.to_mapping()) == raw

@@ -98,21 +98,24 @@ class ScheduleRebootOperation(_HostOperation):
 
 class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     type: Literal["execute-container-runtime-request"]
-    action: Literal[
-        "image-import", "image-inspect", "run-inspect", "start", "stop"
-    ]
+    action: Literal["image-import", "image-inspect", "run-inspect", "start", "stop"]
     job_id: Uuid4Text
     operation_id: Uuid4Text
     attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
     fence: Uuid4Text
     request_sha256: Digest
-    observation_identity_sha256: Digest | None = Field(default=None, exclude_if=lambda value: value is None)
+    observation_identity_sha256: Digest | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def observation_only_for_inspection(
         self,
     ) -> ExecuteContainerRuntimeRequestOperation:
-        if self.observation_identity_sha256 is not None and self.action != "run-inspect":
+        if (
+            self.observation_identity_sha256 is not None
+            and self.action != "run-inspect"
+        ):
             raise ValueError("container runtime observation identity is invalid")
         return self
 
@@ -248,8 +251,7 @@ _COMPONENT = re.compile(r"[A-Za-z0-9._-]{1,128}\Z")
 
 def _relative_path(value: object) -> bool:
     return isinstance(value, str) and all(
-        component not in {"", ".", ".."}
-        and _COMPONENT.fullmatch(component) is not None
+        component not in {"", ".", ".."} and _COMPONENT.fullmatch(component) is not None
         for component in value.split("/")
     )
 

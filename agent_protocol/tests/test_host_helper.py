@@ -72,7 +72,11 @@ def test_exact_observation_receipt_rejects_invalid_claims(
 
 
 def test_rust_signed_receipt_fixture_round_trips_with_identical_signing_bytes() -> None:
-    raw = (Path(__file__).parents[1] / "fixtures" / "recipe-run-observation-receipt.json").read_bytes().rstrip(b"\n")
+    raw = (
+        (Path(__file__).parents[1] / "fixtures" / "recipe-run-observation-receipt.json")
+        .read_bytes()
+        .rstrip(b"\n")
+    )
     document = json.loads(raw)
     receipt = SignedRecipeRunObservationReceipt.parse(document)
 
