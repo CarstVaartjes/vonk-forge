@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import CompiledExecutionPlan
 from vonk_control.artifact_sizes import ArtifactSize, StaticArtifactSizeResolver
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import InstallAdmissionService, InstallPlanConflict
@@ -36,7 +37,9 @@ RECIPE_REVISION_ID = "00000000-0000-4000-8000-000000000021"
 
 
 def _canonical_catalog_documents(
-    *, denied_jurisdictions: tuple[str, ...] = (), recipe_mode: str = "build",
+    *,
+    denied_jurisdictions: tuple[str, ...] = (),
+    recipe_mode: str = "build",
     disk_estimates: tuple[int, int] = (30, 70),
 ) -> tuple[ModelDefinition, RecipeDefinition]:
     raw_model = json.loads(
@@ -86,7 +89,8 @@ def _seed_canonical_catalog(
     disk_estimates: tuple[int, int] = (30, 70),
 ) -> CatalogDocumentRevision:
     model, recipe = _canonical_catalog_documents(
-        denied_jurisdictions=denied_jurisdictions, recipe_mode=recipe_mode,
+        denied_jurisdictions=denied_jurisdictions,
+        recipe_mode=recipe_mode,
         disk_estimates=disk_estimates,
     )
     model_digest = content_sha256(model)
@@ -185,13 +189,14 @@ def _seed_canonical_catalog(
             ]
         )
         session.flush()
-        stored_model_revision = session.get(
-            CatalogDocumentRevision, MODEL_REVISION_ID
-        )
+        stored_model_revision = session.get(CatalogDocumentRevision, MODEL_REVISION_ID)
         assert stored_model_revision is not None
-        assert content_sha256(
-            ModelDefinition.model_validate(stored_model_revision.document)
-        ) == stored_model_revision.content_digest
+        assert (
+            content_sha256(
+                ModelDefinition.model_validate(stored_model_revision.document)
+            )
+            == stored_model_revision.content_digest
+        )
         stored_recipe_revision = session.get(
             CatalogDocumentRevision, RECIPE_REVISION_ID
         )
@@ -231,13 +236,14 @@ def _compiled_plan(
     rank: int,
     model_digest: str,
     recipe_digest: str,
-    build_input: str,
+    build_input: str | None,
+    build_id: str | None,
     image_digest: str | None = None,
 ) -> dict[str, object]:
     artifact_digest = "3" * 64
     image_digest = image_digest or "sha256:" + "1" * 64
     layout_digest = "2" * 64
-    return {
+    payload = {
         "schema_version": 2,
         "identity": {
             "recipe_revision_sha256": recipe_digest,
@@ -292,11 +298,14 @@ def _compiled_plan(
             "image_bytes": 30,
             "architecture": "linux-arm64",
             "runtime_interface": "vonk.runtime.v1",
-            "source": "controller-build",
-            "build_id": "test-build",
-            "registry_manifest_digest": None,
+            "source": "controller-build" if build_id is not None else "published",
+            "build_id": build_id,
+            "registry_manifest_digest": None if build_id is not None else image_digest,
             "platform_manifest_digest": image_digest,
             "local_image_config_id": "sha256:" + "4" * 64,
+            "local_image_reference": (
+                f"localhost/vonk/compiled-runtime-{layout_digest}@{image_digest}"
+            ),
             "runtime_interface_label": "v1",
             "distribution_object": {
                 "name": "image.oci.tar",
@@ -338,6 +347,7 @@ def _compiled_plan(
         },
         "job": None,
     }
+    return CompiledExecutionPlan.model_validate(payload).model_dump(mode="json")
 
 
 def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
@@ -346,7 +356,7 @@ def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
     build = kwargs["build"]
     resolved_entities = kwargs["resolved_entities"]
     model_revision = resolved_entities["models"][0]
-    build_input = build.build_input_sha256 if build is not None else "b" * 64
+    build_input = build.build_input_sha256 if build is not None else None
     execution = revision.document.get("execution", {})
     image = execution.get("image") if isinstance(execution, dict) else None
     image_digest = (
@@ -361,6 +371,7 @@ def _compiled_plan_provider(**kwargs: object) -> dict[str, dict[str, object]]:
             model_digest=model_revision.content_digest,
             recipe_digest=revision.content_digest,
             build_input=build_input,
+            build_id=build.id if build is not None else None,
             image_digest=image_digest,
         )
         for node in mapping_nodes
@@ -524,6 +535,7 @@ def test_territorial_license_install_admission_is_informational(tmp_path) -> Non
         "install.license_territorial_restrictions_informational"
     )
 
+
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
     sessions, now, node, mapping, build, sizes = setup(tmp_path, free=80)
     with sessions.begin() as session:
@@ -642,9 +654,7 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
         )
     )
 
-    refreshed = service.plan_install(
-        mapping, build, now=now + timedelta(seconds=1)
-    )
+    refreshed = service.plan_install(mapping, build, now=now + timedelta(seconds=1))
 
     assert refreshed.allowed is True
     assert refreshed.nodes[0].inventory_observed_at != (

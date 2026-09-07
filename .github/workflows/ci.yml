@@ -252,6 +252,10 @@ jobs:
           shared-key: linux-amd64
           add-job-id-key: "false"
           save-if: "false"
+      - name: Validate every canonical recipe launch projection
+        run: >-
+          uv run --project control --frozen --with-editable .
+          python scripts/tests/check_recipe_launch_contracts.py "$VONK_RECIPE_LIBRARY_ROOT"
       - name: Exercise Controller requests and Spark results together
         run: >-
           uv run --project control --frozen --with-editable .
@@ -300,10 +304,6 @@ jobs:
             run: >-
               cargo test --locked -p vonk-agent --test recipe_builder
               faithful_untagged_oci_layout_loads_with_spark_podman -- --exact
-          - name: Verify Python protocol parity
-            run: >-
-              uv run --project agent_protocol --frozen pytest -q
-              agent_protocol/tests/test_rust_fixtures.py
           - name: Verify controller host-helper authority
             run: >-
               uv run --project control --frozen pytest -q

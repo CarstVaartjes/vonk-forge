@@ -45,6 +45,34 @@ generated clients or weakening their schema. Rust wire compatibility requires
 tests that serialize actual producer values and pass them to the other
 language's real parser and validator, in both directions.
 
+## Required launch checks
+
+The `Controller and Spark wire contract` CI job checks both sides of the
+launch boundary. It runs when the Controller, agent, public-contract lock,
+recipe revision, runtime compiler, or harness configuration changes.
+
+- `scripts/tests/check_recipe_launch_contracts.py` loads every published Model
+  and Recipe through their canonical Pydantic classes, compiles every recipe
+  role with the production compiler, and validates the final launch document
+  through the shared `CompiledExecutionPlan`. Cache receipts are synthetic;
+  model files and images are not downloaded by this structural check.
+- `scripts/tests/run_install_start_wire_bridge.py` builds the Rust probe from
+  the checked-out source. The test queues requests through the actual Controller,
+  parses them through the real Rust claim and launch validators, produces results
+  through the agent's shared result builders, and consumes those results back
+  into persisted Controller state. It covers single-node starts and distributed
+  rank-launch/collective-readiness starts.
+  The same required job runs the complete `agent_protocol/tests` suite,
+  including schema-derived required-field, type, nullable, unknown-field and
+  vocabulary checks through the Rust parser. These cover the declared fields
+  in the tested endpoint, job, image-source and distributed variants; custom
+  cross-field rules still need behavioral cases.
+
+A failing check blocks the CI gate. A new required field must be carried through
+its producer, parser, stored document, and response before the change can pass.
+An explicit `null` and an omitted required-nullable field are different wire
+values; both languages must enforce that distinction.
+
 ## Strict structure, extensible content
 
 - Require the declared fields, types, nesting, and message variants. Reject

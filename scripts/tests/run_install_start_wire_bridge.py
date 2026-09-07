@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the Rust install/start wire probe once, then run its Controller lane."""
+"""Build the Rust probe and run all shared contracts plus the Controller handoff."""
 
 from __future__ import annotations
 
@@ -57,11 +57,13 @@ def main() -> int:
             sys.executable,
             "-m",
             "pytest",
+            "agent_protocol/tests",
             "control/tests/test_install_start_wire_bridge.py",
             *pytest_args,
         ],
         cwd=repository,
         env=environment,
+        check=False,
     ).returncode
 
 
