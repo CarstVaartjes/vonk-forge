@@ -75,10 +75,7 @@ COPY control/packaging/public-contracts.lock ./packaging/public-contracts.lock
 COPY control/src ./src
 COPY control/alembic.ini ./alembic.ini
 COPY control/migrations ./migrations
-COPY schemas/global/catalog-entity-v1.schema.json /schemas/global/catalog-entity-v1.schema.json
-COPY schemas/global/harness-evidence-v1.schema.json /schemas/global/harness-evidence-v1.schema.json
 COPY schemas/global/test-report-v1.schema.json /schemas/global/test-report-v1.schema.json
-COPY config/execution-harnesses /config/execution-harnesses
 COPY --from=web /web/dist ./src/vonk_control/web
 COPY inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl /wheels/
 RUN apt-get update \
@@ -109,7 +106,6 @@ RUN groupadd --gid 10001 control \
     && install -d -o 10001 -g 10001 -m 0700 /tmp/control-cache \
     && install -d -o 10001 -g 10001 -m 1777 /var/tmp
 COPY --from=build /install /usr/local
-COPY --from=build /config /usr/local/lib/config
 COPY --from=skopeo /usr/bin/skopeo /usr/local/lib/skopeo/skopeo.real
 COPY --from=skopeo /skopeo-runtime/lib /usr/local/lib/skopeo
 COPY --from=skopeo /etc/containers /etc/containers

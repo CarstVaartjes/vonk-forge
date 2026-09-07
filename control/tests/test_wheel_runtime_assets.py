@@ -31,11 +31,11 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
     with zipfile.ZipFile(wheel) as archive:
         members = set(archive.namelist())
 
-    assert {
+    assert "vonk_control/schemas/test-report-v1.schema.json" in members
+    assert not {
         "vonk_control/schemas/catalog-entity-v1.schema.json",
         "vonk_control/schemas/harness-evidence-v1.schema.json",
-        "vonk_control/schemas/test-report-v1.schema.json",
-    } <= members
+    } & members
     assert "vonk_control/schemas/recipe-v1.schema.json" not in members
 
     fixture = tmp_path / "synthetic-canonical-recipe.json"
@@ -55,9 +55,7 @@ def test_control_wheel_contains_runtime_contract_schemas(tmp_path: Path) -> None
                 "from vonk_forge_contracts import RecipeDefinition;"
                 "from vonk_control.schema_resources import read_runtime_schema;"
                 "RecipeDefinition.model_validate(json.load(open(sys.argv[2], encoding='utf-8')));"
-                "[Draft202012Validator.check_schema(json.loads(read_runtime_schema(name))) "
-                "for name in ('catalog-entity-v1.schema.json','harness-evidence-v1.schema.json',"
-                "'test-report-v1.schema.json')]"
+                "Draft202012Validator.check_schema(json.loads(read_runtime_schema('test-report-v1.schema.json')))"
             ),
             str(wheel),
             str(fixture),

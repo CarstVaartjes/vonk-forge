@@ -26,9 +26,6 @@ _ARCHIVE_PAYLOAD_PREFIXES = (
     "image/",
     "oci/",
     "weights/",
-    "runtime-distributions/",
-    "patch-bundles/",
-    "execution-harnesses/",
 )
 _ARCHIVE_PAYLOAD_SUFFIXES = (
     ".safetensors",
@@ -118,51 +115,6 @@ def _scan_secrets(root: Path, platform_root: Path) -> None:
                         )
         except tarfile.TarError as error:
             raise LibraryValidationError(f"{archive_path}: package archive is unreadable") from error
-
-
-def _validate_target_recipe_coverage(
-    root: Path,
-    recipe_slugs: set[str],
-) -> None:
-    # The standalone public library owns the complete target ledger. The
-    # platform checkout does not mirror that ledger and is never its authority.
-    target_root = root / "model-targets"
-    if not target_root.is_dir():
-        return
-    for path in sorted(target_root.glob("*.json")):
-        try:
-            document = json.loads(path.read_bytes())
-        except (OSError, json.JSONDecodeError) as error:
-            raise LibraryValidationError(f"{path}: target ledger is invalid") from error
-        targets = document.get("targets") if isinstance(document, Mapping) else None
-        if not isinstance(targets, list):
-            raise LibraryValidationError(f"{path}: target ledger targets are required")
-        for index, target in enumerate(targets):
-            if not isinstance(target, Mapping):
-                raise LibraryValidationError(f"{path}: target {index} is invalid")
-            status = target.get("status")
-            slugs = target.get("recipe_slugs", [])
-            if not isinstance(slugs, list) or any(
-                not isinstance(slug, str) or not slug for slug in slugs
-            ):
-                raise LibraryValidationError(
-                    f"{path}: target {index} recipe_slugs are invalid"
-                )
-            if status == "blocked":
-                if slugs:
-                    raise LibraryValidationError(
-                        f"{path}: blocked target {index} must not advertise a recipe"
-                    )
-                continue
-            if not slugs:
-                raise LibraryValidationError(
-                    f"{path}: non-blocked target has no recipe (index {index})"
-                )
-            missing = sorted(set(slugs) - recipe_slugs)
-            if missing:
-                raise LibraryValidationError(
-                    f"{path}: target {index} references missing recipes: {', '.join(missing)}"
-                )
 
 
 def _dockerfile_build_inputs(payload: bytes, label: str) -> list[dict[str, str]]:
@@ -465,29 +417,16 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
         validate_model_references(models.values())
     except ContractResolutionError as error:
         raise LibraryValidationError(f"model reference graph is invalid: {error}") from error
-    harness_root = platform_root / "config" / "execution-harnesses"
-    harnesses: dict[str, Mapping[str, object]] = {}
-    if harness_root.is_dir():
-        for harness_path in sorted(harness_root.glob("*.json")):
-            try:
-                harness = json.loads(harness_path.read_bytes())
-            except (OSError, UnicodeError, json.JSONDecodeError) as error:
-                raise LibraryValidationError(f"{harness_path}: execution harness is invalid") from error
-            if (
-                not isinstance(harness, Mapping)
-                or harness.get("kind") != "execution-harness"
-                or harness.get("schema_version") != 1
-                or not isinstance(harness.get("identity"), Mapping)
-                or harness["identity"].get("slug") != harness_path.stem
-                or not isinstance(harness.get("runtime_interface"), str)
-                or not harness.get("runtime_interface")
-                or not isinstance(harness.get("topology_modes"), list)
-                or not harness.get("topology_modes")
-            ):
-                raise LibraryValidationError(f"{harness_path}: execution harness compatibility declaration is invalid")
-            harnesses[harness_path.stem] = harness
-    if not harnesses:
-        raise LibraryValidationError("platform execution-harnesses directory is missing or empty")
+    control_source = platform_root / "control" / "src"
+    if not control_source.is_dir():
+        raise LibraryValidationError("platform canonical harness metadata is missing")
+    sys.path.insert(0, str(control_source))
+    try:
+        from vonk_control.harnesses.canonical_metadata import canonical_harness
+    except (ImportError, OSError) as error:
+        raise LibraryValidationError(
+            "platform canonical harness metadata is unavailable"
+        ) from error
     recipe_keys: set[tuple[str, str]] = set()
     digests: list[str] = []
     try:
@@ -555,9 +494,12 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
             validate_recipe_package_paths(recipe, closure)
         except (ContractResolutionError, ValueError) as error:
             raise LibraryValidationError(f"{path}: Recipe model/closure resolution failed: {error}") from error
-        if recipe.runtime.engine not in harnesses:
-            raise LibraryValidationError(f"{path}: runtime engine is not an available platform harness: {recipe.runtime.engine}")
-        harness = harnesses[recipe.runtime.engine]
+        try:
+            harness = canonical_harness(recipe.runtime.engine)
+        except ValueError as error:
+            raise LibraryValidationError(
+                f"{path}: runtime engine is not an available platform harness: {recipe.runtime.engine}"
+            ) from error
         implementation = (
             platform_root
             / "control"
@@ -572,7 +514,7 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
             raise LibraryValidationError(
                 f"{path}: platform harness implementation is not structurally valid"
             ) from error
-        if recipe.validation.serving.interface not in harness["adapters"]:
+        if recipe.validation.serving.interface not in harness.adapters:
             raise LibraryValidationError(
                 f"{path}: serving interface is not implemented by platform harness: "
                 f"{recipe.validation.serving.interface}"
@@ -611,7 +553,6 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
         digests.append(digest)
     if set(indexed) != recipe_keys:
         raise LibraryValidationError("catalog index and recipe directory identities differ")
-    _validate_target_recipe_coverage(library_root, {slug for _publisher, slug in recipe_keys})
     return {"schema_version": 2, "catalog_entity_count": len(models), "recipe_count": len(digests), "recipe_content_sha256": digests, "secret_scan": "passed", "package_check": "identity-verified", "contract_source": "contracts/"}
 
 
