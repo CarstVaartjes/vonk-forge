@@ -1,0 +1,79 @@
+{
+  "platform_commit": "79888ccec3d318c81cc16e5f0140624b7f412b12",
+  "recipe_library_commit": "b388f27129ef494d4625d08176b122c926d6117f",
+  "catalog_source_commit": "a71d494485a64d338876a6fbd205c588e8cb32c4",
+  "recipe_files": 85,
+  "successful_projections": 107,
+  "expected_projections": 109,
+  "compiled_plan_bytes": {
+    "p50": 21554,
+    "p90": 102799,
+    "p95": 276963,
+    "p99": 516122,
+    "max": 516147,
+    "over_64k": 24
+  },
+  "parent_job_payload_bytes": {
+    "p50": 18711,
+    "p90": 180919,
+    "p95": 311410,
+    "max": 2068426,
+    "over_64k": 15
+  },
+  "largest": [
+    {
+      "recipe": "glm-5-2-aqlm-vllm-triple",
+      "artifacts": 751,
+      "compiled_plan_bytes": 516147,
+      "start_claim_bytes": 516944,
+      "parent_job_payload_bytes": 2068426
+    },
+    {
+      "recipe": "qwen3-8-flash-next-nvfp4-vllm-dual",
+      "artifacts": 419,
+      "compiled_plan_bytes": 277080,
+      "parent_job_payload_bytes": 834169
+    },
+    {
+      "recipe": "qwen3-8-flash-next-nvfp4-sglang-dual",
+      "artifacts": 419,
+      "compiled_plan_bytes": 276995,
+      "parent_job_payload_bytes": 833904
+    }
+  ],
+  "duplicate_ltx_failures": [
+    {
+      "recipe": "ltx-2-5-22b-distilled-bf16-diffusers-single",
+      "model_digest": "758426bfab8f18020222df86fb395d9cb8cbacfeb7b0e7105c990fd75a21812",
+      "duplicate_selection_keys": [
+        ["primary", "filtered-snapshot"],
+        ["primary", "filtered-snapshot"]
+      ],
+      "reason": "after receipt deduplication, production CompiledExecutionPlan validation rejects repeated (selection_id,file_id) artifacts; the two selectors have distinct file ids in their selector records but intentionally reuse the same canonical file id and different mounts"
+    },
+    {
+      "recipe": "ltx-2-5-22b-distilled-fp8-cast-diffusers-single",
+      "model_digest": "758426bfab8f18020222df86fb395d9cb8cbacfeb7b0e7105c990fd75a21812",
+      "duplicate_selection_keys": [
+        ["primary", "filtered-snapshot"],
+        ["primary", "filtered-snapshot"]
+      ],
+      "reason": "after receipt deduplication, production CompiledExecutionPlan validation rejects repeated (selection_id,file_id) artifacts; the two selectors have distinct file ids in their selector records but intentionally reuse the same canonical file id and different mounts"
+    }
+  ],
+  "adapter_correction": {
+    "recipes": [
+      "ltx-2-5-22b-distilled-bf16-diffusers-single",
+      "ltx-2-5-22b-distilled-fp8-cast-diffusers-single"
+    ],
+    "model_digest_prefix": "758426",
+    "model_digest_suffix": "a21812",
+    "reused_file_id": "filtered-snapshot",
+    "selection_keys": [
+      ["primary", "filtered-snapshot"],
+      ["primary", "filtered-snapshot"]
+    ],
+    "method": "deduplicate verified receipts by (model_content_sha256,file_id), matching the production canonical manifest semantics; retain both distinct selector/path entries in the runtime spec and let production plan validation report the repeated materialized identity",
+    "result": "the initial adapter also duplicated the receipt; after correcting that, both projections still hit the production repeated-artifact guard, which root must resolve while preserving both mounts"
+  }
+}

@@ -29,6 +29,7 @@ from vonk_agent_protocol import (
     AgentProgress,
     AgentProtocolError,
     AgentResult,
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     ContainerRuntimeAction,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
@@ -52,6 +53,7 @@ from .auth import (
 )
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
+    MAX_COMPILED_EXECUTION_PLAN_BYTES,
     validate_compiled_launch_payload,
 )
 from .distribution import DistributionError, DistributionService
@@ -1904,11 +1906,12 @@ def install_agent_routes(
             )
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
-        return (
-            Response(status_code=status.HTTP_204_NO_CONTENT)
-            if result is None
-            else _json_response(_wire(result))
-        )
+        if result is None:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        encoded_claim = canonical_message(_wire(result))
+        if len(encoded_claim) > MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES:
+            raise HTTPException(status_code=500, detail="agent claim is too large")
+        return Response(content=encoded_claim, media_type="application/json")
 
     @agent.post("/inventory", status_code=status.HTTP_204_NO_CONTENT)
     def inventory(body: InventoryRequest, request: Request) -> Response:
@@ -2442,7 +2445,16 @@ def install_agent_routes(
                     status_code=409,
                     detail="recipe specification execution receipts are stale",
                 )
-        return _json_response(spec)
+        encoded_spec = canonical_message(spec)
+        if len(encoded_spec) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
+            raise HTTPException(
+                status_code=409,
+                detail="recipe specification compiled execution plan is too large",
+            )
+        return Response(
+            content=encoded_spec,
+            media_type="application/json",
+        )
 
     def workload_helper_service() -> WorkloadHelperAuthorityService:
         required = services.workload_helper_authority if services is not None else None

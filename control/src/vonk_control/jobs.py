@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import CursorCodec
+from .compiled_execution_plan import MAX_COMPILED_EXECUTION_PLAN_BYTES
 from .logging import redact_text
 from .models import AgentOperation, Job, JobAttempt
 
@@ -126,7 +127,12 @@ def _canonical_payload(
     inspect(payload)
     copied = json.loads(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     encoded = json.dumps(copied, sort_keys=True, separators=(",", ":")).encode()
-    if len(encoded) > _MAX_PAYLOAD:
+    maximum = (
+        MAX_COMPILED_EXECUTION_PLAN_BYTES
+        if kind in {"recipe.install", "recipe.start"}
+        else _MAX_PAYLOAD
+    )
+    if len(encoded) > maximum:
         raise ValueError("job payload is too large")
     return copied, encoded
 
