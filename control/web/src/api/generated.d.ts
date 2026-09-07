@@ -3495,8 +3495,12 @@ export interface components {
             completed_bytes?: number | null;
             /** Eta Seconds */
             eta_seconds?: number | null;
+            /** Kind */
+            kind?: string | null;
             /** Members */
             members?: components["schemas"]["OperationMemberProgress"][] | null;
+            /** Object Sha256 */
+            object_sha256?: string | null;
             /** Phase */
             phase: string;
             /** Total Bytes */
@@ -5272,8 +5276,12 @@ export interface components {
             completed_bytes: number;
             /** Eta Seconds */
             eta_seconds?: number | null;
+            /** Kind */
+            kind?: string | null;
             /** Members */
             members?: components["schemas"]["OperationMemberProgress"][];
+            /** Object Sha256 */
+            object_sha256?: string | null;
             /** Phase */
             phase: string;
             /** Total Bytes */
