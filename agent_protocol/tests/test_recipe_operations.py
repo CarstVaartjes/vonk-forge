@@ -7,60 +7,29 @@ from vonk_agent_protocol import (
     RecipeOperationRequest,
 )
 
-INSTALL = {
-    "schema_version": 1,
-    "installation_id": "00000000-0000-4000-8000-000000000001",
-    "recipe_revision_id": "00000000-0000-4000-8000-000000000002",
-    "recipe_content_sha256": "a" * 64,
-    "mapping_id": "00000000-0000-4000-8000-000000000007",
-    "mapping_generation": 1,
-    "recipe_build_id": "00000000-0000-4000-8000-000000000008",
-    "image_digest": "sha256:" + "d" * 64,
-    "rank": 0,
-    "role": "entrypoint",
-    "plan_digest": "b" * 64,
-    "expected_bytes": 100,
-}
-START = {
-    "schema_version": 1,
-    "run_id": "00000000-0000-4000-8000-000000000003",
-    "installation_id": INSTALL["installation_id"],
-    "recipe_revision_id": INSTALL["recipe_revision_id"],
-    "recipe_content_sha256": "a" * 64,
-    "mapping_id": INSTALL["mapping_id"],
-    "mapping_generation": 1,
-    "image_digest": INSTALL["image_digest"],
-    "plan_digest": "c" * 64,
-    "alias": "qwen3",
-    "rank": 0,
-    "role": "entrypoint",
-    "port": 8000,
-    "reserved_memory_bytes": 200,
-    "endpoint_address": "192.168.1.211",
-    "world_size": 1,
-    "local_address": None,
-    "master_address": None,
-    "master_port": None,
-}
+INSTALLATION_ID = "00000000-0000-4000-8000-000000000001"
+RUN_ID = "00000000-0000-4000-8000-000000000003"
+RECIPE_DIGEST = "a" * 64
+PLAN_DIGEST = "b" * 64
 STOP = {
     "schema_version": 1,
-    "run_id": START["run_id"],
-    "plan_digest": START["plan_digest"],
+    "run_id": RUN_ID,
+    "plan_digest": PLAN_DIGEST,
 }
 UNINSTALL = {
     "schema_version": 1,
-    "installation_id": INSTALL["installation_id"],
-    "recipe_content_sha256": INSTALL["recipe_content_sha256"],
-    "plan_digest": INSTALL["plan_digest"],
+    "installation_id": INSTALLATION_ID,
+    "recipe_content_sha256": RECIPE_DIGEST,
+    "plan_digest": PLAN_DIGEST,
 }
 MODEL_UNINSTALL = {
     "schema_version": 1,
     "model_version_sha256": "f" * 64,
-    "plan_digest": INSTALL["plan_digest"],
+    "plan_digest": PLAN_DIGEST,
     "installations": [
         {
-            "installation_id": INSTALL["installation_id"],
-            "recipe_content_sha256": INSTALL["recipe_content_sha256"],
+            "installation_id": INSTALLATION_ID,
+            "recipe_content_sha256": RECIPE_DIGEST,
         }
     ],
 }

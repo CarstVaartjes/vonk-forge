@@ -2342,7 +2342,7 @@ mod tests {
     };
     use async_trait::async_trait;
     use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::{
         fs,
         io::{Read, Write},
@@ -2358,7 +2358,7 @@ mod tests {
     use uuid::Uuid;
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, AgentResult, RecipeJobOutputMapping,
-        canonical_json, hex_sha256,
+        RecipeOperationRequest, canonical_json, hex_sha256,
     };
 
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
@@ -2826,8 +2826,20 @@ mod tests {
     }
 
     fn claim() -> AgentClaim {
-        let payload = json!({"plan_digest": "a".repeat(64)});
-        AgentClaim {
+        let plan: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
+        let payload = json!({
+            "schema_version": 2,
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "plan_digest": "a".repeat(64),
+            "rank": 0,
+            "role": "entrypoint",
+            "expected_bytes": 1,
+            "compiled_execution_plan": plan,
+        });
+        let claim = AgentClaim {
             attempt: 1,
             authority_revision: "b".repeat(64),
             deadline: (Utc::now() + ChronoDuration::seconds(20))
@@ -2840,7 +2852,9 @@ mod tests {
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
             schema_version: 1,
-        }
+        };
+        RecipeOperationRequest::parse(&claim).unwrap();
+        claim
     }
 
     #[tokio::test]

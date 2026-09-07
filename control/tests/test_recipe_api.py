@@ -33,6 +33,9 @@ from vonk_control.recipe_operations import (
 )
 from vonk_control.run_admission import RunNodePlan, RunPlan
 from vonk_control.source_policy import SourcePolicyReport
+from vonk_forge_contracts import content_sha256
+
+from .canonical_recipe_fixtures import canonical_recipe
 
 NODE = "spk_" + "1" * 32
 REVISION = "00000000-0000-4000-8000-000000000001"
@@ -96,6 +99,7 @@ class Jobs:
 
 class Recipes:
     def __init__(self) -> None:
+        recipe = canonical_recipe()
         self.install_plan = InstallPlan(
             mapping_id=MAPPING,
             mapping_generation=1,
@@ -182,8 +186,8 @@ class Recipes:
             installation_id=INSTALLATION,
             recipe_id="00000000-0000-4000-8000-000000000007",
             recipe_revision_id=REVISION,
-            recipe_content_sha256="a" * 64,
-            recipe_content={"schema_version": 1},
+            recipe_content_sha256=content_sha256(recipe),
+            recipe_content=recipe.model_dump(mode="json"),
             installation_authority_digest="a" * 64,
             original_plan_digest="b" * 64,
             installation_state="installed",
