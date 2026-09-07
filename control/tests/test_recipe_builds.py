@@ -761,7 +761,6 @@ def test_successful_build_retry_converges_original_and_new_request_keys(
                 "dockerfile": "Dockerfile",
                 "findings": [],
                 "passed": True,
-                "source_bundle_sha256": plan.source_bundle_sha256,
             },
         },
     )

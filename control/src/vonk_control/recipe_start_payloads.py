@@ -31,7 +31,7 @@ def build_recipe_start_payload(
     recipe_content_sha256: str,
     mapping_id: str,
     mapping_generation: int,
-    run_generation: int | None,
+    run_generation: int,
     image_digest: str,
     plan_digest: str,
     alias: str,
@@ -78,16 +78,14 @@ def build_recipe_start_payload(
             "master_address": master_address,
             "master_port": master_port,
         }
+        payload["run_generation"] = run_generation
         if phase is not None:
             payload.update(
                 {
                     "phase": phase,
                     "start_deadline": start_deadline,
-                    "run_generation": run_generation,
                 }
             )
-        elif run_generation is not None:
-            payload["run_generation"] = run_generation
         RecipeStartPayload.model_validate(payload)
     except (KeyError, TypeError, ValueError) as error:
         raise RecipeStartPayloadError("recipe start payload is invalid") from error

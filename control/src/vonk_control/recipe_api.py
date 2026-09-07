@@ -8,13 +8,20 @@ from datetime import datetime
 from typing import Any, Protocol
 
 from fastapi import FastAPI, HTTPException, Path, Request, status
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 from starlette.responses import JSONResponse
+from vonk_forge_contracts import RecipeDefinition
 
 from .audit import AuditRecord
 from .auth import Actor
+from .compiled_execution_plan import CompiledExecutionPlan
 from .library_contract import Digest, ImageDigest, NodeId, Scalar, Text64, UuidId
 from .recipe_action_plans import SharedCachePolicy
+from .recipe_lifecycle_contract import (
+    RecipeLifecycleResult,
+    RecipeOperationConflictResponse,
+    parse_recipe_lifecycle_result,
+)
 from .recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
@@ -164,9 +171,7 @@ class InstallPlanResponse(StrictModel):
     allowed: bool
     nodes: list[InstallNodePlanResponse]
     plan_digest: Digest
-    # The payload itself is an explicit versioned extension map owned by the
-    # compiled-launch contract; only its node identity is constrained here.
-    compiled_execution_plans: dict[NodeId, dict[str, object]] = Field(
+    compiled_execution_plans: dict[NodeId, CompiledExecutionPlan] = Field(
         default_factory=dict
     )
 
@@ -268,7 +273,7 @@ class UninstallPlanResponse(StrictModel):
     recipe_id: UuidId
     recipe_revision_id: UuidId
     recipe_content_sha256: Digest
-    recipe_content: dict[str, object]
+    recipe_content: RecipeDefinition
     installation_authority_digest: Digest
     original_plan_digest: Digest
     installation_state: str = Field(min_length=1, max_length=24)
@@ -330,7 +335,25 @@ class OperationResponse(StrictModel):
     state: str
     plan_digest: Digest
     nodes: list[NodeId]
-    result: dict[str, object] | None
+    result: RecipeLifecycleResult | None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_kind_specific_result(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        result = document.get("result")
+        if result is None:
+            return document
+        kind = document.get("kind")
+        if not isinstance(kind, str):
+            raise TypeError("recipe operation kind is invalid")
+        try:
+            document["result"] = parse_recipe_lifecycle_result(kind, result)
+        except (TypeError, ValueError) as error:
+            raise ValueError(str(error)) from error
+        return document
 
 
 class RunRankStatusResponse(StrictModel):
@@ -488,13 +511,17 @@ def install_recipe_operation_routes(
         )
 
     def conflict(request: Request, error: Exception) -> JSONResponse:
-        return JSONResponse(
-            status_code=409,
-            content={
+        body = _response(
+            RecipeOperationConflictResponse,
+            {
                 "code": "recipe.operation_conflict",
                 "detail": str(error)[:256],
                 "request_id": request.state.request_id,
             },
+        )
+        return JSONResponse(
+            status_code=409,
+            content=body.model_dump(mode="json"),
         )
 
     @app.post(
