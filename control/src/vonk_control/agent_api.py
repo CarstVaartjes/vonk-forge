@@ -151,9 +151,9 @@ def _strict_json_datetime(value: object) -> object:
     if isinstance(value, datetime):
         return value
     if not isinstance(value, str):
-        raise ValueError("observed time must be an RFC 3339 string")
+        raise TypeError("observed time must be an RFC 3339 string")
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
     except ValueError as error:
         raise ValueError("observed time must be an RFC 3339 string") from error
     if "T" not in value and "t" not in value:
