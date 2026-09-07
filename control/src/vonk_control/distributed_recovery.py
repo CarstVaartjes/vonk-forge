@@ -347,7 +347,7 @@ def _recovery_authority(
             .order_by(AgentPresence.observed_at.desc())
             .limit(1)
         )
-        if presence is None:
+        if presence is None or not isinstance(presence.management_address, str):
             raise DistributedLifecycleError(
                 "distributed recovery endpoint evidence is missing"
             )
