@@ -68,7 +68,6 @@ function api(
     target_total: 1,
     current_attempt: 1,
     status_reason: null,
-    reconciliation_id: null,
     operations: [],
     operation_next_cursor: null,
     operation_total: 1,
@@ -214,8 +213,7 @@ test("loads truthful operation progress and resumes only an operator-waiting job
     target_total: 1,
     current_attempt: 2,
     status_reason: "inspect worker logs",
-    reconciliation_id: "reconcile-1",
-    operations: [{id: "step-1", graph_operation_id: null, node_id: TARGET_ID, kind: "distribute", state: "failed", attempt: 2, progress: {phase: "verify"}, updated_at: "2026-08-15T11:59:30Z"}],
+    operations: [{id: "step-1", node_id: TARGET_ID, kind: "distribute", state: "failed", attempt: 2, progress: {phase: "verify"}, updated_at: "2026-08-15T11:59:30Z"}],
     operation_next_cursor: null,
     operation_total: 1,
     progress: {completed: 0, failed: 1, running: 0, total: 1},
@@ -235,6 +233,8 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   expect(screen.getByText("Phase: verify")).toBeVisible();
   expect(screen.getByRole("button", {name: "Resume operation"})).toBeVisible();
   expect(screen.queryByText("step-1")).not.toBeInTheDocument();
+  await user.click(screen.getByText("Operation identifiers"));
+  expect(screen.queryByText("Reconciliation ID")).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", {name: "Resume operation"}));
   await waitFor(() => expect(resumeJob).toHaveBeenCalledWith("operation-1"));
@@ -265,8 +265,7 @@ test("explains an unresolved legacy agent upgrade without guessing its failure s
     target_total: 1,
     current_attempt: 1,
     status_reason: "The exact target identity was not proven.",
-    reconciliation_id: null,
-    operations: [{id: "upgrade-step", graph_operation_id: null, node_id: TARGET_ID, kind: "agent.upgrade.v1", state: "waiting-for-operator", attempt: 2, progress: null, updated_at: "2026-08-15T11:59:30Z"}],
+    operations: [{id: "upgrade-step", node_id: TARGET_ID, kind: "agent.upgrade.v1", state: "waiting-for-operator", attempt: 2, progress: null, updated_at: "2026-08-15T11:59:30Z"}],
     operation_next_cursor: null,
     operation_total: 1,
     progress: {completed: 0, failed: 0, running: 0, total: 1},
@@ -323,8 +322,8 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   });
   const nextAction = "Wait for the controller-managed retry behind its safety delay; it will not dispatch before the reported retry time. Do not manually resume the rollout again.";
   const detail = {
-    id: "upgrade-1", kind: "agent-upgrade", state: "waiting-for-operator", authority_revision: "a".repeat(64), targets: [TARGET_ID], target_next_cursor: null, target_total: 1, current_attempt: 1, status_reason: "agent upgrade helper is unavailable", reconciliation_id: null,
-    operations: [{id: "upgrade-step", graph_operation_id: null, node_id: TARGET_ID, kind: "agent.upgrade.v1", state: "waiting-for-operator", attempt: 2, progress: null, updated_at: "2026-08-15T11:59:30Z"}], operation_next_cursor: null, operation_total: 1, progress: {completed: 0, failed: 0, running: 0, total: 1},
+    id: "upgrade-1", kind: "agent-upgrade", state: "waiting-for-operator", authority_revision: "a".repeat(64), targets: [TARGET_ID], target_next_cursor: null, target_total: 1, current_attempt: 1, status_reason: "agent upgrade helper is unavailable",
+    operations: [{id: "upgrade-step", node_id: TARGET_ID, kind: "agent.upgrade.v1", state: "waiting-for-operator", attempt: 2, progress: null, updated_at: "2026-08-15T11:59:30Z"}], operation_next_cursor: null, operation_total: 1, progress: {completed: 0, failed: 0, running: 0, total: 1},
     agent_upgrade_diagnostics: {
       expected_identity: {version: "0.1.0~dev.350+g15f9faf7c5bf", binary_digest: "b".repeat(64), build_digest: `sha256:${"c".repeat(64)}`},
       targets: [{node_id: TARGET_ID, state: "waiting-for-operator", attempts: 2, target_proven: false, observed_identity: {version: "0.1.0", binary_digest: "d".repeat(64), build_digest: `sha256:${"e".repeat(64)}`}, raw_reason: "agent upgrade helper is unavailable", retry_not_before: "2026-08-15T12:04:00Z", retry_queued: true}],
@@ -351,7 +350,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
 
 test("shows a retryable operation-detail failure without offering resume", async () => {
   const loadJob = vi.fn().mockRejectedValueOnce(new Error("operation projection unavailable")).mockResolvedValueOnce({
-    id: "operation-1", kind: "recipe-install", state: "failed", authority_revision: "a".repeat(64), targets: [], target_next_cursor: null, target_total: 0, current_attempt: 1, status_reason: "worker exited", reconciliation_id: null, operations: [], operation_next_cursor: null, operation_total: 0, progress: {completed: 0, failed: 0, running: 0, total: 0},
+    id: "operation-1", kind: "recipe-install", state: "failed", authority_revision: "a".repeat(64), targets: [], target_next_cursor: null, target_total: 0, current_attempt: 1, status_reason: "worker exited", operations: [], operation_next_cursor: null, operation_total: 0, progress: {completed: 0, failed: 0, running: 0, total: 0},
   });
   const user = userEvent.setup();
   render(<ActivityPage api={api(undefined, undefined, loadJob)} now={NOW}/>);
