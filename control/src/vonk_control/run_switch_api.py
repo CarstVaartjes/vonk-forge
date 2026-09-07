@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Request, status
 from fastapi.responses import JSONResponse
+from pydantic import ConfigDict, Field
 
 from .audit import AuditRecord
 from .auth import Actor
@@ -23,6 +24,7 @@ from .run_switch_operations import (
     RunSwitchOperationConflict,
     RunSwitchOperationService,
 )
+from .strict_json import StrictJSONModel
 
 RUN_SWITCH_OPERATION_IDS = {
     (
@@ -51,6 +53,16 @@ _UUID = (
 )
 
 
+class RunSwitchConflictResponse(StrictJSONModel):
+    """The conflict document returned by mutating Run/Switch routes."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    code: Literal["run-switch.operation_conflict"] = "run-switch.operation_conflict"
+    detail: str = Field(min_length=1, max_length=256)
+    request_id: str = Field(pattern=_UUID)
+
+
 def install_run_switch_routes(
     app: FastAPI,
     *,
@@ -75,19 +87,24 @@ def install_run_switch_routes(
             raise HTTPException(status_code=403, detail="insufficient role")
 
     def conflict(request: Request, error: Exception) -> JSONResponse:
+        response = RunSwitchConflictResponse(
+            detail=str(error)[:256], request_id=request.state.request_id
+        )
         return JSONResponse(
             status_code=409,
-            content={
-                "code": "run-switch.operation_conflict",
-                "detail": str(error)[:256],
-                "request_id": request.state.request_id,
-            },
+            content=response.model_dump(mode="json"),
         )
+
+    def errors(*status_codes: int, conflict: bool = False) -> dict[int, dict[str, object]]:
+        responses = bounded_error_responses(*status_codes)
+        if conflict:
+            responses[409] = {"model": RunSwitchConflictResponse}
+        return responses
 
     @app.post(
         "/api/v1/recipes/run-switch-plans/preview",
         response_model=RunSwitchPlan,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        responses=errors(401, 403, 404, 409, 422, 503),
         operation_id="previewRecipeRunSwitch",
     )
     def preview_run_switch(
@@ -107,7 +124,7 @@ def install_run_switch_routes(
         "/api/v1/recipes/run-switches",
         response_model=RunSwitchOperation,
         status_code=status.HTTP_202_ACCEPTED,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        responses=errors(401, 403, 404, 409, 422, 503, conflict=True),
         operation_id="applyRecipeRunSwitch",
     )
     def apply_run_switch(
@@ -138,7 +155,7 @@ def install_run_switch_routes(
     @app.get(
         "/api/v1/recipes/run-switches/{operation_id}",
         response_model=RunSwitchOperation,
-        responses=bounded_error_responses(401, 404, 422, 503),
+        responses=errors(401, 404, 422, 503),
         operation_id="getRecipeRunSwitchOperation",
     )
     def get_run_switch(
@@ -155,7 +172,7 @@ def install_run_switch_routes(
         "/api/v1/recipes/run-switches/{operation_id}/retry",
         response_model=RunSwitchOperation,
         status_code=status.HTTP_202_ACCEPTED,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        responses=errors(401, 403, 404, 409, 422, 503, conflict=True),
         operation_id="retryRecipeRunSwitchOperation",
     )
     def retry_run_switch(
@@ -191,7 +208,7 @@ def install_run_switch_routes(
     @app.post(
         "/api/v1/recipes/run-switch-stops/preview",
         response_model=RunSwitchPlan,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        responses=errors(401, 403, 404, 409, 422, 503),
         operation_id="previewRecipeRunSwitchStop",
     )
     def preview_run_switch_stop(
@@ -211,7 +228,7 @@ def install_run_switch_routes(
         "/api/v1/recipes/run-switch-stops",
         response_model=RunSwitchOperation,
         status_code=status.HTTP_202_ACCEPTED,
-        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        responses=errors(401, 403, 404, 409, 422, 503, conflict=True),
         operation_id="applyRecipeRunSwitchStop",
     )
     def apply_run_switch_stop(

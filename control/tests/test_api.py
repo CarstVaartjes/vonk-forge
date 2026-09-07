@@ -11,7 +11,9 @@ from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.browser_auth import BrowserAuthService
+from vonk_control.catalog_api import CatalogProblem
 from vonk_control.models import Base, User
+from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.passwords import hash_password
 
 ADMIN_PASSWORD = "correct horse battery staple"
@@ -166,6 +168,28 @@ def test_health_is_public_but_fleet_requires_authentication() -> None:
     client, _, _, _ = _client("viewer")
     assert client.get("/api/v1/healthz").status_code == 200
     assert client.get("/api/v1/fleet").status_code == 401
+
+
+def test_central_api_http_errors_are_serialized_by_the_declared_models() -> None:
+    client, _, _, _ = _client("viewer")
+
+    response = client.get("/api/v1/fleet")
+
+    assert response.status_code == 401
+    assert BoundedErrorResponse.model_validate_json(response.content).detail == (
+        "authentication required"
+    )
+
+
+def test_central_catalog_http_errors_are_serialized_by_catalog_problem() -> None:
+    client, _, _, _ = _client("viewer")
+
+    response = client.get("/api/v1/catalog/source-bundles/" + "a" * 64)
+
+    assert response.status_code == 401
+    problem = CatalogProblem.model_validate_json(response.content)
+    assert problem.code == "catalog.authentication_required"
+    assert problem.detail == "authentication required"
 
 
 def test_request_boundary_admits_large_recipe_images_only_on_exact_put_route() -> None:

@@ -4,10 +4,15 @@ import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
 from vonk_control.operation_api import admin_openapi_schema
-from vonk_control.recipe_image_availability import RecipeImageAvailabilityView
+from vonk_control.recipe_image_availability import (
+    RecipeImageAvailabilityError,
+    RecipeImageAvailabilityView,
+)
 from vonk_control.recipe_image_availability_api import (
     RECIPE_IMAGE_AVAILABILITY_OPERATION_IDS,
+    RecipeImageAvailabilityErrorResponse,
     _child,
+    _failure_response,
     _progress,
     _view_document,
     install_recipe_image_availability_routes,
@@ -37,6 +42,22 @@ def test_model_cache_progress_maps_to_shared_typed_progress() -> None:
     assert progress.completed_bytes == 40
     assert progress.total_bytes == 100
     assert progress.total_bytes_known is True
+
+
+def test_failure_response_serializes_the_complete_declared_error_model() -> None:
+    error = RecipeImageAvailabilityError(
+        "recipe_image.build_failed",
+        "compiler failed",
+        retryable=True,
+        recovery_actions=("retry",),
+    )
+
+    response = _failure_response(error)
+
+    assert isinstance(response, RecipeImageAvailabilityErrorResponse)
+    assert response.model_dump(mode="json")["schema_version"] == 2
+    assert response.failure.code == "recipe_image.build_failed"
+    assert response.failure.recovery_actions == ["retry"]
 
 
 def test_completed_result_projection_is_strict_and_exposes_both_children() -> None:
