@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, GetCoreSchemaHandler
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    GetCoreSchemaHandler,
+    model_serializer,
+    model_validator,
+)
 from pydantic_core import CoreSchema, core_schema
 
 
@@ -58,3 +66,119 @@ class WireModel(StrictJSONModel):
     """Immutable JSON message with exact structure and scalar types."""
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True, allow_inf_nan=False)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in self.__class__.model_fields:
+            raise AttributeError(f"{self.__class__.__name__} is immutable")
+        super().__setattr__(name, value)
+
+
+Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+
+
+class OperationCheckpoint(WireModel):
+    """Restart-safe cursor identifying a durable operation unit."""
+
+    key: str = Field(min_length=1, max_length=128)
+    sequence: int = Field(strict=True, ge=0)
+    cursor: str | None = Field(default=None, max_length=512)
+    digest: Digest | None = None
+
+
+class OperationMemberProgress(WireModel):
+    """Progress for one node, rank, shard, or other operation member."""
+
+    member_id: str = Field(min_length=1, max_length=128)
+    phase: str = Field(min_length=1, max_length=80)
+    kind: str | None = Field(default=None, min_length=1, max_length=80)
+    object_sha256: Digest | None = None
+    completed_bytes: int = Field(default=0, strict=True, ge=0)
+    total_bytes: int | None = Field(default=None, strict=True, ge=0)
+    bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
+    eta_seconds: float | None = Field(default=None, strict=True, ge=0, le=10**9)
+    state: str = Field(default="running", min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def totals_are_consistent(self) -> OperationMemberProgress:
+        if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
+            raise ValueError("completed bytes cannot exceed total bytes")
+        return self
+
+
+class OperationProgress(WireModel):
+    """Canonical durable progress payload shared by Controller and agents."""
+
+    phase: str = Field(min_length=1, max_length=80)
+    kind: str | None = Field(default=None, min_length=1, max_length=80)
+    object_sha256: Digest | None = None
+    completed_bytes: int = Field(default=0, strict=True, ge=0)
+    total_bytes: int | None = Field(default=None, strict=True, ge=0)
+    total_bytes_known: bool = False
+    bytes_per_second: float | None = Field(default=None, strict=True, ge=0, le=10**15)
+    eta_seconds: float | None = Field(default=None, strict=True, ge=0, le=10**9)
+    checkpoint: OperationCheckpoint | None = None
+    members: list[OperationMemberProgress] = Field(default_factory=list, max_length=1024)
+
+    @model_serializer(mode="wrap")
+    def serialize_compact(self, handler: Any) -> dict[str, Any]:
+        document = handler(self)
+        for key in ("kind", "object_sha256", "total_bytes", "bytes_per_second", "eta_seconds", "checkpoint"):
+            if document.get(key) is None:
+                document.pop(key, None)
+        if "completed_bytes" not in self.model_fields_set:
+            document.pop("completed_bytes", None)
+        if "total_bytes_known" not in self.model_fields_set:
+            document.pop("total_bytes_known", None)
+        if "members" not in self.model_fields_set or not self.members:
+            document.pop("members", None)
+        return document
+
+    @model_validator(mode="after")
+    def totals_are_explicit_and_consistent(self) -> OperationProgress:
+        if self.total_bytes_known != (self.total_bytes is not None):
+            raise ValueError(
+                "total_bytes_known must be false when total_bytes is unknown and true when present"
+            )
+        if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
+            raise ValueError("completed bytes cannot exceed total bytes")
+        member_ids = [member.member_id for member in self.members]
+        if len(member_ids) != len(set(member_ids)):
+            raise ValueError("operation progress members must be unique")
+        return self
+
+
+def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, object]:
+    """Validate and canonicalize progress while preserving phase-only wire data."""
+
+    parsed = OperationProgress.model_validate(value)
+    document = parsed.model_dump(mode="json", exclude_none=True)
+    if not document.get("members"):
+        document.pop("members", None)
+    if parsed.checkpoint is None:
+        document.pop("checkpoint", None)
+    if parsed.completed_bytes == 0 and "completed_bytes" not in value:
+        document.pop("completed_bytes", None)
+    if (
+        parsed.total_bytes_known is False
+        and "total_bytes_known" not in value
+        and not set(value) & {
+            "completed_bytes",
+            "total_bytes",
+            "bytes_per_second",
+            "eta_seconds",
+            "checkpoint",
+            "members",
+        }
+    ):
+        document.pop("total_bytes_known", None)
+    return document
+
+
+__all__ = [
+    "OperationCheckpoint",
+    "OperationMemberProgress",
+    "OperationProgress",
+    "StrictJSONModel",
+    "WireModel",
+    "normalize_operation_progress",
+]

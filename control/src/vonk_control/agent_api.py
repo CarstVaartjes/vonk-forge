@@ -34,7 +34,6 @@ from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
     MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     AgentProgress,
-    AgentProtocolError,
     AgentResult,
     ContainerRuntimeAction,
     DistributionAssignment,
@@ -2628,14 +2627,11 @@ def install_agent_routes(
             ) from None
 
     @agent.post("/heartbeat")
-    def heartbeat(body: dict[str, object], request: Request) -> Response:
+    def heartbeat(body: AgentProgress, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        try:
-            message = AgentProgress.parse(body)
-        except AgentProtocolError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+        message = body
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:
@@ -2650,14 +2646,11 @@ def install_agent_routes(
         return _json_response(_wire(response))
 
     @agent.post("/result", status_code=status.HTTP_204_NO_CONTENT)
-    def result(body: dict[str, object], request: Request) -> Response:
+    def result(body: AgentResult, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
         identity = _authenticated_identity(request, required)
-        try:
-            message = AgentResult.parse(body)
-        except AgentProtocolError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+        message = body
         _body_node_matches(message.node_id, identity)
         source = _validated_authenticated_source(request, required, identity)
         try:

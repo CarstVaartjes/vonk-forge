@@ -39,11 +39,9 @@ from .models import (
     RoutePublicationOwner,
 )
 from .operation_contract import (
-    OperationCheckpoint,
     OperationEvidenceDownload,
     OperationEvidenceProvenance,
     OperationFailureEvidence,
-    OperationMemberProgress,
     OperationProgress,
     OperationRecovery,
     OperationRecoveryAction,
@@ -271,27 +269,6 @@ class AgentsResponse(StrictModel):
     agents: list[AgentSummary]
 
 
-class JobOperationProgress(StrictModel):
-    phase: str = Field(min_length=1, max_length=80)
-    completed_bytes: int | None = Field(default=None, ge=0)
-    total_bytes: int | None = Field(default=None, ge=0)
-    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
-    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
-    total_bytes_known: bool | None = None
-    checkpoint: OperationCheckpoint | None = None
-    members: list[OperationMemberProgress] | None = Field(default=None, max_length=1024)
-
-    @model_serializer(mode="wrap")
-    def _serialize_without_unset_contract_fields(self, handler):
-        document = handler(self)
-        # Keep old phase-only status responses byte-for-byte stable.
-        return {
-            key: value
-            for key, value in document.items()
-            if value is not None and value != []
-        }
-
-
 class JobOperationResponse(StrictModel):
     id: str = Field(min_length=1, max_length=128)
     graph_operation_id: str | None = Field(default=None, max_length=128)
@@ -299,7 +276,7 @@ class JobOperationResponse(StrictModel):
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
     attempt: int = Field(ge=0)
-    progress: JobOperationProgress | None = None
+    progress: OperationProgress | None = None
     updated_at: str | None = None
     failure: OperationFailureEvidence | None = None
     provenance: OperationEvidenceProvenance | None = None
@@ -323,7 +300,7 @@ class OperationDetailResponse(StrictModel):
     kind: str = Field(min_length=1, max_length=80)
     state: str = Field(min_length=1, max_length=80)
     attempt: int = Field(ge=0)
-    progress: JobOperationProgress | None = None
+    progress: OperationProgress | None = None
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str | None = None
     failure: OperationFailureEvidence | None = None
@@ -718,40 +695,18 @@ def decode_offset(
     return offset
 
 
-def _progress_projection(value: object) -> JobOperationProgress | None:
+def _progress_projection(value: object) -> OperationProgress | None:
     if not isinstance(value, Mapping):
         return None
     phase = value.get("phase")
     if not isinstance(phase, str) or not phase.strip() or len(phase) > 80:
         return None
-    recognized = {
-        "completed_bytes",
-        "bytes_done",
-        "bytes_completed",
-        "total_bytes",
-        "bytes_total",
-        "bytes_per_second",
-        "rate_bytes_per_second",
-        "rate",
-        "eta_seconds",
-        "checkpoint",
-        "members",
-        "total_bytes_known",
-        "total_unknown",
-    }
     try:
-        # Validate the durable wire values before the compatibility normalizer
-        # runs. Pydantic's default coercion would turn malformed strings such as
-        # ``"100"`` into an apparently valid byte counter.
         OperationProgress.model_validate(value, strict=True)
         normalized = normalize_operation_progress(value)
-    except (TypeError, ValueError):
-        # Unknown extension fields from older agents must not make the whole
-        # job status unavailable; retain the stable phase only.
-        if recognized.intersection(value):
-            return None
-        normalized = {"phase": phase}
-    return JobOperationProgress(**normalized)
+    except (TypeError, ValueError) as error:
+        raise ValueError("durable operation progress is invalid") from error
+    return OperationProgress.model_validate(normalized)
 
 
 def _failure_projection(value: object) -> OperationFailureEvidence | None:

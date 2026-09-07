@@ -6,16 +6,18 @@ import ipaddress
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError, model_validator
+
+from .wire_model import WireModel
 
 MAX_DOCUMENT_BYTES = 64 * 1024
 MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
@@ -108,6 +110,20 @@ class AgentOperation(StrEnum):
     RECIPE_STOP = "recipe.stop"
     RECIPE_UNINSTALL = "recipe.uninstall"
     RECIPE_MODEL_UNINSTALL = "recipe.model-uninstall.v1"
+
+
+class ArtifactDistributionPayload(WireModel):
+    """The complete payload accepted by the artifact transfer operation."""
+
+    schema_version: Literal[1]
+    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def plan_is_authority(self) -> ArtifactDistributionPayload:
+        if self.plan_digest != self.authority_revision:
+            raise ValueError("artifact distribution plan identity is invalid")
+        return self
 
 
 PROTOCOL_FORMAT_CHECKER = FormatChecker()
@@ -1006,9 +1022,8 @@ def _attempt_fields(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-@dataclass(frozen=True)
-class AgentClaim:
-    schema_version: int
+class AgentClaim(WireModel):
+    schema_version: Literal[1]
     job_id: str
     operation_id: str
     attempt: int
@@ -1017,8 +1032,34 @@ class AgentClaim:
     operation: AgentOperation
     authority_revision: str
     payload_digest: str
-    payload: Mapping[str, Any]
+    payload: dict[str, Any]
     deadline: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_wire_scalars(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        if "operation" in document and not isinstance(document["operation"], AgentOperation):
+            try:
+                document["operation"] = AgentOperation(document["operation"])
+            except (TypeError, ValueError):
+                pass
+        if "deadline" in document:
+            document["deadline"] = _deadline(document["deadline"])
+        return document
+
+    @model_validator(mode="after")
+    def validate_wire(self) -> AgentClaim:
+        self.__post_init__()
+        return self
+
+    def __init__(self, **data: Any) -> None:
+        try:
+            super().__init__(**data)
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "schema_version", _version(self.schema_version))
@@ -1062,6 +1103,11 @@ class AgentClaim:
                 ).model_validate(typed_payload)
             except Exception as error:
                 raise AgentProtocolError("recipe operation payload is invalid") from error
+        elif self.operation is AgentOperation.ARTIFACT_DISTRIBUTION:
+            try:
+                ArtifactDistributionPayload.model_validate_json(canonical_message(payload))
+            except ValidationError as error:
+                raise AgentProtocolError("artifact distribution request is invalid") from error
         if (
             hashlib.sha256(canonical_message(payload)).hexdigest()
             != self.payload_digest
@@ -1071,61 +1117,49 @@ class AgentClaim:
             _validate_recipe_build_payload(payload)
         elif self.operation is AgentOperation.AGENT_UPGRADE:
             _validate_agent_upgrade_payload(payload)
-        object.__setattr__(self, "payload", payload)
+        object.__setattr__(self, "payload", json.loads(canonical_message(payload)))
         object.__setattr__(self, "deadline", _deadline(self.deadline))
 
     @classmethod
     def parse(cls, raw: Any) -> AgentClaim:
-        value = _mapping(raw)
-        _fields(
-            value,
-            required={
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "operation",
-                "authority_revision",
-                "payload_digest",
-                "payload",
-                "deadline",
-            },
-        )
         try:
-            operation = AgentOperation(value["operation"])
-        except (TypeError, ValueError) as error:
-            raise AgentProtocolError("operation is not supported") from error
-        authority_revision = value["authority_revision"]
-        if not isinstance(authority_revision, str) or not AUTHORITY_REVISION.fullmatch(
-            authority_revision
-        ):
-            raise AgentProtocolError(
-                "authority_revision must be a 64-character lowercase SHA-256"
-            )
-        payload_digest = value["payload_digest"]
-        if not isinstance(payload_digest, str) or not DIGEST.fullmatch(payload_digest):
-            raise AgentProtocolError("payload_digest must be a lowercase SHA-256")
-        return cls(
-            **_attempt_fields(value),
-            operation=operation,
-            authority_revision=authority_revision,
-            payload_digest=payload_digest,
-            payload=value["payload"],
-        )
+            return cls.model_validate(raw)
+        except AgentProtocolError:
+            raise
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
 
-@dataclass(frozen=True)
-class AgentProgress:
-    schema_version: int
+class AgentProgress(WireModel):
+    schema_version: Literal[1]
     job_id: str
     operation_id: str
     attempt: int
     fence: str
     node_id: str
     deadline: datetime
-    progress: Mapping[str, Any]
+    progress: dict[str, Any]
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_wire_scalars(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        if "deadline" in document:
+            document["deadline"] = _deadline(document["deadline"])
+        return document
+
+    @model_validator(mode="after")
+    def validate_wire(self) -> AgentProgress:
+        self.__post_init__()
+        return self
+
+    def __init__(self, **data: Any) -> None:
+        try:
+            super().__init__(**data)
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "schema_version", _version(self.schema_version))
@@ -1138,33 +1172,23 @@ class AgentProgress:
         object.__setattr__(self, "node_id", _node_id(self.node_id))
         object.__setattr__(self, "deadline", _deadline(self.deadline))
         object.__setattr__(
-            self, "progress", _validate_bounded_document(self.progress, name="progress")
+            self, "progress", json.loads(canonical_message(_validate_bounded_document(self.progress, name="progress")))
         )
 
     @classmethod
     def parse(cls, raw: Any) -> AgentProgress:
-        value = _mapping(raw)
-        _fields(
-            value,
-            required={
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "deadline",
-                "progress",
-            },
-        )
-        return cls(**_attempt_fields(value), progress=value["progress"])
+        try:
+            return cls.model_validate(raw)
+        except AgentProtocolError:
+            raise
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
 
-@dataclass(frozen=True)
-class AgentDirective:
+class AgentDirective(WireModel):
     """Authenticated heartbeat response for deadline renewal and cancellation."""
 
-    schema_version: int
+    schema_version: Literal[1]
     job_id: str
     operation_id: str
     attempt: int
@@ -1172,6 +1196,27 @@ class AgentDirective:
     node_id: str
     deadline: datetime
     cancel_requested: bool
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_wire_scalars(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        if "deadline" in document:
+            document["deadline"] = _deadline(document["deadline"])
+        return document
+
+    @model_validator(mode="after")
+    def validate_wire(self) -> AgentDirective:
+        self.__post_init__()
+        return self
+
+    def __init__(self, **data: Any) -> None:
+        try:
+            super().__init__(**data)
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "schema_version", _version(self.schema_version))
@@ -1188,37 +1233,45 @@ class AgentDirective:
 
     @classmethod
     def parse(cls, raw: Any) -> AgentDirective:
-        value = _mapping(raw)
-        _fields(
-            value,
-            required={
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "deadline",
-                "cancel_requested",
-            },
-        )
-        return cls(
-            **_attempt_fields(value),
-            cancel_requested=value["cancel_requested"],
-        )
+        try:
+            return cls.model_validate(raw)
+        except AgentProtocolError:
+            raise
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
 
-@dataclass(frozen=True)
-class AgentResult:
-    schema_version: int
+class AgentResult(WireModel):
+    schema_version: Literal[1]
     job_id: str
     operation_id: str
     attempt: int
     fence: str
     node_id: str
     deadline: datetime
-    state: str
-    result: Mapping[str, Any]
+    state: Literal["succeeded", "failed", "cancelled", "waiting-for-operator"]
+    result: dict[str, Any]
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_wire_scalars(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        if "deadline" in document:
+            document["deadline"] = _deadline(document["deadline"])
+        return document
+
+    @model_validator(mode="after")
+    def validate_wire(self) -> AgentResult:
+        self.__post_init__()
+        return self
+
+    def __init__(self, **data: Any) -> None:
+        try:
+            super().__init__(**data)
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "schema_version", _version(self.schema_version))
@@ -1240,33 +1293,21 @@ class AgentResult:
         object.__setattr__(
             self,
             "result",
-            _validate_bounded_document(
+            json.loads(canonical_message(_validate_bounded_document(
                 self.result,
                 name="result",
                 typed_result_strings=True,
-            ),
+            ))),
         )
 
     @classmethod
     def parse(cls, raw: Any) -> AgentResult:
-        value = _mapping(raw)
-        _fields(
-            value,
-            required={
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "deadline",
-                "state",
-                "result",
-            },
-        )
-        return cls(
-            **_attempt_fields(value), state=value["state"], result=value["result"]
-        )
+        try:
+            return cls.model_validate(raw)
+        except AgentProtocolError:
+            raise
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
 
 def schema_validator(schema_name: str) -> Draft202012Validator:
@@ -1279,16 +1320,29 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         "telemetry-report.schema.json",
     }:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}")
-    try:
-        document = json.loads(
-            (
-                importlib.resources.files("vonk_agent_protocol")
-                / "schemas"
-                / schema_name
-            ).read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError) as error:
-        raise AgentProtocolError("packaged protocol schema is invalid") from error
+    if schema_name == "recipe-job-run.schema.json":
+        # Recipe job wire shape is generated from the Pydantic model graph.
+        # Keep the import local because recipe_jobs imports these primitives.
+        from .recipe_jobs import RecipeJobRunRequest
+
+        document = RecipeJobRunRequest.model_json_schema()
+    else:
+        try:
+            document = json.loads(
+                (
+                    importlib.resources.files("vonk_agent_protocol")
+                    / "schemas"
+                    / schema_name
+                ).read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as error:
+            raise AgentProtocolError("packaged protocol schema is invalid") from error
+        if schema_name == "agent-job.schema.json":
+            # Keep the compatibility validator's structural/safety rules, but
+            # source its operation vocabulary from the authoritative enum.
+            document["properties"]["operation"]["enum"] = [
+                operation.value for operation in AgentOperation
+            ]
     return Draft202012Validator(document, format_checker=PROTOCOL_FORMAT_CHECKER)
 
 
@@ -1311,7 +1365,16 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         parser = parsers[schema_name]
     except KeyError as error:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}") from error
-    errors = list(schema_validator(schema_name).iter_errors(raw))
-    if errors:
-        raise AgentProtocolError(f"schema validation failed: {errors[0].message}")
+    # Core envelopes and recipe jobs are the source of truth. Their JSON
+    # schemas are generated from the Pydantic graph; validating the old
+    # checked-in copies here would reintroduce a second, drifting parser.
+    if schema_name not in {
+        "agent-job.schema.json",
+        "agent-result.schema.json",
+        "agent-directive.schema.json",
+        "recipe-job-run.schema.json",
+    }:
+        errors = list(schema_validator(schema_name).iter_errors(raw))
+        if errors:
+            raise AgentProtocolError(f"schema validation failed: {errors[0].message}")
     return parser(raw)

@@ -8,7 +8,9 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import Field, ValidationError, model_validator
 
 from .contracts import (
     AgentProtocolError,
@@ -18,6 +20,7 @@ from .contracts import (
     _version,
     canonical_message,
 )
+from .wire_model import WireModel
 
 MAX_INPUT_FILES = 32
 MAX_INPUT_FILE_BYTES = 512 * 1024**2
@@ -92,7 +95,7 @@ def _media_type(value: object) -> str:
 
 
 @dataclass(frozen=True, slots=True)
-class RecipeJobFile:
+class _LegacyRecipeJobFile:
     name: str
     media_type: str
     size_bytes: int
@@ -123,7 +126,7 @@ class RecipeJobFile:
 
 
 @dataclass(frozen=True, slots=True)
-class RecipeJobInputFile:
+class _LegacyRecipeJobInputFile:
     slot: str
     name: str
     media_type: str
@@ -257,7 +260,7 @@ def _parameters(value: object, *, depth: int = 0) -> object:
 
 
 @dataclass(frozen=True, slots=True)
-class RecipeJobOutputLimits:
+class _LegacyRecipeJobOutputLimits:
     max_files: int
     max_file_bytes: int
     max_total_bytes: int
@@ -312,7 +315,7 @@ class RecipeJobOutputLimits:
 
 
 @dataclass(frozen=True, slots=True)
-class RecipeJobOutputMapping:
+class _LegacyRecipeJobOutputMapping:
     slot: str
     media_type: str
     extensions: tuple[str, ...]
@@ -362,7 +365,7 @@ def _output_mappings(raw: object) -> tuple[RecipeJobOutputMapping, ...]:
 
 
 @dataclass(frozen=True, slots=True)
-class RecipeJobRunRequest:
+class _LegacyRecipeJobRunRequest:
     schema_version: int
     job_id: str
     run_id: str
@@ -464,7 +467,7 @@ class RecipeJobRunRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class RecipeJobRunResult:
+class _LegacyRecipeJobRunResult:
     schema_version: int
     job_id: str
     run_id: str
@@ -536,6 +539,273 @@ class RecipeJobRunResult:
             ),
             reason=reason,
         )
+
+
+class _RecipeWireModel(WireModel):
+    """Pydantic base for strict recipe job payloads with legacy error wording."""
+
+    @classmethod
+    def _parse(cls, raw: Any, **kwargs: Any) -> Any:
+        try:
+            return cls.model_validate(raw, **kwargs)
+        except AgentProtocolError:
+            raise
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
+
+
+class RecipeJobFile(_RecipeWireModel):
+    name: str
+    media_type: str
+    size_bytes: int = Field(strict=True, ge=0, le=MAX_OUTPUT_FILE_BYTES)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_file(self) -> RecipeJobFile:
+        _name(self.name)
+        _media_type(self.media_type)
+        _digest(self.sha256, "artifact sha256")
+        return self
+
+    @classmethod
+    def parse(cls, raw: Any, *, maximum_bytes: int) -> RecipeJobFile:
+        value = _mapping(raw)
+        _fields(value, required={"name", "media_type", "size_bytes", "sha256"})
+        parsed = cls._parse(value)
+        if parsed.size_bytes > maximum_bytes:
+            raise AgentProtocolError("artifact size_bytes is invalid")
+        return parsed
+
+    def to_mapping(self) -> dict[str, object]:
+        return self.model_dump(mode="json")
+
+
+class RecipeJobInputFile(_RecipeWireModel):
+    slot: str
+    name: str
+    media_type: str
+    size_bytes: int = Field(strict=True, ge=0, le=MAX_INPUT_FILE_BYTES)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_file(self) -> RecipeJobInputFile:
+        _slot(self.slot)
+        _name(self.name)
+        _media_type(self.media_type)
+        _digest(self.sha256, "artifact sha256")
+        return self
+
+    @classmethod
+    def parse(cls, raw: Any, *, maximum_bytes: int) -> RecipeJobInputFile:
+        value = _mapping(raw)
+        _fields(value, required={"slot", "name", "media_type", "size_bytes", "sha256"})
+        parsed = cls._parse(value)
+        if parsed.size_bytes > maximum_bytes:
+            raise AgentProtocolError("artifact size_bytes is invalid")
+        return parsed
+
+    def to_mapping(self) -> dict[str, object]:
+        return self.model_dump(mode="json")
+
+
+class RecipeJobOutputLimits(_RecipeWireModel):
+    max_files: int = Field(strict=True, ge=1, le=MAX_OUTPUT_FILES)
+    max_file_bytes: int = Field(strict=True, ge=1, le=MAX_OUTPUT_FILE_BYTES)
+    max_total_bytes: int = Field(strict=True, ge=1, le=MAX_OUTPUT_TOTAL_BYTES)
+    allowed_media_types: tuple[str, ...] = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="before")
+    @classmethod
+    def lists_are_sequences(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and isinstance(value.get("allowed_media_types"), list):
+            return {**value, "allowed_media_types": tuple(value["allowed_media_types"])}
+        return value
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> RecipeJobOutputLimits:
+        media_types = tuple(_media_type(item) for item in self.allowed_media_types)
+        if len(set(media_types)) != len(media_types) or list(media_types) != sorted(media_types):
+            raise ValueError("allowed output media types are not canonical")
+        if self.max_file_bytes > self.max_total_bytes:
+            raise ValueError("output limits are inconsistent")
+        object.__setattr__(self, "allowed_media_types", media_types)
+        return self
+
+    @classmethod
+    def parse(cls, raw: Any) -> RecipeJobOutputLimits:
+        value = _mapping(raw)
+        _fields(value, required={"max_files", "max_file_bytes", "max_total_bytes", "allowed_media_types"})
+        return cls._parse(value)
+
+    def to_mapping(self) -> dict[str, object]:
+        return {**self.model_dump(mode="python"), "allowed_media_types": list(self.allowed_media_types)}
+
+
+class RecipeJobOutputMapping(_RecipeWireModel):
+    slot: str
+    media_type: str
+    extensions: tuple[str, ...] = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="before")
+    @classmethod
+    def lists_are_sequences(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and isinstance(value.get("extensions"), list):
+            return {**value, "extensions": tuple(value["extensions"])}
+        return value
+
+    @model_validator(mode="after")
+    def validate_mapping(self) -> RecipeJobOutputMapping:
+        _slot(self.slot)
+        _media_type(self.media_type)
+        if any(_EXTENSION.fullmatch(item) is None for item in self.extensions):
+            raise ValueError("artifact output extensions are not canonical")
+        if len(set(self.extensions)) != len(self.extensions) or list(self.extensions) != sorted(self.extensions):
+            raise ValueError("artifact output extensions are not canonical")
+        return self
+
+    @classmethod
+    def parse(cls, raw: Any) -> RecipeJobOutputMapping:
+        value = _mapping(raw)
+        _fields(value, required={"slot", "media_type", "extensions"})
+        return cls._parse(value)
+
+    def to_mapping(self) -> dict[str, object]:
+        return {**self.model_dump(mode="python"), "extensions": list(self.extensions)}
+
+
+class RecipeJobRunRequest(_RecipeWireModel):
+    schema_version: Literal[1]
+    job_id: str
+    run_id: str
+    installation_id: str
+    recipe_revision_id: str
+    recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    interface: str
+    rank: int = Field(strict=True, ge=0, le=2**32 - 1)
+    role: str
+    reserved_memory_bytes: int = Field(strict=True, ge=1, le=16 * 1024**4)
+    contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    input_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    input_total_bytes: int = Field(strict=True, ge=0, le=MAX_INPUT_TOTAL_BYTES)
+    inputs: tuple[RecipeJobInputFile, ...] = Field(max_length=MAX_INPUT_FILES)
+    parameters: dict[str, Any]
+    output_mappings: tuple[RecipeJobOutputMapping, ...] = Field(min_length=1, max_length=MAX_OUTPUT_FILES)
+    output_limits: RecipeJobOutputLimits
+    timeout_seconds: int = Field(strict=True, ge=1, le=MAX_TIMEOUT_SECONDS)
+
+    @model_validator(mode="before")
+    @classmethod
+    def lists_are_sequences(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        for name in ("inputs", "output_mappings"):
+            if isinstance(document.get(name), list):
+                document[name] = tuple(document[name])
+        limits = document.get("output_limits")
+        if isinstance(limits, Mapping) and isinstance(limits.get("allowed_media_types"), list):
+            document["output_limits"] = {**limits, "allowed_media_types": tuple(limits["allowed_media_types"])}
+        return document
+
+    @model_validator(mode="after")
+    def validate_request(self) -> RecipeJobRunRequest:
+        for name in ("job_id", "run_id", "installation_id", "recipe_revision_id"):
+            _uuid(getattr(self, name), name=name)
+        if self.interface not in _INTERFACES:
+            raise ValueError("recipe job interface is invalid")
+        if _ROLE.fullmatch(self.role) is None:
+            raise ValueError("recipe job role is invalid")
+        inputs = _input_files([item.model_dump(mode="python") for item in self.inputs], maximum_count=MAX_INPUT_FILES, maximum_file_bytes=MAX_INPUT_FILE_BYTES, maximum_total_bytes=MAX_INPUT_TOTAL_BYTES)
+        total = sum(item.size_bytes for item in inputs)
+        if self.input_total_bytes != total or self.input_manifest_sha256 != manifest_sha256(inputs):
+            raise ValueError("input manifest digest or size does not match")
+        parameters = _parameters(self.parameters)
+        if not isinstance(parameters, Mapping) or len(canonical_message(parameters)) > MAX_PARAMETERS_BYTES:
+            raise ValueError("job parameters are invalid")
+        mappings = _output_mappings([item.model_dump(mode="python") for item in self.output_mappings])
+        if not set(self.output_limits.allowed_media_types) <= {item.media_type for item in mappings}:
+            raise ValueError("allowed output media types lack a mapping")
+        object.__setattr__(self, "inputs", inputs)
+        object.__setattr__(self, "parameters", dict(parameters))
+        object.__setattr__(self, "output_mappings", mappings)
+        return self
+
+    @classmethod
+    def parse(cls, raw: Any) -> RecipeJobRunRequest:
+        value = _mapping(raw)
+        _fields(value, required=set(cls.model_fields))
+        return cls._parse(value)
+
+
+class RecipeJobOutputManifest(_RecipeWireModel):
+    schema_version: Literal[1]
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    total_bytes: int = Field(strict=True, ge=0, le=MAX_OUTPUT_TOTAL_BYTES)
+    files: tuple[RecipeJobFile, ...] = Field(max_length=MAX_OUTPUT_FILES)
+
+    @model_validator(mode="before")
+    @classmethod
+    def lists_are_sequences(cls, value: Any) -> Any:
+        if isinstance(value, Mapping) and isinstance(value.get("files"), list):
+            return {**value, "files": tuple(value["files"])}
+        return value
+
+    @model_validator(mode="after")
+    def validate_manifest(self) -> RecipeJobOutputManifest:
+        files = _files([item.model_dump(mode="python") for item in self.files], maximum_count=MAX_OUTPUT_FILES, maximum_file_bytes=MAX_OUTPUT_FILE_BYTES, maximum_total_bytes=MAX_OUTPUT_TOTAL_BYTES)
+        if self.total_bytes != sum(item.size_bytes for item in files) or self.manifest_sha256 != manifest_sha256(files):
+            raise ValueError("output manifest digest or size does not match")
+        object.__setattr__(self, "files", files)
+        return self
+
+
+class RecipeJobEvidence(_RecipeWireModel):
+    elapsed_milliseconds: int = Field(strict=True, ge=0, le=7 * 24 * 60 * 60 * 1000)
+    peak_memory_bytes: int | None = Field(strict=True, ge=0, le=16 * 1024**4)
+
+
+class RecipeJobRunResult(_RecipeWireModel):
+    schema_version: Literal[1]
+    job_id: str
+    run_id: str
+    exit_code: int = Field(strict=True, ge=0, le=255)
+    output_manifest: RecipeJobOutputManifest
+    evidence: RecipeJobEvidence
+    reason: str | None = None
+
+    @property
+    def output_manifest_sha256(self) -> str:
+        return self.output_manifest.manifest_sha256
+
+    @property
+    def outputs(self) -> tuple[RecipeJobFile, ...]:
+        return self.output_manifest.files
+
+    @property
+    def elapsed_milliseconds(self) -> int:
+        return self.evidence.elapsed_milliseconds
+
+    @property
+    def peak_memory_bytes(self) -> int | None:
+        return self.evidence.peak_memory_bytes
+
+    @model_validator(mode="after")
+    def validate_result(self) -> RecipeJobRunResult:
+        _uuid(self.job_id, name="job_id")
+        _uuid(self.run_id, name="run_id")
+        if self.reason is not None and not 1 <= len(self.reason) <= 512:
+            raise ValueError("recipe job failure reason is invalid")
+        return self
+
+    @classmethod
+    def parse(cls, raw: Any) -> RecipeJobRunResult:
+        value = _mapping(raw)
+        required = {"schema_version", "job_id", "run_id", "exit_code", "output_manifest", "evidence"}
+        if not required <= set(value) or set(value) - required - {"reason"}:
+            raise AgentProtocolError("recipe job result fields are invalid")
+        return cls._parse(value)
 
 
 __all__ = [
