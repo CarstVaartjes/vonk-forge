@@ -3762,3 +3762,11 @@
   .library-cache-row, .library-model-row { grid-template-columns: 1fr; }
   .library-cache-row dl, .library-model-row dl { justify-content: space-between; }
 }
+
+.library-profile-field-error {
+  margin: .5rem 0 0;
+  color: var(--danger);
+  font-size: .8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}

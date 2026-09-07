@@ -142,3 +142,105 @@ test("holds cleanup behind an explicit confirmation while keeping normal switche
   await user.click(within(confirmation).getByRole("button", {name: "Confirm switch"}));
   expect(applyFleetProfile).toHaveBeenCalledTimes(1);
 });
+
+function editingApi() {
+  return {
+    fleetProfiles: vi.fn(async () => ({profiles: [profile]})),
+    fleetProfileStatus: vi.fn(async () => ({state: "drifted", scope: {node_ids: [nodeA, nodeB]}, reasons: []})),
+    previewFleetProfile: vi.fn(async () => preview),
+    updateFleetProfile: vi.fn(async (_id: string, input: Record<string, unknown>) => ({...profile, ...input})),
+    createFleetProfile: vi.fn(async (input: Record<string, unknown>) => ({...profile, ...input})),
+  };
+}
+
+test("blocks an empty scope and lets an operator restore scope and save", async () => {
+  const user = userEvent.setup();
+  const api = editingApi();
+  render(<LibraryProfilesView api={api as unknown as ControlApi} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Edit profile"}));
+  await user.click(screen.getByRole("button", {name: "Clear scope"}));
+  const scope = screen.getByRole("group", {name: "Fleet scope"});
+  expect(scope).toHaveAttribute("aria-invalid", "true");
+  expect(scope).toHaveAccessibleDescription(/Select at least one Spark/);
+  const save = screen.getByRole("button", {name: "Save profile"});
+  expect(save).toBeDisabled();
+  await user.click(save);
+  expect(api.updateFleetProfile).not.toHaveBeenCalled();
+  await user.click(within(scope).getByRole("checkbox", {name: /Spark B/}));
+  expect(scope).toHaveAttribute("aria-invalid", "false");
+  expect(screen.queryByText(/Select at least one Spark/)).not.toBeInTheDocument();
+  await user.click(save);
+  expect(api.updateFleetProfile).toHaveBeenCalledWith(profileId, expect.objectContaining({scope: {node_ids: [nodeB]}}));
+});
+
+test("blocks empty placement ranks and preserves fields while ranks are repaired", async () => {
+  const user = userEvent.setup();
+  const api = editingApi();
+  render(<LibraryProfilesView api={api as unknown as ControlApi} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Edit profile"}));
+  const ranks = screen.getByRole("group", {name: "Spark ranks"});
+  await user.click(within(ranks).getByRole("checkbox", {name: "Spark B"}));
+  expect(ranks).toHaveAttribute("aria-invalid", "true");
+  expect(ranks).toHaveAccessibleDescription(/Select the Sparks for this placement before saving/);
+  expect(screen.getByLabelText("Endpoint alias")).toHaveValue("solo");
+  const save = screen.getByRole("button", {name: "Save profile"});
+  expect(save).toBeDisabled();
+  await user.click(save);
+  expect(api.updateFleetProfile).not.toHaveBeenCalled();
+  await user.click(within(ranks).getByRole("checkbox", {name: "Spark A"}));
+  expect(ranks).toHaveAttribute("aria-invalid", "false");
+  await user.click(save);
+  expect(api.updateFleetProfile).toHaveBeenCalledWith(profileId, expect.objectContaining({assignments: [expect.objectContaining({alias: "solo", nodes: [{node_id: nodeA, rank: 0, role: "leader", endpoint_owner: true}]})]}));
+});
+
+test("saves an intentional all-idle profile by removing its last placement", async () => {
+  const user = userEvent.setup();
+  const api = editingApi();
+  render(<LibraryProfilesView api={api as unknown as ControlApi} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Edit profile"}));
+  await user.click(screen.getByRole("button", {name: "Remove placement"}));
+  expect(screen.getByText("All scoped Sparks are idle")).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Save profile"}));
+  expect(api.updateFleetProfile).toHaveBeenCalledWith(profileId, expect.objectContaining({scope: {node_ids: [nodeA, nodeB]}, assignments: []}));
+});
+
+test("does not offer to save a new profile before a Spark is enrolled", async () => {
+  const api = editingApi();
+  render(<LibraryProfilesView api={api as unknown as ControlApi} entries={[]} fleet={{...fleet, nodes: []}} initialCreate onNavigate={vi.fn()} />);
+  expect(await screen.findByText("No Sparks are enrolled. Enroll a Spark before saving a profile.")).toBeVisible();
+  expect(screen.getAllByRole("button", {name: "Create profile"}).at(-1)).toBeDisabled();
+  expect(api.createFleetProfile).not.toHaveBeenCalled();
+});
+
+test("retries remaining work once and follows the returned application", async () => {
+  const user = userEvent.setup();
+  const failed = {...application, state: "failed", status_reason: "Spark B disconnected"};
+  const retried = {...application, id: "66666666-6666-4666-8666-666666666666"};
+  let resolveRetry!: (value: FleetProfileApplication) => void;
+  const retryFleetProfileApplication = vi.fn(() => new Promise<FleetProfileApplication>(resolve => { resolveRetry = resolve; }));
+  const fleetProfileApplication = vi.fn(async () => ({...retried, state: "succeeded"}));
+  const api = {...editingApi(), applyFleetProfile: vi.fn(async () => failed), retryFleetProfileApplication, fleetProfileApplication};
+  render(<LibraryProfilesView api={api as unknown as ControlApi} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Switch profile"}));
+  await user.click(await screen.findByRole("button", {name: "Retry remaining work"}));
+  expect(screen.getByRole("button", {name: "Retrying remaining work…"})).toBeDisabled();
+  expect(retryFleetProfileApplication).toHaveBeenCalledExactlyOnceWith(application.id, {request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+  resolveRetry(retried);
+  expect(await screen.findByText("Remaining profile work is being rechecked against the current fleet.")).toBeVisible();
+  await screen.findByText("succeeded", {}, {timeout: 2500});
+  expect(fleetProfileApplication).toHaveBeenCalledWith(retried.id, expect.any(AbortSignal));
+});
+
+test("keeps failed application evidence and reuses the request key after an uncertain retry", async () => {
+  const user = userEvent.setup();
+  const retryFleetProfileApplication = vi.fn().mockRejectedValue(new Error("Connection interrupted"));
+  const api = {...editingApi(), applyFleetProfile: vi.fn(async () => ({...application, state: "failed", status_reason: "Spark B disconnected"})), retryFleetProfileApplication};
+  render(<LibraryProfilesView api={api as unknown as ControlApi} entries={[]} fleet={fleet} onNavigate={vi.fn()} />);
+  await user.click(await screen.findByRole("button", {name: "Switch profile"}));
+  await user.click(await screen.findByRole("button", {name: "Retry remaining work"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Connection interrupted");
+  expect(screen.getByText("Spark B disconnected")).toBeVisible();
+  await user.click(screen.getByRole("button", {name: "Retry remaining work"}));
+  expect(retryFleetProfileApplication).toHaveBeenCalledTimes(2);
+  expect(retryFleetProfileApplication.mock.calls[1]).toEqual(retryFleetProfileApplication.mock.calls[0]);
+});
