@@ -28,6 +28,11 @@ where
 const MAX_ARGV_ITEMS: usize = 512;
 const MAX_ARGV_ITEM_BYTES: usize = 65_536;
 const MAX_ARGV_BYTES: usize = 1024 * 1024;
+// A canonical launch can project one mount for each selected model artifact,
+// plus the fixed input and output mounts.  This reuses the existing compiled
+// artifact ceiling rather than imposing a small engine-specific cap.
+pub const MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS: usize = 4096;
+pub const MAX_COMPILED_EXECUTION_PLAN_MOUNTS: usize = MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS + 2;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -291,7 +296,7 @@ impl CompiledExecutionPlan {
                 .is_some_and(|value| !lower_hex(value, 64))
             || !lower_hex(&self.identity.model_artifact_set_sha256, 64)
             || self.artifacts.is_empty()
-            || self.artifacts.len() > 4096
+            || self.artifacts.len() > MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS
             || self.runtime.image_digest != self.runtime_image.image_digest
             || self.runtime.placement.rank != self.topology.rank
             || self.runtime.placement.role != self.topology.role
@@ -464,7 +469,7 @@ impl CompiledSecurity {
                 .iter()
                 .any(|value| value != "nvidia.com/gpu=all")
             || !numeric_non_root_user(&self.user)
-            || self.mounts.len() > 4
+            || self.mounts.len() > MAX_COMPILED_EXECUTION_PLAN_MOUNTS
             || self.mounts.iter().any(|mount| {
                 !mount.read_only && mount.target != "/outputs"
                     || mount.read_only
@@ -473,6 +478,17 @@ impl CompiledSecurity {
                             || mount.target.starts_with("/models/"))
                     || !matches!(mount.source.as_str(), "model" | "inputs" | "outputs")
             })
+            || self
+                .mounts
+                .iter()
+                .any(|mount| !valid_mount_target(&mount.target))
+            || self
+                .mounts
+                .iter()
+                .map(|mount| mount.target.as_str())
+                .collect::<BTreeSet<_>>()
+                .len()
+                != self.mounts.len()
         {
             return Err(WorkloadError::Invalid("compiled security"));
         }
@@ -638,6 +654,18 @@ fn valid_model_path(value: &str) -> bool {
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
         })
+}
+
+fn valid_mount_target(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value.starts_with('/')
+        && value != "/"
+        && !value.contains(['\\', '\0'])
+        && value
+            .split('/')
+            .skip(1)
+            .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
 }
 
 impl Placement {

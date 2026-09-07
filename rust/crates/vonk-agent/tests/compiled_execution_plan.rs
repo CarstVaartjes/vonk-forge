@@ -1,7 +1,10 @@
 use std::path::Path;
 
 use serde_json::{Value, json};
-use vonk_agent::workloads::{CompiledExecutionPlan, WorkloadError, materialized_model_path};
+use vonk_agent::workloads::{
+    CompiledExecutionPlan, MAX_COMPILED_EXECUTION_PLAN_MOUNTS, WorkloadError,
+    materialized_model_path,
+};
 
 fn fixture() -> Value {
     serde_json::from_str(include_str!(
@@ -175,4 +178,57 @@ fn opaque_argv_rejects_nul_and_token_or_total_overflow() {
     value["runtime"]["argv"] = json!(vec!["x".repeat(65_536); 17]);
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     assert!(plan.validate().is_err());
+}
+
+#[test]
+fn canonical_multi_model_mount_projection_is_admitted() {
+    let mut value = fixture();
+    value["security"]["mounts"] = json!([
+        {"source": "model", "target": "/models/target", "read_only": true},
+        {"source": "model", "target": "/models/draft", "read_only": true},
+        {"source": "model", "target": "/models/support", "read_only": true},
+        {"source": "inputs", "target": "/inputs", "read_only": true},
+        {"source": "outputs", "target": "/outputs", "read_only": false}
+    ]);
+    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+    plan.validate().unwrap();
+}
+
+#[test]
+fn mount_projection_rejects_over_duplicate_or_unsafe_targets() {
+    let mut over = fixture();
+    let mounts = over["security"]["mounts"].as_array_mut().unwrap();
+    while mounts.len() <= MAX_COMPILED_EXECUTION_PLAN_MOUNTS {
+        let index = mounts.len();
+        mounts.push(json!({
+            "source": "model",
+            "target": format!("/models/extra-{index}"),
+            "read_only": true
+        }));
+    }
+    let plan: CompiledExecutionPlan = serde_json::from_value(over).unwrap();
+    assert!(matches!(
+        plan.validate(),
+        Err(WorkloadError::Invalid("compiled security"))
+    ));
+
+    let mut duplicate = fixture();
+    let first = duplicate["security"]["mounts"][0].clone();
+    duplicate["security"]["mounts"]
+        .as_array_mut()
+        .unwrap()
+        .push(first);
+    let plan: CompiledExecutionPlan = serde_json::from_value(duplicate).unwrap();
+    assert!(matches!(
+        plan.validate(),
+        Err(WorkloadError::Invalid("compiled security"))
+    ));
+
+    let mut unsafe_target = fixture();
+    unsafe_target["security"]["mounts"][0]["target"] = json!("/models/../escape");
+    let plan: CompiledExecutionPlan = serde_json::from_value(unsafe_target).unwrap();
+    assert!(matches!(
+        plan.validate(),
+        Err(WorkloadError::Invalid("compiled security"))
+    ));
 }

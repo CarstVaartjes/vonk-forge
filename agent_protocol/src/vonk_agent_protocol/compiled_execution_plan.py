@@ -21,6 +21,11 @@ from .contracts import AgentProtocolError
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
 _EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+# A canonical launch can project one mount for each selected model artifact,
+# plus the fixed input and output mounts.  Keep this derived from the existing
+# compiled artifact ceiling rather than imposing a small engine-specific cap.
+MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS = 4096
+MAX_COMPILED_EXECUTION_PLAN_MOUNTS = MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS + 2
 
 
 class CompiledExecutionPlanError(ValueError):
@@ -351,7 +356,12 @@ class CompiledSecurity(_Strict):
             )
         ):
             raise ValueError("security policy is invalid")
-        if self.capabilities or len(self.mounts) > 4:
+        targets = [mount.target for mount in self.mounts]
+        if (
+            self.capabilities
+            or len(self.mounts) > MAX_COMPILED_EXECUTION_PLAN_MOUNTS
+            or len(targets) != len(set(targets))
+        ):
             raise ValueError("security policy is invalid")
         parts = self.user.split(":")
         if len(parts) not in {1, 2} or any(
@@ -447,7 +457,9 @@ class CompiledExecutionPlan(_Strict):
     schema_version: Literal[2]
     identity: CompiledIdentity
     runtime: CompiledRuntime
-    artifacts: list[CompiledArtifact] = Field(min_length=1, max_length=4096)
+    artifacts: list[CompiledArtifact] = Field(
+        min_length=1, max_length=MAX_COMPILED_EXECUTION_PLAN_ARTIFACTS
+    )
     runtime_image: CompiledRuntimeImage
     security: CompiledSecurity
     topology: CompiledTopology

@@ -14,6 +14,9 @@ from vonk_agent_protocol import (
     RecipeOperationRequest,
     canonical_message,
 )
+from vonk_agent_protocol.compiled_execution_plan import (
+    MAX_COMPILED_EXECUTION_PLAN_MOUNTS,
+)
 
 PLAN = json.loads(
     (Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json").read_text()
@@ -188,6 +191,41 @@ def test_plan_rejects_unsafe_paths() -> None:
 def test_plan_rejects_non_boolean_security_values() -> None:
     value = copy.deepcopy(PLAN)
     value["security"]["privileged"] = 1
+    with pytest.raises(AgentProtocolError):
+        CompiledExecutionPlan.parse(value)
+
+
+def test_plan_accepts_canonical_multi_model_mount_projection() -> None:
+    value = copy.deepcopy(PLAN)
+    value["security"]["mounts"] = [
+        {"source": "model", "target": "/models/target", "read_only": True},
+        {"source": "model", "target": "/models/text-encoder", "read_only": True},
+        {"source": "model", "target": "/models/vae", "read_only": True},
+        {"source": "inputs", "target": "/inputs", "read_only": True},
+        {"source": "outputs", "target": "/outputs", "read_only": False},
+    ]
+
+    plan = CompiledExecutionPlan.parse(value)
+    assert len(plan.security.mounts) == 5
+
+
+@pytest.mark.parametrize("kind", ["over", "duplicate", "unsafe"])
+def test_plan_rejects_over_duplicate_or_unsafe_mounts(kind: str) -> None:
+    value = copy.deepcopy(PLAN)
+    mounts = value["security"]["mounts"]
+    if kind == "over":
+        mounts.extend(
+            {
+                "source": "model",
+                "target": f"/models/extra-{index}",
+                "read_only": True,
+            }
+            for index in range(MAX_COMPILED_EXECUTION_PLAN_MOUNTS - len(mounts) + 1)
+        )
+    elif kind == "duplicate":
+        mounts.append(mounts[0].copy())
+    else:
+        mounts[0]["target"] = "/models/../escape"
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
 
