@@ -451,10 +451,12 @@ fn ordered_environment(
 fn publications(plan: &CompiledExecutionPlan) -> Result<Vec<String>, CompiledOciError> {
     let placement = &plan.runtime.placement;
     let mut result = Vec::new();
-    if let (Some(endpoint), Some(endpoint_address)) = (&plan.endpoint, placement.endpoint_address) {
+    if let (Some(endpoint), Some(endpoint_address), Some(port)) =
+        (&plan.endpoint, placement.endpoint_address, placement.port)
+    {
         let first = match endpoint_address {
-            IpAddr::V4(address) => format!("{address}:{}:{}", placement.port, endpoint.port),
-            IpAddr::V6(address) => format!("[{address}]:{}:{}", placement.port, endpoint.port),
+            IpAddr::V4(address) => format!("{address}:{port}:{}", endpoint.port),
+            IpAddr::V6(address) => format!("[{address}]:{port}:{}", endpoint.port),
         };
         result.push(first);
     }

@@ -159,6 +159,24 @@ def _spec(
     return spec
 
 
+def _job_spec() -> dict[str, object]:
+    spec = _spec()
+    spec["endpoint"] = None
+    spec["job"] = {
+        "interface": "image-job",
+        "input": None,
+        "output_path": "/outputs",
+        "timeout_seconds": 30,
+    }
+    security = spec["security"]
+    assert isinstance(security, dict)
+    security["mounts"].append(
+        {"source": "/run/vonk/outputs", "target": "/outputs", "read_only": False}
+    )
+    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    return spec
+
+
 def _model_objects() -> list[dict[str, object]]:
     payload = b"verified model bytes"
     return [
@@ -298,6 +316,44 @@ def test_compiled_launch_payload_is_the_nested_schema_two_agent_contract() -> No
     assert validated["security"]["host_network"] is False
     assert validated["endpoint"]["port"] == 8000
     assert validated["job"] is None
+
+
+def test_compiled_launch_payload_preserves_missing_endpoint_for_jobs() -> None:
+    plan = _compile(_job_spec())
+    payload = plan.to_compiled_launch_payload(
+        _job_spec(),
+        placement={
+            "endpoint_address": None,
+            "rank": 0,
+            "role": "entrypoint",
+            "world_size": 1,
+            "local_address": None,
+            "master_address": None,
+            "master_port": None,
+            "port": None,
+            "reserved_memory_bytes": 1,
+        },
+    )
+
+    validated = validate_compiled_launch_payload(payload)
+    assert validated["endpoint"] is None
+    assert validated["job"]["interface"] == "image-job"
+    assert validated["runtime"]["placement"]["port"] is None
+
+
+def test_compiled_launch_projection_requires_explicit_placement_fields() -> None:
+    placement = {
+        "endpoint_address": None,
+        "rank": 0,
+        "role": "entrypoint",
+        "world_size": 1,
+        "local_address": None,
+        "master_address": None,
+        "master_port": None,
+        "reserved_memory_bytes": 1,
+    }
+    with pytest.raises(CompiledExecutionPlanError, match="runtime port is missing"):
+        _compile().to_compiled_launch_payload(_spec(), placement=placement)
 
 
 def test_compiled_launch_projection_validates_before_persisting() -> None:

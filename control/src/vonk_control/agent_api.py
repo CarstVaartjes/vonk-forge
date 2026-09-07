@@ -43,6 +43,7 @@ from vonk_agent_protocol import (
     SignedPackageObjectReceipt,
     canonical_message,
 )
+from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
 from vonk_agent_protocol.enrollment import (
     ActivateRequest,
     EnrollmentBootstrapResponse,
@@ -2214,7 +2215,10 @@ def install_agent_routes(
             },
         )
 
-    @agent.get("/recipe-installations/{installation_id}/spec")
+    @agent.get(
+        "/recipe-installations/{installation_id}/spec",
+        response_model=AgentCompiledExecutionPlan,
+    )
     def recipe_spec(installation_id: str, request: Request) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -2370,6 +2374,7 @@ def install_agent_routes(
             installation_image_digest = installation.image_digest
         try:
             spec = validate_compiled_launch_payload(candidate)
+            typed_spec = AgentCompiledExecutionPlan.model_validate(spec)
         except (CompiledExecutionPlanError, TypeError, ValueError) as error:
             raise HTTPException(
                 status_code=409,
@@ -2439,7 +2444,7 @@ def install_agent_routes(
                     status_code=409,
                     detail="recipe specification execution receipts are stale",
                 )
-        encoded_spec = canonical_message(spec)
+        encoded_spec = canonical_message(typed_spec)
         if len(encoded_spec) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
             raise HTTPException(
                 status_code=409,
