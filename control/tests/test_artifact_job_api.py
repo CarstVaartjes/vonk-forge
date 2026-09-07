@@ -123,6 +123,22 @@ def test_artifact_transfer_openapi_declares_binary_streams(tmp_path: Path) -> No
     paths = client.get("/openapi.json").json()["paths"]
     components = client.get("/openapi.json").json()["components"]["schemas"]
 
+    compiled = components["CompiledArtifactContract"]
+    assert compiled["additionalProperties"] is False
+    assert compiled["properties"]["input"] == {
+        "$ref": "#/components/schemas/ArtifactInputContract"
+    }
+    assert compiled["properties"]["output"] == {
+        "$ref": "#/components/schemas/ArtifactOutputContract"
+    }
+    assert compiled["properties"]["output_limits"] == {
+        "$ref": "#/components/schemas/ArtifactOutputLimits"
+    }
+    assert compiled["properties"]["parameters"]["items"] == {
+        "$ref": "#/components/schemas/ParameterDefinition"
+    }
+    assert "oneOf" in components["ParameterDefinition"]
+
     status = paths["/api/v1/artifact-jobs/{job_id}"]["get"]
     assert status["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/ArtifactJobResponse"
@@ -181,6 +197,8 @@ def test_artifact_transfer_routes_preserve_raw_bytes_and_result_media_type(
     assert upload_document["state"] == "draft"
     assert upload_document["interface"] == "image-job"
     assert upload_document["output_limits"]["allowed_media_types"] == ["image/png"]
+    assert upload_document["compiled_contract"]["input"]["slots"] == []
+    assert upload_document["compiled_contract"]["output"]["slots"][0]["id"] == "image"
     assert upload_document["compiled_contract"]["engine"]["future_argument"] == {
         "enabled": True
     }

@@ -338,7 +338,7 @@ class CompiledArtifactContract(ArtifactContractModel):
         return self
 
     @model_serializer(mode="wrap")
-    def serialize_without_empty_engine(self, handler: Any) -> dict[str, object]:
+    def serialize_without_empty_engine(self, handler: Any):
         document = handler(self)
         if document.get("engine") is None:
             document.pop("engine", None)
