@@ -542,11 +542,6 @@ class PackageHelperGrantResponse(StrictJSONModel):
     grant: SignedPackageHelperGrant
 
 
-class PackageHelperReceiptsResponse(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    receipts: list[dict[str, object]]
-
-
 class PackageHelperTypedReceiptsResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     receipts: list[SignedPackageObjectReceipt]
