@@ -24,12 +24,25 @@ from fastapi.testclient import TestClient
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileApplicationResult,
+)
+from vonk_control.model_cache_contract import ModelCacheDownloadResult
 from vonk_control.operation_api import (
     OperationApiServices,
     OperationListPage,
     OperationProvider,
 )
+from vonk_control.recipe_lifecycle_contract import (
+    LifecycleCodeFailureResult,
+    RecipeOperationResult,
+)
 from vonk_control.recipe_operations import RecipeOperationView
+from vonk_control.run_switch_contract import (
+    RunSwitchMemberReceipt,
+    RunSwitchOperationResult,
+)
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlHTTPError, ControlTransportError
@@ -44,6 +57,35 @@ PLAN = "c" * 64
 NOW = "2026-09-05T12:00:00+00:00"
 NOW_DT = datetime(2026, 9, 5, 12, tzinfo=UTC)
 REQUEST_NAMESPACE = uuid.UUID("00000000-0000-4000-8000-000000000010")
+
+
+def _cache_result() -> dict[str, object]:
+    return ModelCacheDownloadResult(
+        schema_version=2,
+        artifact_set_sha256=ARTIFACT_SET,
+        coverage="complete",
+    ).model_dump(mode="json")
+
+
+def _run_result() -> dict[str, object]:
+    return RunSwitchOperationResult(
+        phase_index=0,
+        item_index=0,
+        phase="start",
+        completed_phases=["start"],
+        completed_bytes=128,
+        total_bytes=128,
+        total_bytes_known=True,
+        members=[
+            RunSwitchMemberReceipt(
+                node_id=NODE,
+                phase="start",
+                state="succeeded",
+                completed_bytes=128,
+                total_bytes=128,
+            )
+        ],
+    ).model_dump(mode="json")
 
 
 class _Jobs:
@@ -85,14 +127,18 @@ class _Ledger:
             "progress": progress,
             "created_at": NOW,
             "updated_at": NOW,
-            "result": {
-                "request_key": request_key,
-                "plan_digest": plan_digest,
-                "model_content_sha256": MODEL,
-                "recipe_revision_id": RECIPE,
-                "artifact_set_sha256": ARTIFACT_SET,
-                "scope_node_ids": [NODE],
-            },
+            "result": (
+                _cache_result()
+                if kind == "model-cache.download"
+                else {
+                    "request_key": request_key,
+                    "plan_digest": plan_digest,
+                    "model_content_sha256": MODEL,
+                    "recipe_revision_id": RECIPE,
+                    "artifact_set_sha256": ARTIFACT_SET,
+                    "scope_node_ids": [NODE],
+                }
+            ),
         }
 
     def provider(self) -> OperationProvider:
@@ -145,7 +191,7 @@ def _cache_operation(ledger: _Ledger, operation_id: str, request_key: str, plan_
         artifact_set_sha256=ARTIFACT_SET,
         plan_digest=plan_digest,
         progress=progress,
-        result={"model_content_sha256": MODEL, "recipe_revision_id": RECIPE},
+        result=_cache_result(),
         last_error=None,
         created_at=NOW,
         updated_at=NOW,
@@ -355,7 +401,7 @@ class _RunSwitch:
                 "members": [{"node_id": NODE, "phase": "start", "state": "succeeded", "completed_bytes": 128, "total_bytes": 128, "error": None}],
             },
             "status_reason": None,
-            "result": {"model_content_sha256": MODEL, "recipe_revision_id": RECIPE, "scope_node_ids": [NODE]},
+            "result": _run_result(),
         }
         self.requests[request_key] = result
         self.ledger.add(
@@ -430,7 +476,24 @@ class _Profiles:
         assert actor == "admin"
         operation_id = self.ledger.id_for(request_key, "profile")
         self.ledger.add(operation_id=operation_id, request_key=request_key, kind="fleet-profile.switch", plan_digest=plan_digest, progress={"phase": "start", "completed_bytes": 128, "total_bytes": 128, "total_bytes_known": True, "members": [{"member_id": NODE, "phase": "start", "state": "succeeded", "completed_bytes": 128, "total_bytes": 128}]})
-        return SimpleNamespace(schema_version=2, id=operation_id, profile_id=PROFILE, profile_digest="f" * 64, plan_digest=plan_digest, state="succeeded", current_step=1, total_steps=1, current_operation_id=operation_id, status_reason=None, progress={"completed_steps": 1, "total_steps": 1}, result={"scope_node_ids": [NODE]}, created_at=NOW_DT, updated_at=NOW_DT)
+        return SimpleNamespace(
+            schema_version=2,
+            id=operation_id,
+            profile_id=PROFILE,
+            profile_digest="f" * 64,
+            plan_digest=plan_digest,
+            state="succeeded",
+            current_step=1,
+            total_steps=1,
+            current_operation_id=operation_id,
+            status_reason=None,
+            progress=FleetProfileApplicationProgress(
+                completed_steps=1, total_steps=1
+            ),
+            result=FleetProfileApplicationResult(changed=False, completed_steps=1),
+            created_at=NOW_DT,
+            updated_at=NOW_DT,
+        )
 
 
 class _Recipes:
@@ -439,7 +502,24 @@ class _Recipes:
 
     @staticmethod
     def _view(operation_id: str, request_key: str) -> RecipeOperationView:
-        return RecipeOperationView(operation_id, "recipe.run", "installation", "failed", PLAN, (NODE,), {"request_key": request_key, "scope_node_ids": [NODE]})
+        result = RecipeOperationResult(
+            successful_nodes=[],
+            failed_nodes=[NODE],
+            node_evidence={
+                NODE: LifecycleCodeFailureResult(
+                    code="recipe.synthetic_failure", detail="synthetic failure"
+                )
+            },
+        )
+        return RecipeOperationView(
+            operation_id,
+            "recipe.run",
+            "installation",
+            "failed",
+            PLAN,
+            (NODE,),
+            result.model_dump(mode="json"),
+        )
 
     def replay_start(self, *_args: object, **_kwargs: object) -> None:
         return None

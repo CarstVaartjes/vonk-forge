@@ -3117,12 +3117,24 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
     assert resolved.content == canonical_message(
         AgentCompiledExecutionPlan.model_validate(payload)
     )
-    spec_route = client.get("/openapi.json").json()["paths"][
+    openapi = client.get("/openapi.json").json()
+    spec_route = openapi["paths"][
         "/agent/v1/recipe-installations/{installation_id}/spec"
     ]["get"]
-    assert spec_route["responses"]["200"]["content"]["application/json"]["schema"][
-        "$ref"
-    ].endswith("/CompiledExecutionPlan")
+    schema_ref = spec_route["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["$ref"]
+    assert schema_ref.startswith("#/components/schemas/")
+    resolved_schema = openapi["components"]["schemas"][schema_ref.rsplit("/", 1)[-1]]
+    canonical_schema = AgentCompiledExecutionPlan.model_json_schema()
+    assert resolved_schema["type"] == canonical_schema["type"] == "object"
+    assert (
+        resolved_schema["additionalProperties"]
+        == canonical_schema["additionalProperties"]
+        == False
+    )
+    assert resolved_schema["required"] == canonical_schema["required"]
+    assert set(resolved_schema["properties"]) == set(canonical_schema["properties"])
 
     tampered = copy.deepcopy(payload)
     tampered["runtime_image"]["local_image_config_id"] = "sha256:" + "0" * 64
