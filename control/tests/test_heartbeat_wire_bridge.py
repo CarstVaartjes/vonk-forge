@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from vonk_agent_protocol import AgentDirective
 
-from .test_agent_api import NODE_A, agent_headers, parent
+from .test_agent_api import NODE_A, STOP_PAYLOAD, agent_headers, parent
 from .test_agent_api import agent_system as _agent_system
 
 agent_system = _agent_system
@@ -23,7 +23,9 @@ def heartbeat_wire_probe() -> Path:
             path = Path(__file__).resolve().parents[2] / path
         path = path.resolve()
         if not path.is_file() or not os.access(path, os.X_OK):
-            raise AssertionError(f"configured heartbeat wire probe is not executable: {path}")
+            raise AssertionError(
+                f"configured heartbeat wire probe is not executable: {path}"
+            )
         return path
 
     repository = Path(__file__).resolve().parents[2]
@@ -45,7 +47,9 @@ def heartbeat_wire_probe() -> Path:
     )
     target = target_root / "debug" / "examples" / "heartbeat_wire_probe"
     if not target.is_file() or not os.access(target, os.X_OK):
-        raise AssertionError(f"cargo did not produce an executable wire probe: {target}")
+        raise AssertionError(
+            f"cargo did not produce an executable wire probe: {target}"
+        )
     return target
 
 
@@ -56,9 +60,9 @@ def test_controller_heartbeat_response_crosses_rust_directive_parser(
     operation = services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,
-        "node.probe",
+        "recipe.stop",
         "a" * 64,
-        {},
+        STOP_PAYLOAD,
     )
     claim = client.post(
         "/agent/v1/claim",
