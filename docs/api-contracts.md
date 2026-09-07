@@ -18,6 +18,7 @@ their current contracts; neither requires accepting an older document format.
 | Controller API requests and responses | Controller Pydantic request/response models, including the `*_contract.py` modules | FastAPI, generated OpenAPI, web and CLI clients |
 | Controller–Spark messages | Shared `agent_protocol` wire contract | Controller and Rust `vonk-agent-protocol` |
 | Run artifact verification | `ArtifactVerificationResult` in `run_switch_contract.py` | Cached/distributed artifact verification producers and Run/Switch consumer |
+| Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
 | Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
 
 Model and Recipe are the two **authoring** contracts. Operations, progress,
@@ -146,6 +147,13 @@ serialized identifiers, persisted progress, and the actual runtime importer.
 Do not substitute matching hand-written fixtures for the producer's output.
 For example, Docker's imported image ID, an archive config ID, and a registry
 manifest digest describe different objects and must not be assumed equal.
+
+The image-cache receipt is one strict Pydantic document. Its producer writes
+every field, including an explicit `null` build identity for registry images.
+The reader rejects missing fields; the compiler consumes the same typed
+receipt. Its explicit projection into the separate compiled-launch document
+replaces the former duplicate receipt class, field alias and dictionary
+fallbacks.
 
 An artifact verification result must include `verified_build_id`. A source
 build supplies the exact Controller build UUID; a published image supplies

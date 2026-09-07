@@ -801,7 +801,10 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     result={
                         "runtime_image": receipt.to_mapping(),
                         "image_digest": receipt.image_digest,
-                        "oci_layout_sha256": receipt.oci_layout_sha256,
+                        # Keep the phase result's established wire key; the
+                        # preparation receipt itself uses its established
+                        # ``oci_archive_sha256`` field.
+                        "oci_layout_sha256": receipt.oci_archive_sha256,
                         "image_bytes": receipt.image_bytes,
                     }
                 )
@@ -1804,15 +1807,12 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(tmp_pat
 def test_activity_provider_integrates_with_global_cursor_and_detail_projection(
     tmp_path: Path,
 ) -> None:
-    try:
-        from vonk_control.operation_api import (
-            OperationProvider,
-            get_operation_from_providers,
-            merge_operation_providers,
-            operation_detail_response,
-        )
-    except ImportError:
-        pytest.skip("global Activity provider seam is supplied by the integration branch")
+    from vonk_control.operation_api import (
+        OperationProvider,
+        get_operation_from_providers,
+        merge_operation_providers,
+        operation_detail_response,
+    )
 
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
     service = _service(

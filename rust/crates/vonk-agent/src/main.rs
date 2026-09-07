@@ -531,7 +531,6 @@ mod tests {
         assert_eq!(claim_wait_seconds(60, 1, false), 0);
     }
 
-    #[test]
     #[tokio::test]
     async fn retryable_telemetry_failure_schedules_retry_without_delaying_claim_lane() {
         let retry_after = telemetry_retry_after(&ClientError::Retryable, 1, 0, 5, 60);
