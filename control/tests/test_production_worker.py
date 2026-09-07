@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control import api as control_api
 from vonk_control import telemetry_maintenance
 from vonk_control.artifact_maintenance import ArtifactMaintenanceCadence
 from vonk_control.jobs import JobService
@@ -38,7 +40,6 @@ def test_production_worker_fails_unknown_generic_work(
             jobs,
             "worker",
             {},
-            reconciliations=None,
         ).run_once()
         is True
     )
@@ -59,7 +60,6 @@ def test_production_worker_does_not_claim_agent_owned_upgrade_parent(
             jobs,
             "worker",
             {},
-            reconciliations=None,
         ).run_once()
         is False
     )
@@ -96,7 +96,7 @@ def test_recipe_worker_services_routes_while_coordinators_are_active(tmp_path, c
     assert calls == [coordinator, "routes"]
 
 
-def test_production_builder_wires_reconciliation_and_housekeeping(
+def test_production_builder_wires_recipe_operations_and_housekeeping(
     tmp_path,
 ) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'builder.sqlite'}")
@@ -119,16 +119,6 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
         def notify_available(self):
             return None
 
-    class Authority:
-        def prefetch(self, *_args):
-            return None
-
-        def authorization_reason(self, *_args):
-            return True
-
-        def clear(self, *_args):
-            return None
-
     agent_jobs = SignerBackedAgentJobs()
 
     worker = assemble_production_worker(
@@ -136,11 +126,8 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
         sessions=sessions,
         agent_jobs=agent_jobs,
         publisher=publisher,
-        route_root=route_root,
-        endpoint_resolver=lambda _session, _node: ("10.0.0.11", clock()),
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
-        authority=Authority(),
         worker_id="control-worker-test",
         artifact_job_root=tmp_path / "artifact-jobs" / "blobs",
         artifact_job_storage_max_bytes=16 * 1024**3,
@@ -155,8 +142,9 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
     assert not hasattr(worker, "_updates")
     assert not hasattr(worker, "_packages")
     assert not hasattr(worker, "_validation")
-    assert worker._reconciliations._agent_jobs is agent_jobs
-    assert worker._reconciliations._publisher is publisher
+    assert isinstance(worker._recipes, RecipeOperationWorker)
+    assert not hasattr(worker, "_reconciliations")
+    assert worker._recipes._routes._publisher._publisher is publisher
     assert isinstance(
         worker._housekeeping,
         telemetry_maintenance.TelemetryMaintenanceCadence,
@@ -183,6 +171,23 @@ def test_production_builder_wires_reconciliation_and_housekeeping(
     scheduler = image_production.scheduler
     worker.close()
     assert scheduler.executor._shutdown is True
+
+
+def test_production_callers_use_current_recipe_worker_and_result_consumers() -> None:
+    api_source = inspect.getsource(control_api.production_app)
+    worker_source = inspect.getsource(assemble_production_worker)
+
+    assert "agent_services.operations.set_result_consumer(consume_agent_result)" in api_source
+    assert "RecipeOperationWorker(" in worker_source
+    for retired in (
+        "AgentReconciliationService",
+        "bind_reconciliation_result_consumer",
+        "WorkerAuthorityService",
+        "HttpWorkerAuthority",
+        "install_worker_authority_routes",
+    ):
+        assert retired not in api_source
+        assert retired not in worker_source
 
 
 def test_production_worker_settings_load_only_worker_authority_secrets(
