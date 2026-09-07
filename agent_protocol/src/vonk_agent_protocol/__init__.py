@@ -38,6 +38,7 @@ from .host_helper import (
     host_helper_grant_signing_bytes,
     recipe_run_observation_receipt_signing_bytes,
 )
+from .inventory import InventoryRequest
 from .recipe_jobs import (
     RecipeJobFile,
     RecipeJobInputFile,
@@ -95,6 +96,7 @@ __all__ = [
     "HostHelperOperation",
     "HostHelperSignature",
     "HostOperationKind",
+    "InventoryRequest",
     "ManagedArea",
     "OciBundleMetadata",
     "PackageHelperGrantClaims",

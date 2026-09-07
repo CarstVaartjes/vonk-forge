@@ -38,6 +38,7 @@ from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
     DistributionAssignment,
+    InventoryRequest,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
     SignedPackageObjectReceipt,
@@ -636,48 +637,6 @@ def _agent_upgrade_request_material(
             "a custom agent package requires its node-bound repair manifest"
         )
     return package, None
-
-
-class InventoryRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1]
-    observed_at: datetime
-    disk_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    disk_free_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    host_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    host_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    gpu_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    gpu_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4, strict=True)
-    gpu_count: int = Field(ge=0, le=64, strict=True)
-    artifact_store_read_only: bool
-    capabilities: list[str] = Field(max_length=64)
-    fabric_address: str | None = Field(default=None, max_length=45)
-    fabric_bandwidth_mbps: int | None = Field(
-        default=None, ge=1, le=1_000_000, strict=True
-    )
-    nvidia_driver_version: str = Field(min_length=1, max_length=256)
-    container_runtime_version: str = Field(min_length=1, max_length=256)
-
-    @field_validator("observed_at", mode="before")
-    @classmethod
-    def parse_observed_at(cls, value: object) -> object:
-        return _strict_json_datetime(value)
-
-    @model_validator(mode="after")
-    def internally_consistent(self) -> InventoryRequest:
-        if (
-            self.disk_free_bytes > self.disk_total_bytes
-            or self.host_memory_free_bytes > self.host_memory_total_bytes
-            or self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
-            or (self.fabric_address is None) != (self.fabric_bandwidth_mbps is None)
-            or len(self.capabilities) != len(set(self.capabilities))
-            or any(
-                re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,127}", item) is None
-                for item in self.capabilities
-            )
-        ):
-            raise ValueError("inventory evidence is inconsistent")
-        return self
 
 
 class RecipeRunObservationRequest(StrictJSONModel):

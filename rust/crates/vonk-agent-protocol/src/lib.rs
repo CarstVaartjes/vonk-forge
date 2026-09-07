@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -280,6 +280,48 @@ pub struct ArtifactDistributionRequest {
     pub authority_revision: String,
     pub plan_digest: String,
     pub schema_version: u8,
+}
+
+/// Canonical schema-1 inventory evidence reported by a Spark agent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct InventoryRequest {
+    pub schema_version: u8,
+    pub observed_at: DateTime<Utc>,
+    pub disk_total_bytes: u64,
+    pub disk_free_bytes: u64,
+    pub host_memory_total_bytes: u64,
+    pub host_memory_free_bytes: u64,
+    pub gpu_memory_total_bytes: u64,
+    pub gpu_memory_free_bytes: u64,
+    pub gpu_count: u32,
+    pub artifact_store_read_only: bool,
+    pub capabilities: Vec<String>,
+    pub fabric_address: Option<std::net::IpAddr>,
+    pub fabric_bandwidth_mbps: Option<u64>,
+    pub nvidia_driver_version: String,
+    pub container_runtime_version: String,
+}
+
+impl InventoryRequest {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.schema_version != 1
+            || self.disk_free_bytes > self.disk_total_bytes
+            || self.host_memory_free_bytes > self.host_memory_total_bytes
+            || self.gpu_memory_free_bytes > self.gpu_memory_total_bytes
+            || self.capabilities.iter().any(|value| value.is_empty())
+            || {
+                let mut unique = BTreeSet::new();
+                self.capabilities.iter().any(|value| !unique.insert(value))
+            }
+            || self.nvidia_driver_version.is_empty()
+            || self.container_runtime_version.is_empty()
+            || (self.fabric_address.is_none() != self.fabric_bandwidth_mbps.is_none())
+        {
+            return Err(ProtocolError::Identity("inventory request"));
+        }
+        Ok(())
+    }
 }
 
 impl ArtifactDistributionRequest {
