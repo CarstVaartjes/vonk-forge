@@ -38,9 +38,8 @@ from vonk_control.models import (
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
 from vonk_control.source_bundles import SourceBundleStore
 
-from agent_protocol.tests.test_recipe_observations import _observation
-from control.tests.test_agent_api import Jobs
-from control.tests.test_recipe_operations import (
+from .test_agent_api import Jobs
+from .test_recipe_operations import (
     NOW,
     installed_recipe,
     setup_services,
@@ -396,7 +395,13 @@ def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
     recipe_observation_wire_probe: Path,
     singleton: bool,
 ) -> None:
-    payload = _observation()
+    fixture = (
+        Path(__file__).parents[2]
+        / "agent_protocol"
+        / "fixtures"
+        / "recipe-run-observation.json"
+    )
+    payload = json.loads(fixture.read_text())
     if singleton:
         payload.update(
             {
@@ -464,7 +469,9 @@ def test_rust_observation_json_is_consumed_by_the_controller_wire_model(
             RecipeRunObservationWire.model_validate(incomplete)
         rejected = subprocess.run(
             [str(recipe_observation_wire_probe), "parse"],
-            input=json.dumps(incomplete) + "\n", text=True,
-            capture_output=True, check=False,
+            input=json.dumps(incomplete) + "\n",
+            text=True,
+            capture_output=True,
+            check=False,
         )
         assert rejected.returncode != 0, field
