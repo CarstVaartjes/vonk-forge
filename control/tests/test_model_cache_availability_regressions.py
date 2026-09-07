@@ -722,11 +722,16 @@ def test_terminal_hf_access_failure_requires_explicit_recheck_and_resume(
     now[0] = NOW + timedelta(seconds=31)
     _drain(service, resumed.id)
     completed = service.get_operation(resumed.id)
-    assert completed.state == "succeeded"
-    assert completed.failure is None
     with sessions() as session:
         persisted = session.get(ModelCacheOperation, first.id)
         assert persisted is not None
+        diagnostic = {
+            "state": persisted.state,
+            "failure": persisted.payload.get("failure"),
+            "retry": persisted.payload.get("retry"),
+        }
+        assert completed.state == "succeeded", diagnostic
+        assert completed.failure is None
         assert persisted.state == completed.state
         assert "failure" not in persisted.payload
         assert "claim" not in persisted.payload
