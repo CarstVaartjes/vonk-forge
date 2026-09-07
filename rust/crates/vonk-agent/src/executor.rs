@@ -551,6 +551,11 @@ pub fn recipe_start_success_body(
                 "endpoint": endpoint,
                 "memory_reservation_bytes": request.reserved_memory_bytes,
                 "ready": true,
+                "run_generation": request.run_generation,
+                "runtime_arguments_sha256": runtime_arguments_sha256,
+                "local_address": request.local_address,
+                "master_address": request.master_address,
+                "master_port": request.master_port,
             });
             let (evidence, evidence_digest) = evidence_with_digest(evidence);
             return Ok(json!({

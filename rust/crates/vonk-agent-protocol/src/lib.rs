@@ -364,106 +364,6 @@ pub struct RecipeRunObservationReceipt {
     pub signature: RecipeRunObservationReceiptSignature,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum RecipeRunObservationGrantOperation {
-    ExecuteContainerRuntimeRequest {
-        action: HostRuntimeAction,
-        job_id: Uuid,
-        operation_id: Uuid,
-        attempt: u32,
-        fence: Uuid,
-        request_sha256: String,
-        observation_identity_sha256: String,
-    },
-}
-
-impl RecipeRunObservationGrantOperation {
-    fn validate(&self) -> Result<(), ProtocolError> {
-        let Self::ExecuteContainerRuntimeRequest {
-            action,
-            job_id,
-            operation_id,
-            attempt,
-            fence,
-            request_sha256,
-            observation_identity_sha256,
-        } = self;
-        if *action != HostRuntimeAction::RunInspect
-            || job_id.get_version() != Some(uuid::Version::Random)
-            || operation_id.get_version() != Some(uuid::Version::Random)
-            || *attempt == 0
-            || fence.get_version() != Some(uuid::Version::Random)
-            || !lower_hex(request_sha256, 64)
-            || !lower_hex(observation_identity_sha256, 64)
-        {
-            return Err(ProtocolError::Identity(
-                "recipe run observation grant operation",
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationGrantClaims {
-    pub schema_version: u8,
-    pub authority: String,
-    pub request_id: Uuid,
-    pub node_id: String,
-    pub issued_at: i64,
-    pub expires_at: i64,
-    pub operation: RecipeRunObservationGrantOperation,
-}
-
-impl RecipeRunObservationGrantClaims {
-    fn validate(&self) -> Result<(), ProtocolError> {
-        if self.schema_version != 1
-            || self.authority != "vonk.host-maintenance-helper"
-            || self.request_id.get_version() != Some(uuid::Version::Random)
-            || !valid_node_id(&self.node_id)
-            || self.issued_at <= 0
-            || !(1..=300).contains(&(self.expires_at - self.issued_at))
-        {
-            return Err(ProtocolError::Identity(
-                "recipe run observation grant claims",
-            ));
-        }
-        self.operation.validate()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationGrantSignature {
-    pub algorithm: String,
-    pub key_id: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservationGrant {
-    pub schema_version: u8,
-    pub claims: RecipeRunObservationGrantClaims,
-    pub signature: RecipeRunObservationGrantSignature,
-}
-
-impl RecipeRunObservationGrant {
-    pub fn validate(&self) -> Result<(), ProtocolError> {
-        self.claims.validate()?;
-        if self.schema_version != 1
-            || self.signature.algorithm != "ed25519"
-            || !lower_hex(&self.signature.key_id, 64)
-            || !lower_hex(&self.signature.value, 128)
-        {
-            return Err(ProtocolError::Identity("recipe run observation grant"));
-        }
-        Ok(())
-    }
-}
-
 impl RecipeRunObservationReceipt {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         self.claims.validate()?;
@@ -492,7 +392,7 @@ pub struct RecipeRunObservationWire {
     #[serde(deserialize_with = "required_optional_bool")]
     pub endpoint_ready: Option<bool>,
     pub observation_identity_sha256: String,
-    pub grant: RecipeRunObservationGrant,
+    pub grant: SignedHostHelperGrant,
     pub helper_receipt: RecipeRunObservationReceipt,
     pub observation_receipt_public_key: String,
 }
@@ -513,7 +413,7 @@ impl RecipeRunObservationWire {
             || self.helper_receipt.claims.observation_identity_sha256
                 != self.observation_identity_sha256
             || match &self.grant.claims.operation {
-                RecipeRunObservationGrantOperation::ExecuteContainerRuntimeRequest {
+                HostHelperOperation::ExecuteContainerRuntimeRequest {
                     action,
                     job_id,
                     attempt,
@@ -521,12 +421,14 @@ impl RecipeRunObservationWire {
                     observation_identity_sha256,
                     ..
                 } => {
-                    *action != HostRuntimeAction::RunInspect
+                    *action != HostHelperContainerRuntimeAction::RunInspect
                         || *job_id != self.binding.run_id
                         || u32::try_from(self.binding.run_generation).ok() != Some(*attempt)
                         || request_sha256 != &self.helper_receipt.claims.request_sha256
-                        || observation_identity_sha256 != &self.observation_identity_sha256
+                        || observation_identity_sha256.as_deref()
+                            != Some(self.observation_identity_sha256.as_str())
                 }
+                _ => true,
             }
             || self.observed_at.timestamp() != self.helper_receipt.claims.observed_at
             || (self.binding.local_address == self.binding.master_address)
@@ -2777,26 +2679,26 @@ mod recipe_run_inspection_tests {
                 value: "d".repeat(128),
             },
         };
-        let grant = RecipeRunObservationGrant {
+        let grant = SignedHostHelperGrant {
             schema_version: 1,
-            claims: RecipeRunObservationGrantClaims {
+            claims: HostHelperGrantClaims {
                 schema_version: 1,
                 authority: "vonk.host-maintenance-helper".to_owned(),
                 request_id: receipt.claims.request_id,
                 node_id: receipt.claims.node_id.clone(),
                 issued_at: observed_at.timestamp(),
                 expires_at: observed_at.timestamp() + 60,
-                operation: RecipeRunObservationGrantOperation::ExecuteContainerRuntimeRequest {
-                    action: HostRuntimeAction::RunInspect,
+                operation: HostHelperOperation::ExecuteContainerRuntimeRequest {
+                    action: HostHelperContainerRuntimeAction::RunInspect,
                     job_id: binding.run_id,
                     operation_id: Uuid::new_v4(),
                     attempt: binding.run_generation as u32,
                     fence: Uuid::new_v4(),
                     request_sha256: "b".repeat(64),
-                    observation_identity_sha256: identity_sha256.clone(),
+                    observation_identity_sha256: Some(identity_sha256.clone()),
                 },
             },
-            signature: RecipeRunObservationGrantSignature {
+            signature: HostHelperGrantSignature {
                 algorithm: "ed25519".to_owned(),
                 key_id: "f".repeat(64),
                 value: "e".repeat(128),
@@ -2814,6 +2716,18 @@ mod recipe_run_inspection_tests {
             observation_receipt_public_key: "e".repeat(64),
         };
         observation.validate().unwrap();
+        let mut wrong_operation = observation.clone();
+        wrong_operation.grant.claims.operation = HostHelperOperation::CreateManagedDirectory {
+            area: HostHelperManagedArea::Models,
+            relative_path: "observation".to_owned(),
+        };
+        assert!(wrong_operation.validate().is_err());
+
+        let mut partial_rendezvous = observation.binding.clone();
+        partial_rendezvous.world_size = 2;
+        partial_rendezvous.master_address = Some("10.0.0.2".parse().unwrap());
+        assert!(partial_rendezvous.validate().is_err());
+
         let mut encoded = serde_json::to_value(&observation).unwrap();
         encoded.as_object_mut().unwrap().remove("endpoint_ready");
         assert!(serde_json::from_value::<RecipeRunObservationWire>(encoded).is_err());

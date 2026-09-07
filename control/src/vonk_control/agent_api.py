@@ -1915,6 +1915,9 @@ def install_agent_routes(
                 assigned = prepare_exact_recipe_run_observation_nodes(
                     session, identity.node_id, observed_at, set(by_run)
                 )
+                agent_node = session.get(AgentNode, identity.node_id)
+                if agent_node is None:
+                    raise ValueError("recipe run observation node is unavailable")
                 for node in assigned:
                     run = session.get(RecipeRun, node.run_id)
                     assert run is not None
@@ -1923,7 +1926,7 @@ def install_agent_routes(
                         continue
                     evidence_observed_at = evidence.observed_at.astimezone(UTC)
                     if (
-                        node.observation_receipt_public_key
+                        agent_node.observation_receipt_public_key
                         != evidence.observation_receipt_public_key
                     ):
                         raise ValueError("recipe run observation receipt key is stale")
@@ -1945,8 +1948,8 @@ def install_agent_routes(
                             identity=evidence.observation_identity(),
                             observed_at=evidence_observed_at,
                             received_at=now,
-                            signed_grant=evidence.grant.to_mapping(),
-                            helper_receipt=evidence.helper_receipt.to_mapping(),
+                            signed_grant=evidence.grant,
+                            helper_receipt=evidence.helper_receipt,
                         )
                     except HostHelperAuthorityError:
                         # An authenticated same-generation identity mismatch is

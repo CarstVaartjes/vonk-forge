@@ -312,8 +312,8 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
             "rank": payload["rank"],
             "role": payload["role"],
             "world_size": payload["world_size"],
-            "local_address": str(payload["local_address"]),
-            "master_address": str(payload["master_address"]),
+            "local_address": payload["local_address"],
+            "master_address": payload["master_address"],
             "master_port": payload["master_port"],
             "memory_reservation_bytes": payload["reserved_memory_bytes"],
             "process_running": True,
@@ -356,8 +356,8 @@ def start_evidence(payload: dict[str, object]) -> dict[str, object]:
             {
                 "run_generation": payload["run_generation"],
                 "runtime_arguments_sha256": "c" * 64,
-                "local_address": str(payload["local_address"]),
-                "master_address": str(payload["master_address"]),
+                "local_address": payload["local_address"],
+                "master_address": payload["master_address"],
                 "master_port": payload["master_port"],
             }
         )

@@ -13,7 +13,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeAction, HostRuntimeRequest, RecipeRunInspectionBinding,
-    RecipeRunObservationGrant, RecipeRunObservationOutcome, RecipeRunObservationReceipt,
+    RecipeRunObservationOutcome, RecipeRunObservationReceipt, SignedHostHelperGrant,
     canonical_json, hex_sha256, parse_strict, recipe_run_observation_receipt_signing_bytes,
 };
 
@@ -54,7 +54,7 @@ pub struct HostRuntimeOutcome {
 }
 
 pub struct RecipeRunInspectionOutcome {
-    pub grant: RecipeRunObservationGrant,
+    pub grant: SignedHostHelperGrant,
     pub observation_identity_sha256: String,
     pub receipt: RecipeRunObservationReceipt,
     pub process_running: bool,
@@ -190,12 +190,7 @@ impl HostRuntimeBoundary<'_> {
                 .client
                 .host_runtime_grant(claim, action, &digest)
                 .await?;
-            let request_id = grant
-                .get("claims")
-                .and_then(|claims| claims.get("request_id"))
-                .and_then(serde_json::Value::as_str)
-                .ok_or(HostRuntimeError::Protocol)?
-                .to_owned();
+            let request_id = grant.claims.request_id.to_string();
             let grant = canonical_json(&grant).map_err(|_| HostRuntimeError::Protocol)?;
             let helper_socket = self.helper_socket.to_path_buf();
             let response = tokio::task::spawn_blocking(move || {

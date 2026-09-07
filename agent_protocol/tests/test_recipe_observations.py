@@ -230,6 +230,17 @@ def test_observation_grant_request_is_shared_and_preserves_singleton_nulls() -> 
         RecipeRunObservationWire.parse(payload)
 
 
+@pytest.mark.parametrize(
+    "field",
+    ["local_address", "master_address", "master_port"],
+)
+def test_distributed_observation_rejects_partial_rendezvous(field: str) -> None:
+    payload = _observation()
+    payload[field] = None
+    with pytest.raises(AgentProtocolError):
+        RecipeRunObservationWire.parse(payload)
+
+
 @pytest.mark.parametrize("version", [True, 2.0])
 def test_observation_snapshot_schema_version_is_exact_integer(version: object) -> None:
     with pytest.raises(ValidationError):

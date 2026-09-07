@@ -2065,7 +2065,13 @@ class RecipeOperationService:
         evidence_field = (
             "launch_evidence"
             if job.kind == "recipe.start"
-            and operation.payload.get("phase") == "rank-launch"
+            and (
+                operation.payload.get("phase") == "rank-launch"
+                or (
+                    operation.payload.get("run_generation") is not None
+                    and operation.payload.get("phase") is None
+                )
+            )
             else "node_evidence"
         )
         raw_node_evidence = recorded_result.get(evidence_field, {})
@@ -3703,8 +3709,8 @@ def _validate_rank_launch_evidence(
         "rank": operation.payload.get("rank"),
         "role": operation.payload.get("role"),
         "world_size": operation.payload.get("world_size"),
-        "local_address": str(operation.payload.get("local_address")),
-        "master_address": str(operation.payload.get("master_address")),
+        "local_address": operation.payload.get("local_address"),
+        "master_address": operation.payload.get("master_address"),
         "master_port": operation.payload.get("master_port"),
         "memory_reservation_bytes": operation.payload.get("reserved_memory_bytes"),
     }
@@ -3833,8 +3839,8 @@ def _validate_start_evidence(
         )
     if exact_inspection:
         comparisons["run_generation"] = operation.payload.get("run_generation")
-        comparisons["local_address"] = str(operation.payload.get("local_address"))
-        comparisons["master_address"] = str(operation.payload.get("master_address"))
+        comparisons["local_address"] = operation.payload.get("local_address")
+        comparisons["master_address"] = operation.payload.get("master_address")
         comparisons["master_port"] = operation.payload.get("master_port")
     if any(evidence.get(key) != value for key, value in comparisons.items()):
         raise RecipeOperationConflict(

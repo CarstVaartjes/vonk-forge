@@ -105,10 +105,9 @@ class RecipeRunObservationWire(WireModel):
         if self.rank >= self.world_size:
             raise ValueError("recipe run observation rank is invalid")
         singleton = self.world_size == 1
-        if singleton != (
-            self.local_address is None
-            and self.master_address is None
-            and self.master_port is None
+        rendezvous = (self.local_address, self.master_address, self.master_port)
+        if (singleton and any(value is not None for value in rendezvous)) or (
+            not singleton and any(value is None for value in rendezvous)
         ):
             raise ValueError("recipe run observation rendezvous is invalid")
         if (self.local_address == self.master_address) != (
@@ -123,7 +122,9 @@ class RecipeRunObservationWire(WireModel):
             raise ValueError("recipe run observation grant request is invalid")
         operation = self.grant.claims.operation
         if not isinstance(operation, ExecuteContainerRuntimeRequestOperation):
-            raise TypeError("recipe run observation grant operation is invalid")
+            raise ValueError(  # noqa: TRY004
+                "recipe run observation grant operation is invalid"
+            )
         if (
             operation.action != "run-inspect"
             or operation.job_id != self.run_id
@@ -247,10 +248,9 @@ class RecipeRunObservationGrantRequest(WireModel):
     @model_validator(mode="after")
     def exact_rendezvous(self) -> RecipeRunObservationGrantRequest:
         singleton = self.world_size == 1
-        if singleton != (
-            self.local_address is None
-            and self.master_address is None
-            and self.master_port is None
+        rendezvous = (self.local_address, self.master_address, self.master_port)
+        if (singleton and any(value is not None for value in rendezvous)) or (
+            not singleton and any(value is None for value in rendezvous)
         ):
             raise ValueError("recipe run observation rendezvous is invalid")
         return self
