@@ -3450,19 +3450,29 @@ class ModelCacheService:
                     )
                 )
                 self._refresh_huggingface_cooldown(cooldown_rows, now)
-            rows = list(
+            candidate_ids = list(
                 session.scalars(
-                    select(ModelCacheOperation)
+                    select(ModelCacheOperation.id)
                     .where(ModelCacheOperation.kind.in_(["download", "repair", "evict"]))
                     .where(ModelCacheOperation.state.in_(["queued", "running", "partial"]))
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
                     .limit(max(limit * 4, limit))
-                    .with_for_update(skip_locked=True)
                 )
             )
-            for operation in rows:
+            for operation_id in candidate_ids:
                 if len(claimed) >= limit:
                     break
+                operation = session.scalar(
+                    select(ModelCacheOperation)
+                    .where(
+                        ModelCacheOperation.id == operation_id,
+                        ModelCacheOperation.kind.in_(["download", "repair", "evict"]),
+                        ModelCacheOperation.state.in_(["queued", "running", "partial"]),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+                if operation is None:
+                    continue
                 payload = dict(operation.payload) if isinstance(operation.payload, Mapping) else {}
                 retry = payload.get("retry")
                 retry = dict(retry) if isinstance(retry, Mapping) else {}
