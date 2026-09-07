@@ -452,8 +452,9 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     assert filtered.json()["operations"][0]["id"] == "run-1"
 
 
+@pytest.mark.parametrize("profile_state", ["running", "failed", "waiting-for-operator"])
 def test_profile_operation_provider_is_registered_through_the_global_api(
-    tmp_path,
+    tmp_path, profile_state,
 ) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'profile-operations.sqlite'}")
     Base.metadata.create_all(engine)
@@ -502,7 +503,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
                     profile_id=profile_id,
                     profile_digest="9" * 64,
                     plan_digest=plan_digest,
-                    state="running",
+                    state=profile_state,
                     plan=_profile_operation_plan(
                         profile_id=profile_id,
                         profile_digest="9" * 64,
@@ -518,7 +519,10 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
                         "total_steps": 1,
                     },
                     result={"changed": False, "completed_steps": 0},
-                    status_reason=None,
+                    status_reason=(
+                        "Spark could not start: token=private-credential"
+                        if profile_state != "running" else None
+                    ),
                     actor="admin",
                     created_at=created_at,
                     updated_at=created_at,
@@ -556,6 +560,16 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     assert detail.status_code == 200
     assert detail.json()["kind"] == "fleet-profile.apply"
     assert detail.json()["progress"] == {"phase": "start"}
+    if profile_state != "running":
+        failure = detail.json()["failure"]
+        assert failure["error_code"] == "fleet_profile_application_failed"
+        assert failure["detail"] == "Spark could not start: token=<redacted>"
+        assert failure["uncertain"] is (profile_state == "waiting-for-operator")
+        assert first.json()["operations"][0]["failure"] == failure
+        assert detail.json()["recovery"]["uncertain"] == failure["uncertain"]
+        assert "private-credential" not in first.text + detail.text
+    else:
+        assert "failure" not in detail.json()
     assert second.status_code == 200
     assert second.json()["total"] == 2
     assert second.json()["operations"][0]["id"] == older_id

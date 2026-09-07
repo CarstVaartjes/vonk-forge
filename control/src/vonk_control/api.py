@@ -1249,6 +1249,20 @@ def create_app(
             total=total,
         )
 
+    def activity_detail(item: Mapping[str, object]) -> OperationDetailResponse:
+        """Expose recovery only when its family route is installed."""
+        kind = item.get("kind")
+        can_retry = (
+            isinstance(kind, str)
+            and (
+                (kind.startswith("fleet-profile.") and fleet_profiles is not None)
+                or (kind == "library.placement" and library_placements is not None)
+            )
+        )
+        return operation_detail_response(
+            item, available_actions=("retry",) if can_retry else ()
+        )
+
     @app.get(
         "/api/v1/operations",
         response_model=OperationsResponse,
@@ -1283,7 +1297,7 @@ def create_app(
                 status_code=503, detail="operation projection unavailable"
             ) from None
         return OperationsResponse(
-            operations=[operation_detail_response(item) for item in page.items],
+            operations=[activity_detail(item) for item in page.items],
             next_cursor=page.next_cursor,
             total=page.total,
         )
@@ -1310,7 +1324,7 @@ def create_app(
             raise HTTPException(
                 status_code=503, detail="operation projection unavailable"
             ) from None
-        return operation_detail_response(item)
+        return activity_detail(item)
 
     @app.get(
         "/api/v1/audit",

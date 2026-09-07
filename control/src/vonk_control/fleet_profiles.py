@@ -44,6 +44,7 @@ from .fleet_profile_contract import (
     FleetProfileSwitchChildResult,
     FleetProfileView,
 )
+from .logging import redact_text
 from .models import (
     AgentNode,
     CatalogDocument,
@@ -58,6 +59,7 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .operation_contract import OperationFailureEvidence
 from .preparation_contract import RolloutPreparation
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
 from .recipe_runtime_specs import (
@@ -1990,31 +1992,44 @@ class FleetProfileService:
         return "final_verify"
 
     @classmethod
-    def _operation_item(cls, row: FleetProfileApplication, *, retry_available: bool = False) -> dict[str, object]:
-        """Build a schema-2 Activity row for inspect-only profile recovery.
-
-        Profile applications currently have one durable resumable attempt; the
-        Activity projection therefore exposes attempt 1 and no retry action.
-        """
+    def _operation_item(
+        cls, row: FleetProfileApplication, *, retry_available: bool = False
+    ) -> dict[str, object]:
+        """Project profile progress and its operator-visible failure into Activity."""
 
         typed_progress = FleetProfileApplicationProgress.model_validate(row.progress)
         progress = {"phase": cls._operation_phase(row)}
         operation_kind = typed_progress.operation_kind
+        failure = None
+        if row.state in {"failed", "waiting-for-operator"}:
+            if not row.status_reason or not row.status_reason.strip():
+                raise FleetProfileConflict("Profile application failure reason is missing")
+            failure = OperationFailureEvidence(
+                error_code="fleet_profile_application_failed",
+                summary=(
+                    "Profile application needs attention"
+                    if row.state == "waiting-for-operator"
+                    else "Profile application failed"
+                ),
+                detail=redact_text(row.status_reason),
+                retryable=retry_available,
+                uncertain=row.state == "waiting-for-operator",
+            ).model_dump(mode="json")
         return {
             "id": row.id,
-            "parent_id": None,
+            "parent_id": typed_progress.retry_of_application_id,
             "node_ids": list(cls._operation_scope(row)),
             "kind": (
-                operation_kind
-                if isinstance(operation_kind, str)
-                else "fleet-profile.apply"
+                "library.placement" if typed_progress.library_placement is not None
+                else operation_kind or "fleet-profile.apply"
             ),
             "state": row.state,
-            "attempt": 1,
+            "attempt": typed_progress.attempt,
             "progress": progress,
             "created_at": _aware(row.created_at).isoformat(),
             "updated_at": _aware(row.updated_at).isoformat(),
-            "supported_actions": [],
+            "supported_actions": ["retry"] if retry_available else [],
+            "failure": failure,
             "result": (
                 result.model_dump(mode="json")
                 if (result := _persisted_profile_result(row)) is not None
