@@ -21,6 +21,7 @@ from .recipe_lifecycle_contract import (
     RecipeLifecycleResult,
     RecipeOperationConflictResponse,
     parse_recipe_lifecycle_result,
+    validate_recipe_lifecycle_terminal,
 )
 from .recipe_operations import (
     RecipeOperationConflict,
@@ -344,12 +345,13 @@ class OperationResponse(StrictModel):
             return value
         document = dict(value)
         result = document.get("result")
-        if result is None:
-            return document
         kind = document.get("kind")
         if not isinstance(kind, str):
             raise TypeError("recipe operation kind is invalid")
         try:
+            validate_recipe_lifecycle_terminal(kind, str(document.get("state")), result)
+            if result is None:
+                return document
             document["result"] = parse_recipe_lifecycle_result(kind, result)
         except (TypeError, ValueError) as error:
             raise ValueError(str(error)) from error
