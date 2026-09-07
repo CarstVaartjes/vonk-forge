@@ -769,9 +769,7 @@ impl AgentHttpClient {
             return Err(ClientError::Protocol);
         }
         let assignment = self.distribution_manifest(plan_digest).await?;
-        let model_root = destination_root
-            .join("models")
-            .join(&assignment.model_artifact_set_sha256);
+        let model_root = destination_root.join("models");
         let oci_root = archive_root.to_path_buf();
         tokio::fs::create_dir_all(&model_root).await?;
         tokio::fs::create_dir_all(&oci_root).await?;
@@ -2172,12 +2170,7 @@ mod tests {
         assert_eq!(server.join().unwrap().len(), 3);
         assert_eq!(
             evidence.model_paths,
-            vec![
-                distribution_root
-                    .join("models")
-                    .join(&assignment.model_artifact_set_sha256)
-                    .join(hex_sha256(&model))
-            ]
+            vec![distribution_root.join("models").join(hex_sha256(&model))]
         );
         assert_eq!(
             evidence.oci_archive_path,
@@ -2251,6 +2244,7 @@ mod tests {
 
         let mut second_assignment = assignment.clone();
         second_assignment.plan_digest = "f".repeat(64);
+        second_assignment.model_artifact_set_sha256 = "c".repeat(64);
         let (second_client, second_server) = distribution_fixture_server(
             second_assignment.clone(),
             objects,
@@ -2266,10 +2260,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(reused.downloaded_bytes, evidence.downloaded_bytes);
+        assert_eq!(
+            reused.model_paths,
+            vec![distribution_root.join("models").join(&model_sha256)]
+        );
+        assert_eq!(
+            std::fs::read_dir(distribution_root.join("models"))
+                .unwrap()
+                .count(),
+            1,
+            "the same object is retained once across artifact sets"
+        );
         assert_eq!(second_server.join().unwrap().len(), 1);
 
         let mut second_plan = plan.clone();
         second_plan.identity.execution_sha256 = "f".repeat(64);
+        second_plan.identity.model_artifact_set_sha256 =
+            second_assignment.model_artifact_set_sha256.clone();
         let second_installation = "cb555393-764b-4eb6-8f15-b416d2894290";
         runtime
             .install(
@@ -2299,7 +2306,6 @@ mod tests {
         let model_path = root
             .path()
             .join("models")
-            .join(&assignment.model_artifact_set_sha256)
             .join(&assignment.objects[0].sha256);
         let partial_path = PathBuf::from(format!("{}.partial", model_path.display()));
         std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
@@ -2419,14 +2425,12 @@ mod tests {
         let model_path = root
             .path()
             .join("models")
-            .join(&assignment.model_artifact_set_sha256)
             .join(&assignment.objects[0].sha256);
         std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
         std::fs::write(model_path, model).unwrap();
         std::fs::set_permissions(
             root.path()
                 .join("models")
-                .join(&assignment.model_artifact_set_sha256)
                 .join(&assignment.objects[0].sha256),
             std::fs::Permissions::from_mode(0o600),
         )
