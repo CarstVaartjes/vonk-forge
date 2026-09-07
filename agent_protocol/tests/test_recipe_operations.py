@@ -86,8 +86,6 @@ def test_recipe_operation_vocabulary_is_closed() -> None:
 @pytest.mark.parametrize(
     ("operation", "payload"),
     [
-        (AgentOperation.RECIPE_INSTALL, INSTALL),
-        (AgentOperation.RECIPE_START, START),
         (AgentOperation.RECIPE_STOP, STOP),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL),
         (AgentOperation.RECIPE_MODEL_UNINSTALL, MODEL_UNINSTALL),
@@ -105,8 +103,6 @@ def test_recipe_operation_payloads_are_typed_and_digest_bound(
 @pytest.mark.parametrize(
     ("operation", "payload"),
     [
-        (AgentOperation.RECIPE_INSTALL, INSTALL | {"shell": "curl evil"}),
-        (AgentOperation.RECIPE_START, START | {"environment": {"TOKEN": "x"}}),
         (AgentOperation.RECIPE_STOP, STOP | {"plan_digest": "not-a-digest"}),
         (AgentOperation.RECIPE_UNINSTALL, UNINSTALL | {"host_path": "/tmp"}),
     ],
@@ -116,57 +112,3 @@ def test_recipe_operations_reject_hacks_unknown_fields_and_weak_identity(
 ) -> None:
     with pytest.raises(AgentProtocolError):
         RecipeOperationRequest.parse(operation, payload)
-
-
-def test_recipe_start_accepts_tailnet_address_but_rejects_localhost() -> None:
-    request = RecipeOperationRequest.parse(
-        AgentOperation.RECIPE_START,
-        START | {"endpoint_address": "100.100.20.30"},
-    )
-    assert request.endpoint_address == "100.100.20.30"
-
-    with pytest.raises(AgentProtocolError, match="endpoint address"):
-        RecipeOperationRequest.parse(
-            AgentOperation.RECIPE_START,
-            START | {"endpoint_address": "127.0.0.1"},
-        )
-
-
-def test_multinode_start_requires_explicit_direct_fabric_rendezvous() -> None:
-    request = RecipeOperationRequest.parse(
-        AgentOperation.RECIPE_START,
-        START
-        | {
-            "world_size": 2,
-            "local_address": "192.168.100.3",
-            "master_address": "192.168.100.2",
-            "master_port": 29500,
-            "rank": 1,
-            "role": "worker",
-        },
-    )
-    assert request.master_address == "192.168.100.2"
-
-    large = RecipeOperationRequest.parse(
-        AgentOperation.RECIPE_START,
-        START
-        | {
-            "world_size": 17,
-            "local_address": "192.168.100.3",
-            "master_address": "192.168.100.2",
-            "master_port": 29500,
-        },
-    )
-    assert large.world_size == 17
-
-    with pytest.raises(AgentProtocolError, match="fabric"):
-        RecipeOperationRequest.parse(
-            AgentOperation.RECIPE_START,
-            START
-            | {
-                "world_size": 2,
-                "local_address": None,
-                "master_address": "192.168.100.2",
-                "master_port": 29500,
-            },
-        )

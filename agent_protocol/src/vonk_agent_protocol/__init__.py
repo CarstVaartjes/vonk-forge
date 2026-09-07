@@ -9,8 +9,15 @@ from .contracts import (
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
     MAX_DOCUMENT_BYTES,
     canonical_message,
+    format_model_identity,
+    parse_model_identity,
     schema_validator,
     validate_schema_message,
+)
+from .compiled_execution_plan import (
+    CompiledExecutionPlan,
+    CompiledExecutionPlanError,
+    validate_compiled_execution_plan,
 )
 from .distribution import (
     DistributionAssignment,
@@ -45,7 +52,12 @@ from .recipe_jobs import (
 from .recipe_jobs import (
     manifest_sha256 as recipe_job_manifest_sha256,
 )
-from .recipe_operations import RECIPE_OPERATIONS, RecipeOperationRequest
+from .recipe_operations import (
+    RECIPE_OPERATIONS,
+    RecipeInstallPayload,
+    RecipeOperationRequest,
+    RecipeStartPayload,
+)
 from .telemetry import TelemetryReport
 from .workload_packages import (
     ComponentDescriptor,
@@ -74,6 +86,8 @@ __all__ = [
     "MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES",
     "MAX_DOCUMENT_BYTES",
     "ComponentDescriptor",
+    "CompiledExecutionPlan",
+    "CompiledExecutionPlanError",
     "ContainerRuntimeAction",
     "DistributionAssignment",
     "DistributionObject",
@@ -95,7 +109,9 @@ __all__ = [
     "RecipeJobOutputMapping",
     "RecipeJobRunRequest",
     "RecipeJobRunResult",
+    "RecipeInstallPayload",
     "RecipeOperationRequest",
+    "RecipeStartPayload",
     "RecipeRunObservationReceiptClaims",
     "RestartUnit",
     "SignedHostHelperGrant",
@@ -104,13 +120,16 @@ __all__ = [
     "SignedRecipeRunObservationReceipt",
     "TelemetryReport",
     "canonical_message",
+    "format_model_identity",
     "host_artifact_signing_bytes",
     "host_helper_grant_signing_bytes",
     "package_helper_grant_signing_bytes",
     "package_object_receipt_signing_bytes",
+    "parse_model_identity",
     "recipe_job_manifest_document",
     "recipe_job_manifest_sha256",
     "recipe_run_observation_receipt_signing_bytes",
     "schema_validator",
     "validate_schema_message",
+    "validate_compiled_execution_plan",
 ]
