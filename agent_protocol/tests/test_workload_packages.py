@@ -3,16 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 from importlib.resources import files
-from types import MappingProxyType
-
 import pytest
 from jsonschema import Draft202012Validator
+from pydantic import ValidationError
 from vonk_agent_protocol import AgentProtocolError
 from vonk_agent_protocol.workload_packages import (
     ComponentDescriptor,
     PackageReleaseGraph,
     PackageReleaseLock,
 )
+from vonk_agent_protocol.wire_model import WireModel
 
 SHA_A = "a" * 64
 SHA_B = "b" * 64
@@ -132,7 +132,7 @@ def test_release_lock_digest_is_stable_for_reordered_maps() -> None:
 
     assert reordered.canonical_bytes == original.canonical_bytes
     assert reordered.digest == original.digest
-    assert original.compatibility["minimum_memory_bytes"] == 4096
+    assert original.compatibility.minimum_memory_bytes == 4096
     assert hashlib.sha256(original.canonical_bytes).hexdigest() == original.digest
 
 
@@ -143,12 +143,12 @@ def test_release_lock_parses_signed_resource_envelope() -> None:
     lock = PackageReleaseLock.parse(document)
 
     assert lock.resource_envelope is not None
-    assert lock.resource_envelope["required_nodes"] == 2
-    assert lock.resource_envelope["per_node"]["kv_cache_per_token_bytes"] == 4096
-    assert lock.resource_envelope["per_node"]["resident_memory_bytes"] == 8 * 1024**3
-    assert lock.resource_envelope["world_size"] == 2
-    assert lock.resource_envelope["ranks"][1]["role"] == "worker"
-    assert lock.resource_envelope["fabric"]["kind"] == "rdma"
+    assert lock.resource_envelope.required_nodes == 2
+    assert lock.resource_envelope.per_node.kv_cache_per_token_bytes == 4096
+    assert lock.resource_envelope.per_node.resident_memory_bytes == 8 * 1024**3
+    assert lock.resource_envelope.world_size == 2
+    assert lock.resource_envelope.ranks[1].role == "worker"
+    assert lock.resource_envelope.fabric.kind == "rdma"
 
 
 @pytest.mark.parametrize(
@@ -196,9 +196,10 @@ def test_release_lock_accepts_signed_python_runtime_metadata() -> None:
 
     lock = PackageReleaseLock.parse(document)
 
-    assert lock.compatibility["backends"] == ("python-venv",)
-    runtime = lock.compatibility["python_runtime"]
-    assert runtime["interpreter_component"] == "python-interpreter"
+    assert lock.compatibility.backends == ("python-venv",)
+    runtime = lock.compatibility.python_runtime
+    assert runtime is not None
+    assert runtime.interpreter_component == "python-interpreter"
 
 
 def test_release_lock_rejects_untrusted_python_runtime_metadata() -> None:
@@ -236,11 +237,11 @@ def test_release_lock_rejects_duplicate_json_keys() -> None:
 def test_release_lock_and_components_are_deeply_immutable() -> None:
     lock = PackageReleaseLock.parse(lock_document())
 
-    assert isinstance(lock.upstream_identity, MappingProxyType)
-    assert isinstance(lock.compatibility, MappingProxyType)
-    assert isinstance(lock.components[0].materialization, MappingProxyType)
-    with pytest.raises(TypeError):
-        lock.compatibility["architectures"] = ("amd64",)  # type: ignore[index]
+    assert isinstance(lock.upstream_identity, WireModel)
+    assert isinstance(lock.compatibility, WireModel)
+    assert isinstance(lock.components[0].materialization, WireModel)
+    with pytest.raises(ValidationError):
+        lock.compatibility.architectures = ("amd64",)
 
 
 def test_component_descriptor_exposes_exact_contract_fields() -> None:

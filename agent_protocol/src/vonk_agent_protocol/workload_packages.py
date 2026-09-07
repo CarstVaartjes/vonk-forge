@@ -7,11 +7,17 @@ from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from pathlib import PurePosixPath
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from pydantic import Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from .contracts import AgentProtocolError, canonical_message
 from .wire_model import WireModel
@@ -27,20 +33,6 @@ MAX_PACKAGE_HELPER_GRANT_SECONDS = 15 * 60
 PACKAGE_HELPER_AUTHORITY = "vonk.workload-package-helper"
 PACKAGE_HELPER_GRANT_DOMAIN = b"Vonk Forge-WORKLOAD-PACKAGE-HELPER-GRANT-V1\0"
 PACKAGE_OBJECT_RECEIPT_DOMAIN = b"Vonk Forge-WORKLOAD-PACKAGE-OBJECT-RECEIPT-V1\0"
-
-
-class _PositionalWireModel(WireModel):
-    """Keep the established positional constructors while sharing wire validation."""
-
-    def __init__(self, *args: Any, **data: Any) -> None:
-        if args:
-            names = tuple(type(self).model_fields)
-            if len(args) > len(names) or any(
-                name in data for name in names[: len(args)]
-            ):
-                raise TypeError("invalid positional wire model arguments")
-            data.update(zip(names, args))
-        super().__init__(**data)
 
 
 IDENTIFIER = re.compile(r"[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?\Z")
@@ -226,85 +218,96 @@ def _sequence(
     return value
 
 
-def _parse_source(value: Any) -> Mapping[str, object]:
-    source = _mapping(value, name="component source")
-    provider = source.get("provider")
-    if provider == "https":
-        _exact_fields(source, required={"provider", "url"}, name="component source")
-        parsed = {
-            "provider": provider,
-            "url": _https_url(source["url"], name="source URL"),
-        }
-    elif provider == "oci":
-        _exact_fields(
-            source,
-            required={"provider", "reference"},
-            name="component source",
-        )
-        reference = source["reference"]
-        if not isinstance(reference, str) or OCI_REFERENCE.fullmatch(reference) is None:
-            raise AgentProtocolError("OCI source must use an exact digest reference")
-        parsed = {"provider": provider, "reference": reference}
-    elif provider == "git":
-        _exact_fields(
-            source,
-            required={"provider", "repository", "commit"},
-            name="component source",
-        )
-        commit = source["commit"]
-        if not isinstance(commit, str) or GIT_COMMIT.fullmatch(commit) is None:
-            raise AgentProtocolError("Git source commit must be full lowercase hex")
-        parsed = {
-            "provider": provider,
-            "repository": _https_url(source["repository"], name="Git repository"),
-            "commit": commit,
-        }
-    elif provider == "huggingface":
-        _exact_fields(
-            source,
-            required={"provider", "repository", "revision"},
-            name="component source",
-        )
-        repository = source["repository"]
-        revision = source["revision"]
-        if (
-            not isinstance(repository, str)
-            or HF_REPOSITORY.fullmatch(repository) is None
-        ):
-            raise AgentProtocolError("Hugging Face repository is invalid")
-        if not isinstance(revision, str) or GIT_COMMIT.fullmatch(revision) is None:
-            raise AgentProtocolError(
-                "Hugging Face revision must be a full immutable revision"
-            )
-        parsed = {"provider": provider, "repository": repository, "revision": revision}
-    elif provider in {"python-index", "signed-http-index"}:
-        _exact_fields(
-            source,
-            required={"provider", "url", "digest"},
-            name="component source",
-        )
-        parsed = {
-            "provider": provider,
-            "url": _https_url(source["url"], name="index URL"),
-            "digest": _sha256(source["digest"], name="source digest", prefixed=True),
-        }
-    else:
-        raise AgentProtocolError("component source provider is not supported")
-    return _freeze(parsed)
+class _HttpsSource(WireModel):
+    provider: Literal["https"]
+    url: str
+
+    @field_validator("url")
+    @classmethod
+    def url_is_safe(cls, value: str) -> str:
+        return _https_url(value, name="source URL")
 
 
-def _parse_evidence(value: Any, *, name: str) -> Mapping[str, object]:
-    evidence = _mapping(value, name=name)
-    _exact_fields(evidence, required={"kind", "digest"}, name=name)
-    return _freeze(
-        {
-            "kind": _identifier(evidence["kind"], name=f"{name} kind"),
-            "digest": _sha256(evidence["digest"], name=f"{name} digest", prefixed=True),
-        }
+class _OciSource(WireModel):
+    provider: Literal["oci"]
+    reference: str = Field(
+        pattern=r"^[a-z0-9][a-z0-9._:/-]{0,510}@sha256:[0-9a-f]{64}$"
     )
 
 
-class OciBundleMetadata(_PositionalWireModel):
+class _GitSource(WireModel):
+    provider: Literal["git"]
+    repository: str
+    commit: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+    @field_validator("repository")
+    @classmethod
+    def repository_is_safe(cls, value: str) -> str:
+        return _https_url(value, name="Git repository")
+
+
+class _HuggingFaceSource(WireModel):
+    provider: Literal["huggingface"]
+    repository: str = Field(
+        pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,95})/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,95})$"
+    )
+    revision: str = Field(pattern=r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+
+
+class _IndexSource(WireModel):
+    provider: Literal["python-index", "signed-http-index"]
+    url: str
+    digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+    @field_validator("url")
+    @classmethod
+    def url_is_safe(cls, value: str) -> str:
+        return _https_url(value, name="index URL")
+
+
+ComponentSource = Annotated[
+    Union[_HttpsSource, _OciSource, _GitSource, _HuggingFaceSource, _IndexSource],
+    Field(discriminator="provider"),
+]
+_COMPONENT_SOURCE_ADAPTER = TypeAdapter(ComponentSource)
+
+
+class ComponentEvidence(WireModel):
+    kind: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+    digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+
+def _parse_source(value: Any) -> ComponentSource:
+    try:
+        return _COMPONENT_SOURCE_ADAPTER.validate_json(canonical_message(value))
+    except ValidationError as error:
+        provider = value.get("provider") if isinstance(value, Mapping) else None
+        if "Extra inputs" in str(error):
+            message = "component source contains unknown fields"
+        elif provider == "oci":
+            message = "OCI source must use an exact digest reference"
+        elif provider == "git":
+            message = "Git source commit must be full lowercase hex"
+        elif provider == "huggingface":
+            message = "Hugging Face revision must be a full immutable revision"
+        else:
+            message = "component source is invalid"
+        raise AgentProtocolError(f"{message}: {error}") from error
+
+
+def _parse_evidence(value: Any, *, name: str) -> ComponentEvidence:
+    try:
+        return ComponentEvidence.model_validate_json(canonical_message(value))
+    except ValidationError as error:
+        message = (
+            f"{name} contains unknown fields"
+            if "Extra inputs" in str(error)
+            else f"{name} is invalid"
+        )
+        raise AgentProtocolError(f"{message}: {error}") from error
+
+
+class OciBundleMetadata(WireModel):
     """Signed metadata for an immutable OCI-rootfs workload component.
 
     Workload locks carry this metadata in the component's materialization
@@ -351,68 +354,62 @@ class OciBundleMetadata(_PositionalWireModel):
         return self.model_dump(mode="json")
 
 
-def _parse_materialization(value: Any) -> Mapping[str, object]:
-    materialization = _mapping(value, name="component materialization")
-    if "method" not in materialization:
-        raise AgentProtocolError("component materialization missing method")
-    method = materialization["method"]
-    allowed = {
+class _SimpleMaterialization(WireModel):
+    method: Literal[
         "file",
         "snapshot",
         "archive",
         "oci-content",
-        "oci-bundle",
         "configuration",
         "native-archive",
         "wheel",
         "pylock-environment",
         "executable",
-    }
-    if method not in allowed:
-        raise AgentProtocolError("component materialization method is not supported")
-    if method != "oci-bundle":
-        _exact_fields(
-            materialization,
-            required={"method"},
-            name="component materialization",
-        )
-        return MappingProxyType({"method": method})
-    metadata = OciBundleMetadata.parse(
-        {
+    ]
+
+
+class _OciBundleMaterialization(OciBundleMetadata):
+    method: Literal["oci-bundle"]
+
+
+ComponentMaterialization = Annotated[
+    Union[_SimpleMaterialization, _OciBundleMaterialization],
+    Field(discriminator="method"),
+]
+_MATERIALIZATION_ADAPTER = TypeAdapter(ComponentMaterialization)
+
+
+def _parse_materialization(value: Any) -> ComponentMaterialization:
+    materialization = _mapping(value, name="component materialization")
+    if materialization.get("method") == "oci-bundle":
+        materialization = {
             "schema_version": 1,
-            **{key: value for key, value in materialization.items() if key != "method"},
+            **materialization,
         }
-    )
-    return MappingProxyType({"method": method, **metadata.to_mapping()})
+    try:
+        return _MATERIALIZATION_ADAPTER.validate_json(
+            canonical_message(materialization)
+        )
+    except ValidationError as error:
+        message = (
+            "component materialization contains unknown fields"
+            if "Extra inputs" in str(error)
+            else "component materialization is invalid"
+        )
+        raise AgentProtocolError(f"{message}: {error}") from error
 
 
-class ComponentDescriptor(_PositionalWireModel):
+class ComponentDescriptor(WireModel):
     name: str
     kind: str
     media_type: str
-    sources: tuple[Mapping[str, object], ...] = Field(
-        min_length=1, max_length=MAX_SOURCES
-    )
+    sources: tuple[ComponentSource, ...] = Field(min_length=1, max_length=MAX_SOURCES)
     digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     size: int = Field(ge=1, le=MAX_COMPONENT_SIZE)
     unpacked_size: int | None = Field(default=None, ge=1, le=MAX_COMPONENT_SIZE)
     platforms: tuple[str, ...] = Field(min_length=1, max_length=16)
-    materialization: Mapping[str, object]
-    evidence: tuple[Mapping[str, object], ...] = Field(max_length=MAX_EVIDENCE)
-
-    @field_validator("materialization", mode="after")
-    @classmethod
-    def materialization_is_immutable(
-        cls, value: Mapping[str, object]
-    ) -> Mapping[str, object]:
-        return _freeze(value)
-
-    @field_validator("sources", "evidence", mode="after")
-    @classmethod
-    def maps_are_immutable(
-        cls, value: tuple[Mapping[str, object], ...]
-    ) -> tuple[Mapping[str, object], ...]:
-        return tuple(_freeze(item) for item in value)
+    materialization: ComponentMaterialization
+    evidence: tuple[ComponentEvidence, ...] = Field(max_length=MAX_EVIDENCE)
 
     @classmethod
     def parse(cls, value: Any) -> ComponentDescriptor:
@@ -490,13 +487,13 @@ class ComponentDescriptor(_PositionalWireModel):
             "name": self.name,
             "kind": self.kind,
             "media_type": self.media_type,
-            "sources": _thaw(self.sources),
+            "sources": [source.model_dump(mode="json") for source in self.sources],
             "digest": self.digest,
             "size": self.size,
             "unpacked_size": self.unpacked_size,
             "platforms": list(self.platforms),
-            "materialization": _thaw(self.materialization),
-            "evidence": _thaw(self.evidence),
+            "materialization": self.materialization.model_dump(mode="json"),
+            "evidence": [item.model_dump(mode="json") for item in self.evidence],
         }
 
 
@@ -506,81 +503,54 @@ def _platform(value: Any) -> str:
     return value
 
 
-def _parse_upstream_identity(value: Any) -> Mapping[str, object]:
-    identity = _mapping(value, name="upstream_identity")
-    provider = identity.get("provider")
-    if provider == "git":
-        _exact_fields(
-            identity,
-            required={"provider", "repository", "commit"},
-            name="upstream_identity",
-        )
-        commit = identity["commit"]
-        if not isinstance(commit, str) or GIT_COMMIT.fullmatch(commit) is None:
-            raise AgentProtocolError("Git commit must be a full lowercase identity")
-        result = {
-            "provider": provider,
-            "repository": _https_url(identity["repository"], name="Git repository"),
-            "commit": commit,
-        }
-    elif provider == "huggingface":
-        _exact_fields(
-            identity,
-            required={"provider", "repository", "revision"},
-            name="upstream_identity",
-        )
-        repository = identity["repository"]
-        revision = identity["revision"]
-        if (
-            not isinstance(repository, str)
-            or HF_REPOSITORY.fullmatch(repository) is None
-        ):
-            raise AgentProtocolError("Hugging Face repository is invalid")
-        if not isinstance(revision, str) or GIT_COMMIT.fullmatch(revision) is None:
-            raise AgentProtocolError(
-                "Hugging Face revision must be a full immutable revision"
-            )
-        result = {"provider": provider, "repository": repository, "revision": revision}
-    elif provider == "oci":
-        _exact_fields(
-            identity,
-            required={"provider", "reference"},
-            name="upstream_identity",
-        )
-        reference = identity["reference"]
-        if not isinstance(reference, str) or OCI_REFERENCE.fullmatch(reference) is None:
-            raise AgentProtocolError("OCI upstream identity must use an exact digest")
-        result = {"provider": provider, "reference": reference}
-    elif provider == "python-index":
-        _exact_fields(
-            identity,
-            required={"provider", "project", "version", "digest"},
-            name="upstream_identity",
-        )
-        result = {
-            "provider": provider,
-            "project": _identifier(identity["project"], name="Python project"),
-            "version": _bounded_text(
-                identity["version"], name="Python version", maximum=128
-            ),
-            "digest": _sha256(
-                identity["digest"], name="Python artifact digest", prefixed=True
-            ),
-        }
-    elif provider == "signed-http-index":
-        _exact_fields(
-            identity,
-            required={"provider", "url", "digest"},
-            name="upstream_identity",
-        )
-        result = {
-            "provider": provider,
-            "url": _https_url(identity["url"], name="signed index URL"),
-            "digest": _sha256(identity["digest"], name="index digest", prefixed=True),
-        }
-    else:
-        raise AgentProtocolError("upstream_identity provider is not supported")
-    return _freeze(result)
+class _PythonIndexIdentity(WireModel):
+    provider: Literal["python-index"]
+    project: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+    version: str = Field(min_length=1, max_length=128)
+    digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+    @field_validator("version")
+    @classmethod
+    def version_is_bounded(cls, value: str) -> str:
+        return _bounded_text(value, name="Python version", maximum=128)
+
+
+class _SignedHttpIndexIdentity(WireModel):
+    provider: Literal["signed-http-index"]
+    url: str
+    digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+    @field_validator("url")
+    @classmethod
+    def url_is_safe(cls, value: str) -> str:
+        return _https_url(value, name="signed index URL")
+
+
+UpstreamIdentity = Annotated[
+    Union[
+        _GitSource,
+        _HuggingFaceSource,
+        _OciSource,
+        _PythonIndexIdentity,
+        _SignedHttpIndexIdentity,
+    ],
+    Field(discriminator="provider"),
+]
+_UPSTREAM_IDENTITY_ADAPTER = TypeAdapter(UpstreamIdentity)
+
+
+def _parse_upstream_identity(value: Any) -> UpstreamIdentity:
+    try:
+        return _UPSTREAM_IDENTITY_ADAPTER.validate_json(canonical_message(value))
+    except ValidationError as error:
+        provider = value.get("provider") if isinstance(value, Mapping) else None
+        if provider == "git":
+            message = "Git commit must be a full lowercase identity"
+        elif provider == "huggingface":
+            message = "Hugging Face revision must be a full immutable revision"
+        else:
+            message = "upstream_identity is invalid"
+        raise AgentProtocolError(f"{message}: {error}") from error
 
 
 def _identifier_tuple(
@@ -599,187 +569,133 @@ def _identifier_tuple(
     return result
 
 
-def _parse_compatibility(value: Any) -> Mapping[str, object]:
-    compatibility = _mapping(value, name="compatibility")
-    required = {
-        "architectures",
-        "operating_systems",
-        "required_capabilities",
-        "minimum_storage_bytes",
-    }
-    optional = {
-        "minimum_memory_bytes",
-        "minimum_driver",
-        "minimum_cuda",
-        "backends",
-        "python_runtime",
-    }
-    _exact_fields(
-        compatibility,
-        required=required,
-        optional=optional,
-        name="compatibility",
+class PythonRuntimeMetadata(WireModel):
+    environment_component: str = Field(
+        pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
     )
-    result: dict[str, object] = {
-        "architectures": _identifier_tuple(
-            compatibility["architectures"],
-            name="compatibility architectures",
-            minimum=1,
-        ),
-        "operating_systems": _identifier_tuple(
-            compatibility["operating_systems"],
-            name="compatibility operating_systems",
-            minimum=1,
-        ),
-        "required_capabilities": _identifier_tuple(
-            compatibility["required_capabilities"],
-            name="compatibility required_capabilities",
-        ),
-        "minimum_storage_bytes": _positive_integer(
-            compatibility["minimum_storage_bytes"],
-            name="compatibility minimum_storage_bytes",
-            maximum=MAX_COMPONENT_SIZE,
-        ),
-    }
-    if "minimum_memory_bytes" in compatibility:
-        result["minimum_memory_bytes"] = _positive_integer(
-            compatibility["minimum_memory_bytes"],
-            name="compatibility minimum_memory_bytes",
-            maximum=MAX_COMPONENT_SIZE,
-        )
-    for field in ("minimum_driver", "minimum_cuda"):
-        if field in compatibility:
-            result[field] = _bounded_text(
-                compatibility[field], name=f"compatibility {field}", maximum=64
+    environment_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    environment_tree_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    interpreter_component: str = Field(
+        pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+    )
+    interpreter_component_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    interpreter_entrypoint: str = Field(min_length=1, max_length=256)
+    interpreter_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+    @field_validator("interpreter_entrypoint")
+    @classmethod
+    def entrypoint_is_safe(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            "\\" in value
+            or path.is_absolute()
+            or str(path) != value
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or path.name in {"apt", "apt-get", "bash", "dash", "sh", "sudo"}
+        ):
+            raise ValueError("Python interpreter entrypoint is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def components_are_distinct(self) -> PythonRuntimeMetadata:
+        if self.environment_component == self.interpreter_component:
+            raise ValueError(
+                "Python environment and interpreter components must differ"
             )
-    if "backends" in compatibility:
-        backends = _identifier_tuple(
-            compatibility["backends"], name="compatibility backends", minimum=1
-        )
-        if not set(backends) <= {"oci", "python-venv", "native"}:
-            raise AgentProtocolError("compatibility backend is not supported")
-        result["backends"] = backends
-    if "python_runtime" in compatibility:
-        if "backends" not in result or "python-venv" not in result["backends"]:
-            raise AgentProtocolError(
-                "Python runtime metadata requires the python-venv backend"
+        return self
+
+
+class Compatibility(WireModel):
+    architectures: tuple[str, ...] = Field(min_length=1, max_length=32)
+    operating_systems: tuple[str, ...] = Field(min_length=1, max_length=32)
+    required_capabilities: tuple[str, ...] = Field(max_length=32)
+    minimum_storage_bytes: int = Field(ge=1, le=MAX_COMPONENT_SIZE)
+    minimum_memory_bytes: int | None = Field(default=None, ge=1, le=MAX_COMPONENT_SIZE)
+    minimum_driver: str | None = Field(default=None, min_length=1, max_length=64)
+    minimum_cuda: str | None = Field(default=None, min_length=1, max_length=64)
+    backends: tuple[Literal["oci", "python-venv", "native"], ...] | None = Field(
+        default=None, min_length=1, max_length=3
+    )
+    python_runtime: PythonRuntimeMetadata | None = None
+
+    @field_validator("architectures", "operating_systems", "required_capabilities")
+    @classmethod
+    def identifiers_are_unique(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for item in value:
+            _identifier(item, name="compatibility identifier")
+        if len(set(value)) != len(value):
+            raise ValueError("compatibility identifiers contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def runtime_matches_backend(self) -> Compatibility:
+        if self.python_runtime is not None and (
+            self.backends is None or "python-venv" not in self.backends
+        ):
+            raise ValueError("Python runtime metadata requires the python-venv backend")
+        if (
+            self.backends is not None
+            and "python-venv" in self.backends
+            and self.python_runtime is None
+        ):
+            raise ValueError(
+                "python-venv compatibility requires Python runtime metadata"
             )
-        result["python_runtime"] = _parse_python_runtime(
-            compatibility["python_runtime"]
+        return self
+
+
+def _parse_compatibility(value: Any) -> Compatibility:
+    try:
+        return Compatibility.model_validate_json(canonical_message(value))
+    except ValidationError as error:
+        message = (
+            "compatibility contains unknown fields"
+            if "Extra inputs" in str(error)
+            else "compatibility is invalid"
         )
-    elif "backends" in result and "python-venv" in result["backends"]:
-        raise AgentProtocolError(
-            "python-venv compatibility requires Python runtime metadata"
+        raise AgentProtocolError(f"{message}: {error}") from error
+
+
+class ValidationRecord(WireModel):
+    kind: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+    component: str | None = Field(
+        default=None,
+        pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+    )
+    digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    required: bool | None = None
+
+
+def _parse_validation(value: Any, *, component_names: set[str]) -> ValidationRecord:
+    try:
+        record = ValidationRecord.model_validate_json(canonical_message(value))
+    except ValidationError as error:
+        message = (
+            "validation record contains unknown fields"
+            if "Extra inputs" in str(error)
+            else "validation record is invalid"
         )
-    return _freeze(result)
+        raise AgentProtocolError(f"{message}: {error}") from error
+    if record.component is not None and record.component not in component_names:
+        raise AgentProtocolError("validation component is not declared")
+    return record
 
 
-def _parse_python_runtime(value: Any) -> Mapping[str, object]:
-    runtime = _mapping(value, name="Python runtime metadata")
-    required = {
-        "environment_component",
-        "environment_digest",
-        "environment_tree_digest",
-        "interpreter_component",
-        "interpreter_component_digest",
-        "interpreter_entrypoint",
-        "interpreter_digest",
-    }
-    if set(runtime) != required:
-        raise AgentProtocolError("Python runtime metadata fields are invalid")
-    environment_component = _identifier(
-        runtime["environment_component"], name="Python environment component"
-    )
-    interpreter_component = _identifier(
-        runtime["interpreter_component"], name="Python interpreter component"
-    )
-    if environment_component == interpreter_component:
-        raise AgentProtocolError(
-            "Python environment and interpreter components must differ"
+class Resolver(WireModel):
+    name: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+    version: int = Field(ge=1, le=2**31 - 1)
+
+
+def _parse_resolver(value: Any) -> Resolver:
+    try:
+        return Resolver.model_validate_json(canonical_message(value))
+    except ValidationError as error:
+        message = (
+            "resolver contains unknown fields"
+            if "Extra inputs" in str(error)
+            else "resolver is invalid"
         )
-    entrypoint = runtime["interpreter_entrypoint"]
-    if (
-        not isinstance(entrypoint, str)
-        or not 1 <= len(entrypoint) <= 256
-        or "\\" in entrypoint
-    ):
-        raise AgentProtocolError("Python interpreter entrypoint is invalid")
-    path = PurePosixPath(entrypoint)
-    if (
-        path.is_absolute()
-        or str(path) != entrypoint
-        or any(part in {"", ".", ".."} for part in path.parts)
-        or path.name in {"apt", "apt-get", "bash", "dash", "sh", "sudo"}
-    ):
-        raise AgentProtocolError("Python interpreter entrypoint is invalid")
-    return _freeze(
-        {
-            "environment_component": environment_component,
-            "environment_digest": _sha256(
-                runtime["environment_digest"],
-                name="Python environment digest",
-                prefixed=True,
-            ),
-            "environment_tree_digest": _sha256(
-                runtime["environment_tree_digest"],
-                name="Python environment tree digest",
-                prefixed=True,
-            ),
-            "interpreter_component": interpreter_component,
-            "interpreter_component_digest": _sha256(
-                runtime["interpreter_component_digest"],
-                name="Python interpreter component digest",
-                prefixed=True,
-            ),
-            "interpreter_entrypoint": entrypoint,
-            "interpreter_digest": _sha256(
-                runtime["interpreter_digest"],
-                name="Python interpreter digest",
-                prefixed=True,
-            ),
-        }
-    )
-
-
-def _parse_validation(value: Any, *, component_names: set[str]) -> Mapping[str, object]:
-    validation = _mapping(value, name="validation record")
-    _exact_fields(
-        validation,
-        required={"kind"},
-        optional={"component", "digest", "required"},
-        name="validation record",
-    )
-    result: dict[str, object] = {
-        "kind": _identifier(validation["kind"], name="validation kind")
-    }
-    if "component" in validation:
-        component = _identifier(validation["component"], name="validation component")
-        if component not in component_names:
-            raise AgentProtocolError("validation component is not declared")
-        result["component"] = component
-    if "digest" in validation:
-        result["digest"] = _sha256(
-            validation["digest"], name="validation digest", prefixed=True
-        )
-    if "required" in validation:
-        required = validation["required"]
-        if not isinstance(required, bool):
-            raise AgentProtocolError("validation required must be a boolean")
-        result["required"] = required
-    return _freeze(result)
-
-
-def _parse_resolver(value: Any) -> Mapping[str, object]:
-    resolver = _mapping(value, name="resolver")
-    _exact_fields(resolver, required={"name", "version"}, name="resolver")
-    return MappingProxyType(
-        {
-            "name": _identifier(resolver["name"], name="resolver name"),
-            "version": _positive_integer(
-                resolver["version"], name="resolver version", maximum=2**31 - 1
-            ),
-        }
-    )
+        raise AgentProtocolError(f"{message}: {error}") from error
 
 
 _RESOURCE_FIELDS = (
@@ -800,126 +716,26 @@ _RESOURCE_FIELDS = (
 )
 
 
-def _parse_resource_envelope(value: Any) -> Mapping[str, object]:
-    envelope = _mapping(value, name="resource_envelope")
-    _exact_fields(
-        envelope,
-        required={
-            "schema_version",
-            "per_node",
-            "aggregate",
-            "required_nodes",
-            "topology",
-            "world_size",
-            "ranks",
-            "fabric",
-            "measurement",
-            "evidence",
-        },
-        name="resource_envelope",
-    )
-    if envelope["schema_version"] != 1 or isinstance(envelope["schema_version"], bool):
-        raise AgentProtocolError("resource_envelope schema_version is invalid")
-    required_nodes = _positive_integer(
-        envelope["required_nodes"],
-        name="resource_envelope required_nodes",
-        maximum=512,
-    )
-    topology = envelope["topology"]
-    if topology not in {"single", "replicated", "gang"}:
-        raise AgentProtocolError("resource_envelope topology is invalid")
-    if topology == "single" and required_nodes != 1:
-        raise AgentProtocolError("single resource_envelope requires one GPU node")
-    if topology == "gang" and required_nodes < 2:
-        raise AgentProtocolError("gang resource_envelope requires multiple GPU nodes")
-    world_size = _positive_integer(
-        envelope["world_size"],
-        name="resource_envelope world_size",
-        maximum=512,
-    )
-    if topology == "single" and world_size != 1:
-        raise AgentProtocolError("single resource_envelope requires world_size one")
-    if topology == "replicated" and world_size != 1:
-        raise AgentProtocolError(
-            "replicated resource_envelope requires world_size one per replica"
-        )
-    if topology == "gang" and world_size < required_nodes:
-        raise AgentProtocolError(
-            "gang resource_envelope world_size cannot be below required GPU nodes"
-        )
+class ResourceValues(WireModel):
+    download_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    installed_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    transient_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    output_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    host_memory_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    resident_memory_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    auxiliary_memory_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    activation_memory_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    workspace_memory_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    gpu_memory_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    gpu_count: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    cpu_millicores: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    kv_cache_base_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
+    kv_cache_per_token_bytes: int = Field(ge=0, le=MAX_COMPONENT_SIZE)
 
-    ranks_raw = _sequence(
-        envelope["ranks"], name="resource_envelope ranks", minimum=1, maximum=512
-    )
-    if len(ranks_raw) != world_size:
-        raise AgentProtocolError("resource_envelope ranks must match world_size")
-    ranks: list[dict[str, object]] = []
-    for expected_rank, raw_rank in enumerate(ranks_raw):
-        rank = _mapping(raw_rank, name="resource_envelope rank")
-        _exact_fields(rank, required={"rank", "role"}, name="resource_envelope rank")
-        parsed_rank = rank["rank"]
-        if (
-            not isinstance(parsed_rank, int)
-            or isinstance(parsed_rank, bool)
-            or not 0 <= parsed_rank <= 511
-        ):
-            raise AgentProtocolError("resource_envelope rank must be bounded")
-        if parsed_rank != expected_rank:
-            raise AgentProtocolError("resource_envelope ranks must be contiguous")
-        ranks.append(
-            {
-                "rank": parsed_rank,
-                "role": _identifier(rank["role"], name="resource role"),
-            }
-        )
-    fabric = _mapping(envelope["fabric"], name="resource_envelope fabric")
-    _exact_fields(
-        fabric,
-        required={"kind", "min_bandwidth_mbps"},
-        name="resource_envelope fabric",
-    )
-    min_bandwidth = fabric["min_bandwidth_mbps"]
-    if (
-        not isinstance(min_bandwidth, int)
-        or isinstance(min_bandwidth, bool)
-        or not 0 <= min_bandwidth <= 1_000_000_000
-    ):
-        raise AgentProtocolError(
-            "resource_envelope fabric min_bandwidth_mbps must be bounded"
-        )
-    fabric_value = {
-        "kind": _identifier(fabric["kind"], name="resource fabric kind"),
-        "min_bandwidth_mbps": min_bandwidth,
-    }
-    measurement = envelope["measurement"]
-    if measurement not in {"declared", "measured"}:
-        raise AgentProtocolError("resource_envelope measurement is invalid")
-
-    def parse_values(raw: Any, *, name: str) -> dict[str, int]:
-        values = _mapping(raw, name=name)
-        missing = set(_RESOURCE_FIELDS) - set(values)
-        unknown = set(values) - set(_RESOURCE_FIELDS)
-        if missing:
-            raise AgentProtocolError(
-                f"{name} missing fields: {', '.join(sorted(missing))}"
-            )
-        if unknown:
-            raise AgentProtocolError(
-                f"{name} unknown fields: {', '.join(sorted(unknown))}"
-            )
-        result: dict[str, int] = {}
-        for field in _RESOURCE_FIELDS:
-            value = values[field]
-            if (
-                not isinstance(value, int)
-                or isinstance(value, bool)
-                or value < 0
-                or value > MAX_COMPONENT_SIZE
-            ):
-                raise AgentProtocolError(f"{name} {field} must be bounded")
-            result[field] = value
-        memory_total = sum(
-            result[field]
+    @model_validator(mode="after")
+    def memory_breakdown_fits(self) -> ResourceValues:
+        total = sum(
+            getattr(self, field)
             for field in (
                 "resident_memory_bytes",
                 "auxiliary_memory_bytes",
@@ -927,43 +743,69 @@ def _parse_resource_envelope(value: Any) -> Mapping[str, object]:
                 "workspace_memory_bytes",
             )
         )
-        if result["host_memory_bytes"] < memory_total:
-            raise AgentProtocolError(
-                f"{name} host_memory_bytes is below memory breakdown"
-            )
-        return result
+        if self.host_memory_bytes < total:
+            raise ValueError("host_memory_bytes is below memory breakdown")
+        return self
 
-    per_node = parse_values(envelope["per_node"], name="resource_envelope per_node")
-    aggregate = parse_values(envelope["aggregate"], name="resource_envelope aggregate")
-    for field in _RESOURCE_FIELDS:
-        minimum = per_node[field] * required_nodes
-        if aggregate[field] < minimum:
-            raise AgentProtocolError(
-                f"resource_envelope aggregate {field} is below per-node total"
+
+class ResourceRank(WireModel):
+    rank: int = Field(ge=0, le=511)
+    role: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+
+
+class ResourceFabric(WireModel):
+    kind: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
+    min_bandwidth_mbps: int = Field(ge=0, le=1_000_000_000)
+
+
+class ResourceEnvelope(WireModel):
+    schema_version: Literal[1]
+    per_node: ResourceValues
+    aggregate: ResourceValues
+    required_nodes: int = Field(ge=1, le=512)
+    topology: Literal["single", "replicated", "gang"]
+    world_size: int = Field(ge=1, le=512)
+    ranks: tuple[ResourceRank, ...] = Field(min_length=1, max_length=512)
+    fabric: ResourceFabric
+    measurement: Literal["declared", "measured"]
+    evidence: tuple[ComponentEvidence, ...] = Field(
+        min_length=1, max_length=MAX_EVIDENCE
+    )
+
+    @model_validator(mode="after")
+    def topology_is_consistent(self) -> ResourceEnvelope:
+        if self.topology == "single" and (
+            self.required_nodes != 1 or self.world_size != 1
+        ):
+            raise ValueError(
+                "single resource_envelope requires one node and world size"
             )
-    evidence = tuple(
-        _parse_evidence(item, name="resource_envelope evidence")
-        for item in _sequence(
-            envelope["evidence"],
-            name="resource_envelope evidence",
-            minimum=1,
-            maximum=MAX_EVIDENCE,
-        )
-    )
-    return _freeze(
-        {
-            "schema_version": 1,
-            "per_node": per_node,
-            "aggregate": aggregate,
-            "required_nodes": required_nodes,
-            "topology": topology,
-            "world_size": world_size,
-            "ranks": ranks,
-            "fabric": fabric_value,
-            "measurement": measurement,
-            "evidence": evidence,
-        }
-    )
+        if self.topology == "replicated" and self.world_size != 1:
+            raise ValueError("replicated resource_envelope requires world_size one")
+        if self.topology == "gang" and (
+            self.required_nodes < 2 or self.world_size < self.required_nodes
+        ):
+            raise ValueError("gang resource_envelope topology is invalid")
+        if len(self.ranks) != self.world_size or any(
+            rank.rank != expected for expected, rank in enumerate(self.ranks)
+        ):
+            raise ValueError("resource_envelope ranks must be contiguous")
+        for field in _RESOURCE_FIELDS:
+            if (
+                getattr(self.aggregate, field)
+                < getattr(self.per_node, field) * self.required_nodes
+            ):
+                raise ValueError(
+                    f"resource_envelope aggregate {field} is below per-node total"
+                )
+        return self
+
+
+def _parse_resource_envelope(value: Any) -> ResourceEnvelope:
+    try:
+        return ResourceEnvelope.model_validate_json(canonical_message(value))
+    except ValidationError as error:
+        raise AgentProtocolError(f"resource_envelope is invalid: {error}") from error
 
 
 class PackageHelperOperation(StrEnum):
@@ -978,7 +820,7 @@ class PackageHelperOperation(StrEnum):
     VERIFY_RELEASE = "verify-release"
 
 
-class PackageHelperSignature(_PositionalWireModel):
+class PackageHelperSignature(WireModel):
     algorithm: str
     key_id: str
     value: str
@@ -1006,7 +848,7 @@ class PackageHelperSignature(_PositionalWireModel):
         return self.model_dump(mode="json")
 
 
-class PackageHelperGrantClaims(_PositionalWireModel):
+class PackageHelperGrantClaims(WireModel):
     schema_version: Literal[1]
     authority: Literal[PACKAGE_HELPER_AUTHORITY]
     request_id: str
@@ -1060,7 +902,7 @@ class PackageHelperGrantClaims(_PositionalWireModel):
         return self.model_dump(mode="json")
 
 
-class SignedPackageHelperGrant(_PositionalWireModel):
+class SignedPackageHelperGrant(WireModel):
     claims: PackageHelperGrantClaims
     signature: PackageHelperSignature
 
@@ -1077,7 +919,7 @@ class SignedPackageHelperGrant(_PositionalWireModel):
         return self.model_dump(mode="json")
 
 
-class PackageObjectReceiptClaims(_PositionalWireModel):
+class PackageObjectReceiptClaims(WireModel):
     schema_version: Literal[1]
     authority: Literal[PACKAGE_HELPER_AUTHORITY]
     object_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -1103,7 +945,7 @@ class PackageObjectReceiptClaims(_PositionalWireModel):
         return self.model_dump(mode="json")
 
 
-class SignedPackageObjectReceipt(_PositionalWireModel):
+class SignedPackageObjectReceipt(WireModel):
     claims: PackageObjectReceiptClaims
     signature: PackageHelperSignature
 
@@ -1150,29 +992,16 @@ class PackageReleaseLock(WireModel):
     schema_version: Literal[1]
     family_id: str = Field(pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$")
     upstream_version: str = Field(min_length=1, max_length=128)
-    upstream_identity: Mapping[str, object]
+    upstream_identity: UpstreamIdentity
     components: tuple[ComponentDescriptor, ...] = Field(max_length=255)
     dependency_digests: tuple[str, ...] = Field(max_length=256)
     adapter: ComponentDescriptor
     adapter_abi: int = Field(ge=1, le=255)
-    compatibility: Mapping[str, object]
-    validation: tuple[Mapping[str, object], ...]
-    provenance: tuple[Mapping[str, object], ...]
-    resolver: Mapping[str, object]
-    resource_envelope: Mapping[str, object] | None = None
-
-    @field_validator(
-        "upstream_identity",
-        "compatibility",
-        "resolver",
-        "resource_envelope",
-        mode="after",
-    )
-    @classmethod
-    def nested_maps_are_immutable(
-        cls, value: Mapping[str, object] | None
-    ) -> Mapping[str, object] | None:
-        return None if value is None else _freeze(value)
+    compatibility: Compatibility
+    validation: tuple[ValidationRecord, ...] = Field(max_length=64)
+    provenance: tuple[ComponentEvidence, ...] = Field(max_length=64)
+    resolver: Resolver
+    resource_envelope: ResourceEnvelope | None = None
 
     @property
     def canonical_bytes(self) -> bytes:
@@ -1180,18 +1009,20 @@ class PackageReleaseLock(WireModel):
             "schema_version": self.schema_version,
             "family_id": self.family_id,
             "upstream_version": self.upstream_version,
-            "upstream_identity": self.upstream_identity,
+            "upstream_identity": self.upstream_identity.model_dump(mode="json"),
             "components": [component.to_mapping() for component in self.components],
             "dependency_digests": self.dependency_digests,
             "adapter": self.adapter.to_mapping(),
             "adapter_abi": self.adapter_abi,
-            "compatibility": self.compatibility,
-            "validation": self.validation,
-            "provenance": self.provenance,
-            "resolver": self.resolver,
+            "compatibility": self.compatibility.model_dump(mode="json"),
+            "validation": [item.model_dump(mode="json") for item in self.validation],
+            "provenance": [item.model_dump(mode="json") for item in self.provenance],
+            "resolver": self.resolver.model_dump(mode="json"),
         }
         if self.resource_envelope is not None:
-            document["resource_envelope"] = self.resource_envelope
+            document["resource_envelope"] = self.resource_envelope.model_dump(
+                mode="json"
+            )
         return canonical_message(document)
 
     @property
@@ -1356,7 +1187,10 @@ class PackageReleaseGraph(WireModel):
 __all__ = [
     "MAX_PACKAGE_HELPER_GRANT_SECONDS",
     "PACKAGE_HELPER_AUTHORITY",
+    "Compatibility",
+    "ComponentEvidence",
     "ComponentDescriptor",
+    "ComponentSource",
     "OciBundleMetadata",
     "PackageHelperGrantClaims",
     "PackageHelperOperation",
@@ -1364,6 +1198,12 @@ __all__ = [
     "PackageObjectReceiptClaims",
     "PackageReleaseGraph",
     "PackageReleaseLock",
+    "PythonRuntimeMetadata",
+    "ResourceEnvelope",
+    "ResourceFabric",
+    "ResourceRank",
+    "ResourceValues",
+    "Resolver",
     "SignedPackageHelperGrant",
     "SignedPackageObjectReceipt",
     "package_helper_grant_signing_bytes",
