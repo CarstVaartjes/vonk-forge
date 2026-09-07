@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import ConfigDict, Field, StringConstraints, model_validator
 
 from .library_contract import Digest, NodeId, UuidId
+from .strict_json import StrictJSONModel
 
 Alias = Annotated[
     str,
@@ -19,7 +20,7 @@ Alias = Annotated[
 ]
 
 
-class _StrictModel(BaseModel):
+class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 

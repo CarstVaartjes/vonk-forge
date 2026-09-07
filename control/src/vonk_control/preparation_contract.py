@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import ConfigDict, Field, StringConstraints, model_validator
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[
@@ -20,7 +20,10 @@ PreparationState = Literal[
 ]
 
 
-class _StrictModel(BaseModel):
+from .strict_json import StrictJSONModel
+
+
+class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
