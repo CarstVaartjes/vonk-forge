@@ -14,9 +14,9 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
-    HostRuntimeAction, HostRuntimeRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    RecipeRunInspectionBinding, RecipeRunObservationReceipt, canonical_json, hex_sha256,
-    parse_strict,
+    HostRuntimeAction, HostRuntimeRequest, InventoryRequest,
+    MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES, RecipeRunInspectionBinding,
+    RecipeRunObservationReceipt, canonical_json, hex_sha256, parse_strict,
 };
 
 use crate::{
@@ -72,15 +72,6 @@ struct ClaimRequest<'a> {
     protocol_version: u32,
     runtime_identity: Option<&'a AgentRuntimeIdentity>,
     wait_seconds: u64,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct InventoryRequest<'a> {
-    schema_version: u8,
-    observed_at: chrono::DateTime<chrono::Utc>,
-    #[serde(flatten)]
-    inventory: &'a Inventory,
 }
 
 #[derive(Serialize)]
@@ -1082,14 +1073,28 @@ impl AgentHttpClient {
     }
 
     pub async fn report_inventory(&self, inventory: &Inventory) -> Result<(), ClientError> {
+        let request = InventoryRequest {
+            schema_version: 1,
+            observed_at: chrono::Utc::now(),
+            disk_total_bytes: inventory.disk_total_bytes,
+            disk_free_bytes: inventory.disk_available_bytes,
+            host_memory_total_bytes: inventory.memory_total_bytes,
+            host_memory_free_bytes: inventory.memory_available_bytes,
+            gpu_memory_total_bytes: inventory.gpu_memory_total_bytes,
+            gpu_memory_free_bytes: inventory.gpu_memory_free_bytes,
+            gpu_count: inventory.gpu_count,
+            artifact_store_read_only: inventory.artifact_store_read_only,
+            capabilities: inventory.capabilities.clone(),
+            fabric_address: inventory.fabric_address,
+            fabric_bandwidth_mbps: inventory.fabric_bandwidth_mbps,
+            nvidia_driver_version: inventory.nvidia_driver_version.clone(),
+            container_runtime_version: inventory.container_runtime_version.clone(),
+        };
+        request.validate().map_err(|_| ClientError::Protocol)?;
         let response = self
             .client
             .post(self.endpoint("/agent/v1/inventory")?)
-            .json(&InventoryRequest {
-                schema_version: 1,
-                observed_at: chrono::Utc::now(),
-                inventory,
-            })
+            .json(&request)
             .send()
             .await?;
         if response.status() == StatusCode::NO_CONTENT {

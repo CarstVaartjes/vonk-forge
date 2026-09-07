@@ -1,3 +1,9 @@
+from .build_import import (
+    RecipeBuildEvidence,
+    RecipeBuildRequest,
+    RecipeImageImportEvidence,
+    RecipeImageImportRequest,
+)
 from .compiled_execution_plan import (
     CompiledExecutionPlan,
     CompiledExecutionPlanError,
@@ -38,6 +44,7 @@ from .host_helper import (
     host_helper_grant_signing_bytes,
     recipe_run_observation_receipt_signing_bytes,
 )
+from .inventory import InventoryRequest
 from .recipe_jobs import (
     RecipeJobEvidence,
     RecipeJobFile,
@@ -105,6 +112,7 @@ __all__ = [
     "HostHelperOperation",
     "HostHelperSignature",
     "HostOperationKind",
+    "InventoryRequest",
     "ManagedArea",
     "OciBundleMetadata",
     "PackageHelperGrantClaims",
@@ -113,6 +121,10 @@ __all__ = [
     "PackageObjectReceiptClaims",
     "PackageReleaseGraph",
     "PackageReleaseLock",
+    "RecipeBuildEvidence",
+    "RecipeBuildRequest",
+    "RecipeImageImportEvidence",
+    "RecipeImageImportRequest",
     "RecipeInstallPayload",
     "RecipeJobEvidence",
     "RecipeJobFile",
