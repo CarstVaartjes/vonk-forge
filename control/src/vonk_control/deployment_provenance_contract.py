@@ -5,15 +5,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import ConfigDict, Field, StringConstraints
+
+from .strict_json import StrictJSONModel
 
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
 Commit = Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{40}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[a-f0-9]{64}$")]
 
 
-class ProvenanceModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class ProvenanceModel(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class EvidenceAge(ProvenanceModel):

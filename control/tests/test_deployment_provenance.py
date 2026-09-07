@@ -198,7 +198,7 @@ def test_authenticated_endpoint_serves_typed_projection_and_bounds_errors(tmp_pa
     app.dependency_overrides[unauthorized] = lambda: object()
     response = client.get("/api/v1/deployment-provenance")
     assert response.status_code == 200
-    assert DeploymentProvenance.model_validate(response.json()) == service.snapshot()
+    assert DeploymentProvenance.model_validate_json(response.text) == service.snapshot()
     service._observations = lambda: (_ for _ in ()).throw(ValueError("secret details"))
     response = client.get("/api/v1/deployment-provenance")
     assert response.status_code == 503
@@ -338,3 +338,23 @@ def test_connected_recipe_start_receipts_expose_rank_artifacts(tmp_path):
     result = service.snapshot().workloads[0]
     assert result.rank_agreement == "mismatch"
     assert sum(rank.identity_agreement == "mismatch" for rank in result.ranks) == 1
+
+
+@pytest.mark.parametrize("coerced", [True, "7200", 7200.0])
+def test_nested_provenance_scalar_coercions_are_rejected(tmp_path, coerced):
+    import json
+
+    from pydantic import ValidationError
+
+    sessions, now, _, _ = deployment(tmp_path)
+    snapshot = DeploymentProvenanceService(sessions, clock=lambda: now).snapshot()
+    document = snapshot.model_dump()
+    document["agents"][0]["evidence"]["age_seconds"] = coerced
+    with pytest.raises(ValidationError) as error:
+        DeploymentProvenance.model_validate(document)
+    assert error.value.errors()[0]["loc"] == ("agents", 0, "evidence", "age_seconds")
+    document = snapshot.model_dump(mode="json")
+    document["agents"][0]["evidence"]["age_seconds"] = coerced
+    with pytest.raises(ValidationError) as error:
+        DeploymentProvenance.model_validate_json(json.dumps(document))
+    assert error.value.errors()[0]["loc"] == ("agents", 0, "evidence", "age_seconds")

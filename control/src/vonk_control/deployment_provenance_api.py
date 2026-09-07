@@ -13,12 +13,6 @@ from .operation_api import bounded_error_responses
 def install_deployment_provenance_routes(
     app: FastAPI, *, actor_dependency: Any, provenance: Any | None
 ) -> None:
-    from .operation_api import _ADMIN_OPERATION_IDS
-
-    _ADMIN_OPERATION_IDS[("get", "/api/v1/deployment-provenance")] = (
-        "getDeploymentProvenance"
-    )
-
     @app.get(
         "/api/v1/deployment-provenance",
         response_model=DeploymentProvenance,
