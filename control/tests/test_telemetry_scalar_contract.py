@@ -77,7 +77,7 @@ def test_scalar_producer_survives_report_parse_and_controller_validation(
     value: object,
 ) -> None:
     parsed = TelemetryReport.parse(_report(value))
-    parsed_series = parsed.samples[0]["metrics"]["series"][0]  # type: ignore[index]
+    parsed_series = parsed.samples[0].metrics.series[0].model_dump()
 
     validated = TelemetrySeries.model_validate(parsed_series)
 

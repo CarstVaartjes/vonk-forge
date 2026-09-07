@@ -515,7 +515,7 @@ def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
     encoded = canonical_message(payload)
     assert 64 * 1024 < len(encoded) < MAX_TELEMETRY_REPORT_BYTES
     assert (
-        len(TelemetryReport.parse(payload).samples[0]["metrics"]["series"])
+        len(TelemetryReport.parse(payload).samples[0].metrics.series)
         == series_count
     )
     response = client.post(

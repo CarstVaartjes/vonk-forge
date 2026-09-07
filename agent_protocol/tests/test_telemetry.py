@@ -100,12 +100,15 @@ def test_rich_report_is_schema_validated_and_canonically_copied() -> None:
 
     assert isinstance(parsed, TelemetryReport)
     assert parsed.schema_version == 1
-    assert parsed.samples[0]["metrics"]["schema_version"] == 2  # type: ignore[index]
-    assert parsed.document() == raw
-    assert canonical_message(parsed.document()) == canonical_message(raw)
+    assert parsed.samples[0].metrics.schema_version == 2
+    assert parsed.document()["schema_version"] == 1
+    assert len(parsed.document()["samples"]) == 2
+    assert canonical_message(parsed.document()) == canonical_message(
+        TelemetryReport.parse(parsed.document()).document()
+    )
 
     raw["samples"][0]["sequence"] = 99  # type: ignore[index]
-    assert parsed.samples[0]["sequence"] == 0
+    assert parsed.samples[0].sequence == 0
 
 
 def test_report_rejects_duplicate_or_out_of_order_samples() -> None:

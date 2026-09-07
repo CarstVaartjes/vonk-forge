@@ -58,7 +58,18 @@ from .recipe_operations import (
     RecipeOperationRequest,
     RecipeStartPayload,
 )
-from .telemetry import TelemetryReport
+from .telemetry import (
+    TelemetryCapability,
+    TelemetryDetails,
+    TelemetryMetrics,
+    TelemetryProvenance,
+    TelemetryReport,
+    TelemetryRequest,
+    TelemetryRuntime,
+    TelemetrySample,
+    TelemetrySeries,
+    TelemetryWorkload,
+)
 from .workload_packages import (
     ComponentDescriptor,
     OciBundleMetadata,
@@ -118,7 +129,16 @@ __all__ = [
     "SignedPackageHelperGrant",
     "SignedPackageObjectReceipt",
     "SignedRecipeRunObservationReceipt",
+    "TelemetryCapability",
+    "TelemetryDetails",
+    "TelemetryMetrics",
+    "TelemetryProvenance",
     "TelemetryReport",
+    "TelemetryRequest",
+    "TelemetryRuntime",
+    "TelemetrySample",
+    "TelemetrySeries",
+    "TelemetryWorkload",
     "canonical_message",
     "format_model_identity",
     "host_artifact_signing_bytes",

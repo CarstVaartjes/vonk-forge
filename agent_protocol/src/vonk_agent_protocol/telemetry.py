@@ -1,23 +1,27 @@
-"""Parser for the authenticated agent telemetry envelope.
+"""The authenticated agent telemetry wire contract.
 
-The envelope keeps the existing wire schema 1 used by enrolled agents.  Its
-``metrics`` member is explicitly bound to rich metrics schema 2, so extending
-the observation payload cannot be mistaken for an unversioned map.
+This module is the single Python authority for the strict telemetry JSON
+graph. The Controller may enrich persisted projections with receipt and node
+identity, but those values are not supplied by an agent.
 """
 
 from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any
+import re
+import uuid
+from datetime import datetime
+from typing import Annotated, Any, Literal
+
+from pydantic import Field, field_validator, model_validator
+from pydantic_core import ValidationError
 
 from .contracts import (
     AgentProtocolError,
     canonical_message,
-    schema_validator,
 )
+from .wire_model import WireModel
 
 # The sender batches toward a smaller soft target. This is an authenticated
 # transport memory safeguard, not a limit on a valid metrics inventory.
@@ -25,6 +29,25 @@ MAX_TELEMETRY_REPORT_BYTES = 16 * 1024 * 1024
 MAX_TELEMETRY_SCALAR_STRING_CHARS = 256
 MIN_TELEMETRY_SCALAR_INTEGER = -(2**63)
 MAX_TELEMETRY_SCALAR_INTEGER = 2**63 - 1
+MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
+MAX_TELEMETRY_RATE = 1_000_000_000_000_000.0
+
+TelemetryScope = Literal[
+    "node", "accelerator", "memory", "storage", "network", "runtime",
+    "workload", "service", "benchmark"
+]
+TelemetrySupport = Literal["available", "unsupported", "unavailable", "stale"]
+TelemetryFreshness = Literal["fresh", "delayed", "stale"]
+TelemetryMeasurementKind = Literal["measured", "derived", "estimated", "configured"]
+TelemetryRunState = Literal[
+    "starting", "ready", "running", "queued", "stopped", "failed", "unknown"
+]
+TelemetryWorkloadState = Literal[
+    "queued", "running", "completed", "failed", "cancelled", "unknown"
+]
+_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,95}$")
+_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+_SOURCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 
 
 def validate_telemetry_scalar(value: Any) -> Any:
@@ -51,67 +74,345 @@ def validate_telemetry_scalar(value: Any) -> Any:
     raise ValueError("telemetry value must be a JSON scalar")
 
 
-@dataclass(frozen=True)
-class TelemetryReport:
-    schema_version: int
-    samples: tuple[Mapping[str, Any], ...]
+def _rfc3339_datetime(value: object) -> object:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or ("T" not in value and "t" not in value):
+        raise ValueError("telemetry time must be an RFC 3339 string")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("telemetry time must be an RFC 3339 string") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("telemetry time must include a timezone")
+    if parsed.utcoffset().total_seconds() != 0:
+        raise ValueError("telemetry time must be UTC")
+    return parsed
+
+
+class TelemetryWireModel(WireModel):
+    pass
+
+
+class TelemetryDetails(TelemetryWireModel):
+    accelerator_name: str | None = Field(min_length=1, max_length=256)
+    accelerator_performance_state: str | None = Field(min_length=1, max_length=32)
+
+
+class TelemetrySeries(TelemetryWireModel):
+    node_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    key: Annotated[str, Field(min_length=1, max_length=96)]
+    scope: TelemetryScope
+    device_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    process_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
+    process_name: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    interface_name: Annotated[str, Field(min_length=1, max_length=64)] | None = None
+    run_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    value: int | float | str | bool | None
+    unit: Annotated[str, Field(min_length=1, max_length=32)]
+    source: Annotated[str, Field(min_length=1, max_length=128)]
+    measurement_kind: TelemetryMeasurementKind
+    observed_at: datetime
+    received_at: datetime | None = None
+    freshness: TelemetryFreshness = "fresh"
+    freshness_threshold_seconds: float = Field(gt=0, le=86_400)
+    support_status: TelemetrySupport
+    reason: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    aggregation: Annotated[str, Field(min_length=1, max_length=32)]
+    _parse_observed_at = field_validator("observed_at", "received_at", mode="before")(_rfc3339_datetime)
+
+    @field_validator("key")
+    @classmethod
+    def key_is_canonical(cls, value: str) -> str:
+        if _KEY.fullmatch(value) is None:
+            raise ValueError("telemetry metric key is invalid")
+        return value
+
+    @field_validator("source")
+    @classmethod
+    def source_is_canonical(cls, value: str) -> str:
+        if _SOURCE.fullmatch(value) is None:
+            raise ValueError("telemetry metric source is invalid")
+        return value
+
+    @field_validator("aggregation")
+    @classmethod
+    def aggregation_is_canonical(cls, value: str) -> str:
+        if _KEY.fullmatch(value) is None:
+            raise ValueError("telemetry aggregation is invalid")
+        return value
+
+    @field_validator("value", mode="before")
+    @classmethod
+    def scalar_value(cls, value: object) -> object:
+        return validate_telemetry_scalar(value)
+
+    @model_validator(mode="after")
+    def support_reason_and_scope(self) -> TelemetrySeries:
+        if self.support_status == "available" and self.reason is not None:
+            raise ValueError("available telemetry series cannot have a reason")
+        if self.support_status != "available" and self.reason is None:
+            raise ValueError("unsupported telemetry series requires a reason")
+        if self.scope in {"accelerator", "storage"} and self.device_id is None:
+            raise ValueError(f"{self.scope} telemetry series requires a device ID")
+        if self.scope == "network" and self.interface_name is None:
+            raise ValueError("network telemetry series requires an interface name")
+        if self.scope in {"runtime", "workload", "benchmark"} and self.run_id is None:
+            raise ValueError("runtime telemetry series requires a run ID")
+        return self
+
+
+class TelemetryCapability(TelemetryWireModel):
+    node_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    key: Annotated[str, Field(min_length=1, max_length=96)]
+    scope: TelemetryScope
+    device_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    process_id: int | None = Field(default=None, ge=1, le=2**31 - 1)
+    process_name: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    interface_name: Annotated[str, Field(min_length=1, max_length=64)] | None = None
+    run_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    unit: Annotated[str, Field(min_length=1, max_length=32)]
+    source: Annotated[str, Field(min_length=1, max_length=128)]
+    measurement_kind: TelemetryMeasurementKind
+    supported: bool
+    freshness_threshold_seconds: float = Field(gt=0, le=86_400)
+    reason: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+
+    @field_validator("key")
+    @classmethod
+    def key_is_canonical(cls, value: str) -> str:
+        if _KEY.fullmatch(value) is None:
+            raise ValueError("telemetry capability key is invalid")
+        return value
+
+    @field_validator("source")
+    @classmethod
+    def source_is_canonical(cls, value: str) -> str:
+        if _SOURCE.fullmatch(value) is None:
+            raise ValueError("telemetry capability source is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def supported_reason(self) -> TelemetryCapability:
+        if self.supported and self.reason is not None:
+            raise ValueError("supported telemetry capability cannot have a reason")
+        if not self.supported and self.reason is None:
+            raise ValueError("unsupported telemetry capability requires a reason")
+        if self.scope in {"accelerator", "storage"} and self.device_id is None:
+            raise ValueError(f"{self.scope} telemetry capability requires a device ID")
+        if self.scope == "network" and self.interface_name is None:
+            raise ValueError("network telemetry capability requires an interface name")
+        return self
+
+
+class TelemetryProvenance(TelemetryWireModel):
+    collector: Annotated[str, Field(min_length=1, max_length=64)]
+    collector_version: Annotated[str, Field(min_length=1, max_length=64)]
+    host_uptime_seconds: int | None = Field(default=None, ge=0, le=2**63 - 1)
+    source_observed_at: datetime | None = None
+    _parse_source_observed_at = field_validator("source_observed_at", mode="before")(_rfc3339_datetime)
+
+    @field_validator("collector", "collector_version")
+    @classmethod
+    def provenance_text(cls, value: str) -> str:
+        if _IDENTIFIER.fullmatch(value) is None:
+            raise ValueError("telemetry provenance is invalid")
+        return value
+
+
+class TelemetryRuntime(TelemetryWireModel):
+    run_id: Annotated[str, Field(min_length=1, max_length=128)]
+    engine_id: Annotated[str, Field(min_length=1, max_length=128)]
+    backend: Annotated[str, Field(min_length=1, max_length=64)]
+    version: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    endpoint: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    model: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    model_version: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    recipe_revision: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    context_limit_tokens: int | None = Field(default=None, ge=1, le=2**63 - 1)
+    serving_node_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(max_length=64)
+    ranks: list[int] = Field(max_length=64)
+    readiness: TelemetryRunState
+    error: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    adapter: Annotated[str, Field(min_length=1, max_length=64)]
+    adapter_version: Annotated[str, Field(min_length=1, max_length=64)] | None = None
+    adapter_supported: bool
+    adapter_reason: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+
+    @model_validator(mode="after")
+    def adapter_reason_consistency(self) -> TelemetryRuntime:
+        if self.adapter_supported and self.adapter_reason is not None:
+            raise ValueError("supported runtime adapter cannot have a reason")
+        if not self.adapter_supported and self.adapter_reason is None:
+            raise ValueError("unsupported runtime adapter requires a reason")
+        if len(set(self.ranks)) != len(self.ranks):
+            raise ValueError("runtime ranks must be unique")
+        return self
+
+
+class TelemetryWorkload(TelemetryWireModel):
+    request_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    job_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    run_id: Annotated[str, Field(min_length=1, max_length=128)]
+    model: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    recipe_revision: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    engine_id: Annotated[str, Field(min_length=1, max_length=128)]
+    state: TelemetryWorkloadState
+    origin_node_id: Annotated[str, Field(min_length=1, max_length=128)] | None = None
+    executor_node_ids: list[Annotated[str, Field(min_length=1, max_length=128)]] = Field(max_length=64)
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    elapsed_seconds: float | None = Field(default=None, ge=0, le=86_400 * 365)
+    failure: Annotated[str, Field(min_length=1, max_length=256)] | None = None
+    title: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    progress_value: float | None = Field(default=None, ge=0, le=1)
+    progress_max: float | None = Field(default=None, gt=0, le=1_000_000)
+    eta_seconds: float | None = Field(default=None, ge=0, le=86_400 * 365)
+    eta_source: Annotated[str, Field(min_length=1, max_length=64)] | None = None
+    _parse_times = field_validator("created_at", "started_at", "ended_at", mode="before")(_rfc3339_datetime)
+
+    @model_validator(mode="after")
+    def workload_identity_and_state(self) -> TelemetryWorkload:
+        if self.request_id is None and self.job_id is None:
+            raise ValueError("telemetry workload requires a request or job ID")
+        if len(set(self.executor_node_ids)) != len(self.executor_node_ids):
+            raise ValueError("telemetry executor nodes must be unique")
+        if self.state == "failed" and self.failure is None:
+            raise ValueError("failed telemetry workload requires a sanitized failure")
+        if self.progress_value is not None and self.progress_max is None:
+            raise ValueError("telemetry progress maximum is required with progress")
+        return self
+
+
+class TelemetryMetrics(TelemetryWireModel):
+    schema_version: Literal[2] = 2
+    series: list[TelemetrySeries] = Field(max_length=512)
+    capabilities: list[TelemetryCapability] = Field(max_length=128)
+    runtimes: list[TelemetryRuntime] = Field(max_length=32)
+    workloads: list[TelemetryWorkload] = Field(max_length=128)
+    provenance: TelemetryProvenance
+
+    @model_validator(mode="after")
+    def bounded_and_unique(self) -> TelemetryMetrics:
+        def identity(item: TelemetrySeries | TelemetryCapability) -> tuple[object, ...]:
+            return (item.key, item.scope, item.device_id, item.process_id, item.interface_name, item.run_id)
+        series = [identity(item) for item in self.series]
+        capabilities = [identity(item) for item in self.capabilities]
+        if len(series) != len(set(series)):
+            raise ValueError("telemetry series identity is duplicated")
+        if len(capabilities) != len(set(capabilities)):
+            raise ValueError("telemetry capability identity is duplicated")
+        return self
+
+
+class TelemetrySample(TelemetryWireModel):
+    boot_id: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    sequence: int = Field(ge=0, le=MAX_TELEMETRY_SCALAR_INTEGER)
+    observed_at: datetime
+    cpu_utilization_percent: float | None = Field(ge=0, le=100, allow_inf_nan=False)
+    load_average_1m: float | None = Field(ge=0, le=1_000_000, allow_inf_nan=False)
+    memory_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    memory_available_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    disk_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    disk_free_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    gpu_utilization_percent: float | None = Field(ge=0, le=100, allow_inf_nan=False)
+    gpu_memory_total_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    gpu_memory_free_bytes: int | None = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    temperature_c: float | None = Field(ge=-100, le=300, allow_inf_nan=False)
+    power_watts: float | None = Field(ge=0, le=100_000, allow_inf_nan=False)
+    network_receive_bytes_per_second: float | None = Field(ge=0, le=MAX_TELEMETRY_RATE, allow_inf_nan=False)
+    network_transmit_bytes_per_second: float | None = Field(ge=0, le=MAX_TELEMETRY_RATE, allow_inf_nan=False)
+    gap_samples: int = Field(ge=0, le=MAX_TELEMETRY_SCALAR_INTEGER)
+    details: TelemetryDetails
+    metrics: TelemetryMetrics = Field(default_factory=lambda: empty_telemetry_metrics())
+    _parse_observed_at = field_validator("observed_at", mode="before")(_rfc3339_datetime)
+
+    @field_validator("boot_id")
+    @classmethod
+    def nonzero_boot_id(cls, value: str) -> str:
+        if uuid.UUID(value).int == 0:
+            raise ValueError("telemetry boot ID cannot be nil")
+        return value
+
+    @model_validator(mode="after")
+    def internally_consistent(self) -> TelemetrySample:
+        for total, available in ((self.memory_total_bytes, self.memory_available_bytes), (self.disk_total_bytes, self.disk_free_bytes), (self.gpu_memory_total_bytes, self.gpu_memory_free_bytes)):
+            if (total is None) is not (available is None) or (total is not None and available is not None and available > total):
+                raise ValueError("telemetry capacity values are inconsistent")
+        return self
+
+
+class TelemetryRequest(TelemetryWireModel):
+    schema_version: Literal[1]
+    samples: list[TelemetrySample] = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="after")
+    def ordered_unique_samples(self) -> TelemetryRequest:
+        identities = [(sample.boot_id, sample.sequence) for sample in self.samples]
+        if len(identities) != len(set(identities)):
+            raise ValueError("telemetry sample is duplicated")
+        previous_observed_at: datetime | None = None
+        previous_by_boot: dict[str, int] = {}
+        for sample in self.samples:
+            if previous_observed_at is not None and sample.observed_at <= previous_observed_at:
+                raise ValueError("telemetry observations are not ordered")
+            previous_observed_at = sample.observed_at
+            prior = previous_by_boot.get(sample.boot_id)
+            if prior is not None and sample.sequence <= prior:
+                raise ValueError("telemetry sequences must increase within one boot")
+            previous_by_boot[sample.boot_id] = sample.sequence
+        return self
 
     @classmethod
-    def parse(cls, raw: Any) -> TelemetryReport:
-        if not isinstance(raw, Mapping):
-            raise AgentProtocolError("telemetry report must be an object")
-        samples = raw.get("samples")
-        if isinstance(samples, (list, tuple)):
-            for sample in samples:
-                if not isinstance(sample, Mapping):
-                    continue
-                metrics = sample.get("metrics")
-                if not isinstance(metrics, Mapping):
-                    continue
-                series_items = metrics.get("series")
-                if not isinstance(series_items, (list, tuple)):
-                    continue
-                for series in series_items:
-                    if isinstance(series, Mapping) and "value" in series:
-                        try:
-                            validate_telemetry_scalar(series["value"])
-                        except ValueError as error:
-                            raise AgentProtocolError(
-                                "telemetry metric value is invalid"
-                            ) from error
-        errors = list(schema_validator("telemetry-report.schema.json").iter_errors(raw))
-        if errors:
-            raise AgentProtocolError(
-                f"telemetry report schema is invalid: {errors[0].message}"
-            )
-        encoded = canonical_message(raw)
-        if len(encoded) > MAX_TELEMETRY_REPORT_BYTES:
+    def parse(cls, raw: Any) -> TelemetryRequest:
+        try:
+            parsed = cls.model_validate(raw)
+            document = json.loads(canonical_message(parsed.model_dump(mode="json")))
+        except (ValidationError, TypeError, ValueError) as error:
+            raise AgentProtocolError(f"telemetry report schema is invalid: {error}") from error
+        if len(canonical_message(document)) > MAX_TELEMETRY_REPORT_BYTES:
             raise AgentProtocolError("telemetry report is too large")
-        document = json.loads(encoded)
-        samples = tuple(document["samples"])
-        identities = [(sample["boot_id"], sample["sequence"]) for sample in samples]
-        if len(identities) != len(set(identities)):
-            raise AgentProtocolError("telemetry sample is duplicated")
-        observed = [sample["observed_at"] for sample in samples]
-        if observed != sorted(observed):
-            raise AgentProtocolError("telemetry observations are not ordered")
-        previous_by_boot: dict[str, int] = {}
-        for sample in samples:
-            prior = previous_by_boot.get(sample["boot_id"])
-            if prior is not None and sample["sequence"] <= prior:
-                raise AgentProtocolError("telemetry sequences are not ordered")
-            previous_by_boot[sample["boot_id"]] = sample["sequence"]
-        return cls(schema_version=document["schema_version"], samples=samples)
+        try:
+            return cls.model_validate(document)
+        except ValidationError as error:
+            raise AgentProtocolError(f"telemetry report schema is invalid: {error}") from error
 
     def document(self) -> dict[str, Any]:
-        return {"schema_version": self.schema_version, "samples": list(self.samples)}
+        return json.loads(canonical_message(self.model_dump(mode="json")))
+
+
+TelemetryReport = TelemetryRequest
+
+
+def empty_telemetry_metrics() -> TelemetryMetrics:
+    return TelemetryMetrics(series=[], capabilities=[], runtimes=[], workloads=[], provenance=TelemetryProvenance(collector="legacy", collector_version="1"))
 
 
 __all__ = [
+    "MAX_TELEMETRY_CAPACITY_BYTES",
+    "MAX_TELEMETRY_RATE",
     "MAX_TELEMETRY_REPORT_BYTES",
     "MAX_TELEMETRY_SCALAR_INTEGER",
     "MAX_TELEMETRY_SCALAR_STRING_CHARS",
     "MIN_TELEMETRY_SCALAR_INTEGER",
+    "TelemetryCapability",
+    "TelemetryDetails",
+    "TelemetryFreshness",
+    "TelemetryMeasurementKind",
+    "TelemetryMetrics",
+    "TelemetryProvenance",
     "TelemetryReport",
+    "TelemetryRequest",
+    "TelemetryRuntime",
+    "TelemetrySample",
+    "TelemetryScope",
+    "TelemetrySeries",
+    "TelemetrySupport",
+    "TelemetryWorkload",
+    "TelemetryWorkloadState",
+    "empty_telemetry_metrics",
     "validate_telemetry_scalar",
 ]

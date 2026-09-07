@@ -260,6 +260,10 @@ jobs:
         run: >-
           uv run --project control --frozen --with-editable .
           python scripts/tests/run_install_start_wire_bridge.py -- -q
+      - name: Exercise Rust telemetry through the shared Python and Controller wire
+        run: >-
+          uv run --project control --frozen --with-editable .
+          python scripts/tests/run_telemetry_wire_bridge.py -- -q
 
   rust-platform:
     name: Rust platform integration
@@ -611,7 +615,7 @@ jobs:
             pytest --collect-only -q control/tests > "$collection" || { cat "$collection"; exit 1; }
           mapfile -t shard_files < <(
             # The connected wire file runs in its required Linux/Rust lane.
-            awk '/^tests\/.*::/ && $0 !~ /^tests\/test_install_start_wire_bridge\.py::/' "$collection" |
+            awk '/^tests\/.*::/ && $0 !~ /^tests\/test_(install_start|telemetry)_wire_bridge\.py::/' "$collection" |
               scripts/select-pytest-shard-files \
                 --durations "$timing_file" --max-duration-age-hours 720 \
                 --index "$SHARD_INDEX" --total "$SHARD_TOTAL" \

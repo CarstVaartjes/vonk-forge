@@ -1302,7 +1302,10 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
     if schema_name == "telemetry-report.schema.json":
         from .telemetry import TelemetryReport
 
-        parsers[schema_name] = TelemetryReport.parse
+        # Telemetry's Pydantic graph is authoritative. The packaged JSON
+        # Schema is a derived interoperability artifact and must not be a
+        # second parser that can drift from the Rust/Controller contract.
+        return TelemetryReport.parse(raw)
     if schema_name == "recipe-job-run.schema.json":
         from .recipe_jobs import RecipeJobRunRequest
 
