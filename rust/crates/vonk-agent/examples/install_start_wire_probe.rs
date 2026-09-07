@@ -17,7 +17,7 @@ use vonk_agent::{
     compiled_oci::CompiledOciPaths,
     executor::{
         parse_compiled_execution_plan, recipe_install_success_body,
-        recipe_model_cleanup_success_body, recipe_start_success_body,
+        recipe_model_cleanup_success_body, recipe_start_success_body, recipe_stop_success_body,
         recipe_uninstall_success_body, runtime_arguments_for_plan,
     },
     oci::{RuntimeStartPlan, start_arguments_for_paths},
@@ -103,13 +103,14 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
             )
             .map_err(|_| "readiness evidence is unavailable".to_owned())?
         }
+        RecipeOperationRequest::Stop(_request) => recipe_stop_success_body(),
         RecipeOperationRequest::Uninstall(_request) => recipe_uninstall_success_body(0),
         RecipeOperationRequest::ModelCleanup(request) => {
             recipe_model_cleanup_success_body(request.installations.len(), 0)
         }
         _ => {
             return Err(
-                "probe only accepts recipe.install, recipe.start, recipe.uninstall, and recipe.model-uninstall.v1"
+                "probe only accepts recipe.install, recipe.start, recipe.stop, recipe.uninstall, and recipe.model-uninstall.v1"
                     .to_owned(),
             )
         }

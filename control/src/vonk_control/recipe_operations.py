@@ -15,10 +15,18 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentOperation as ProtocolAgentOperation,
+)
+from vonk_agent_protocol import (
     RecipeInstallPayload,
+    RecipeModelCleanupPayload,
+    RecipeModelCleanupResult,
     RecipeStartPayload,
+    RecipeStopPayload,
+    RecipeUninstallPayload,
     canonical_message,
     format_model_identity,
+    parse_recipe_operation_result,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
@@ -116,6 +124,14 @@ class RecipeOperationConflict(RuntimeError):
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 _EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
+
+_RECIPE_WIRE_PAYLOAD_MODELS = {
+    "recipe.install": RecipeInstallPayload,
+    "recipe.start": RecipeStartPayload,
+    "recipe.stop": RecipeStopPayload,
+    "recipe.uninstall": RecipeUninstallPayload,
+    "recipe.model-uninstall.v1": RecipeModelCleanupPayload,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -1832,14 +1848,29 @@ class RecipeOperationService:
         result = getattr(message, "result", None)
         if state not in {"succeeded", "failed"} or not isinstance(result, Mapping):
             raise RecipeOperationConflict("recipe agent result is invalid")
-        raw_evidence = result.get("evidence", result)
-        if not isinstance(raw_evidence, Mapping):
-            raise RecipeOperationConflict("recipe agent evidence is invalid")
-        if raw_evidence is not result and "evidence_digest" in result:
-            raw_evidence = {
-                **raw_evidence,
-                "evidence_digest": result["evidence_digest"],
-            }
+        if state == "succeeded" and job.kind in {
+            "recipe.stop",
+            "recipe.uninstall",
+            "recipe.model-uninstall.v1",
+        }:
+            try:
+                parsed_result = parse_recipe_operation_result(
+                    ProtocolAgentOperation(job.kind), result
+                )
+            except (KeyError, ValueError) as error:
+                raise RecipeOperationConflict(
+                    "recipe operation result is invalid"
+                ) from error
+            raw_evidence = parsed_result.model_dump(mode="json")
+        else:
+            raw_evidence = result.get("evidence", result)
+            if not isinstance(raw_evidence, Mapping):
+                raise RecipeOperationConflict("recipe agent evidence is invalid")
+            if raw_evidence is not result and "evidence_digest" in result:
+                raw_evidence = {
+                    **raw_evidence,
+                    "evidence_digest": result["evidence_digest"],
+                }
         self._project_node_result(
             session,
             job,
@@ -1994,31 +2025,30 @@ class RecipeOperationService:
             node.state = "uninstalled" if succeeded else "failed"
             node.updated_at = now
         elif job.kind == "recipe.model-uninstall.v1":
-            raw_installations = operation.payload.get("installations")
-            if not isinstance(raw_installations, list) or not raw_installations:
+            try:
+                cleanup_request = RecipeModelCleanupPayload.model_validate_json(
+                    canonical_message(operation.payload)
+                )
+            except ValueError as error:
+                raise RecipeOperationConflict(
+                    "model deletion authority is invalid"
+                ) from error
+            raw_installations = cleanup_request.installations
+            if not raw_installations:
                 raise RecipeOperationConflict("model deletion authority is invalid")
             if succeeded:
-                uninstalled_count = evidence.get("uninstalled_installations")
-                removed_model_bytes = evidence.get("removed_model_bytes")
-                if (
-                    set(evidence)
-                    != {"uninstalled_installations", "removed_model_bytes"}
-                    or uninstalled_count != len(raw_installations)
-                    or not isinstance(removed_model_bytes, int)
-                    or isinstance(removed_model_bytes, bool)
-                    or removed_model_bytes < 0
-                ):
+                try:
+                    cleanup_result = RecipeModelCleanupResult.model_validate_json(
+                        canonical_message(evidence)
+                    )
+                except ValueError as error:
+                    raise RecipeOperationConflict(
+                        "model deletion evidence is invalid"
+                    ) from error
+                if cleanup_result.uninstalled_installations != len(raw_installations):
                     raise RecipeOperationConflict("model deletion evidence is invalid")
             for raw_installation in raw_installations:
-                installation_id = (
-                    raw_installation.get("installation_id")
-                    if isinstance(raw_installation, Mapping)
-                    else None
-                )
-                if not isinstance(installation_id, str):
-                    raise RecipeOperationConflict(
-                        "model deletion installation identity is invalid"
-                    )
+                installation_id = raw_installation.installation_id
                 node = session.scalar(
                     select(InstallationNode).where(
                         InstallationNode.installation_id == installation_id,
@@ -3100,16 +3130,17 @@ class RecipeOperationService:
     ) -> Job:
         if not node_payloads:
             raise RecipeOperationConflict("operation group has no target nodes")
-        if kind in {"recipe.install", "recipe.start"}:
-            payload_model = (
-                RecipeInstallPayload if kind == "recipe.install" else RecipeStartPayload
-            )
+        try:
+            payload_model = _RECIPE_WIRE_PAYLOAD_MODELS[kind]
+        except KeyError:
+            payload_model = None
+        if payload_model is not None:
             try:
                 for _node_id, payload in node_payloads:
-                    payload_model.model_validate(payload)
+                    payload_model.model_validate_json(canonical_message(payload))
             except Exception as error:
                 raise RecipeOperationConflict(
-                    f"{kind} payload does not satisfy schema 2"
+                    f"{kind} payload does not satisfy its wire schema"
                 ) from error
         if session.scalar(select(Job.id).where(Job.request_id == request_id)):
             raise RecipeOperationConflict("request key was already used differently")

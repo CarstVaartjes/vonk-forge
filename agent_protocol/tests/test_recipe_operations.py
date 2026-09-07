@@ -4,7 +4,11 @@ import pytest
 from vonk_agent_protocol import (
     AgentOperation,
     AgentProtocolError,
+    RecipeModelCleanupResult,
     RecipeOperationRequest,
+    RecipeStopResult,
+    RecipeUninstallResult,
+    parse_recipe_operation_result,
 )
 
 INSTALLATION_ID = "00000000-0000-4000-8000-000000000001"
@@ -20,6 +24,7 @@ UNINSTALL = {
     "schema_version": 1,
     "installation_id": INSTALLATION_ID,
     "recipe_content_sha256": RECIPE_DIGEST,
+    "cleanup_model_content_sha256": None,
     "plan_digest": PLAN_DIGEST,
 }
 UNINSTALL_WITH_MODEL_CLEANUP = UNINSTALL | {"cleanup_model_content_sha256": "f" * 64}
@@ -83,3 +88,37 @@ def test_recipe_operations_reject_hacks_unknown_fields_and_weak_identity(
 ) -> None:
     with pytest.raises(AgentProtocolError):
         RecipeOperationRequest.parse(operation, payload)
+
+
+def test_uninstall_cleanup_key_is_required_and_nullable() -> None:
+    payload = dict(UNINSTALL)
+    payload.pop("cleanup_model_content_sha256")
+    with pytest.raises(AgentProtocolError):
+        RecipeOperationRequest.parse(AgentOperation.RECIPE_UNINSTALL, payload)
+
+    parsed = RecipeOperationRequest.parse(AgentOperation.RECIPE_UNINSTALL, UNINSTALL)
+    assert parsed.cleanup_model_content_sha256 is None
+
+
+@pytest.mark.parametrize(
+    ("operation", "body", "result_type"),
+    [
+        (AgentOperation.RECIPE_STOP, {"stopped": True}, RecipeStopResult),
+        (
+            AgentOperation.RECIPE_UNINSTALL,
+            {"uninstalled": True, "removed_model_bytes": 0},
+            RecipeUninstallResult,
+        ),
+        (
+            AgentOperation.RECIPE_MODEL_UNINSTALL,
+            {"uninstalled_installations": 1, "removed_model_bytes": 0},
+            RecipeModelCleanupResult,
+        ),
+    ],
+)
+def test_recipe_success_results_are_operation_specific(
+    operation: AgentOperation, body: dict[str, object], result_type: type
+) -> None:
+    assert isinstance(parse_recipe_operation_result(operation, body), result_type)
+    with pytest.raises(AgentProtocolError):
+        parse_recipe_operation_result(operation, body | {"unexpected": True})
