@@ -92,6 +92,17 @@ def _queued_recovery_restart(tmp_path: Path):
             )
         )
     assert stop_job is not None
+    produced_phases = tuple(
+        tuple(
+            (item["node_id"], item["payload"])
+            for item in group
+        )
+        for group in stop_job.payload["recovery"]["start_phases"]
+    )
+    for _node_id, payload in (
+        item for group in produced_phases for item in group
+    ):
+        RecipeOperationRequest.parse(AgentOperation.RECIPE_START, payload)
     service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
     service.record_node_result(stop_job.id, nodes[1], succeeded=True, evidence={})
     with sessions() as session:
@@ -103,7 +114,7 @@ def _queued_recovery_restart(tmp_path: Path):
             )
         )
     assert restart is not None
-    return sessions, service, started, restart, nodes
+    return sessions, service, started, restart, nodes, produced_phases
 
 
 def test_recovery_start_children_are_canonical_schema2_payloads(
@@ -115,6 +126,7 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         started,
         restart,
         nodes,
+        produced_phases,
     ) = _queued_recovery_restart(tmp_path)
 
     with sessions() as session:
@@ -127,6 +139,18 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         )
     assert {item.payload["phase"] for item in rank_launches} == {"rank-launch"}
     assert {item.node_id for item in rank_launches} == set(nodes)
+
+    produced = {
+        (node_id, payload["phase"]): payload
+        for group in produced_phases
+        for node_id, payload in group
+    }
+    assert {
+        (operation.node_id, operation.payload["phase"]): operation.payload
+        for operation in rank_launches
+    } == {
+        key: payload for key, payload in produced.items() if payload["phase"] == "rank-launch"
+    }
 
     for operation in rank_launches:
         service.record_node_result(
@@ -154,6 +178,10 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
     assert (
         sum(item.payload["phase"] == "collective-readiness" for item in children) == 1
     )
+    assert {
+        (operation.node_id, operation.payload["phase"]): operation.payload
+        for operation in children
+    } == produced
     assert {key for child in children for key in child.payload} == {
         "schema_version",
         "run_id",

@@ -28,6 +28,11 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .recipe_start_payloads import (
+    RecipeStartPayloadError,
+    RecipeStartPlacement,
+    build_recipe_start_payload,
+)
 
 _DISTRIBUTED_START_CAPABILITY = "recipe.start.two-phase.v1"
 _EXACT_RUN_INSPECTION_CAPABILITY = "recipe.run.inspect.exact.v1"
@@ -295,7 +300,12 @@ def _recovery_authority(
     ):
         raise DistributedLifecycleError("distributed recovery rank set is invalid")
     plans = run.plan.get("nodes") if isinstance(run.plan, Mapping) else None
-    if not isinstance(plans, list) or len(plans) != len(nodes):
+    compiled_plans = installation.plan.get("compiled_execution_plans")
+    if (
+        not isinstance(plans, list)
+        or len(plans) != len(nodes)
+        or not isinstance(compiled_plans, Mapping)
+    ):
         raise DistributedLifecycleError("distributed recovery plan is invalid")
     by_rank = {item.get("rank"): item for item in plans if isinstance(item, Mapping)}
     owner = next(
@@ -350,39 +360,54 @@ def _recovery_authority(
     start_payloads: dict[str, tuple[str, dict[str, object]]] = {}
     for node in nodes:
         plan = by_rank[node.rank]
+        compiled_plan = compiled_plans.get(node.node_id)
         local_address = plan.get("fabric_address")
         endpoint_owner = plan.get("endpoint_owner")
-        if not isinstance(local_address, str) or type(endpoint_owner) is not bool:
+        if (
+            not isinstance(local_address, str)
+            or type(endpoint_owner) is not bool
+            or not isinstance(compiled_plan, Mapping)
+        ):
             raise DistributedLifecycleError("distributed recovery plan is invalid")
-        start_payloads[node.role] = (
-            node.node_id,
-            {
-                "schema_version": 1,
-                "run_id": run.id,
-                "installation_id": installation.id,
-                "recipe_revision_id": revision.id,
-                "recipe_content_sha256": revision.content_digest,
-                "mapping_id": run.mapping_id,
-                "mapping_generation": run.mapping_generation,
-                "run_generation": run.run_generation,
-                "image_digest": installation.image_digest,
-                "plan_digest": run.plan_digest,
-                "alias": run.alias,
-                "rank": node.rank,
-                "role": node.role,
-                "port": node.port,
-                "reserved_memory_bytes": node.reserved_memory_bytes,
-                "endpoint_address": (
+        try:
+            payload = build_recipe_start_payload(
+                run_id=run.id,
+                installation_id=installation.id,
+                recipe_revision_id=revision.id,
+                recipe_content_sha256=revision.content_digest,
+                mapping_id=run.mapping_id,
+                mapping_generation=run.mapping_generation,
+                run_generation=run.run_generation,
+                image_digest=installation.image_digest,
+                plan_digest=run.plan_digest,
+                alias=run.alias,
+                placement=RecipeStartPlacement(
+                    node.node_id,
+                    node.rank,
+                    node.role,
+                    node.port,
+                    node.reserved_memory_bytes,
+                    local_address,
+                ),
+                endpoint_address=(
                     presences[node.node_id] if endpoint_owner else local_address
                 ),
-                "world_size": len(nodes),
-                "local_address": local_address,
-                "master_address": master_address,
-                "master_port": master_port,
-                "phase": "rank-launch",
-                "start_deadline": start_deadline,
-            },
-        )
+                compiled_endpoint_address=(
+                    presences[node.node_id] if endpoint_owner else None
+                ),
+                world_size=len(nodes),
+                compiled_execution_plan=compiled_plan,
+                local_address=local_address,
+                master_address=master_address,
+                master_port=master_port,
+                phase="rank-launch",
+                start_deadline=start_deadline,
+            )
+        except (KeyError, RecipeStartPayloadError) as error:
+            raise DistributedLifecycleError(
+                "distributed recovery start payload is invalid"
+            ) from error
+        start_payloads[node.role] = (node.node_id, payload)
     start_order = topology.get("start_order")
     stop_order = topology.get("stop_order")
     roles = {node.role for node in nodes}
