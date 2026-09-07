@@ -2250,11 +2250,7 @@ mod tests {
         let recipe_digest = "1".repeat(64);
         authorize_installation(&installation, &recipe_digest);
 
-        let cached = data
-            .path()
-            .join("distribution")
-            .join("models")
-            .join(&plan.identity.model_artifact_set_sha256);
+        let cached = data.path().join("distribution").join("models");
         fs::create_dir_all(&cached).unwrap();
         fs::write(cached.join(&plan.artifacts[0].sha256), b"primary").unwrap();
         fs::write(cached.join(&plan.artifacts[1].sha256), b"secondary").unwrap();
@@ -2295,11 +2291,7 @@ mod tests {
             persisted_plan_installation(data.path(), other_id.clone(), other_plan);
         authorize_installation(&other_installation, &"4".repeat(64));
 
-        let cached = data
-            .path()
-            .join("distribution")
-            .join("models")
-            .join(&plan.identity.model_artifact_set_sha256);
+        let cached = data.path().join("distribution").join("models");
         fs::create_dir_all(&cached).unwrap();
         fs::write(cached.join(&plan.artifacts[0].sha256), b"primary").unwrap();
         fs::write(cached.join(&plan.artifacts[1].sha256), b"secondary").unwrap();
@@ -2332,7 +2324,6 @@ mod tests {
             .path()
             .join("distribution")
             .join("models")
-            .join(&plan.identity.model_artifact_set_sha256)
             .join(&plan.artifacts[0].sha256);
         fs::create_dir_all(cached.parent().unwrap()).unwrap();
         fs::write(&cached, b"primary").unwrap();
