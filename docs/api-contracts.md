@@ -18,6 +18,11 @@ Model and Recipe are the two **authoring** contracts. Operations, progress,
 telemetry, and device messages also need wire contracts; they do not become
 additional recipe documents for users to maintain.
 
+Only the current Model and Recipe authoring format is supported. The retired
+recipe parser, recipe-v1 schema asset, and flat install/start fixtures are
+removed. Version numbers belong to each document: current job envelopes and
+stop commands can still use schema 1 without accepting old Recipe documents.
+
 ## Python
 
 Import the canonical Pydantic model when consuming a shared document. Validate
@@ -72,6 +77,11 @@ A failing check blocks the CI gate. A new required field must be carried through
 its producer, parser, stored document, and response before the change can pass.
 An explicit `null` and an omitted required-nullable field are different wire
 values; both languages must enforce that distinction.
+
+The complete Controller suite also imports the current catalog into disposable
+PostgreSQL and checks typed Library responses and offline package reuse. These
+checks use `VONK_RECIPE_LIBRARY_ROOT`, the same checkout used by the compiler;
+they do not skip because a temporary receipt from an earlier run is missing.
 
 ## Strict structure, extensible content
 
