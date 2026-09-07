@@ -129,7 +129,6 @@ class Worker:
         logs=None,
         housekeeping: Callable[[], object] | None = None,
         artifact_housekeeping: Callable[[], object] | None = None,
-        reconciliations=None,
         recipes=None,
         model_cache=None,
         background_services: Sequence[Callable[[], object]] = (),
@@ -142,7 +141,6 @@ class Worker:
         self._logs = logs
         self._housekeeping = housekeeping
         self._artifact_housekeeping = artifact_housekeeping
-        self._reconciliations = reconciliations
         self._recipes = recipes
         self._model_cache = model_cache
         self._background_services = tuple(background_services)
@@ -170,8 +168,6 @@ class Worker:
         if self._artifact_housekeeping is not None:
             self._artifact_housekeeping()
         sources: list[Callable[[], bool]] = []
-        if self._reconciliations is not None:
-            sources.append(self._reconciliations.tick)
         if self._recipes is not None:
             sources.append(self._recipes.tick)
         if self._model_cache is not None:
@@ -245,11 +241,8 @@ def assemble_production_worker(
     sessions,
     agent_jobs,
     publisher,
-    route_root,
-    endpoint_resolver,
     management_policy,
     clock,
-    authority,
     worker_id: str,
     artifact_job_root: Path,
     artifact_job_storage_max_bytes: int,
@@ -267,9 +260,8 @@ def assemble_production_worker(
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
 ) -> Worker:
-    """Compose the worker-owned reconciliation runtime."""
+    """Compose the worker-owned recipe and maintenance runtime."""
 
-    from .agent_reconciliation import AgentReconciliationService
     from .artifact_blob_store import ArtifactBlobStore
     from .artifact_jobs import ArtifactJobService
     from .artifact_maintenance import ArtifactMaintenanceCadence
@@ -311,16 +303,6 @@ def assemble_production_worker(
     else:
         artifact_phase_executor = None
 
-    reconciliations = AgentReconciliationService(
-        sessions,
-        agent_jobs=agent_jobs,
-        publisher=publisher,
-        endpoint_resolver=endpoint_resolver,
-        clock=clock,
-        authority_prefetch=authority.prefetch,
-        authority_check=authority.authorization_reason,
-        authority_clear=authority.clear,
-    )
     recipe_routes = RecipeRouteService(
         sessions,
         publisher=AtomicRecipeRoutePublisher(publisher, clock=clock),
@@ -426,7 +408,6 @@ def assemble_production_worker(
             batch_limit=artifact_job_reconcile_batch_limit,
             clock=clock,
         ),
-        reconciliations=reconciliations,
         recipes=recipe_operations,
         model_cache=model_cache,
         background_services=worker_background_services,
@@ -449,7 +430,7 @@ if __name__ == "__main__":
     from .execution_plan_service import ControllerExecutionPlanService
     from .model_cache import ModelCacheService
     from .models import CatalogDocumentRevision
-    from .presence import AgentPresenceService, ManagementAddressPolicy
+    from .presence import ManagementAddressPolicy
     from .route_runtime import (
         AtomicRouteBundlePublisher,
         FileSupervisorAcknowledger,
@@ -462,7 +443,6 @@ if __name__ == "__main__":
         resolve_persisted_runtime_image_receipt,
     )
     from .settings import WorkerSettings
-    from .worker_authority import HttpWorkerAuthority
 
     settings = WorkerSettings.from_env_and_secrets()
     wait_for_database(settings.database_url)
@@ -474,19 +454,7 @@ if __name__ == "__main__":
         settings.management_cidrs,
         forbidden_cidrs=settings.direct_fabric_cidrs,
     )
-    presence = AgentPresenceService(sessions, address_policy, clock=clock)
 
-    def endpoint(session, node_id: str) -> tuple[str, datetime]:
-        observation = presence.latest_in_session(
-            session, node_id, maximum_age_seconds=300
-        )
-        return observation.address, observation.observed_at
-
-    authority = HttpWorkerAuthority(
-        settings.internal_api_url,
-        settings.internal_api_token,
-        timeout_seconds=settings.internal_api_timeout_seconds,
-    )
     agent_jobs = AgentJobService(
         sessions,
         clock=clock,
@@ -622,11 +590,8 @@ if __name__ == "__main__":
         sessions=sessions,
         agent_jobs=agent_jobs,
         publisher=publisher,
-        route_root=route_root,
-        endpoint_resolver=endpoint,
         management_policy=address_policy,
         clock=clock,
-        authority=authority,
         worker_id=os.environ.get("HOSTNAME", "control-worker"),
         artifact_job_root=settings.state_path / "artifact-jobs" / "blobs",
         artifact_job_storage_max_bytes=settings.artifact_job_storage_max_bytes,
