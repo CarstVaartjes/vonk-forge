@@ -55,6 +55,10 @@ separate results.
   pairing tests pass. The combined protocol/wire run passed 539 tests, including
   enrollment and renewal through Rust, and exposed one heartbeat 409 failure
   following progress canonicalization; that failure remains under repair.
+- Bootstrap no longer selects an older response by setup-schema query. Both
+  Controller and Spark setup require the complete current document. Seven
+  connected bootstrap/enrollment/renewal checks and 47 unprivileged Linux setup
+  tests pass; three focused Controller bootstrap checks pass.
 - The unavailable upstream Skopeo pin is replaced with a verified current
   official image. All six packaging checks pass; the worker image builds and
   downloads an OCI archive as UID10001 with a read-only root.
@@ -64,7 +68,10 @@ separate results.
   binaries exist, but this is neither signed release nor physical acceptance.
 - The user approved deleting all remaining legacy code. Removal of old catalog
   ModelGroup/ModelVersion schema branches, validators, and seed/test documents
-  is underway in an isolated worker. Active platform harness/runtime wire
+  has a validated canonical replacement in an isolated worker, but automatic
+  approval review requires explicit confirmation of the exact validator,
+  schema, sidecar and supply-chain input removals. That request is pending;
+  the blocked removals are paused. Active platform harness/runtime wire
   contracts remain supported. Separate exact approvals remain pending for
   removing repeated full-file hashes at trusted internal handoffs and the
   qualification CLI's duplicate territorial metadata check. Those changes have

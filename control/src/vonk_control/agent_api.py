@@ -1735,31 +1735,29 @@ def install_agent_routes(
         response_model=EnrollmentBootstrapResponse,
         responses=bounded_error_responses(503),
     )
-    def enrollment_bootstrap(setup_schema: Literal["1", "2"] = "1") -> Response:
+    def enrollment_bootstrap() -> Response:
         required = _require_services(services)
         if required.bootstrap is None:
             raise HTTPException(
                 status_code=503,
                 detail="agent enrollment bootstrap is unavailable",
             )
-        helper_public_key = None
-        if setup_schema == "2":
-            if required.host_runtime_authority is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail="host runtime authority is unavailable",
-                )
-            helper_public_key = required.host_runtime_authority.public_key_document.get(
-                "public_key"
+        if required.host_runtime_authority is None:
+            raise HTTPException(
+                status_code=503,
+                detail="host runtime authority is unavailable",
             )
-            if (
-                not isinstance(helper_public_key, str)
-                or re.fullmatch(r"[0-9a-f]{64}", helper_public_key) is None
-            ):
-                raise HTTPException(
-                    status_code=503,
-                    detail="host runtime authority is unavailable",
-                )
+        helper_public_key = required.host_runtime_authority.public_key_document.get(
+            "public_key"
+        )
+        if (
+            not isinstance(helper_public_key, str)
+            or re.fullmatch(r"[0-9a-f]{64}", helper_public_key) is None
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="host runtime authority is unavailable",
+            )
         return _json_response(
             EnrollmentBootstrapResponse(
                 controller_endpoint=required.bootstrap.controller_endpoint,
@@ -1769,7 +1767,7 @@ def install_agent_routes(
                 controller_address=required.bootstrap.controller_address,
                 service_hostnames=list(required.bootstrap.service_hostnames),
                 host_helper_authority_public_key=helper_public_key,
-            ).model_dump(exclude_none=True, exclude_defaults=True)
+            )
         )
 
     @agent.post("/enroll", response_model=IssuedCertificateResponse)
