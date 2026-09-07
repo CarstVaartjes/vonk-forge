@@ -505,7 +505,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if placement.rank != spec.runtime.placement.rank
             || placement.role != spec.runtime.placement.role
             || placement.world_size != spec.runtime.placement.world_size
-            || placement.port != spec.runtime.placement.port
+            || Some(placement.port) != spec.runtime.placement.port
             || placement.reserved_memory_bytes != spec.runtime.placement.reserved_memory_bytes
         {
             return Err(OciError::Runtime);
