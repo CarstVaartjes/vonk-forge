@@ -98,14 +98,16 @@ fn materialized_paths_remain_selection_scoped() {
 }
 
 #[test]
-fn duplicate_selection_file_or_materialized_path_is_rejected() {
+fn duplicate_final_mount_target_is_rejected() {
     let mut value = fixture();
     let duplicate = value["artifacts"][0].clone();
     value["artifacts"] = serde_json::json!([duplicate.clone(), duplicate]);
     let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
     assert!(matches!(
         plan.validate(),
-        Err(WorkloadError::Invalid("compiled model artifact identity"))
+        Err(WorkloadError::Invalid(
+            "compiled model artifact mount target"
+        ))
     ));
 }
 
