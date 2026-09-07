@@ -70,6 +70,24 @@ def test_source_build_requires_and_binds_exact_receipt(model: object) -> None:
     assert spec["runtime"]["image"] == f"localhost/vonk/recipe-build@sha256:{digest}"  # type: ignore[index]
 
 
+def test_runtime_compiler_rejects_retired_entity_authorities(model: object) -> None:
+    recipe = _recipe(
+        "recipe-image.json",
+        engine="vllm",
+        entrypoint=["/opt/vonk/bin/vllm", "serve", "/models"],
+    )
+    with pytest.raises(RecipeRuntimeSpecError, match="retired authorities"):
+        compile_runtime_spec(
+            recipe,
+            resolved_entities={
+                "execution_harness": {"kind": "execution-harness"},
+            },
+            models=[model],
+            role="entrypoint",
+            rank=0,
+        )
+
+
 @pytest.mark.parametrize(
     ("engine", "entrypoint", "recipe_file"),
     [
@@ -190,13 +208,15 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
     """Compile every role from the current canonical recipe checkout."""
     root = recipe_library_root()
     recipe_files = sorted((root / "recipes").glob("*.json"))
-    assert recipe_files
+    assert len(recipe_files) == 85
     model_documents: dict[tuple[str, str], object] = {}
     for path in (root / "models").glob("*.json"):
         item = json.loads(path.read_text(encoding="utf-8"))
         parsed = contracts.ModelDefinition.model_validate(item)
         model_documents[(parsed.identity.publisher, parsed.identity.slug)] = parsed
+    assert len(model_documents) == 92
     engines: set[str] = set()
+    projection_count = 0
     for path in recipe_files:
         recipe = contracts.RecipeDefinition.model_validate(json.loads(path.read_text(encoding="utf-8")))
         engines.add(recipe.runtime.engine)
@@ -226,6 +246,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
                     role=role.name,
                     rank=rank,
                 )
+                projection_count += 1
                 for artifact in spec["artifacts"]:
                     assert artifact["mount"]["source"].startswith(
                         f"/run/vonk/models/{artifact['selection_id']}/{artifact['file_id']}"
@@ -238,6 +259,7 @@ def test_current_recipe_corpus_compiles_every_role() -> None:
         "comfyui",
         "pytorch-pipeline",
     }
+    assert projection_count == 109
 
 
 def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(model: object) -> None:

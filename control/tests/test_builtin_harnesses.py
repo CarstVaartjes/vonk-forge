@@ -6,6 +6,7 @@ from importlib.resources import files
 
 import pytest
 from pydantic import ValidationError
+from vonk_control import harnesses
 from vonk_control.harnesses.canonical import compile_canonical_harness
 from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_control.harnesses.common import HarnessCompileError
@@ -100,6 +101,11 @@ def test_platform_metadata_contains_exactly_the_canonical_builtin_harnesses() ->
     assert tuple(metadata.slug for metadata in CANONICAL_HARNESSES) == BUILTINS
 
 
+def test_harness_package_exposes_only_the_canonical_compiler_boundary() -> None:
+    assert not hasattr(harnesses, "HarnessRegistry")
+    assert not hasattr(harnesses, "TrustedBuiltinComposition")
+
+
 def test_platform_metadata_is_strict_and_has_current_capabilities() -> None:
     vllm = next(item for item in CANONICAL_HARNESSES if item.slug == "vllm")
     sglang = next(item for item in CANONICAL_HARNESSES if item.slug == "sglang")
@@ -109,6 +115,15 @@ def test_platform_metadata_is_strict_and_has_current_capabilities() -> None:
     assert sglang.security_exceptions == ("model.trust-remote-code",)
     with pytest.raises(ValidationError):
         type(vllm).model_validate({**vllm.model_dump(), "schema_version": 1})
+
+
+def test_platform_metadata_is_immutable_and_digest_bound() -> None:
+    for metadata in CANONICAL_HARNESSES:
+        assert metadata.content_sha256 == metadata.model_copy().content_sha256
+        assert metadata.executables
+        assert metadata.wrapper.startswith("/")
+        with pytest.raises(ValidationError):
+            metadata.slug = "mutated"  # type: ignore[misc]
 
 
 @pytest.fixture(scope="module")

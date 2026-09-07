@@ -20,6 +20,7 @@ from ..runtime_writable_paths import (
 from ..runtime_writable_paths import (
     writable_paths as engine_writable_paths,
 )
+from .canonical_metadata import CANONICAL_HARNESSES
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
 _SAFE_ARGUMENT = re.compile(r'^[A-Za-z0-9_./:+@%=\[\]{},"<>-]{1,2048}$')
@@ -54,18 +55,7 @@ _SHELL_LAUNCHERS = frozenset({"env", "busybox", "sudo", "doas"})
 _CUSTOM_ADAPTER_BIN = PurePosixPath("/opt/vonk/adapters/bin")
 _IMAGE = re.compile(r"^[a-z0-9][a-z0-9._:/-]*@sha256:[a-f0-9]{64}$")
 _SOCKET_NAMES = ("docker.sock", "podman.sock", "containerd.sock", "cri-dockerd.sock")
-_BUILTIN_HARNESS_SLUGS = frozenset(
-    {
-        "vllm",
-        "sglang",
-        "tensorrt-llm",
-        "llama-cpp",
-        "ds4",
-        "diffusers",
-        "comfyui",
-        "pytorch-pipeline",
-    }
-)
+_BUILTIN_HARNESS_SLUGS = frozenset(metadata.slug for metadata in CANONICAL_HARNESSES)
 
 
 class HarnessCompileError(ValueError):
