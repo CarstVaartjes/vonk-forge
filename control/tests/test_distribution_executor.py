@@ -81,7 +81,18 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
     executor = DurableDistributionPhaseExecutor(None, None, None, clock=lambda: datetime.now(UTC))
     result = executor.execute(plan, phase, item_index=0, actor="test", request_key="00000000-0000-4000-8000-000000000001", progress={})
     assert result.operation_id is None
-    assert result.result == {"skipped": True, "verified": False, "verified_digests": ["c" * 64], "verified_build_id": None, "verified_image_digest": "sha256:" + "d" * 64, "verified_oci_layout_sha256": "e" * 64, "cached_nodes": list(nodes), "cached_target_totals": {node: 0 for node in nodes}}
+    assert result.result == {
+        "phase": "transfer",
+        "subphase": "target-copy",
+        "skipped": True,
+        "verified": False,
+        "verified_digests": ["c" * 64],
+        "verified_build_id": None,
+        "verified_image_digest": "sha256:" + "d" * 64,
+        "verified_oci_layout_sha256": "e" * 64,
+        "cached_nodes": list(nodes),
+        "cached_target_totals": {node: 0 for node in nodes},
+    }
 
 
 def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> None:  # noqa: F811
@@ -950,11 +961,20 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     )
     assert cached_model.operation_id is None
     assert cached_model.result == {
+        "schema_version": 2,
+        "phase": "transfer",
+        "subphase": "model-download",
         "skipped": True,
         "coverage": "complete",
         "artifact_set_sha256": artifact_set,
         "downloaded_bytes": 0,
         "total_bytes": 0,
+        "progress": {
+            "phase": "model-download",
+            "completed_bytes": 0,
+            "total_bytes": 0,
+            "total_bytes_known": True,
+        },
     }
 
     copy_view = executor.get(copy_child.operation_id)

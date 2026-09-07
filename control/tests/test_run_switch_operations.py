@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from vonk_control.auth import CursorCodec
 from vonk_control.cluster_mappings import ClusterMappingService
@@ -42,6 +43,7 @@ from vonk_control.recipe_runtime_specs import (
 from vonk_control.run_switch_contract import (
     InvocationMetadata,
     RunSwitchApplyRequest,
+    RunSwitchPhaseResult,
     RunSwitchPreviewRequest,
     SparkGroup,
     SparkGroupNode,
@@ -69,8 +71,121 @@ from .test_recipe_operations import (
     setup_services,
 )
 
+
+def test_persisted_phase_receipts_reject_empty_and_cross_phase_shapes() -> None:
+    adapter = TypeAdapter(RunSwitchPhaseResult)
+    with pytest.raises(ValidationError):
+        adapter.validate_python({}, strict=True)
+    with pytest.raises(ValidationError):
+        adapter.validate_python(
+            {
+                "phase": "prepare",
+                "subphase": "runtime-image",
+                "runtime_image": {"image_digest": "sha256:" + "1" * 64},
+                "image_digest": "sha256:" + "1" * 64,
+                "oci_layout_sha256": "2" * 64,
+                "image_bytes": 1,
+            },
+            strict=True,
+        )
+    with pytest.raises(ValidationError):
+        adapter.validate_python(
+            {
+                "phase": "transfer",
+                "subphase": "model-download",
+                "schema_version": 2,
+                "artifact_set_sha256": "3" * 64,
+                "downloaded_bytes": 0,
+                "total_bytes": 0,
+            },
+            strict=True,
+        )
+    with pytest.raises(ValidationError):
+        adapter.validate_python(
+            {
+                "phase": "transfer",
+                "subphase": "model-download",
+                "schema_version": 2,
+                "artifact_set_sha256": "3" * 64,
+                "coverage": "complete",
+                "downloaded_bytes": 0,
+                "total_bytes": 0,
+                "progress": {
+                    "phase": "model-download",
+                    "completed_bytes": 0,
+                    "total_bytes": 0,
+                    "total_bytes_known": True,
+                },
+                "evidence": {
+                    "schema_version": 2,
+                    "artifact_set_sha256": "4" * 64,
+                    "coverage": "complete",
+                },
+            },
+            strict=True,
+        )
+
 MODEL_ARTIFACT = "c" * 64
 MODEL_ARTIFACT_SET = "f" * 64
+
+
+def _target_copy_evidence(plan, phase, progress=None) -> dict[str, object]:
+    runtime_image = getattr(getattr(plan, "preparation", None), "runtime_image", None)
+    image_digest = getattr(runtime_image, "image_digest", None) or getattr(
+        plan, "image_digest", "sha256:" + "1" * 64
+    )
+    layout_digest = getattr(runtime_image, "oci_layout_sha256", None) or getattr(
+        getattr(plan, "build", None), "oci_layout_sha256", "3" * 64
+    )
+    if isinstance(progress, dict):
+        for candidate in reversed(progress.get("phase_results", [])):
+            if isinstance(candidate, dict):
+                image_digest = image_digest or candidate.get("image_digest")
+                layout_digest = layout_digest or candidate.get("oci_layout_sha256")
+    node_id = phase.node_ids[0] if getattr(phase, "node_ids", ()) else "spk_" + "0" * 32
+    return {
+        "node_id": node_id,
+        "verified": True,
+        "verified_digests": list(getattr(plan.storage, "artifact_digests", ())) or [MODEL_ARTIFACT],
+        "verified_image_digest": image_digest,
+        "imported_image_digest": image_digest,
+        "verified_oci_layout_sha256": layout_digest,
+        "copied_bytes": getattr(plan.storage, "missing_spark_bytes", 0),
+    }
+
+
+def _runtime_receipt(
+    plan,
+    *,
+    image: str | None = None,
+    layout: str | None = None,
+    size: int | None = None,
+    build_id: str | None = None,
+) -> dict[str, object]:
+    image = image or getattr(plan.build, "image_digest", None) or getattr(plan, "image_digest", None)
+    layout = layout or getattr(plan.build, "oci_layout_sha256", None)
+    size = size or getattr(plan.build, "image_bytes", None) or 1
+    build_id = build_id or getattr(plan, "recipe_build_id", None)
+    return {
+        "schema_version": 2,
+        "source": "controller-build",
+        "distribution_publisher": "test",
+        "distribution_slug": "recipe",
+        "distribution_content_sha256": "a" * 64,
+        "registry_manifest_digest": None,
+        "platform_manifest_digest": image,
+        "image_digest": image,
+        "oci_archive_sha256": layout,
+        "image_bytes": size,
+        "local_image_config_id": None,
+        "local_image_reference": "localhost/test",
+        "architecture": "linux-arm64",
+        "runtime_interface": "vonk.runtime.v1",
+        "archive_path": "/tmp/runtime-image.oci.tar",
+        "recorded_at": NOW.isoformat(),
+        "build_id": build_id,
+        "runtime_interface_label": "v1",
+    }
 
 
 class CompleteArtifactInspector:
@@ -175,7 +290,7 @@ class RecordingArtifactExecutor:
             self.children[child_id] = SimpleNamespace(state="queued", result=None)
             return PhaseExecution(
                 operation_id=child_id,
-                result={"phase": phase.kind, "checkpoint": item_index},
+                result=None,
             )
         if phase.kind == "verify":
             digests = ["d" * 64] if self.bad_verify else [MODEL_ARTIFACT]
@@ -201,7 +316,7 @@ class RecordingArtifactExecutor:
                     "protected_digests": [],
                 }
             )
-        return PhaseExecution(result={"copied_bytes": 0})
+        return PhaseExecution(result=_target_copy_evidence(plan, phase))
 
     def get(self, operation_id: str):
         return self.children.get(operation_id)
@@ -318,7 +433,7 @@ class BuildThenCopyExecutor:
             return execution
         if phase.subphase == "target-copy":
             self.receipts.append(effective_build_receipt(plan, progress))
-            return PhaseExecution(result={"copied_bytes": 0})
+            return PhaseExecution(result=_target_copy_evidence(plan, phase, progress))
         if phase.subphase == "runtime-image":
             with self._sessions() as session:
                 build = session.get(RecipeBuild, plan.recipe_build_id)
@@ -328,17 +443,29 @@ class BuildThenCopyExecutor:
                 assert build.image_bytes is not None
                 return PhaseExecution(
                     result={
-                        "runtime_image": {
-                            "source": "controller-build",
-                            "image_digest": build.image_digest,
-                            "oci_layout_sha256": build.oci_layout_sha256,
-                            "image_bytes": build.image_bytes,
-                        },
+                        "runtime_image": _runtime_receipt(
+                            plan,
+                            image=build.image_digest,
+                            layout=build.oci_layout_sha256,
+                            size=build.image_bytes,
+                            build_id=build.id,
+                        ),
                         "image_digest": build.image_digest,
                         "oci_layout_sha256": build.oci_layout_sha256,
                         "image_bytes": build.image_bytes,
                     }
                 )
+        if phase.subphase in {"runtime-plan", "runtime-install"}:
+            if phase.subphase == "runtime-plan":
+                return PhaseExecution(
+                    result={
+                        "installation_id": str(uuid.uuid4()),
+                        "mapping_id": str(uuid.uuid4()),
+                        "install_plan_digest": plan.plan_digest,
+                        "compiled_plan_persisted": True,
+                    }
+                )
+            return PhaseExecution(result={"installation_id": str(uuid.uuid4())})
         return PhaseExecution(result={"phase": phase.kind})
 
     def get(self, operation_id: str):
@@ -365,32 +492,33 @@ class ColdStartPhaseExecutor:
         identity = phase.subphase or phase.kind
         self.events.append(identity)
         if phase.subphase == "model-download":
+            total = plan.storage.missing_nas_bytes
             return PhaseExecution(
                 result={
+                    "schema_version": 2,
                     "artifact_set_sha256": plan.preparation.model.artifact_set_sha256,
                     "coverage": "complete",
-                    "downloaded_bytes": plan.storage.missing_nas_bytes,
-                    "total_bytes": plan.storage.missing_nas_bytes,
+                    "downloaded_bytes": total,
+                    "total_bytes": total,
+                    "progress": {
+                        "phase": "model-download",
+                        "completed_bytes": total,
+                        "total_bytes": total,
+                        "total_bytes_known": True,
+                    },
                 }
             )
         if phase.subphase == "runtime-image":
             return PhaseExecution(
                 result={
-                    "runtime_image": {
-                        "source": "controller-build",
-                        "image_digest": plan.build.image_digest,
-                        "oci_layout_sha256": plan.build.oci_layout_sha256,
-                        "image_bytes": plan.build.image_bytes,
-                    },
+                    "runtime_image": _runtime_receipt(plan),
                     "image_digest": plan.build.image_digest,
                     "oci_layout_sha256": plan.build.oci_layout_sha256,
                     "image_bytes": plan.build.image_bytes,
                 }
             )
         if phase.kind == "transfer" and phase.subphase == "target-copy":
-            return PhaseExecution(
-                result={"copied_bytes": plan.storage.missing_spark_bytes}
-            )
+            return PhaseExecution(result=_target_copy_evidence(plan, phase))
         if phase.kind == "verify":
             return PhaseExecution(
                 result={
@@ -401,9 +529,28 @@ class ColdStartPhaseExecutor:
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
                 }
             )
+        if phase.subphase == "runtime-plan":
+            mapping = getattr(plan, "mapping", None)
+            mapping_id = getattr(mapping, "mapping_id", None) or str(uuid.uuid4())
+            installation_id = getattr(plan, "installation_id", None) or str(uuid.uuid4())
+            return PhaseExecution(
+                result={
+                    "installation_id": installation_id,
+                    "mapping_id": mapping_id,
+                    "install_plan_digest": plan.plan_digest,
+                    "compiled_plan_persisted": True,
+                }
+            )
+        if phase.subphase == "runtime-install":
+            return PhaseExecution(
+                result={
+                    "installation_id": getattr(plan, "installation_id", None)
+                    or str(uuid.uuid4())
+                }
+            )
         # ``runtime-install`` represents the real admission/compile boundary
         # in this focused driver; the asserted event ordering is the contract.
-        return PhaseExecution(result={"compiled_plan_persisted": True})
+        return PhaseExecution(result={"prepared": True})
 
     def get(self, _operation_id: str):
         raise KeyError(_operation_id)
@@ -754,10 +901,17 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                 model_cache.ready = True
                 return PhaseExecution(
                     result={
+                        "schema_version": 2,
                         "artifact_set_sha256": plan.preparation.model.artifact_set_sha256,
                         "coverage": "complete",
                         "downloaded_bytes": plan.storage.missing_nas_bytes,
                         "total_bytes": plan.storage.missing_nas_bytes,
+                        "progress": {
+                            "phase": "model-download",
+                            "completed_bytes": plan.storage.missing_nas_bytes,
+                            "total_bytes": plan.storage.missing_nas_bytes,
+                            "total_bytes_known": True,
+                        },
                     }
                 )
             if phase.subphase == "runtime-image":
@@ -818,7 +972,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
                     progress=progress,
                 )
             if phase.kind == "transfer" and phase.subphase == "target-copy":
-                return PhaseExecution(result={"copied_bytes": plan.storage.missing_spark_bytes})
+                return PhaseExecution(result=_target_copy_evidence(plan, phase))
             if phase.kind == "verify":
                 return PhaseExecution(
                     result={
@@ -885,7 +1039,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     assert service.tick() is True
     planned = service.get(operation.operation_id)
     assert planned.progress.subphase == "target-copy"
-    assert planned.result.get("child_operation_id") is None
+    assert planned.result.child_operation_id is None
     with sessions() as session:
         installation = session.scalar(
             select(RecipeInstallation).where(
@@ -907,11 +1061,11 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     assert service.get(operation.operation_id).progress.subphase == "target-copy"
     assert service.tick() is True
     assert service.get(operation.operation_id).progress.subphase == "runtime-install"
-    assert service.get(operation.operation_id).result.get("child_operation_id") is None
+    assert service.get(operation.operation_id).result.child_operation_id is None
     assert service.tick() is True
     waiting = service.get(operation.operation_id)
     assert waiting.progress.subphase == "runtime-install"
-    install_child_id = waiting.result["child_operation_id"]
+    install_child_id = waiting.result.child_operation_id
     assert install_child_id
     assert executor.events == [
         "model-download",
@@ -1005,7 +1159,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     def start_build(build_plan, **_kwargs):
         build_start_calls.append("start")
         build_start_plans.append(build_plan)
-        return SimpleNamespace(id=child_id, state="running", owner_id=build_id)
+        return SimpleNamespace(id=child_id, state="building", owner_id=build_id)
 
     lifecycle.preview_build = preview_build
     lifecycle.build = start_build
@@ -1046,7 +1200,7 @@ def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     waiting = service.get(operation.operation_id)
     assert waiting.current_phase == "prepare"
     assert waiting.progress.subphase == "container-build"
-    assert waiting.result["child_operation_id"] == child_id
+    assert waiting.result.child_operation_id == child_id
     # Apply consumes the plan persisted during preview.  A fresh planner call
     # would admit mutable builder evidence and can derive a new identity.
     assert build_preview_calls == []
@@ -1412,7 +1566,7 @@ def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(tmp_path: Pat
     assert service.tick() is True
     pending = service.get(operation.operation_id)
     assert pending.current_phase == "transfer"
-    child_id = pending.result["child_operation_id"]
+    child_id = pending.result.child_operation_id
     artifact_executor.children[child_id].state = "succeeded"
     artifact_executor.children[child_id].result = {"copied_bytes": 0}
     assert service.tick() is True
@@ -1471,7 +1625,7 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     )
 
     assert service.tick() is True
-    child_id = service.get(operation.operation_id).result["child_operation_id"]
+    child_id = service.get(operation.operation_id).result.child_operation_id
     artifact_executor.children[child_id].state = "running"
     artifact_executor.children[child_id].result = {
         "progress": {
@@ -1531,13 +1685,13 @@ def test_child_distribution_progress_is_typed_and_restart_safe(tmp_path: Path) -
     assert any(
         item.node_id == nodes[0]
         and item.verified is True
-        for item in completed_transfer.result.get("phase_results", [])
+        for item in completed_transfer.result.phase_results
     )
     # The next durable tick consumes the persisted transfer receipts and runs
     # the real verify phase; no caller supplied progress is reconstructed.
     assert restarted.tick() is True
     verified = restarted.get(operation.operation_id)
-    assert "verify" in verified.result.get("completed_phases", [])
+    assert "verify" in verified.result.completed_phases
 
 
 def test_transient_distribution_failure_requeues_exact_plan_and_progress(
@@ -1570,7 +1724,7 @@ def test_transient_distribution_failure_requeues_exact_plan_and_progress(
         actor="admin",
     )
     assert service.tick() is True
-    child_id = service.get(operation.operation_id).result["child_operation_id"]
+    child_id = service.get(operation.operation_id).result.child_operation_id
     artifact_executor.children[child_id].state = "failed"
     artifact_executor.children[child_id].result = {
         "error_code": "agent.copy.timeout",
@@ -1601,7 +1755,7 @@ def test_transient_distribution_failure_requeues_exact_plan_and_progress(
     retried = service.get(operation.operation_id)
     assert retried.state == "running"
     assert retried.plan_digest == plan.plan_digest
-    assert retried.result["child_operation_id"] != child_id
+    assert retried.result.child_operation_id != child_id
 
 
 def test_exhausted_transient_distribution_allows_bounded_operator_retry(
@@ -1636,7 +1790,7 @@ def test_exhausted_transient_distribution_allows_bounded_operator_retry(
 
     assert service.tick() is True
     for attempt in range(3):
-        child_id = service.get(operation.operation_id).result["child_operation_id"]
+        child_id = service.get(operation.operation_id).result.child_operation_id
         artifact_executor.children[child_id].state = "failed"
         artifact_executor.children[child_id].result = {
             "error_code": "agent.copy.timeout",
@@ -1661,7 +1815,7 @@ def test_exhausted_transient_distribution_allows_bounded_operator_retry(
         assert row.payload["retry"]["operator_retries"] == 1
 
     assert service.tick() is True
-    retried_child = service.get(retry.operation_id).result["child_operation_id"]
+    retried_child = service.get(retry.operation_id).result.child_operation_id
     artifact_executor.children[retried_child].state = "succeeded"
     artifact_executor.children[retried_child].result = {
         "copied_bytes": 1024,

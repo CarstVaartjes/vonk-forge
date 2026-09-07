@@ -14,6 +14,7 @@ from typing import Annotated, Literal
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from vonk_agent_protocol import DistributionAssignment
 
+from .model_cache_contract import ModelCacheDownloadResult
 from .preparation_contract import RolloutPreparation
 from .runtime_image_preparation import RuntimeImageReceipt
 from .strict_json import StrictJSONModel
@@ -276,7 +277,7 @@ class RuntimeImageStorageImpact(_StrictModel):
     reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
 
 
-class RecipeBuildEvidence(_StrictModel):
+class RunSwitchBuildEvidence(_StrictModel):
     state: Literal["available", "planned", "building", "failed", "missing", "incompatible", "unknown"]
     build_id: UuidId | None
     # A pending build is still bound to an immutable source/build input and a
@@ -371,7 +372,7 @@ class RunSwitchPlan(_StrictModel):
     fit: SparkFit
     storage: ArtifactStorageImpact
     runtime_storage: RuntimeImageStorageImpact
-    build: RecipeBuildEvidence
+    build: RunSwitchBuildEvidence
     preparation: RolloutPreparation | None = None
     conflicts: list[RunSwitchReason] = Field(max_length=128)
     stops: list[StopImpact] = Field(max_length=128)
@@ -484,115 +485,228 @@ class RunSwitchChildProgress(_StrictModel):
         return self
 
 
-class RuntimeImageEvidence(_StrictModel):
-    """Typed projection for a prepared image receipt."""
+class ArtifactVerificationResult(_StrictModel):
+    """Canonical evidence returned by a completed artifact verify phase."""
 
-    schema_version: Literal[2] | None = None
-    source: Literal["published", "controller-build"] | None = None
-    distribution_publisher: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = None
-    distribution_slug: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = None
-    distribution_content_sha256: Digest | None = None
-    registry_manifest_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None = None
-    platform_manifest_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None = None
-    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None = None
-    oci_archive_sha256: Digest | None = None
-    oci_layout_sha256: Digest | None = None
-    image_bytes: int | None = Field(default=None, ge=1)
-    local_image_config_id: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None = None
-    local_image_reference: Annotated[str, StringConstraints(min_length=1, max_length=512)] | None = None
-    architecture: Literal["linux-arm64"] | None = None
-    runtime_interface: Literal["vonk.runtime.v1"] | None = None
-    archive_path: Annotated[str, StringConstraints(min_length=1, max_length=4096)] | None = None
-    recorded_at: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = None
-    build_id: UuidId | None = None
-    runtime_interface_label: Literal["v1"] | None = None
-
-
-class ModelDownloadEvidence(_StrictModel):
-    """Canonical model-cache receipt nested in a phase result."""
-
-    schema_version: Literal[2] | None = None
-    artifact_set_sha256: Digest
-    coverage: Literal["complete", "partial", "unknown"]
-
-    def __getitem__(self, key: str) -> object:
-        return getattr(self, key)
-
-    def get(self, key: str, default: object = None) -> object:
-        return getattr(self, key, default)
-
-
-class RunSwitchPhaseResult(_StrictModel):
-    """Typed union payload for every persisted Run/Switch phase receipt.
-
-    Phase receipts intentionally use one closed model: each phase has a small
-    subset of these optional fields, and unknown producer keys are rejected.
-    This keeps the persisted tree inspectable without weakening it to a
-    ``dict[str, object]`` escape hatch.
-    """
-
-    node_id: NodeId | None = None
-    phase: RunSwitchPhaseKind | None = None
-    checkpoint: int | None = Field(default=None, ge=0)
-    state: Annotated[str, StringConstraints(min_length=1, max_length=32)] | None = None
-    build_id: UuidId | None = None
-    build_input_sha256: Digest | None = None
-    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None = None
-    oci_layout_sha256: Digest | None = None
-    image_bytes: int | None = Field(default=None, ge=0)
-    run_id: UuidId | None = None
-    installation_id: UuidId | None = None
-    mapping_id: UuidId | None = None
-    install_plan_digest: Digest | None = None
-    model_artifact_set_sha256: Digest | None = None
-    model_artifact_set_bytes: int | None = Field(default=None, ge=0)
-    compiled_plan_persisted: bool | None = None
-    prepared: bool | None = None
-    final_verified: bool | None = None
-    route_state: Annotated[str, StringConstraints(max_length=64)] | None = None
-    healthy: bool | None = None
-    ranks: list[RunSwitchRankReceipt] = Field(default_factory=list, max_length=32)
-    scope: Annotated[str, StringConstraints(max_length=64)] | None = None
-    reclaimed_bytes: int | None = Field(default=None, ge=0)
-    nas_evicted: bool | None = None
-    skipped: bool | None = None
-    verified: bool | None = None
-    verified_digests: list[Digest] = Field(default_factory=list, max_length=256)
-    verified_build_id: UuidId | None = None
+    skipped: bool = False
+    verified: Literal[True]
+    verified_digests: list[Digest] = Field(max_length=256)
+    verified_build_id: UuidId | None
     verified_image_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ] | None = None
+    ]
     verified_registry_manifest_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
     ] | None = None
-    verified_oci_layout_sha256: Digest | None = None
+    verified_oci_layout_sha256: Digest
     cached_nodes: list[NodeId] = Field(default_factory=list, max_length=32)
     cached_target_totals: dict[NodeId, int] = Field(default_factory=dict)
-    assignments: dict[NodeId, DistributionAssignment] = Field(default_factory=dict)
-    runtime_image: RuntimeImageReceipt | RuntimeImageEvidence | None = None
+    evidence: list[ArtifactVerificationEvidence] = Field(default_factory=list)
+
+class _RunSwitchPhaseBase(_StrictModel):
+    phase: RunSwitchPhaseKind
+    subphase: Literal[
+        "container-build", "model-download", "runtime-image", "runtime-plan",
+        "target-copy", "runtime-install",
+    ] | None = None
+
+class RunSwitchContainerBuildResult(_RunSwitchPhaseBase):
+    phase: Literal["prepare"]
+    subphase: Literal["container-build"]
+    build_id: UuidId
+    build_input_sha256: Digest
+    state: Literal["planned", "building", "succeeded", "failed"]
+    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")] | None = None
+    oci_layout_sha256: Digest | None = None
+    image_bytes: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def succeeded_build_has_receipt(self) -> RunSwitchContainerBuildResult:
+        if self.state == "succeeded" and (
+            self.image_digest is None or self.oci_layout_sha256 is None or self.image_bytes is None
+        ):
+            raise ValueError("succeeded build phase requires complete image receipt")
+        return self
+
+
+class RunSwitchRuntimeImageResult(_RunSwitchPhaseBase):
+    phase: Literal["prepare"]
+    subphase: Literal["runtime-image"]
+    runtime_image: RuntimeImageReceipt
     effective_execution_key: Digest | None = None
-    artifact_set_sha256: Digest | None = None
-    coverage: Literal["complete", "partial", "unknown"] | None = None
+    image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    oci_layout_sha256: Digest
+    image_bytes: int = Field(ge=1)
+    build_id: UuidId | None = None
+
+    @model_validator(mode="after")
+    def outer_identity_matches_receipt(self) -> RunSwitchRuntimeImageResult:
+        if (
+            self.runtime_image.image_digest != self.image_digest
+            or self.runtime_image.oci_archive_sha256 != self.oci_layout_sha256
+            or self.runtime_image.image_bytes != self.image_bytes
+        ):
+            raise ValueError("runtime image phase identity differs from canonical receipt")
+        if self.build_id is not None and self.runtime_image.build_id != self.build_id:
+            raise ValueError("runtime image phase build identity differs from receipt")
+        return self
+
+
+class RunSwitchModelDownloadResult(ModelCacheDownloadResult):
+    phase: Literal["transfer"]
+    subphase: Literal["model-download"]
+    skipped: Literal[True] = True
+    downloaded_bytes: int = Field(ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+    progress: RunSwitchChildProgress
+    reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+    evidence: ModelCacheDownloadResult | None = None
+
+    @model_validator(mode="after")
+    def nested_identity_matches_result(self) -> RunSwitchModelDownloadResult:
+        if (
+            self.evidence is not None
+            and self.evidence.artifact_set_sha256 != self.artifact_set_sha256
+        ):
+            raise ValueError("model download evidence artifact set differs from result")
+        return self
+
+class RunSwitchModelDownloadPendingResult(_RunSwitchPhaseBase):
+    phase: Literal["transfer"]
+    subphase: Literal["model-download"]
+    schema_version: Literal[2] = 2
+    artifact_set_sha256: Digest
+    downloaded_bytes: int = Field(ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+    progress: RunSwitchChildProgress
+    reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+
+
+class RunSwitchTargetTransferResult(_RunSwitchPhaseBase):
+    phase: Literal["transfer"]
+    subphase: Literal["target-copy"]
+    cached_nodes: list[NodeId] = Field(default_factory=list, max_length=32)
+    assignments: dict[NodeId, DistributionAssignment] = Field(min_length=1)
+
+
+class RunSwitchTargetTransferEvidenceResult(_RunSwitchPhaseBase):
+    phase: Literal["transfer"]
+    subphase: Literal["target-copy"]
+    node_id: NodeId
+    verified: Literal[True]
+    verified_digests: list[Digest] = Field(min_length=1, max_length=256)
+    verified_image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    imported_image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    verified_oci_layout_sha256: Digest
     downloaded_bytes: int | None = Field(default=None, ge=0)
     copied_bytes: int | None = Field(default=None, ge=0)
-    imported_image_digest: Annotated[
-        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ] | None = None
-    total_bytes: int | None = Field(default=None, ge=0)
-    progress: RunSwitchChildProgress | None = None
-    members: list[RunSwitchMemberReceipt] = Field(default_factory=list, max_length=32)
-    evidence: list[ArtifactVerificationEvidence] | ModelDownloadEvidence = Field(
-        default_factory=list
-    )
+
+
+class RunSwitchCachedTransferResult(_RunSwitchPhaseBase):
+    phase: Literal["transfer"]
+    subphase: Literal["target-copy"]
+    skipped: Literal[True]
+    verified: Literal[False]
+    verified_digests: list[Digest] = Field(max_length=256)
+    verified_build_id: UuidId | None
+    verified_image_digest: Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
+    verified_oci_layout_sha256: Digest
+    cached_nodes: list[NodeId] = Field(min_length=1, max_length=32)
+    cached_target_totals: dict[NodeId, int]
+
+
+class RunSwitchVerifyResult(ArtifactVerificationResult):
+    phase: Literal["verify"]
+    subphase: Literal["target-copy"]
+
+
+class RunSwitchCleanupResult(_RunSwitchPhaseBase):
+    phase: Literal["cleanup"]
+    scope: Literal["spark-local"]
+    reclaimed_bytes: int = Field(ge=0)
+    protected_referenced_bytes: int = Field(default=0, ge=0)
+    reclaimed_digests: list[Digest] = Field(default_factory=list, max_length=256)
+    protected_digests: list[Digest] = Field(default_factory=list, max_length=256)
+    nas_evicted: bool
+
+
+class RunSwitchRuntimePlanResult(_RunSwitchPhaseBase):
+    phase: Literal["prepare"]
+    subphase: Literal["runtime-plan"]
+    installation_id: UuidId
+    mapping_id: UuidId
+    install_plan_digest: Digest
+    model_artifact_set_sha256: Digest | None = None
+    model_artifact_set_bytes: int | None = Field(default=None, ge=0)
+    compiled_plan_persisted: Literal[True]
+
+
+class RunSwitchPreparedResult(_RunSwitchPhaseBase):
+    phase: Literal["prepare"]
+    subphase: Literal["runtime-plan"]
+    prepared: Literal[True]
+
+
+class RunSwitchRuntimeInstallResult(_RunSwitchPhaseBase):
+    phase: Literal["prepare"]
+    subphase: Literal["runtime-install"]
+    installation_id: UuidId
+
+
+class RunSwitchStopResult(_RunSwitchPhaseBase):
+    phase: Literal["stop"]
+    run_id: UuidId
+
+
+class RunSwitchStartResult(_RunSwitchPhaseBase):
+    phase: Literal["start"]
+    run_id: UuidId
+
+
+class RunSwitchFinalVerifyResult(_RunSwitchPhaseBase):
+    phase: Literal["final_verify"]
+    final_verified: bool
+    run_id: UuidId
+    state: Annotated[str, StringConstraints(min_length=1, max_length=32)]
+    route_state: Annotated[str, StringConstraints(max_length=64)]
+    healthy: bool
+    ranks: list[RunSwitchRankReceipt] = Field(max_length=32)
+
+
+class RunSwitchDistributionChildResult(_StrictModel):
+    """Durable projection of one target-copy child operation.
+
+    A child Job has a different persisted shape from a parent phase receipt:
+    it owns member progress and per-node handoff evidence.  Keeping that
+    projection separate prevents a progress snapshot from being accepted as
+    a completed phase result.
+    """
+
+    phase: Literal["transfer"]
+    subphase: Literal["target-copy"]
+    progress: RunSwitchChildProgress
+    members: list[RunSwitchMemberReceipt] = Field(min_length=1, max_length=32)
+    evidence: list[ArtifactVerificationEvidence] = Field(max_length=32)
     reason: Annotated[str, StringConstraints(max_length=512)] | None = None
-    error: Annotated[str, StringConstraints(max_length=512)] | None = None
-    uncertain: bool = False
 
-    def __getitem__(self, key: str) -> object:
-        return getattr(self, key)
 
-    def get(self, key: str, default: object = None) -> object:
-        return getattr(self, key, default)
+RunSwitchPhaseResult = (
+    RunSwitchContainerBuildResult
+    | RunSwitchRuntimeImageResult
+    | RunSwitchModelDownloadResult
+    | RunSwitchModelDownloadPendingResult
+    | RunSwitchTargetTransferResult
+    | RunSwitchCachedTransferResult
+    | RunSwitchTargetTransferEvidenceResult
+    | RunSwitchVerifyResult
+    | RunSwitchCleanupResult
+    | RunSwitchRuntimePlanResult
+    | RunSwitchPreparedResult
+    | RunSwitchRuntimeInstallResult
+    | RunSwitchStopResult
+    | RunSwitchStartResult
+    | RunSwitchFinalVerifyResult
+)
 
 
 class RunSwitchOperationResult(_StrictModel):
@@ -627,34 +741,6 @@ class RunSwitchOperationResult(_StrictModel):
             raise ValueError("operation completed bytes exceed total bytes")
         return self
 
-    def __getitem__(self, key: str) -> object:
-        return getattr(self, key)
-
-    def get(self, key: str, default: object = None) -> object:
-        return getattr(self, key, default)
-
-
-class ArtifactVerificationResult(_StrictModel):
-    """Canonical evidence returned by a completed artifact verify phase."""
-
-    skipped: bool = False
-    verified: Literal[True]
-    verified_digests: list[Digest] = Field(max_length=256)
-    # Published images have no Controller build and therefore carry null;
-    # source-build plans must bind this field to their exact RecipeBuild UUID.
-    verified_build_id: UuidId | None
-    verified_image_digest: Annotated[
-        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ]
-    verified_registry_manifest_digest: Annotated[
-        str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
-    ] | None = None
-    verified_oci_layout_sha256: Digest
-    cached_nodes: list[NodeId] = Field(default_factory=list, max_length=32)
-    cached_target_totals: dict[NodeId, int] = Field(default_factory=dict)
-    evidence: list[ArtifactVerificationEvidence] = Field(default_factory=list, max_length=64)
-
-
 class RunSwitchOperation(_StrictModel):
     schema_version: Literal[2] = 2
     operation_id: UuidId
@@ -687,23 +773,37 @@ __all__ = [
     "FreshnessEvidence",
     "InvocationMetadata",
     "MappingSelection",
-    "ModelDownloadEvidence",
-    "RecipeBuildEvidence",
+    "RunSwitchBuildEvidence",
     "RunSwitchApplyRequest",
+    "RunSwitchCachedTransferResult",
+    "RunSwitchCleanupResult",
+    "RunSwitchContainerBuildResult",
+    "RunSwitchDistributionChildResult",
+    "RunSwitchFinalVerifyResult",
     "RunSwitchMemberProgress",
+    "RunSwitchModelDownloadPendingResult",
+    "RunSwitchModelDownloadResult",
     "RunSwitchOperation",
     "RunSwitchOperationResult",
     "RunSwitchPhase",
     "RunSwitchPhaseKind",
     "RunSwitchPhaseResult",
     "RunSwitchPlan",
+    "RunSwitchPreparedResult",
     "RunSwitchPreviewRequest",
     "RunSwitchProgress",
     "RunSwitchReason",
     "RunSwitchRetryRequest",
+    "RunSwitchRuntimeImageResult",
+    "RunSwitchRuntimeInstallResult",
+    "RunSwitchRuntimePlanResult",
+    "RunSwitchStartResult",
     "RunSwitchStopApplyRequest",
     "RunSwitchStopPreviewRequest",
-    "RuntimeImageEvidence",
+    "RunSwitchStopResult",
+    "RunSwitchTargetTransferEvidenceResult",
+    "RunSwitchTargetTransferResult",
+    "RunSwitchVerifyResult",
     "RuntimeImageStorageImpact",
     "SparkFit",
     "SparkFitNode",
