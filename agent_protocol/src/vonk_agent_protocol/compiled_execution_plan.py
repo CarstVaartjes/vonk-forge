@@ -126,7 +126,7 @@ class CompiledPlacement(_Strict):
     local_address: str | None
     master_address: str | None
     master_port: int | None
-    port: int = Field(ge=1, le=65535)
+    port: int | None = Field(default=..., ge=1, le=65535)
     reserved_memory_bytes: int = Field(gt=0, le=16 * 1024**4)
 
     _addresses_are_safe = field_validator(
@@ -475,6 +475,11 @@ class CompiledExecutionPlan(_Strict):
             or placement.rank >= placement.world_size
         ):
             raise ValueError("compiled placement identity is inconsistent")
+        if self.endpoint is not None:
+            if placement.port != self.endpoint.port:
+                raise ValueError("compiled serving endpoint port is inconsistent")
+        elif placement.port is not None:
+            raise ValueError("compiled job placement must not have a port")
         if self.topology.world_size < self.topology.node_count:
             raise ValueError("compiled topology bounds are invalid")
         if self.topology.world_size == 1 and (

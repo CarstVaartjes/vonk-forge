@@ -154,7 +154,8 @@ pub struct CompiledRuntimePlacement {
     pub master_address: Option<IpAddr>,
     #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_port: Option<u16>,
-    pub port: u16,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
+    pub port: Option<u16>,
     pub reserved_memory_bytes: u64,
 }
 
@@ -306,6 +307,11 @@ impl CompiledExecutionPlan {
             || self.topology.node_count == 0
             || self.topology.world_size < self.topology.node_count
             || self.endpoint.is_some() == self.job.is_some()
+            || self.endpoint.is_some() != self.runtime.placement.port.is_some()
+            || self
+                .endpoint
+                .as_ref()
+                .is_some_and(|endpoint| self.runtime.placement.port != Some(endpoint.port))
         {
             return Err(WorkloadError::Invalid("compiled execution identity"));
         }
@@ -444,7 +450,7 @@ impl CompiledRuntime {
         if self.placement.world_size == 0
             || self.placement.rank >= self.placement.world_size
             || !valid_role(&self.placement.role)
-            || self.placement.port == 0
+            || self.placement.port.is_some_and(|port| port == 0)
             || self.placement.reserved_memory_bytes == 0
         {
             return Err(WorkloadError::Invalid("compiled runtime placement"));

@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import CompiledExecutionPlan as AgentCompiledExecutionPlan
 from vonk_agent_protocol import (
     HostHelperOperation,
     HostOperationKind,
@@ -3031,6 +3032,15 @@ def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
     assert resolved.status_code == 200
     assert resolved.json() == payload
     assert resolved.json()["schema_version"] == 2
+    assert resolved.content == canonical_message(
+        AgentCompiledExecutionPlan.model_validate(payload)
+    )
+    spec_route = client.get("/openapi.json").json()["paths"][
+        "/agent/v1/recipe-installations/{installation_id}/spec"
+    ]["get"]
+    assert spec_route["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/CompiledExecutionPlan")
 
     tampered = copy.deepcopy(payload)
     tampered["runtime_image"]["local_image_config_id"] = "sha256:" + "0" * 64

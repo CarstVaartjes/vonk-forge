@@ -529,28 +529,28 @@ class CompiledExecutionPlan(_StrictModel):
                 raise CompiledExecutionPlanError(f"{label} is invalid")
             return value
 
+        if "port" not in placement:
+            raise CompiledExecutionPlanError("runtime port is missing")
+        raw_port = placement["port"]
         placement_doc = {
             "endpoint_address": placement.get("endpoint_address"),
-            "rank": _required_int(placement.get("rank", topology.get("rank")), "runtime rank"),
-            "role": placement.get("role", topology.get("role")),
+            "rank": _required_int(placement.get("rank"), "runtime rank"),
+            "role": placement.get("role"),
             "world_size": _required_int(
-                placement.get("world_size", topology.get("world_size")),
+                placement.get("world_size"),
                 "runtime world size",
                 minimum=1,
             ),
             "local_address": placement.get("local_address"),
             "master_address": placement.get("master_address"),
             "master_port": placement.get("master_port"),
-            "port": _required_int(
-                placement.get(
-                    "port",
-                    _mapping(endpoint, "endpoint").get("port") if isinstance(endpoint, Mapping) else 1024,
-                ),
-                "runtime port",
-                minimum=1,
+            "port": (
+                None
+                if raw_port is None
+                else _required_int(raw_port, "runtime port", minimum=1)
             ),
             "reserved_memory_bytes": _required_int(
-                placement.get("reserved_memory_bytes", 1),
+                placement.get("reserved_memory_bytes"),
                 "runtime reserved memory",
                 minimum=1,
             ),

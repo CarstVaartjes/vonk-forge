@@ -1403,7 +1403,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     || spec.runtime.placement.rank != request.rank
                     || spec.runtime.placement.role != request.role
                     || spec.runtime.placement.world_size != request.world_size
-                    || spec.runtime.placement.port != request.port
+                    || spec.runtime.placement.port != Some(request.port)
                     || spec.runtime.placement.reserved_memory_bytes != request.reserved_memory_bytes
                     || spec.runtime.placement.local_address != request.local_address
                     || spec.runtime.placement.master_address != request.master_address
