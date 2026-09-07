@@ -402,11 +402,12 @@ def install_model_cache_routes(
     def get_updates(
         artifact_set_sha256: Annotated[str | None, Query(pattern=_DIGEST)] = None,
         limit: Annotated[int, Query(ge=1, le=100)] = 100,
+        check_upstream: bool = False,
         cursor: Annotated[str | None, Query(max_length=1024)] = None,
         _actor: Actor = authenticated,
     ) -> ModelCacheUpdatesResponse:
         try:
-            context = {"limit": limit, "artifact_set_sha256": artifact_set_sha256}
+            context = {"limit": limit, "artifact_set_sha256": artifact_set_sha256, "check_upstream": check_upstream}
             boundary = decode_cursor(
                 cursor,
                 resource="model-cache-updates",
@@ -416,6 +417,7 @@ def install_model_cache_routes(
             result = cache().discover_updates(
                 artifact_set_sha256=artifact_set_sha256,
                 limit=limit,
+                check_upstream=check_upstream,
                 boundary=boundary,
             )
             return ModelCacheUpdatesResponse(

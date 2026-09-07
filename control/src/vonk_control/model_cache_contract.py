@@ -27,6 +27,11 @@ class StrictModel(StrictJSONModel):
     )
 
 
+class ModelCacheRepairCheckpoint(StrictModel):
+    transfer_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    completed_objects: list[Digest]
+
+
 class ModelCacheDownloadRequest(StrictModel):
     schema_version: Literal[2] = 2
     request_key: str = Field(pattern=UUID_PATTERN)
@@ -296,6 +301,15 @@ class ModelCacheEvictionPreviewResponse(StrictModel):
     blockers: list[str] = Field(max_length=32)
 
 
+class ModelCacheUpstreamRevision(StrictModel):
+    repository: str
+    pinned_revision: str = Field(pattern=REVISION_PATTERN)
+    latest_revision: str | None = Field(default=None, pattern=REVISION_PATTERN)
+    status: Literal["current", "update-available", "check-failed"]
+    checked_at: str
+    error_code: str | None = None
+
+
 class ModelCacheUpdateResponse(StrictModel):
     schema_version: Literal[2] = 2
     artifact_set_sha256: Digest
@@ -303,6 +317,7 @@ class ModelCacheUpdateResponse(StrictModel):
     latest_model_content_sha256: Digest | None
     model_update_from: ModelReference | None = None
     model_update_to: ModelReference | None = None
+    upstream_revisions: list[ModelCacheUpstreamRevision] = Field(default_factory=list)
     model_update_ambiguous: bool = False
     model_update_candidates: list[ModelReference] = Field(default_factory=list, max_length=16)
     recipe_revision_sha256: Digest | None

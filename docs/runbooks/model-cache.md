@@ -1,123 +1,89 @@
-# Model cache preparation and verification
+# NAS model cache preparation and repair
 
-This runbook prepares the immutable DeepSeek-V4-Flash-0731 snapshot used by
-the Mia dual-GPU node runtime. Each GPU node keeps its own complete copy under
-`/srv/models`; the NAS and Hugging Face are not serving-time dependencies.
+The Controller downloads immutable Model files once into `/state/model-cache`.
+Enrolled Sparks receive complete, authorized manifests and bytes over the LAN;
+they do not download Model payloads from upstream. Image archives are independent
+and live under `/state/agent-artifacts/image-cache`. A Model can be downloaded
+without selecting a Recipe, preparing an image, or requiring an online Spark.
+The NAS is not a serving-time dependency after local installation completes.
 
-The Controller-side cache downloader supports optional gated/private access
-through the [Hugging Face model-cache authentication guide](../model-cache-huggingface-auth.md).
-The default deployment has no `HF_TOKEN_FILE`, so public downloads remain
-anonymous. The signed NAS installer creates an empty regular
-`secrets/hf-token` with owner-only permissions without prompting. To enable
-gated access, replace it with a protected token file (`chmod 0400
-secrets/hf-token`), set `HF_TOKEN_FILE=./secrets/hf-token` in the host `.env`,
-then recreate or restart the `control-api` and `control-worker` services so the
-normalized secret volume is refreshed:
+## Prepare and inspect
+
+Select the exact Model in Library and use Download, or use its canonical digest:
 
 ```bash
-docker compose up -d --force-recreate control-api control-worker
+vonkctl cache download --model-content-sha256 MODEL_CONTENT_SHA256 --dry-run --json
+vonkctl cache download --model-content-sha256 MODEL_CONTENT_SHA256 --apply --json
+vonkctl cache list --json
+vonkctl cache operations list --json
 ```
 
-To rotate the credential, replace the file atomically with another owner-only
-file and run the same recreate command. The token is used only for a canonical
-Hugging Face gated response; the Controller verifies the resulting bytes once
-in the NAS cache, and Spark distribution remains tokenless. Missing access is
-reported as `model_cache.credentials_missing`; a rejected token is reported as
-`model_cache.credentials_denied`. Neither error contains the credential.
+Preview distinguishes cached bytes from remaining upstream bytes and checks
+actual filesystem free space against the configured reserve. Insufficient space
+blocks preparation; it does not redirect Sparks to upstream. Concurrent workers
+share one digest transfer. Partial files remain outside the published object
+namespace and resume from durable byte checkpoints. Once all declared files
+match their pinned sizes and SHA-256 identities, the cache entry is usable.
 
-## Immutable inputs
+Successful verification is reused while a file's filesystem identity remains
+unchanged, including during inventory reconciliation and LAN serving. A changed
+file triggers verification again. Routine inventory and installation do not
+rescan all unchanged model payloads. Per-node assignment, authorization,
+manifest identity, transfer length and completion checks remain required.
 
-| Input | Pinned value |
-|---|---|
-| Repository | `deepseek-ai/DeepSeek-V4-Flash-0731` |
-| Revision | `9e165c30e2704aec5d9d593cce3eebd58bbef1cb` |
-| Expected manifest | `manifests/deepseek-v4-flash-0731.json` |
-| Manifest SHA-256 | `82e965c1caa019b31f4d776d0b3eddb0cc0d8e076f189822b8a3bbe3fa115121` |
-| Snapshot path | `/srv/models/snapshots/deepseek-v4-flash-0731` |
-| Node manifest path | `/srv/models/manifests/deepseek-v4-flash-0731.json` |
+## Credentials
 
-The manifest covers 74 files and 166,898,660,330 bytes. Its 48 SafeTensors
-shards account for 166,886,535,336 bytes. The required
-`encoding/encoding_dsv4.py` is included explicitly.
+Follow the [Hugging Face authentication guide](../model-cache-huggingface-auth.md)
+for optional gated access. Only the NAS receives the upstream token. The
+Controller sends it to the canonical Hugging Face authority and strips it from
+CDN redirects. Sparks use their enrollment identity for NAS distribution.
+Missing or denied account access is shown on the operation; after fixing access,
+use its Check access and resume action to continue the same immutable transfer.
 
-## Build the expected manifest
-
-Build expected manifests on the developer machine before preparing either
-node. Generation calls the exact revision API with `?blobs=true`, requires the
-response's top-level `sha` to equal the requested revision, and parses the
-pinned weight index. It takes weight SHA-256 values and sizes from Git LFS
-metadata. It downloads and hashes only the 26 non-LFS repository files; it
-does not download any weight blob. A repository `blobId` is retained only as
-Git provenance and is never treated as a raw-file SHA-256.
+## Repair the same pin
 
 ```bash
-uv run python -m tools.model_manifest generate \
-  --repo deepseek-ai/DeepSeek-V4-Flash-0731 \
-  --revision 9e165c30e2704aec5d9d593cce3eebd58bbef1cb \
-  --output manifests/deepseek-v4-flash-0731.json
-
-shasum -a 256 manifests/deepseek-v4-flash-0731.json
+vonkctl cache repair ARTIFACT_SET_SHA256 preview --json
+vonkctl cache repair ARTIFACT_SET_SHA256 apply --plan-digest PLAN_DIGEST --apply --json
 ```
 
-Review the revision, file count, aggregate sizes, encoder entry, index entry,
-and all 48 shard entries before pinning the manifest digest in a Model
-Definition. Regeneration is a maintenance action: a changed byte means the
-checked manifest and its consumer pins must be reviewed together.
+Repair checks reserve space for a new copy. Its partial files belong to that
+repair and survive retries and Controller restarts. A new repair starts a fresh
+transfer; it does not inherit a failed repair's bytes. Completed repair members
+are retained across retries. Each replacement must satisfy the original pin
+before an atomic overwrite; the existing pathname and already-open readers stay
+available throughout publication. Failed transfers, mismatches and publication
+failures preserve the last verified copy. Repair never changes the Model or
+Recipe identity.
 
-## Prepare each node
+## Discover and accept upstream changes
 
-Preparation must use the exact commit above and a temporary directory on the
-same local filesystem as the final snapshot. The node-local preparation job
-downloads into that temporary directory, verifies it, and only then installs
-it at the final path. Never resolve `main`, `latest`, or another branch name.
+The updates endpoint normally returns accepted catalog candidates without
+network access. Explicit checks use
+`GET /api/v1/model-cache/updates?check_upstream=true`, optionally filtered by
+`artifact_set_sha256`. They fetch only repository metadata, once per repository
+and pin within the result page. Up to four checks run concurrently after the
+catalog DB session closes, within an eight-second page budget. Unfinished checks
+report `model_cache.upstream_check_budget_exhausted`; accepted catalog candidates
+remain available. Provider rate limiting is reported as a failed check with its
+stable error code. `upstream_revisions` reports the pinned and
+current upstream revisions, check time, and `current`, `update-available` or
+`check-failed`. Provider failure does not hide accepted catalog candidates.
 
-The installed tree must contain materialized regular files. Do not point the
-snapshot path at a Hugging Face cache snapshot made of symlinks. If a download
-tool uses a shared blob cache internally, its final `--local-dir` output still
-has to be a self-contained regular-file tree before verification. The
-verifier refuses symlinks, non-regular files, unsafe relative paths,
-unmanifested files or directories, missing files, size changes, and digest
-changes. It does not repair, download, or delete anything.
+An upstream difference is a discovery result, not an installable update. Import
+and review a new canonical Model manifest with the exact new revision and file
+identities, then a new Recipe revision referencing that Model. The resulting
+artifact set has a new immutable identity; the previous cached revision and its
+installed consumers remain unchanged.
 
-Keep the checked manifest outside the snapshot and copy the identical bytes
-to the node manifest path. Confirm its digest before using it:
+## Retention and evidence
 
-```bash
-shasum -a 256 /srv/models/manifests/deepseek-v4-flash-0731.json
-```
+Recipe uninstall retains successful Model and image cache entries. Eviction is
+a separate preview/apply operation and rechecks installed Recipe, active-run and
+in-flight references before deletion. Free filesystem bytes drive admission;
+logical cache totals describe storage rather than determine free capacity.
 
-Expected output begins with:
-
-```text
-82e965c1caa019b31f4d776d0b3eddb0cc0d8e076f189822b8a3bbe3fa115121
-```
-
-## Verify offline
-
-Run the standard-library-only verifier on each GPU node after download, after any
-transfer, and before runtime activation:
-
-```bash
-python3 tools/model_manifest.py verify \
-  --manifest /srv/models/manifests/deepseek-v4-flash-0731.json \
-  --snapshot /srv/models/snapshots/deepseek-v4-flash-0731
-```
-
-Verification performs no network calls. It opens each path relative to a
-no-follow directory descriptor where the operating system supports it,
-requires a regular file, checks size before hashing, and hashes in 8 MiB
-chunks. A successful report has `"ok": true`, 74 verified files, no missing,
-changed, unsafe, or unexpected paths, and 166,898,660,330 verified bytes. A
-failure exits nonzero and prints all discovered snapshot failures as JSON.
-
-After both nodes pass, serving uses:
-
-```text
-HF_HUB_OFFLINE=1
-TRANSFORMERS_OFFLINE=1
-HF_HUB_DISABLE_XET=1
-```
-
-Do not delete a previous snapshot, runtime cache, output, or verification
-evidence as part of failure recovery. Retain the failed report and staging
-directory until the mismatch has been diagnosed.
+Cache and per-node distribution operations expose source, bytes, cache hits and
+transfer progress. Successful caching and LAN distribution prove preparation;
+physical model runtime and multi-Spark fabric acceptance require the designated
+hardware lane.
