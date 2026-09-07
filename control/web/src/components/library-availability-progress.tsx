@@ -22,7 +22,8 @@ function finiteNumber(value: unknown): number | undefined {
 }
 
 export function availabilityProgress(value: unknown): AvailabilityProgress {
-  const raw = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const outer = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  const raw = typeof outer.operation === "object" && outer.operation !== null ? outer.operation as Record<string, unknown> : outer;
   const completedBytes = finiteNumber(raw.completed_bytes ?? raw.downloaded_bytes) ?? 0;
   const totalBytes = raw.total_bytes_known === false ? undefined : finiteNumber(raw.total_bytes ?? raw.expected_bytes);
   const bytesPerSecond = finiteNumber(raw.smoothed_bytes_per_second ?? raw.bytes_per_second ?? raw.rate);

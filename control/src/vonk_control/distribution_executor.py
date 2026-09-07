@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionAssignment,
     DistributionObject,
+    OperationMemberProgress,
+    OperationProgress,
     canonical_message,
 )
 
@@ -31,6 +33,7 @@ from .models import (
     RuntimeImageAuthorization,
     RuntimeImageReceipt,
 )
+from .operation_progress import aggregate_progress, project_progress
 from .run_switch_contract import (
     ArtifactVerificationEvidence,
     ArtifactVerificationResult,
@@ -290,6 +293,7 @@ class DurableDistributionPhaseExecutor:
                 .order_by(AgentOperation.node_id)
             ))
             members = []
+            measured_members = []
             evidence = []
             cached_nodes = tuple(
                 value for value in child.payload.get("cached_nodes", [])
@@ -372,6 +376,15 @@ class DurableDistributionPhaseExecutor:
                     "error": evidence_error
                     or (result.get("reason") if isinstance(result, Mapping) else None),
                 })
+                if raw:
+                    measured = project_progress(OperationProgress.model_validate(raw), self._clock())
+                    values = {key: value for key, value in measured.model_dump(mode="python").items() if key in OperationMemberProgress.model_fields}
+                    if member_state not in {"running", "pending"}:
+                        values.update(bytes_per_second=None, smoothed_bytes_per_second=None, eta_seconds=None, activity=None)
+                    values.update(member_id=operation.node_id, state=member_state, completed_bytes=members[-1]["completed_bytes"], total_bytes=members[-1]["total_bytes"])
+                    measured_members.append(OperationMemberProgress.model_validate(values))
+                else:
+                    measured_members.append(OperationMemberProgress(member_id=operation.node_id, phase="pending" if member_state == "pending" else "transfer", state=member_state, completed_bytes=members[-1]["completed_bytes"], total_bytes=members[-1]["total_bytes"]))
                 if isinstance(result, Mapping) and result:
                     evidence.append(_evidence_projection(operation.node_id, result))
             by_node = {str(item["node_id"]): item for item in members}
@@ -405,6 +418,10 @@ class DurableDistributionPhaseExecutor:
                 "members": members,
                 "evidence": evidence,
             }
+            for node_id in cached_nodes:
+                item = by_node[node_id]
+                measured_members.append(OperationMemberProgress(member_id=node_id, phase="transfer", state="succeeded", completed_bytes=item["completed_bytes"], total_bytes=item["total_bytes"]))
+            payload["progress"]["operation"] = aggregate_progress(measured_members).model_dump(mode="json", exclude_none=True)
             if child.status_reason or projection_reason:
                 payload["reason"] = child.status_reason or projection_reason
             if state != child.state:

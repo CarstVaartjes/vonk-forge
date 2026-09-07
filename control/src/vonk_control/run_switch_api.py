@@ -13,6 +13,7 @@ from .auth import Actor
 from .operation_api import bounded_error_responses
 from .run_switch_contract import (
     RunSwitchApplyRequest,
+    RunSwitchCancelRequest,
     RunSwitchOperation,
     RunSwitchPlan,
     RunSwitchPreviewRequest,
@@ -27,6 +28,7 @@ from .run_switch_operations import (
 from .strict_json import StrictJSONModel
 
 RUN_SWITCH_OPERATION_IDS = {
+    ("post", "/api/v1/recipes/run-switches/{operation_id}/cancel"): "cancelRecipeRunSwitchOperation",
     (
         "post",
         "/api/v1/recipes/run-switch-plans/preview",
@@ -203,6 +205,26 @@ def install_run_switch_routes(
                 (operation_id, result.operation_id, result.plan_digest),
             )
         )
+        return result
+
+    @app.post(
+        "/api/v1/recipes/run-switches/{operation_id}/cancel",
+        response_model=RunSwitchOperation,
+        status_code=status.HTTP_202_ACCEPTED,
+        responses=errors(401, 403, 404, 409, 422, 503, conflict=True),
+        operation_id="cancelRecipeRunSwitchOperation",
+    )
+    def cancel_run_switch(body: RunSwitchCancelRequest, request: Request, operation_id: str = Path(pattern=_UUID), actor: Actor = authenticated) -> RunSwitchOperation:
+        administrator(actor)
+        try:
+            result = runs().cancel(operation_id, actor=actor.subject, request_key=body.request_key, reason=body.reason)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="run/switch operation not found") from None
+        except RunSwitchOperationConflict as error:
+            return conflict(request, error)
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            raise HTTPException(status_code=503, detail=f"run/switch cancellation unavailable: {error}") from None
+        audits.append(AuditRecord(request.state.request_id, actor.subject, "recipe.run-switch.cancel", None, (operation_id, result.plan_digest)))
         return result
 
     @app.post(

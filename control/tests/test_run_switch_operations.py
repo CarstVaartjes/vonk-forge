@@ -1588,7 +1588,7 @@ def test_artifact_child_checkpoint_and_digest_mismatch_fail_closed(tmp_path: Pat
     assert pending.current_phase == "transfer"
     child_id = pending.result.child_operation_id
     artifact_executor.children[child_id].state = "succeeded"
-    artifact_executor.children[child_id].result = {"copied_bytes": 0}
+    artifact_executor.children[child_id].result = _target_copy_evidence(plan, plan.phases[0])
     assert service.tick() is True
     assert service.get(operation.operation_id).current_phase == "verify"
 
@@ -1968,7 +1968,7 @@ def test_activity_provider_preserves_group_and_canonical_nested_progress(tmp_pat
     assert item["node_ids"] == list(nodes)
     assert item["node_id"] == nodes[0]
     assert item["attempt"] >= 1
-    assert item["supported_actions"] == []
+    assert item["supported_actions"] == ["cancel"]
     assert item["progress"]["total_bytes_known"] is True
     assert item["progress"]["members"][0]["member_id"] == nodes[0]
     assert "phase_index" not in item["progress"]
@@ -2119,3 +2119,117 @@ def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evid
         row.result = None
     with pytest.raises(ValidationError, match="completed phase evidence"):
         restarted.get(operation.operation_id)
+
+
+def test_nas_transfer_checkpoint_does_not_complete_unstarted_spark_copy(tmp_path):
+    sessions, lifecycle, _, _, _, nodes = setup_services(tmp_path)
+
+    class ColdInspector(CompleteArtifactInspector):
+        def inspect(self, *args, **kwargs):
+            return replace(super().inspect(*args, **kwargs), missing_nas_bytes=1024, nas_coverage="partial")
+
+    executor = ColdStartPhaseExecutor()
+    service = _service(sessions, NOW, lifecycle, None, artifacts=ColdInspector(missing_spark_bytes=1024), phase_executor=executor)
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
+    service.tick()
+    progress = service.get(operation.operation_id).progress
+    assert executor.events == ["model-download"]
+    assert progress.completed_bytes == 1024
+    assert progress.total_bytes > progress.completed_bytes
+    assert progress.members[0].completed_bytes == 0
+
+
+@pytest.mark.parametrize("child_completion", [False, True])
+def test_overlapping_ticks_cannot_apply_completion_to_the_next_checkpoint(tmp_path, child_completion):
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4()))
+
+    class InterleavedExecutor(RecordingArtifactExecutor):
+        entered = False
+        service = None
+
+        def execute(self, *args, **kwargs):
+            result = super().execute(*args, **kwargs)
+            if not child_completion and not self.entered:
+                self.entered = True
+                self.service.tick()
+            return result
+
+        def get(self, operation_id):
+            result = super().get(operation_id)
+            if child_completion and result.state == "succeeded" and not self.entered:
+                self.entered = True
+                self.service.tick()
+            return result
+
+    executor = InterleavedExecutor(child_transfer=child_completion)
+    service = _service(sessions, NOW, lifecycle, executor, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
+    executor.service = service
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
+    service.tick()
+    if child_completion:
+        child_id = service.get(operation.operation_id).result.child_operation_id
+        child = executor.children[child_id]
+        child.state = "succeeded"
+        child.result = _target_copy_evidence(plan, plan.phases[0])
+        service.tick()
+    current = service.get(operation.operation_id)
+    assert current.progress.phase_index == 1
+    assert current.current_phase == "verify"
+    assert current.completed_phases == ["transfer"]
+
+
+def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tmp_path):
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4()))
+    executor = RecordingArtifactExecutor(child_transfer=True)
+    service = _service(sessions, NOW, lifecycle, executor, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
+    service.tick()
+    child_id = service.get(operation.operation_id).result.child_operation_id
+    key = str(uuid.uuid4())
+    pending = service.cancel(operation.operation_id, actor="admin", request_key=key, reason="Stop preparation")
+    assert pending.state == "running"
+    assert service.cancel(operation.operation_id, actor="admin", request_key=key, reason="Stop preparation") == pending
+    service.tick()
+    assert service.get(operation.operation_id).state == "running"
+    child = executor.children[child_id]
+    child.state = "succeeded"
+    child.result = _target_copy_evidence(plan, plan.phases[0])
+    restarted = _service(sessions, NOW, lifecycle, executor, artifacts=CompleteArtifactInspector(missing_spark_bytes=1024))
+    restarted.tick()
+    cancelled = restarted.get(operation.operation_id)
+    assert cancelled.state == "cancelled"
+    assert cancelled.result.completed_phases == ["transfer"]
+    assert cancelled.result.phase_results
+    assert cancelled.result.child_operation_id is None
+    assert not restarted._advance(operation.operation_id)
+    with sessions() as session:
+        assert len(list(session.scalars(select(NodeArtifact)))) > 0
+        assert session.get(RecipeInstallation, plan.installation_id).state == "installed"
+
+
+def test_cancel_queued_start_is_idempotent_but_active_runtime_requires_stop(tmp_path):
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4()))
+    service = _service(sessions, NOW, lifecycle, RecordingArtifactExecutor())
+    request = _request(sessions, nodes[0])
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=str(uuid.uuid4())), actor="admin")
+    key = str(uuid.uuid4())
+    cancelled = service.cancel(operation.operation_id, actor="admin", request_key=key, reason="Keep the current profile")
+    assert cancelled.state == "cancelled"
+    assert cancelled.progress.state == "cancelled"
+    with pytest.raises(RunSwitchOperationConflict, match="already used differently"):
+        service.cancel(operation.operation_id, actor="admin", request_key=key, reason="Different intent")
+    request_key = str(uuid.uuid4())
+    active = service.apply(RunSwitchApplyRequest(**request.model_dump(), plan_digest=plan.plan_digest, request_key=request_key), actor="admin")
+    service.tick()
+    with pytest.raises(RunSwitchOperationConflict, match="explicit Stop"):
+        service.cancel(active.operation_id, actor="admin", request_key=str(uuid.uuid4()), reason="Stop running")
