@@ -286,9 +286,7 @@ def _validate_safe_keys(
                 and ("/" in value or "\\" in value)
                 and _typed_result_string(path, value)
             )
-        ):
-            return
-        elif (
+        ) or (
             operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
             and path[:1] == ("compiled_execution_plan",)
         ):

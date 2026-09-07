@@ -12,7 +12,8 @@ from vonk_control.compiled_execution_plan import (
     execution_identity_sha256,
 )
 from vonk_control.execution_plan_service import _bind_runtime_artifacts
-from test_compiled_execution_plan import _image, _spec
+
+from control.tests.test_compiled_execution_plan import _image, _spec
 
 
 def main() -> None:

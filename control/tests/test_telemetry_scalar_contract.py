@@ -7,7 +7,6 @@ from pydantic import ValidationError
 from vonk_agent_protocol import AgentProtocolError, TelemetryReport
 from vonk_control.telemetry_contract import TelemetrySeries
 
-
 OBSERVED_AT = "2026-09-05T12:00:00+00:00"
 
 

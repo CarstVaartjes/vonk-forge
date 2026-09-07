@@ -12,16 +12,16 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from .compiled_execution_plan import CompiledExecutionPlan
 from .contracts import (
     AgentOperation,
     AgentProtocolError,
-    canonical_message,
     _fields,
     _mapping,
     _uuid,
     _version,
+    canonical_message,
 )
-from .compiled_execution_plan import CompiledExecutionPlan
 
 RECIPE_OPERATIONS = frozenset(
     {
