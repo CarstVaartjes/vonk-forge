@@ -1,20 +1,24 @@
 use std::io::{Read, Write};
 
 use ring::signature::{self, Ed25519KeyPair, KeyPair};
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use uuid::{Uuid, Version};
+use uuid::Uuid;
 use vonk_agent_protocol::{
-    RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunObservationOutcome,
+    HOST_HELPER_AUTHORITY, RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY, RecipeRunObservationOutcome,
     RecipeRunObservationReceipt, RecipeRunObservationReceiptClaims,
     RecipeRunObservationReceiptSignature, canonical_json, hex_sha256,
-    recipe_run_observation_receipt_signing_bytes,
+    host_helper_grant_signing_bytes, recipe_run_observation_receipt_signing_bytes,
+};
+pub use vonk_agent_protocol::{
+    HostHelperContainerRuntimeAction as ContainerRuntimeAction,
+    HostHelperGrantClaims as GrantClaims, HostHelperGrantSignature as GrantSignature,
+    HostHelperManagedArea as ManagedArea, HostHelperOperation as HostOperation,
+    HostHelperRestartUnit as RestartUnit, SignedHostHelperGrant as SignedGrant,
 };
 
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 pub const MAX_GRANT_LIFETIME_SECONDS: i64 = 300;
-pub const AUTHORITY: &str = "vonk.host-maintenance-helper";
-const GRANT_DOMAIN: &[u8] = b"VONK-HOST-MAINTENANCE-HELPER-GRANT-V1\0";
+pub const AUTHORITY: &str = HOST_HELPER_AUTHORITY;
 const ARTIFACT_DOMAIN: &[u8] = b"VONK-HOST-ARTIFACT-V1\0";
 
 #[derive(Debug, Error)]
@@ -31,146 +35,6 @@ pub enum HelperError {
     InvalidFrame,
     #[error("helper I/O failed")]
     Io(#[from] std::io::Error),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum ManagedArea {
-    Models,
-    State,
-    Workloads,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum RestartUnit {
-    Agent,
-    Helper,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum ContainerRuntimeAction {
-    ImageImport,
-    ImageInspect,
-    RunInspect,
-    Start,
-    Stop,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum HostOperation {
-    CreateManagedDirectory {
-        area: ManagedArea,
-        relative_path: String,
-    },
-    InstallVonkDeb {
-        package_sha256: String,
-        package_signature: String,
-    },
-    RestartVonkUnit {
-        unit: RestartUnit,
-    },
-    ScheduleReboot {
-        delay_seconds: u16,
-    },
-    ExecuteContainerRuntimeRequest {
-        action: ContainerRuntimeAction,
-        job_id: Uuid,
-        operation_id: Uuid,
-        attempt: u32,
-        fence: Uuid,
-        request_sha256: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        observation_identity_sha256: Option<String>,
-    },
-}
-
-impl HostOperation {
-    pub fn validate(&self) -> Result<(), HelperError> {
-        let valid = match self {
-            Self::CreateManagedDirectory { relative_path, .. } => {
-                valid_relative_path(relative_path)
-            }
-            Self::InstallVonkDeb {
-                package_sha256,
-                package_signature,
-            } => valid_digest(package_sha256) && valid_signature(package_signature),
-            Self::RestartVonkUnit { .. } => true,
-            Self::ScheduleReboot { delay_seconds } => (60..=3600).contains(delay_seconds),
-            Self::ExecuteContainerRuntimeRequest {
-                job_id,
-                operation_id,
-                attempt,
-                fence,
-                request_sha256,
-                action,
-                observation_identity_sha256,
-                ..
-            } => {
-                job_id.get_version() == Some(Version::Random)
-                    && operation_id.get_version() == Some(Version::Random)
-                    && *attempt > 0
-                    && fence.get_version() == Some(Version::Random)
-                    && valid_digest(request_sha256)
-                    && match observation_identity_sha256 {
-                        None => true,
-                        Some(digest) => {
-                            *action == ContainerRuntimeAction::RunInspect && valid_digest(digest)
-                        }
-                    }
-            }
-        };
-        if valid {
-            Ok(())
-        } else {
-            Err(HelperError::InvalidOperation)
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct GrantClaims {
-    pub schema_version: u8,
-    pub authority: String,
-    pub request_id: Uuid,
-    pub node_id: String,
-    pub issued_at: i64,
-    pub expires_at: i64,
-    pub operation: HostOperation,
-}
-
-impl GrantClaims {
-    fn validate(&self) -> Result<(), HelperError> {
-        if self.schema_version != 1
-            || self.authority != AUTHORITY
-            || self.request_id.get_version() != Some(Version::Random)
-            || !valid_node_id(&self.node_id)
-            || self.issued_at <= 0
-            || !(1..=MAX_GRANT_LIFETIME_SECONDS).contains(&(self.expires_at - self.issued_at))
-        {
-            return Err(HelperError::InvalidAuthorization);
-        }
-        self.operation.validate()
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct GrantSignature {
-    pub algorithm: String,
-    pub key_id: String,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct SignedGrant {
-    pub schema_version: u8,
-    pub claims: GrantClaims,
-    pub signature: GrantSignature,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,7 +73,10 @@ impl GrantVerifier {
         {
             return Err(HelperError::InvalidPeer);
         }
-        grant.claims.validate()?;
+        grant
+            .claims
+            .validate()
+            .map_err(|_| HelperError::InvalidAuthorization)?;
         if grant.schema_version != 1
             || now < grant.claims.issued_at
             || now >= grant.claims.expires_at
@@ -237,15 +104,15 @@ pub fn parse_request(raw: &[u8]) -> Result<SignedGrant, HelperError> {
     if canonical != raw {
         return Err(HelperError::InvalidMessage);
     }
-    request.claims.validate()?;
+    request
+        .claims
+        .validate()
+        .map_err(|_| HelperError::InvalidAuthorization)?;
     Ok(request)
 }
 
 pub fn canonical_signing_bytes(claims: &GrantClaims) -> Result<Vec<u8>, HelperError> {
-    claims.validate()?;
-    let mut value = GRANT_DOMAIN.to_vec();
-    value.extend(canonical_json(claims).map_err(|_| HelperError::InvalidMessage)?);
-    Ok(value)
+    host_helper_grant_signing_bytes(claims).map_err(|_| HelperError::InvalidAuthorization)
 }
 
 pub fn sign_observation_receipt(
@@ -315,14 +182,6 @@ pub fn write_frame(writer: &mut impl Write, body: &[u8]) -> Result<(), HelperErr
     Ok(())
 }
 
-fn valid_node_id(value: &str) -> bool {
-    value.len() == 36
-        && value.starts_with("spk_")
-        && value[4..]
-            .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-}
-
 fn valid_digest(value: &str) -> bool {
     value.len() == 64
         && value
@@ -335,20 +194,6 @@ fn valid_signature(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-}
-
-fn valid_relative_path(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 512
-        && value.split('/').all(|component| {
-            !component.is_empty()
-                && component != "."
-                && component != ".."
-                && component.len() <= 128
-                && component
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        })
 }
 
 #[cfg(test)]

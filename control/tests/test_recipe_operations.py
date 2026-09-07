@@ -273,7 +273,7 @@ def signed_observation_receipt(
     node_id: str,
     observed_at: datetime,
     outcome: str = "running",
-) -> dict[str, object]:
+) -> SignedRecipeRunObservationReceipt:
     claims = RecipeRunObservationReceiptClaims(
         schema_version=1,
         authority="vonk.recipe-run-observation-helper",
@@ -295,7 +295,7 @@ def signed_observation_receipt(
                 recipe_run_observation_receipt_signing_bytes(claims)
             ).hex(),
         ),
-    ).to_mapping()
+    )
 
 
 def start_evidence(payload: dict[str, object]) -> dict[str, object]:
@@ -3620,7 +3620,15 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
         node_id=observation_node,
         observed_at=NOW,
     )
-    forged_receipt["signature"]["value"] = "0" * 128
+    forged_receipt = forged_receipt.model_copy(
+        update={
+            "signature": HostHelperSignature(
+                algorithm="ed25519",
+                key_id=forged_receipt.signature.key_id,
+                value="0" * 128,
+            )
+        }
+    )
     with (
         sessions.begin() as session,
         pytest.raises(HostHelperAuthorityError, match="signature"),
@@ -3632,7 +3640,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW,
             received_at=NOW,
-            signed_grant=grant.to_mapping(),
+            signed_grant=grant,
             helper_receipt=forged_receipt,
         )
     with sessions.begin() as session:
@@ -3643,7 +3651,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW,
             received_at=NOW,
-            signed_grant=grant.to_mapping(),
+            signed_grant=grant,
             helper_receipt=signed_observation_receipt(
                 grant,
                 identity_sha256,
@@ -3675,7 +3683,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW + timedelta(seconds=1),
             received_at=NOW + timedelta(seconds=1),
-            signed_grant=grant.to_mapping(),
+            signed_grant=grant,
             helper_receipt=signed_observation_receipt(
                 grant,
                 identity_sha256,
@@ -3705,7 +3713,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW,
             received_at=NOW,
-            signed_grant=second_grant.to_mapping(),
+            signed_grant=second_grant,
             helper_receipt=signed_observation_receipt(
                 second_grant,
                 second_identity_sha256,
@@ -3737,7 +3745,7 @@ def test_exact_rank_inspection_grant_is_identity_bound_and_single_use(
             identity=identity,
             observed_at=NOW - timedelta(seconds=1),
             received_at=NOW,
-            signed_grant=stale_grant.to_mapping(),
+            signed_grant=stale_grant,
             helper_receipt=signed_observation_receipt(
                 stale_grant,
                 identity_sha256,

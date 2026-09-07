@@ -13,8 +13,8 @@ use serde::Deserialize;
 use thiserror::Error;
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeAction, HostRuntimeRequest, RecipeRunInspectionBinding,
-    RecipeRunObservationOutcome, RecipeRunObservationReceipt, canonical_json, hex_sha256,
-    parse_strict, recipe_run_observation_receipt_signing_bytes,
+    RecipeRunObservationOutcome, RecipeRunObservationReceipt, SignedHostHelperGrant,
+    canonical_json, hex_sha256, parse_strict, recipe_run_observation_receipt_signing_bytes,
 };
 
 use crate::client::{AgentHttpClient, ClientError};
@@ -54,7 +54,7 @@ pub struct HostRuntimeOutcome {
 }
 
 pub struct RecipeRunInspectionOutcome {
-    pub grant: serde_json::Value,
+    pub grant: SignedHostHelperGrant,
     pub observation_identity_sha256: String,
     pub receipt: RecipeRunObservationReceipt,
     pub process_running: bool,
@@ -103,15 +103,7 @@ impl HostRuntimeBoundary<'_> {
             .client
             .recipe_run_inspection_grant(&binding, &request, &digest)
             .await?;
-        let request_id = authorization
-            .grant
-            .get("claims")
-            .and_then(|claims| claims.get("request_id"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(|value| uuid::Uuid::parse_str(value).ok())
-            .filter(|value| value.get_version() == Some(uuid::Version::Random))
-            .ok_or(HostRuntimeError::Protocol)?
-            .to_string();
+        let request_id = authorization.grant.claims.request_id.to_string();
         let grant_bytes =
             canonical_json(&authorization.grant).map_err(|_| HostRuntimeError::Protocol)?;
         let helper_socket = self.helper_socket.to_path_buf();
@@ -124,18 +116,8 @@ impl HostRuntimeBoundary<'_> {
             return Err(HostRuntimeError::Protocol);
         }
         let receipt = require_inspection_receipt(&response)?.clone();
-        let issued_at = authorization
-            .grant
-            .get("claims")
-            .and_then(|claims| claims.get("issued_at"))
-            .and_then(serde_json::Value::as_i64)
-            .ok_or(HostRuntimeError::Protocol)?;
-        let expires_at = authorization
-            .grant
-            .get("claims")
-            .and_then(|claims| claims.get("expires_at"))
-            .and_then(serde_json::Value::as_i64)
-            .ok_or(HostRuntimeError::Protocol)?;
+        let issued_at = authorization.grant.claims.issued_at;
+        let expires_at = authorization.grant.claims.expires_at;
         let received_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|_| HostRuntimeError::Protocol)?
@@ -208,12 +190,7 @@ impl HostRuntimeBoundary<'_> {
                 .client
                 .host_runtime_grant(claim, action, &digest)
                 .await?;
-            let request_id = grant
-                .get("claims")
-                .and_then(|claims| claims.get("request_id"))
-                .and_then(serde_json::Value::as_str)
-                .ok_or(HostRuntimeError::Protocol)?
-                .to_owned();
+            let request_id = grant.claims.request_id.to_string();
             let grant = canonical_json(&grant).map_err(|_| HostRuntimeError::Protocol)?;
             let helper_socket = self.helper_socket.to_path_buf();
             let response = tokio::task::spawn_blocking(move || {

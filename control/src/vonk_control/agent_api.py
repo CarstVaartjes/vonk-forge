@@ -39,6 +39,7 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     DistributionAssignment,
     SignedHostHelperGrant,
+    SignedRecipeRunObservationReceipt,
     SignedPackageHelperGrant,
     SignedPackageObjectReceipt,
     canonical_message,
@@ -537,11 +538,9 @@ class AgentGrantResponse(StrictJSONModel):
     grant: dict[str, object]
 
 
-class HostHelperGrantResponse(AgentGrantResponse):
-    @field_validator("grant")
-    @classmethod
-    def canonical_host_grant(cls, value: dict[str, object]) -> dict[str, object]:
-        return SignedHostHelperGrant.parse(value).to_mapping()
+class HostHelperGrantResponse(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    grant: SignedHostHelperGrant
 
 
 class PackageHelperReceiptsResponse(StrictJSONModel):
@@ -553,12 +552,11 @@ class RecipeRunObservationGrantResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    grant: dict[str, object]
+    grant: SignedHostHelperGrant
 
 
-def _host_grant_response(grant: object) -> HostHelperGrantResponse:
-    parsed = SignedHostHelperGrant.parse(grant.to_mapping())
-    return HostHelperGrantResponse(grant=parsed.to_mapping())
+def _host_grant_response(grant: SignedHostHelperGrant) -> HostHelperGrantResponse:
+    return HostHelperGrantResponse(grant=grant)
 
 
 def _package_grant_response(grant: object) -> dict[str, object]:
@@ -709,8 +707,8 @@ class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
     observed_at: datetime
     observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     endpoint_ready: bool | None = Field(default=None, strict=True)
-    grant: dict[str, object]
-    helper_receipt: dict[str, object]
+    grant: SignedHostHelperGrant
+    helper_receipt: SignedRecipeRunObservationReceipt
 
     @field_validator("observed_at", mode="before")
     @classmethod
@@ -2179,7 +2177,7 @@ def install_agent_routes(
             RecipeRunObservationGrantResponse(
                 schema_version=1,
                 observation_identity_sha256=observation_identity,
-                grant=grant.to_mapping(),
+                grant=grant,
             ).model_dump()
         )
 
@@ -2479,7 +2477,7 @@ def install_agent_routes(
     @agent.post("/host-runtime/grant", response_model=HostHelperGrantResponse)
     def host_runtime_grant(
         body: HostRuntimeGrantRequest, request: Request
-    ) -> HostHelperGrantResponse:
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
@@ -2494,7 +2492,7 @@ def install_agent_routes(
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
             )
-            return _host_grant_response(grant)
+            return _json_response(_host_grant_response(grant))
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="host runtime authority rejected request"
@@ -2503,7 +2501,7 @@ def install_agent_routes(
     @agent.post("/agent-upgrade/grant", response_model=HostHelperGrantResponse)
     def agent_upgrade_grant(
         body: AgentUpgradeGrantRequest, request: Request
-    ) -> HostHelperGrantResponse:
+    ) -> Response:
         identity = workload_helper_identity(request)
         required = host_runtime_service()
         try:
@@ -2518,7 +2516,7 @@ def install_agent_routes(
                 certificate_serial=identity.certificate_serial,
                 expires_in_seconds=body.expires_in_seconds,
             )
-            return _host_grant_response(grant)
+            return _json_response(_host_grant_response(grant))
         except (KeyError, TypeError, ValueError, HostHelperAuthorityError):
             raise HTTPException(
                 status_code=409, detail="agent upgrade authority rejected request"
