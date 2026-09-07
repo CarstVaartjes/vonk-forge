@@ -166,3 +166,27 @@ through the same model before advancing the operation.
 A passing model validation test proves document structure. A passing connected
 lifecycle test proves the tested orchestration. Neither alone proves that every
 model works on physical Spark hardware.
+
+
+## Current coverage gaps
+
+The 7 September 2026 route inventory verified that generation starts from the
+real FastAPI application; there is no separately handwritten full OpenAPI
+contract. This does not prove every nested document or error response is typed.
+The following active gaps remain after source consolidation:
+
+- `InstallPlanResponse.compiled_execution_plans` must expose the shared
+  `CompiledExecutionPlan` for each Spark.
+- `UninstallPlanResponse.recipe_content` must expose the public `RecipeDefinition`.
+- `ArtifactJobResponse.compiled_contract` needs one typed structure shared with
+  its compiler and validator; it currently uses a dictionary and manual checks.
+- `OperationResponse.result` needs the actual kind-specific lifecycle output
+  contracts, including progress and aggregated per-node results.
+- Alternate JSON errors in catalog, recipe, Run/Switch, image availability and
+  central exception handlers must serialize their documented Pydantic models.
+  Declaring a response model in OpenAPI does not validate a returned `JSONResponse`.
+
+Engine parameters and other intentionally extensible content remain flexible.
+Raw file responses, SSE, metrics and empty responses do not need JSON models.
+The exact route inventory was examined alongside the handlers; the nested audit
+identified concrete gaps rather than claiming exhaustive semantic coverage.

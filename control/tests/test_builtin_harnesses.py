@@ -247,6 +247,30 @@ def test_vllm_preserves_opaque_engine_options(model: ModelDefinition) -> None:
     assert "--structured-option" in projection.command
 
 
+def test_canonical_harness_preserves_value_bearing_arguments(model: ModelDefinition) -> None:
+    raw = _recipe("vllm").model_dump(mode="json")
+    raw["runtime"]["arguments"] = [
+        {"name": "device", "value": "--device=/dev/nvidia0"},
+        {"name": "network", "value": "host"},
+        {"name": "mount", "value": ""},
+        {"name": "option", "value": "-c"},
+    ]
+    projection = _projection("vllm", recipe=RecipeDefinition.model_validate(raw), model=model)
+
+    expected = (
+        "--device",
+        "--device=/dev/nvidia0",
+        "--network",
+        "host",
+        "--mount",
+        "",
+        "--option",
+        "-c",
+    )
+    start = projection.command.index("--device")
+    assert projection.command[start : start + len(expected)] == expected
+
+
 @pytest.mark.parametrize("slug", BUILTINS)
 def test_builtin_harness_preserves_unknown_environment(slug: str, model: ModelDefinition) -> None:
     raw = _recipe(slug).model_dump(mode="json")

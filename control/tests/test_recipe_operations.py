@@ -96,6 +96,8 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
+from .canonical_recipe_fixtures import canonical_example
+
 
 class RecordingQueue:
     def __init__(self) -> None:
@@ -462,11 +464,7 @@ def setup_services(
                 fabric_bandwidth_mbps=(1000 if nodes > 1 else None),
             )
         )
-    document = json.loads(
-        resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-source-build.json")
-        .read_text()
-    )
+    document = canonical_example("recipe-source-build.json")
     model_document = json.loads(
         resources.files("vonk_forge_contracts")
         .joinpath("examples", "model-definition.json")

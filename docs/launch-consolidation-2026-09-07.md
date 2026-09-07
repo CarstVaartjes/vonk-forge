@@ -22,11 +22,12 @@ are merged whole. Unique uncommitted work is reviewed before a worktree is close
 | Old graph module removal | `393c17b1` | Whole merge `14d88a1b`. |
 | Mandatory pinned client generator | `c5618bfe` | Whole merge `4d979a0b`; current source regenerated at `6c52338f`. |
 | Current command/queue contract | `7dbf6393` | Whole merge `642cd061`, including the approved repair of the newly introduced global revision callback. |
-| Canonical compiler metadata | `578e9670` | Whole merge `db77809d`; 93 checks pass. Remaining obsolete validator consumers are recorded below. |
+| Canonical compiler metadata and current fixture coverage | `077ae720` | Metadata merged at `db77809d`; complete worker branch integrated with 223 focused compiler/lifecycle/artifact checks passing. Remaining obsolete validator consumers are recorded below. |
 | Unused topology bootstrap seed | `9e3abb6a` | Whole merge `6293df00`; 24 PostgreSQL, authority and model-cache checks pass. |
 | Current route authority and LiteLLM contract | `34ad4b6f` | Whole merge `e65eb291`; 115 checks pass, including PostgreSQL and the packaged consumer. |
 | Queue concurrency repair | `30b2aa9f` | Whole merge `7349d467`; 86 queue, upgrade and PostgreSQL checks pass. |
 | Current queue transaction fixtures | `af2bb135` | Whole merge `deef4ce0`; 33 checks pass. |
+| Authenticated API and heartbeat fixtures | `5f7284c4` | Whole merge `dbbf967f`; 136 API checks pass. |
 
 Combined CLI and generated-contract verification passes 245 tests and 45
 subtests. The full Controller run is the final integration gate; earlier focused
@@ -63,6 +64,21 @@ checks adapters and topology support, and packaging still includes those inputs.
 Those consumers must first use canonical compiler metadata before the obsolete
 files can be removed together. This is a recorded unfinished cleanup, not a
 second supported authoring format or an unaccounted worker patch.
+
+## API coverage audit
+
+The real application registers 136 FastAPI routes: 115 have response models;
+the remaining 21 are raw transfers, uploads, event streams, metrics or empty
+responses. OpenAPI is derived from the real application and the generated web
+and CLI clients consume it. The bounded enrollment parser derives its schema
+from the same Pydantic request class.
+
+The pipeline is implemented, but complete nested-contract coverage is unfinished:
+compiled plans, uninstall recipe content, artifact job compiled contracts and
+kind-dependent lifecycle results still use open dictionaries in some responses.
+Several alternate JSON error responses are constructed directly instead of
+serializing their documented Pydantic model. These are concrete follow-up items;
+dynamic engine parameters remain deliberately extensible. See `api-contracts.md`.
 
 ## Publication and deployment boundary
 

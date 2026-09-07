@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
-from importlib.resources import files
 
 import pytest
 from pydantic import ValidationError
@@ -12,13 +10,11 @@ from vonk_control.recipe_runtime_specs import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
+from .canonical_recipe_fixtures import canonical_example
+
 
 def _example(name: str) -> dict[str, object]:
-    return json.loads(
-        files("vonk_forge_contracts")
-        .joinpath("examples", name)
-        .read_text(encoding="utf-8")
-    )
+    return canonical_example(name)
 
 
 @pytest.fixture(scope="module")

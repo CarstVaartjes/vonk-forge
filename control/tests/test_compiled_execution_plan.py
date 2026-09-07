@@ -5,7 +5,6 @@ import hashlib
 import json
 import tarfile
 from datetime import UTC, datetime, timedelta
-from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -66,7 +65,8 @@ from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_forge_contracts.model import ModelFile, ModelReference
 
-from tests.recipe_library_source import recipe_library_root
+from .canonical_recipe_fixtures import canonical_example
+from .recipe_library_source import recipe_library_root
 
 
 def _spec(
@@ -665,11 +665,7 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
         source_bundles=SourceBundleStore(tmp_path / "bundles"),
     )
     services.artifact_root.mkdir()
-    original_recipe = json.loads(
-        resources.files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-image.json")
-        .read_text()
-    )
+    original_recipe = canonical_example("recipe-image.json")
     from vonk_forge_contracts import RecipeDefinition, content_sha256
 
     original = RecipeDefinition.model_validate(original_recipe)
@@ -893,24 +889,10 @@ def test_production_agent_spec_route_returns_the_persisted_schema_two_plan(
 
 
 def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> None:
-    from importlib.resources import files
-
     from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
-    recipe = RecipeDefinition.model_validate(
-        json.loads(
-            files("vonk_forge_contracts")
-            .joinpath("examples/recipe-source-build.json")
-            .read_text(encoding="utf-8")
-        )
-    )
-    model = ModelDefinition.model_validate(
-        json.loads(
-            files("vonk_forge_contracts")
-            .joinpath("examples/model-definition.json")
-            .read_text(encoding="utf-8")
-        )
-    )
+    recipe = RecipeDefinition.model_validate(canonical_example("recipe-source-build.json"))
+    model = ModelDefinition.model_validate(canonical_example("model-definition.json"))
     recipe_document = recipe.model_dump(mode="json")
     model_document = model.model_dump(mode="json")
     model_digest = content_sha256(model)
@@ -1035,13 +1017,7 @@ def test_controller_built_receipt_and_pulled_receipt_share_reusable_identity() -
 def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundary(
     mutation: str,
 ) -> None:
-    from importlib.resources import files
-
-    raw = json.loads(
-        files("vonk_forge_contracts")
-        .joinpath("examples/recipe-source-build.json")
-        .read_text(encoding="utf-8")
-    )
+    raw = canonical_example("recipe-source-build.json")
     recipe = RecipeDefinition.model_validate(raw)
     document = recipe.model_dump(mode="json")
     if mutation == "missing":
@@ -1074,15 +1050,7 @@ def test_controller_service_rejects_invalid_recipe_topology_at_canonical_boundar
 
 
 def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resolution() -> None:
-    from importlib.resources import files
-
-    recipe = RecipeDefinition.model_validate(
-        json.loads(
-            files("vonk_forge_contracts")
-            .joinpath("examples/recipe-source-build.json")
-            .read_text(encoding="utf-8")
-        )
-    )
+    recipe = RecipeDefinition.model_validate(canonical_example("recipe-source-build.json"))
 
     class Cache:
         def resolve_artifact_set(self, **_kwargs: object) -> object:
@@ -1109,15 +1077,7 @@ def test_controller_service_rejects_recipe_digest_mismatch_before_cache_resoluti
 
 
 def test_placement_rejects_unresolved_role_and_endpoint() -> None:
-    from importlib.resources import files
-
-    recipe = RecipeDefinition.model_validate(
-        json.loads(
-            files("vonk_forge_contracts")
-            .joinpath("examples/recipe-source-build.json")
-            .read_text(encoding="utf-8")
-        )
-    )
+    recipe = RecipeDefinition.model_validate(canonical_example("recipe-source-build.json"))
     node = SimpleNamespace(rank=0, role="missing", node_id="spk_missing")
     with pytest.raises(ExecutionPlanCompilationError, match="mapped role"):
         _placement(recipe, {"endpoint": {"port": 8000}}, node, 1)
