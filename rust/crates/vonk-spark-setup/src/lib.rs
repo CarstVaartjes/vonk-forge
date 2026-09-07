@@ -2384,18 +2384,25 @@ fn required_origin(prompt: &mut dyn Prompt, label: &str) -> Result<Url, SetupErr
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-struct EnrollmentBootstrap {
+pub struct EnrollmentBootstrap {
     controller_endpoint: String,
     enrollment_endpoint: String,
     ca_fingerprint: String,
     ca_pem: String,
-    #[serde(default)]
+    #[serde(deserialize_with = "Option::deserialize")]
     controller_address: Option<String>,
-    #[serde(default)]
     service_hostnames: Vec<String>,
     host_helper_authority_public_key: String,
+}
+
+/// Parse the current Controller bootstrap document; omitted fields are invalid.
+pub fn parse_enrollment_bootstrap(bytes: &[u8]) -> Result<EnrollmentBootstrap, SetupError> {
+    if bytes.is_empty() || bytes.len() > MAX_BOOTSTRAP_BYTES {
+        return Err(SetupError::EnrollmentBootstrap);
+    }
+    serde_json::from_slice(bytes).map_err(|_| SetupError::EnrollmentBootstrap)
 }
 
 fn discover_enrollment(
@@ -2406,17 +2413,12 @@ fn discover_enrollment(
 ) -> Result<EnrollmentDiscovery, SetupError> {
     let mut bootstrap_url = expected_enrollment.clone();
     bootstrap_url.set_path("/agent/v1/bootstrap");
-    bootstrap_url.set_query(Some("setup_schema=2"));
     let output = run_checked(
         runner,
         bootstrap_curl(&bootstrap_url, expected_controller_address, None),
     )?
     .stdout;
-    if output.is_empty() || output.len() > MAX_BOOTSTRAP_BYTES {
-        return Err(SetupError::EnrollmentBootstrap);
-    }
-    let bootstrap: EnrollmentBootstrap =
-        serde_json::from_slice(&output).map_err(|_| SetupError::EnrollmentBootstrap)?;
+    let bootstrap = parse_enrollment_bootstrap(&output)?;
     let discovered = validate_enrollment_bootstrap(
         bootstrap,
         expected_enrollment,
@@ -2440,11 +2442,7 @@ fn discover_enrollment(
         ),
     )?
     .stdout;
-    if authenticated.is_empty() || authenticated.len() > MAX_BOOTSTRAP_BYTES {
-        return Err(SetupError::EnrollmentBootstrap);
-    }
-    let authenticated: EnrollmentBootstrap =
-        serde_json::from_slice(&authenticated).map_err(|_| SetupError::EnrollmentBootstrap)?;
+    let authenticated = parse_enrollment_bootstrap(&authenticated)?;
     let verified = validate_enrollment_bootstrap(
         authenticated,
         expected_enrollment,

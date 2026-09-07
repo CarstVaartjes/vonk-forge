@@ -17,10 +17,14 @@ from vonk_agent_protocol.host_helper import (
     HOST_HELPER_AUTHORITY,
     MAX_HOST_HELPER_GRANT_SECONDS,
     ContainerRuntimeAction,
+    CreateManagedDirectoryOperation,
+    ExecuteContainerRuntimeRequestOperation,
     HostHelperGrantClaims,
-    HostHelperOperation,
     HostHelperSignature,
     HostOperationKind,
+    InstallVonkDebOperation,
+    RestartVonkUnitOperation,
+    ScheduleRebootOperation,
     SignedHostHelperGrant,
     SignedRecipeRunObservationReceipt,
     host_helper_grant_signing_bytes,
@@ -107,7 +111,16 @@ class HostHelperGrantIssuer:
         expires_in_seconds: object,
         request_id: object | None = None,
     ) -> SignedHostHelperGrant:
-        if type(operation) is not HostHelperOperation:
+        if not isinstance(
+            operation,
+            (
+                CreateManagedDirectoryOperation,
+                ExecuteContainerRuntimeRequestOperation,
+                InstallVonkDebOperation,
+                RestartVonkUnitOperation,
+                ScheduleRebootOperation,
+            ),
+        ):
             raise HostHelperAuthorityError("host helper operation is invalid")
         if (
             not isinstance(expires_in_seconds, int)
@@ -177,6 +190,7 @@ class HostRuntimeAuthorityService:
             {"recipe.start", "recipe.stop", "recipe.job.run.v1"}
         ),
     }
+
     def __init__(
         self,
         sessions: sessionmaker[Session],
@@ -224,16 +238,14 @@ class HostRuntimeAuthorityService:
         )
         grant = self._issuer.issue_grant(
             node_id=node_id,
-            operation=HostHelperOperation(
-                HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
-                {
-                    "action": action.value,
-                    "job_id": job_id,
-                    "operation_id": operation_id,
-                    "attempt": attempt,
-                    "fence": fence,
-                    "request_sha256": request_sha256,
-                },
+            operation=ExecuteContainerRuntimeRequestOperation(
+                type=HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
+                action=action.value,
+                job_id=job_id,
+                operation_id=operation_id,
+                attempt=attempt,
+                fence=fence,
+                request_sha256=request_sha256,
             ),
             expires_in_seconds=expires_in_seconds,
         )
@@ -301,17 +313,15 @@ class HostRuntimeAuthorityService:
                 )
             grant = self._issuer.issue_grant(
                 node_id=node_id,
-                operation=HostHelperOperation(
-                    HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
-                    {
-                        "action": ContainerRuntimeAction.RUN_INSPECT.value,
-                        "job_id": job_id,
-                        "operation_id": operation_id,
-                        "attempt": attempt,
-                        "fence": fence,
-                        "request_sha256": request_sha256,
-                        "observation_identity_sha256": observation_identity,
-                    },
+                operation=ExecuteContainerRuntimeRequestOperation(
+                    type=HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
+                    action=ContainerRuntimeAction.RUN_INSPECT.value,
+                    job_id=job_id,
+                    operation_id=operation_id,
+                    attempt=attempt,
+                    fence=fence,
+                    request_sha256=request_sha256,
+                    observation_identity_sha256=observation_identity,
                 ),
                 expires_in_seconds=expires_in_seconds,
             )
@@ -334,8 +344,8 @@ class HostRuntimeAuthorityService:
         identity: Mapping[str, object],
         observed_at: datetime,
         received_at: datetime,
-        signed_grant: Mapping[str, object],
-        helper_receipt: Mapping[str, object],
+        signed_grant: SignedHostHelperGrant,
+        helper_receipt: SignedRecipeRunObservationReceipt,
     ) -> tuple[str, bool, str]:
         """Verify and consume the exact grant echoed by an observation result."""
 
@@ -348,7 +358,7 @@ class HostRuntimeAuthorityService:
             now=now,
         )
         try:
-            grant = SignedHostHelperGrant.parse(signed_grant)
+            grant = signed_grant
             self._issuer.public_key.verify(
                 bytes.fromhex(grant.signature.value),
                 host_helper_grant_signing_bytes(grant.claims),
@@ -358,7 +368,7 @@ class HostRuntimeAuthorityService:
                 "recipe run observation grant signature is invalid"
             ) from error
         try:
-            receipt = SignedRecipeRunObservationReceipt.parse(helper_receipt)
+            receipt = helper_receipt
             node = session.get(AgentNode, node_id)
             if node is None or node.observation_receipt_public_key is None:
                 raise HostHelperAuthorityError(
@@ -384,10 +394,10 @@ class HostRuntimeAuthorityService:
             "type": HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
             "action": ContainerRuntimeAction.RUN_INSPECT.value,
             "job_id": identity["run_id"],
-            "operation_id": grant.claims.operation.values.get("operation_id"),
+            "operation_id": grant.claims.operation.operation_id,
             "attempt": identity["run_generation"],
-            "fence": grant.claims.operation.values.get("fence"),
-            "request_sha256": grant.claims.operation.values.get("request_sha256"),
+            "fence": grant.claims.operation.fence,
+            "request_sha256": grant.claims.operation.request_sha256,
             "observation_identity_sha256": observation_identity,
         }
         observed_epoch = int(_aware(observed_at).timestamp())
@@ -399,8 +409,7 @@ class HostRuntimeAuthorityService:
             or int(now.timestamp()) > grant.claims.expires_at + 5
             or receipt.claims.node_id != node_id
             or receipt.claims.request_id != grant.claims.request_id
-            or receipt.claims.request_sha256
-            != grant.claims.operation.values.get("request_sha256")
+            or receipt.claims.request_sha256 != grant.claims.operation.request_sha256
             or receipt.claims.observation_identity_sha256 != observation_identity
             or receipt.claims.observed_at != observed_epoch
             or not grant.claims.issued_at
@@ -607,12 +616,10 @@ class HostRuntimeAuthorityService:
                 raise HostHelperAuthorityError("agent upgrade authority is stale")
         grant = self._issuer.issue_grant(
             node_id=node_id,
-            operation=HostHelperOperation(
-                HostOperationKind.INSTALL_VONK_DEB,
-                {
-                    "package_sha256": package_sha256,
-                    "package_signature": package_signature,
-                },
+            operation=InstallVonkDebOperation(
+                type=HostOperationKind.INSTALL_VONK_DEB.value,
+                package_sha256=package_sha256,
+                package_signature=package_signature,
             ),
             expires_in_seconds=expires_in_seconds,
         )

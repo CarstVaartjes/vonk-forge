@@ -1,22 +1,39 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.resources
 import ipaddress
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, fields, is_dataclass
+from copy import deepcopy
+from dataclasses import fields, is_dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    model_validator,
+)
+
+from .wire_model import OperationProgress, WireModel
 
 MAX_DOCUMENT_BYTES = 64 * 1024
+MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
+MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES = (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES
+)
 NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -36,23 +53,6 @@ MODEL_REPOSITORY = re.compile(
 )
 MODEL_QUERY_COMPONENT = re.compile(r"[A-Za-z0-9._~-]{1,128}\Z")
 PINNED_OCI_IMAGE = re.compile(r"[a-z0-9][a-z0-9._:/-]{0,511}@sha256:[0-9a-f]{64}\Z")
-RECIPE_BUILD_NAME = re.compile(r"[a-z][a-z0-9._-]{0,63}\Z")
-RECIPE_BUILD_CAPABILITIES = frozenset(
-    {
-        "CHOWN",
-        "DAC_OVERRIDE",
-        "FOWNER",
-        "FSETID",
-        "KILL",
-        "MKNOD",
-        "NET_BIND_SERVICE",
-        "SETFCAP",
-        "SETGID",
-        "SETPCAP",
-        "SETUID",
-    }
-)
-MAX_RECIPE_BUILD_STORAGE_BYTES = 16 * 1024**4
 
 
 def _ascii_case_pattern(token: str, *, initial_upper: bool = False) -> str:
@@ -75,6 +75,14 @@ PATH_KEY = re.compile(
     rf"(?:^|[_-])(?:{PATH_KEY_ANY_CASE})(?:$|[_-]|[A-Z])"
     rf"|[a-z0-9](?:{PATH_KEY_CAMEL_CASE})(?:$|[_-]|[A-Z])"
 )
+UNSAFE_SCHEMA_KEY_PATTERN = (
+    r"[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|"
+    r"[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|"
+    r"[Aa][Uu][Tt][Hh][Oo][Rr][Ii][Zz][Aa][Tt][Ii][Oo][Nn]|"
+    r"[Pp][Rr][Ii][Vv][Aa][Tt][Ee].?[Kk][Ee][Yy]|"
+    r"[Cc][Oo][Mm][Mm][Aa][Nn][Dd]|[Ss][Hh][Ee][Ll][Ll]|"
+    r"[Ee][Nn][Vv][Ii][Rr][Oo][Nn][Mm][Ee][Nn][Tt]"
+)
 AGENT_PACKAGE_URL = re.compile(
     r"https://install\.vonkforge\.ai/"
     r"[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\.deb\Z"
@@ -83,6 +91,39 @@ AGENT_PACKAGE_URL = re.compile(
 
 class AgentProtocolError(ValueError):
     """A protocol message is invalid or outside the agent trust boundary."""
+
+
+type JsonValue = (
+    StrictBool
+    | StrictInt
+    | StrictFloat
+    | StrictStr
+    | None
+    | list[JsonValue]
+    | dict[str, JsonValue]
+)
+JsonObject = dict[str, JsonValue]
+_UUID_PATTERN = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+CanonicalUUID = Annotated[
+    str,
+    Field(
+        strict=True,
+        min_length=36,
+        max_length=36,
+        pattern=_UUID_PATTERN,
+        json_schema_extra={"format": "uuid"},
+    ),
+]
+NodeIdentifier = Annotated[
+    str,
+    Field(strict=True, pattern=r"^spk_[0-9a-f]{32}$"),
+]
+DigestText = Annotated[
+    str,
+    Field(strict=True, pattern=r"^[0-9a-f]{64}$"),
+]
 
 
 class AgentOperation(StrEnum):
@@ -103,6 +144,164 @@ class AgentOperation(StrEnum):
     RECIPE_STOP = "recipe.stop"
     RECIPE_UNINSTALL = "recipe.uninstall"
     RECIPE_MODEL_UNINSTALL = "recipe.model-uninstall.v1"
+
+
+class ArtifactDistributionPayload(WireModel):
+    """The complete payload accepted by the artifact transfer operation."""
+
+    schema_version: Literal[1]
+    authority_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    plan_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def plan_is_authority(self) -> ArtifactDistributionPayload:
+        if self.plan_digest != self.authority_revision:
+            raise ValueError("artifact distribution plan identity is invalid")
+        return self
+
+
+class AgentUpgradePayload(WireModel):
+    """Signed package authority for the current agent upgrade operation."""
+
+    architecture: Literal["linux-arm64"]
+    package_bytes: int = Field(strict=True, ge=1, le=1024**3)
+    package_sha256: DigestText
+    package_signature: Annotated[str, Field(pattern=r"^[0-9a-f]{128}$")]
+    package_url: Annotated[
+        str,
+        Field(
+            pattern=r"^https://install\.vonkforge\.ai/[A-Za-z0-9._~!$&'()*+,;=:%/-]{1,1900}/vonk-forge-agent\.deb$"
+        ),
+    ]
+    package_version: Annotated[str, Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")]
+    schema_version: Literal[1]
+    target_binary_digest: DigestText
+    target_build_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+
+
+class AgentInstallResult(WireModel):
+    installed_bytes: int = Field(strict=True, ge=0, le=16 * 1024**4)
+
+
+class AgentUpgradeResult(WireModel):
+    """Evidence emitted after the Rust agent reports an exact upgrade."""
+
+    architecture: Literal["linux-arm64"]
+    binary_digest: DigestText
+    build_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    package_sha256: DigestText
+    package_version: Annotated[
+        str, Field(pattern=r"^[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}$")
+    ]
+    self_test_passed: Literal[True]
+    status: Literal["upgraded"]
+
+
+class _RecipeStartEvidenceCommon(WireModel):
+    recipe_revision_id: CanonicalUUID
+    recipe_content_sha256: DigestText
+    image_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    artifact_set_digest: DigestText
+    model_identity: str | None = Field(default=None, max_length=1024)
+    rank: int = Field(strict=True, ge=0)
+    world_size: int = Field(strict=True, ge=1)
+    memory_reservation_bytes: int = Field(strict=True, ge=1)
+    evidence_digest: DigestText
+
+
+class RecipeStartSingleEvidence(_RecipeStartEvidenceCommon):
+    rank: Literal[0]
+    world_size: Literal[1]
+    endpoint: str
+    ready: Literal[True]
+    run_generation: int = Field(strict=True, ge=1)
+    runtime_arguments_sha256: DigestText
+    local_address: None
+    master_address: None
+    master_port: None
+
+
+class RecipeStartRankLaunchEvidence(_RecipeStartEvidenceCommon):
+    phase: Literal["rank-launch"]
+    run_id: CanonicalUUID
+    run_generation: int = Field(strict=True, ge=1)
+    runtime_arguments_sha256: DigestText
+    role: str = Field(min_length=1, max_length=80)
+    local_address: str | None
+    master_address: str | None
+    master_port: int | None = Field(default=None, strict=True, ge=1024, le=65535)
+    process_running: Literal[True]
+    fabric_projection_bound: Literal[True]
+    launched: Literal[True]
+
+
+class RecipeStartCollectiveReadinessEvidence(_RecipeStartEvidenceCommon):
+    phase: Literal["collective-readiness"]
+    run_id: CanonicalUUID
+    run_generation: int = Field(strict=True, ge=1)
+    runtime_arguments_sha256: DigestText
+    role: str = Field(min_length=1, max_length=80)
+    local_address: str | None
+    master_address: str | None
+    master_port: int | None = Field(default=None, strict=True, ge=1024, le=65535)
+    endpoint: str
+    ready: Literal[True]
+
+
+RecipeStartEvidence = (
+    RecipeStartSingleEvidence
+    | RecipeStartRankLaunchEvidence
+    | RecipeStartCollectiveReadinessEvidence
+)
+
+
+class RecipeStartResult(WireModel):
+    endpoint: str | None = None
+    evidence: RecipeStartEvidence
+    evidence_digest: DigestText
+
+
+class ArtifactDistributionResult(WireModel):
+    assignment_id: CanonicalUUID
+    model_artifact_set_sha256: DigestText
+    verified: Literal[True]
+    verified_digests: list[DigestText] = Field(max_length=4096)
+    verified_image_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    imported_image_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    verified_oci_layout_sha256: DigestText
+    oci_image_digest: Annotated[str, Field(pattern=r"^sha256:[0-9a-f]{64}$")]
+    downloaded_bytes: int = Field(strict=True, ge=0, le=16 * 1024**4)
+    evidence_digest: DigestText
+
+
+class AgentFailureResult(WireModel):
+    reason: str | None = Field(default=None, min_length=1, max_length=512)
+    error_code: str | None = Field(default=None, min_length=1, max_length=128)
+    status: Literal["failed"] | None = None
+    operation: AgentOperation | None = None
+    stage: str | None = Field(default=None, min_length=1, max_length=128)
+    diagnostic: str | None = Field(default=None, min_length=1, max_length=512)
+    helper_error_code: str | None = Field(default=None, min_length=1, max_length=128)
+    helper_exit_code: int | None = Field(default=None, strict=True, ge=0, le=255)
+
+    @model_validator(mode="after")
+    def requires_failure_identity(self) -> AgentFailureResult:
+        if self.reason is None and self.error_code is None:
+            raise ValueError("failure result requires reason or error_code")
+        return self
+
+
+class AgentResultExtensions(WireModel):
+    """Bounded operator evidence for result kinds without a typed projection."""
+
+    model_config = ConfigDict(extra="allow", strict=True, frozen=True)
+    __pydantic_extra__: dict[str, JsonValue] = Field(init=False)
+
+    @model_validator(mode="after")
+    def requires_evidence(self) -> AgentResultExtensions:
+        if not self.model_fields_set:
+            raise ValueError("result evidence cannot be empty")
+        return self
 
 
 PROTOCOL_FORMAT_CHECKER = FormatChecker()
@@ -136,6 +335,8 @@ def canonical_message(value: Any) -> bytes:
 
 
 def _to_wire(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return _to_wire(value.model_dump(mode="python", exclude_unset=True))
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, datetime):
@@ -205,9 +406,14 @@ def _validate_safe_keys(
                 and isinstance(path[2], int)
                 and key == "name"
             )
+            typed_compiled_plan_key = (
+                operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+                and path[:1] == ("compiled_execution_plan",)
+            )
             if _is_path_key(key) and not (
                 typed_recipe_build_key
                 or typed_distribution_object_name
+                or typed_compiled_plan_key
                 or (
                     operation is AgentOperation.RECIPE_JOB_RUN
                     and path == ("output_limits",)
@@ -277,6 +483,9 @@ def _validate_safe_keys(
                 and ("/" in value or "\\" in value)
                 and _typed_result_string(path, value)
             )
+        ) or (
+            operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            and path[:1] == ("compiled_execution_plan",)
         ):
             return
         elif "/" in value or "\\" in value:
@@ -444,6 +653,25 @@ def _model_identity(value: str) -> bool:
     )
 
 
+def parse_model_identity(value: str) -> tuple[str, str]:
+    """Parse the canonical result identity ``repository@revision``."""
+
+    if not isinstance(value, str) or not _model_identity(value):
+        raise AgentProtocolError("model identity is invalid")
+    repository, _marker, revision = value.rpartition("@")
+    return repository, revision
+
+
+def format_model_identity(
+    publisher: str, slug: str, content_sha256: str
+) -> str:
+    """Format the catalog model identity used by result evidence."""
+
+    value = f"{publisher}/{slug}@{content_sha256}"
+    parse_model_identity(value)
+    return value
+
+
 def _safe_model_query(query: str) -> bool:
     if not query:
         return True
@@ -476,6 +704,7 @@ def _validate_bounded_document(
     name: str,
     operation: AgentOperation | None = None,
     typed_result_strings: bool = False,
+    maximum_bytes: int = MAX_DOCUMENT_BYTES,
 ) -> Any:
     if not isinstance(value, Mapping):
         raise AgentProtocolError(f"{name} must be a JSON object")
@@ -485,411 +714,9 @@ def _validate_bounded_document(
         typed_result_strings=typed_result_strings,
     )
     copied = _canonical_copy(value, name=name)
-    if len(canonical_message(copied)) > MAX_DOCUMENT_BYTES:
+    if len(canonical_message(copied)) > maximum_bytes:
         raise AgentProtocolError(f"{name} is too large")
     return copied
-
-
-def _validate_agent_upgrade_payload(value: Mapping[str, Any]) -> None:
-    _fields(
-        value,
-        required={
-            "architecture",
-            "package_bytes",
-            "package_sha256",
-            "package_signature",
-            "package_url",
-            "package_version",
-            "schema_version",
-            "target_binary_digest",
-            "target_build_digest",
-        },
-    )
-    if (
-        value["schema_version"] != 1
-        or isinstance(value["schema_version"], bool)
-        or value["architecture"] != "linux-arm64"
-        or not isinstance(value["package_bytes"], int)
-        or isinstance(value["package_bytes"], bool)
-        or not 1 <= value["package_bytes"] <= 1024**3
-        or not isinstance(value["package_sha256"], str)
-        or DIGEST.fullmatch(value["package_sha256"]) is None
-        or not isinstance(value["package_signature"], str)
-        or re.fullmatch(r"[0-9a-f]{128}", value["package_signature"]) is None
-        or not isinstance(value["package_url"], str)
-        or AGENT_PACKAGE_URL.fullmatch(value["package_url"]) is None
-        or not isinstance(value["package_version"], str)
-        or re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+~-]{0,127}", value["package_version"])
-        is None
-        or not isinstance(value["target_binary_digest"], str)
-        or DIGEST.fullmatch(value["target_binary_digest"]) is None
-        or not isinstance(value["target_build_digest"], str)
-        or re.fullmatch(r"sha256:[0-9a-f]{64}", value["target_build_digest"]) is None
-    ):
-        raise AgentProtocolError("agent upgrade payload is invalid")
-
-
-def _validate_recipe_build_payload(value: Mapping[str, Any]) -> None:
-    _fields(
-        value,
-        required={
-            "arguments",
-            "base_image_storage_bytes",
-            "base_images",
-            "build_id",
-            "build_input_sha256",
-            "capabilities",
-            "dockerfile",
-            "kind",
-            "limits",
-            "network",
-            "options",
-            "platform",
-            "recipe_content_sha256",
-            "recipe_revision_id",
-            "schema_version",
-            "source_bundle_bytes",
-            "source_bundle_sha256",
-            "target",
-        },
-    )
-    _version(value["schema_version"])
-    if value["kind"] != "recipe.build.v1":
-        raise AgentProtocolError("recipe build kind is not supported")
-    _uuid(value["build_id"], name="build_id")
-    _uuid(value["recipe_revision_id"], name="recipe_revision_id")
-    for name in (
-        "recipe_content_sha256",
-        "source_bundle_sha256",
-        "build_input_sha256",
-    ):
-        if not isinstance(value[name], str) or DIGEST.fullmatch(value[name]) is None:
-            raise AgentProtocolError(f"{name} must be a lowercase SHA-256")
-    _bounded_build_integer(
-        value["source_bundle_bytes"],
-        name="source_bundle_bytes",
-        minimum=1,
-        maximum=64 * 1024 * 1024,
-    )
-    if value["platform"] != "linux/arm64":
-        raise AgentProtocolError("recipe build platform must be linux/arm64")
-    dockerfile = value["dockerfile"]
-    if not isinstance(dockerfile, str) or not _typed_build_string(
-        ("dockerfile",), dockerfile
-    ):
-        raise AgentProtocolError("recipe build Dockerfile is not canonical")
-    target = value["target"]
-    if target is not None and (
-        not isinstance(target, str)
-        or re.fullmatch(r"[A-Za-z0-9._-]{1,64}", target) is None
-    ):
-        raise AgentProtocolError("recipe build target is not canonical")
-    capabilities = _build_sequence(
-        value["capabilities"], name="capabilities", maximum=11
-    )
-    if (
-        any(
-            capability.startswith("SYS_")
-            or capability not in RECIPE_BUILD_CAPABILITIES
-            for capability in capabilities
-        )
-        or len(set(capabilities)) != len(capabilities)
-    ):
-        raise AgentProtocolError("recipe build capabilities are not allowed")
-
-    arguments = _build_sequence(value["arguments"], name="arguments", maximum=64)
-    for argument in arguments:
-        item = _mapping(argument)
-        _fields(item, required={"name", "value"})
-        name = item["name"]
-        if not isinstance(name, str) or RECIPE_BUILD_NAME.fullmatch(name) is None:
-            raise AgentProtocolError("recipe build argument name is not canonical")
-        if not _valid_build_scalar(item["value"]):
-            raise AgentProtocolError("recipe build argument value is not scalar")
-
-    base_images = _build_sequence(value["base_images"], name="base_images", maximum=8)
-    references: set[str] = set()
-    for image in base_images:
-        item = _mapping(image)
-        _fields(item, required={"manifest_digest", "reference"})
-        manifest_digest = item["manifest_digest"]
-        reference = item["reference"]
-        if (
-            not isinstance(manifest_digest, str)
-            or not isinstance(reference, str)
-            or PINNED_OCI_IMAGE.fullmatch(reference) is None
-            or reference.rpartition("@")[2] != manifest_digest
-        ):
-            raise AgentProtocolError("recipe build base image is not exact")
-        if reference in references:
-            raise AgentProtocolError("recipe build base image is duplicated")
-        references.add(reference)
-
-    storage = _bounded_build_integer(
-        value["base_image_storage_bytes"],
-        name="base_image_storage_bytes",
-        minimum=0 if not base_images else 1,
-        maximum=MAX_RECIPE_BUILD_STORAGE_BYTES,
-    )
-    if not base_images and storage != 0:
-        raise AgentProtocolError("base image storage requires a declared base")
-
-    network = _mapping(value["network"])
-    _fields(network, required={"hosts", "mode"})
-    mode = network["mode"]
-    if mode not in {"none", "public"}:
-        raise AgentProtocolError("recipe build network mode is not supported")
-    hosts = _build_sequence(network["hosts"], name="network hosts", maximum=64)
-    if (mode == "none" and hosts) or (mode == "public" and not hosts):
-        raise AgentProtocolError("recipe build network declaration is inconsistent")
-    if any(
-        not isinstance(host, str) or not _valid_public_build_host(host)
-        for host in hosts
-    ):
-        raise AgentProtocolError("recipe build network host is not public")
-
-    options = _mapping(value["options"])
-    _fields(
-        options,
-        required={
-            "additional_contexts",
-            "annotations",
-            "environment",
-            "format",
-            "identity_label",
-            "ignorefile",
-            "jobs",
-            "labels",
-            "layer_compression",
-            "layer_labels",
-            "layers",
-            "no_hostname",
-            "no_hosts",
-            "omit_history",
-            "os_features",
-            "os_version",
-            "shm_bytes",
-            "skip_unused_stages",
-            "squash",
-            "timestamp",
-            "unset_environment",
-            "unset_labels",
-        },
-    )
-    _validate_recipe_build_options(options)
-
-    limits = _mapping(value["limits"])
-    _fields(
-        limits,
-        required={
-            "container_socket",
-            "cpu_cores",
-            "gpu",
-            "host_mounts",
-            "memory_bytes",
-            "output_bytes",
-            "privileged",
-            "processes",
-            "temporary_bytes",
-            "timeout_seconds",
-        },
-    )
-    for name, maximum in (
-        ("cpu_cores", 256),
-        ("processes", 65_535),
-        ("timeout_seconds", 86_400),
-    ):
-        _bounded_build_integer(limits[name], name=name, minimum=1, maximum=maximum)
-    for name in ("memory_bytes", "temporary_bytes", "output_bytes"):
-        _bounded_build_integer(
-            limits[name],
-            name=name,
-            minimum=1,
-            maximum=MAX_RECIPE_BUILD_STORAGE_BYTES,
-        )
-    if limits["gpu"] != 0 or isinstance(limits["gpu"], bool):
-        raise AgentProtocolError("recipe build GPU authority must be zero")
-    if any(
-        limits[name] is not False
-        for name in ("privileged", "host_mounts", "container_socket")
-    ):
-        raise AgentProtocolError("recipe build privilege authority must be false")
-
-
-def _bounded_build_integer(value: Any, *, name: str, minimum: int, maximum: int) -> int:
-    if (
-        not isinstance(value, int)
-        or isinstance(value, bool)
-        or not minimum <= value <= maximum
-    ):
-        raise AgentProtocolError(f"{name} is outside its signed bound")
-    return value
-
-
-def _validate_recipe_build_options(value: Mapping[str, Any]) -> None:
-    metadata_name = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\Z")
-    environment_name = re.compile(r"[A-Z_][A-Z0-9_]{0,127}\Z")
-
-    contexts = _build_sequence(
-        value["additional_contexts"], name="additional_contexts", maximum=16
-    )
-    context_names: set[str] = set()
-    for raw in contexts:
-        item = _mapping(raw)
-        _fields(item, required={"name", "path"})
-        if (
-            not isinstance(item["name"], str)
-            or RECIPE_BUILD_NAME.fullmatch(item["name"]) is None
-            or item["name"] in context_names
-            or not isinstance(item["path"], str)
-            or not _typed_build_string(
-                ("options", "additional_contexts", 0, "path"), item["path"]
-            )
-        ):
-            raise AgentProtocolError("recipe build additional context is not canonical")
-        context_names.add(item["name"])
-
-    for field in ("annotations", "labels", "layer_labels"):
-        entries = _build_sequence(value[field], name=field, maximum=64)
-        names: set[str] = set()
-        for raw in entries:
-            item = _mapping(raw)
-            _fields(item, required={"name", "value"})
-            if (
-                not isinstance(item["name"], str)
-                or metadata_name.fullmatch(item["name"]) is None
-                or item["name"] in names
-                or not isinstance(item["value"], str)
-                or len(item["value"]) > 1024
-            ):
-                raise AgentProtocolError(f"recipe build {field} is not canonical")
-            names.add(item["name"])
-
-    environment = _build_sequence(value["environment"], name="environment", maximum=64)
-    environment_names: set[str] = set()
-    for raw in environment:
-        item = _mapping(raw)
-        _fields(item, required={"name", "value"})
-        if (
-            not isinstance(item["name"], str)
-            or environment_name.fullmatch(item["name"]) is None
-            or item["name"] in environment_names
-            or not _valid_build_scalar(item["value"])
-        ):
-            raise AgentProtocolError("recipe build environment is not canonical")
-        environment_names.add(item["name"])
-
-    if value["format"] not in {"oci", "docker"}:
-        raise AgentProtocolError("recipe build format is not supported")
-    if value["layer_compression"] not in {"disabled", "gzip"}:
-        raise AgentProtocolError("recipe build layer compression is not supported")
-    if value["squash"] not in {"none", "new", "all"}:
-        raise AgentProtocolError("recipe build squash mode is not supported")
-    for field in (
-        "identity_label",
-        "layers",
-        "no_hostname",
-        "no_hosts",
-        "omit_history",
-        "skip_unused_stages",
-    ):
-        if not isinstance(value[field], bool):
-            raise AgentProtocolError(f"recipe build {field} must be boolean")
-    ignorefile = value["ignorefile"]
-    if ignorefile is not None and (
-        not isinstance(ignorefile, str)
-        or not _typed_build_string(("options", "ignorefile"), ignorefile)
-    ):
-        raise AgentProtocolError("recipe build ignorefile is not canonical")
-    _bounded_build_integer(value["jobs"], name="jobs", minimum=1, maximum=32)
-    _bounded_build_integer(
-        value["shm_bytes"], name="shm_bytes", minimum=65_536, maximum=64 * 1024**3
-    )
-    timestamp = value["timestamp"]
-    if timestamp is not None:
-        _bounded_build_integer(
-            timestamp, name="timestamp", minimum=0, maximum=4_102_444_800
-        )
-    os_version = value["os_version"]
-    if os_version is not None and (
-        not isinstance(os_version, str)
-        or re.fullmatch(r"[A-Za-z0-9._+-]{1,64}", os_version) is None
-    ):
-        raise AgentProtocolError("recipe build OS version is not canonical")
-    os_features = _build_sequence(value["os_features"], name="os_features", maximum=32)
-    if len(set(os_features)) != len(os_features) or any(
-        not isinstance(item, str)
-        or re.fullmatch(r"[A-Za-z0-9._-]{1,64}", item) is None
-        for item in os_features
-    ):
-        raise AgentProtocolError("recipe build OS features are not canonical")
-    for field, pattern in (
-        ("unset_environment", environment_name),
-        ("unset_labels", metadata_name),
-    ):
-        entries = _build_sequence(value[field], name=field, maximum=64)
-        if len(set(entries)) != len(entries) or any(
-            not isinstance(item, str) or pattern.fullmatch(item) is None
-            for item in entries
-        ):
-            raise AgentProtocolError(f"recipe build {field} is not canonical")
-
-
-def _build_sequence(value: Any, *, name: str, maximum: int) -> tuple[Any, ...]:
-    if not isinstance(value, (list, tuple)) or len(value) > maximum:
-        raise AgentProtocolError(f"{name} is not a bounded array")
-    return tuple(value)
-
-
-def _valid_build_scalar(value: Any) -> bool:
-    if isinstance(value, bool):
-        return True
-    if isinstance(value, int):
-        return -(2**63) <= value <= 2**63 - 1
-    return (
-        isinstance(value, str)
-        and len(value.encode("utf-8")) <= 1024
-        and "\x00" not in value
-    )
-
-
-def _valid_public_build_host(value: str) -> bool:
-    lowered = value.lower()
-    if (
-        not value
-        or len(value.encode("utf-8")) > 253
-        or value.startswith(".")
-        or value.endswith(".")
-        or lowered
-        in {
-            "localhost",
-            "localhost.localdomain",
-            "metadata",
-            "metadata.google.internal",
-            "instance-data.ec2.internal",
-        }
-        or lowered.endswith((".localhost", ".localdomain", ".internal"))
-        or any(
-            not character.isascii() or not (character.isalnum() or character in ".-")
-            for character in value
-        )
-    ):
-        return False
-    if not all(character.isdigit() or character == "." for character in value):
-        return True
-    try:
-        first, second, _third, _fourth = ipaddress.IPv4Address(value).packed
-    except ipaddress.AddressValueError:
-        return False
-    return bool(
-        first not in {0, 10, 127}
-        and not (first == 100 and 64 <= second <= 127)
-        and not (first == 169 and second == 254)
-        and not (first == 172 and 16 <= second <= 31)
-        and not (first == 192 and second == 168)
-        and not (first == 198 and 18 <= second <= 19)
-        and first < 224
-    )
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
@@ -971,250 +798,448 @@ def _attempt_fields(value: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-@dataclass(frozen=True)
-class AgentClaim:
-    schema_version: int
-    job_id: str
-    operation_id: str
-    attempt: int
-    fence: str
-    node_id: str
+class NodeProbePayload(WireModel):
+    """The current Rust node probe has no operation-specific fields."""
+
+    # Probe requests have controller-defined health gates that are intentionally
+    # extensible, while their values still use the strict recursive JSON graph.
+    model_config = ConfigDict(extra="allow", strict=True, frozen=True)
+    __pydantic_extra__: dict[str, JsonValue] = Field(init=False)
+    artifact_digest: DigestText | None = None
+    require_active_nvidia_compute_processes: int | None = Field(
+        default=None, strict=True, ge=0
+    )
+
+
+class ReleaseInstallPayload(WireModel):
+    """Legacy Controller operation with an intentionally empty wire payload."""
+
+
+class WorkloadPreparePayload(WireModel):
+    """Legacy Controller operation with an intentionally empty wire payload."""
+
+
+class WorkloadStartPayload(WireModel):
+    """Legacy Controller operation with an intentionally empty wire payload."""
+
+
+class WorkloadStopPayload(WireModel):
+    """Legacy Controller operation with an intentionally empty wire payload."""
+
+
+class WorkloadHealthPayload(WireModel):
+    """Legacy Controller operation with an intentionally empty wire payload."""
+
+
+class WorkloadVerifyPayload(WireModel):
+    """Legacy Controller operation with an intentionally empty wire payload."""
+
+
+class NodeProbeMemory(WireModel):
+    available_bytes: int = Field(strict=True, ge=0)
+    total_bytes: int = Field(strict=True, ge=0)
+
+
+class NodeProbeAccelerator(WireModel):
+    available: bool
+    active_nvidia_compute_processes: int = Field(strict=True, ge=0)
+
+
+class NodeProbeVonkForgeEvidence(WireModel):
+    schema_version: Literal[1]
+    memory: NodeProbeMemory
+    storage: NodeProbeMemory
+    accelerator: NodeProbeAccelerator
+
+
+class NodeProbeEvidence(WireModel):
+    vonk_forge: NodeProbeVonkForgeEvidence
+    nvidia: dict[str, JsonValue]
+
+
+class NodeProbeResult(WireModel):
+    status: Literal["ok"]
+    evidence: NodeProbeEvidence
+
+
+class NodeProbeHealthResult(WireModel):
+    healthy: bool
+
+
+from .build_import import (
+    RecipeBuildEvidence,
+    RecipeBuildRequest,
+    RecipeImageImportEvidence,
+    RecipeImageImportRequest,
+)
+from .recipe_jobs import RecipeJobRunRequest, RecipeJobRunResult
+from .recipe_operations import (
+    RecipeInstallPayload,
+    RecipeModelCleanupPayload,
+    RecipeModelCleanupResult,
+    RecipeStartPayload,
+    RecipeStopPayload,
+    RecipeStopResult,
+    RecipeUninstallPayload,
+    RecipeUninstallResult,
+)
+
+AgentPayload = (
+    NodeProbePayload
+    | ReleaseInstallPayload
+    | WorkloadPreparePayload
+    | WorkloadStartPayload
+    | WorkloadStopPayload
+    | WorkloadHealthPayload
+    | WorkloadVerifyPayload
+    | AgentUpgradePayload
+    | ArtifactDistributionPayload
+    | RecipeBuildRequest
+    | RecipeImageImportRequest
+    | RecipeJobRunRequest
+    | RecipeInstallPayload
+    | RecipeStartPayload
+    | RecipeStopPayload
+    | RecipeUninstallPayload
+    | RecipeModelCleanupPayload
+)
+AgentResultPayload = (
+    NodeProbeResult
+    | NodeProbeHealthResult
+    | AgentInstallResult
+    | RecipeStartResult
+    | RecipeStopResult
+    | RecipeUninstallResult
+    | RecipeModelCleanupResult
+    | RecipeBuildEvidence
+    | RecipeImageImportEvidence
+    | RecipeJobRunResult
+    | ArtifactDistributionResult
+    | AgentFailureResult
+    | AgentUpgradeResult
+    | AgentResultExtensions
+)
+PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
+    AgentOperation.NODE_PROBE: NodeProbePayload,
+    AgentOperation.RELEASE_INSTALL: ReleaseInstallPayload,
+    AgentOperation.WORKLOAD_PREPARE: WorkloadPreparePayload,
+    AgentOperation.WORKLOAD_START: WorkloadStartPayload,
+    AgentOperation.WORKLOAD_STOP: WorkloadStopPayload,
+    AgentOperation.WORKLOAD_HEALTH: WorkloadHealthPayload,
+    AgentOperation.WORKLOAD_VERIFY: WorkloadVerifyPayload,
+    AgentOperation.AGENT_UPGRADE: AgentUpgradePayload,
+    AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionPayload,
+    AgentOperation.RECIPE_BUILD: RecipeBuildRequest,
+    AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportRequest,
+    AgentOperation.RECIPE_JOB_RUN: RecipeJobRunRequest,
+    AgentOperation.RECIPE_INSTALL: RecipeInstallPayload,
+    AgentOperation.RECIPE_START: RecipeStartPayload,
+    AgentOperation.RECIPE_STOP: RecipeStopPayload,
+    AgentOperation.RECIPE_UNINSTALL: RecipeUninstallPayload,
+    AgentOperation.RECIPE_MODEL_UNINSTALL: RecipeModelCleanupPayload,
+}
+
+# Result validation is contextual because the result envelope deliberately
+# carries no operation discriminator.  Keep this registry alongside the
+# payload registry so Controller ingress can resolve the stored operation and
+# validate the exact result graph before accepting it.
+RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
+    AgentOperation.AGENT_UPGRADE: AgentUpgradeResult,
+    AgentOperation.NODE_PROBE: NodeProbeResult,
+    AgentOperation.RELEASE_INSTALL: AgentResultExtensions,
+    AgentOperation.WORKLOAD_PREPARE: AgentResultExtensions,
+    AgentOperation.WORKLOAD_START: AgentResultExtensions,
+    AgentOperation.WORKLOAD_STOP: AgentResultExtensions,
+    AgentOperation.WORKLOAD_HEALTH: NodeProbeHealthResult,
+    AgentOperation.WORKLOAD_VERIFY: NodeProbeHealthResult,
+    AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionResult,
+    AgentOperation.RECIPE_INSTALL: AgentInstallResult,
+    AgentOperation.RECIPE_START: RecipeStartResult,
+    AgentOperation.RECIPE_STOP: RecipeStopResult,
+    AgentOperation.RECIPE_UNINSTALL: RecipeUninstallResult,
+    AgentOperation.RECIPE_MODEL_UNINSTALL: RecipeModelCleanupResult,
+    AgentOperation.RECIPE_BUILD: RecipeBuildEvidence,
+    AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportEvidence,
+    AgentOperation.RECIPE_JOB_RUN: RecipeJobRunResult,
+}
+
+
+def validate_result_for_operation(
+    operation: AgentOperation | str,
+    result: Any,
+    *,
+    state: str,
+) -> BaseModel | None:
+    """Validate a result against the operation stored by the Controller.
+
+    The generic evidence branch remains available for operation kinds whose
+    producer has no shared result model.  A current operation with a typed
+    result model must pass that model, preventing the generic branch from
+    silently accepting malformed known-operation evidence.
+    """
+
+    try:
+        operation_kind = AgentOperation(operation)
+    except (TypeError, ValueError) as error:
+        raise AgentProtocolError("agent result operation is invalid") from error
+    try:
+        model = RESULT_MODELS[operation_kind]
+    except KeyError as error:
+        raise AgentProtocolError(
+            f"result model is not registered for {operation_kind.value}"
+        ) from error
+    if state != "succeeded":
+        return None
+    try:
+        return model.model_validate_json(canonical_message(result))
+    except (TypeError, ValueError, ValidationError) as error:
+        raise AgentProtocolError(
+            f"{operation_kind.value} result does not match its typed model"
+        ) from error
+
+
+class _ProtocolEnvelopeModel(WireModel):
+    """Wire envelope base with the derived extension-map security schema."""
+
+    @classmethod
+    def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        document = super().model_json_schema(*args, **kwargs)
+        _add_protocol_schema_constraints(document)
+        return document
+
+
+class AgentClaim(_ProtocolEnvelopeModel):
+    schema_version: Literal[1]
+    job_id: CanonicalUUID
+    operation_id: CanonicalUUID
+    attempt: int = Field(strict=True, ge=1)
+    fence: CanonicalUUID
+    node_id: NodeIdentifier
     operation: AgentOperation
-    authority_revision: str
-    payload_digest: str
-    payload: Mapping[str, Any]
+    authority_revision: DigestText
+    payload_digest: DigestText
+    payload: AgentPayload
     deadline: datetime
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "schema_version", _version(self.schema_version))
-        object.__setattr__(self, "job_id", _uuid(self.job_id, name="job_id"))
-        object.__setattr__(
-            self, "operation_id", _uuid(self.operation_id, name="operation_id")
-        )
-        object.__setattr__(self, "attempt", _attempt(self.attempt))
-        object.__setattr__(self, "fence", _uuid(self.fence, name="fence"))
-        object.__setattr__(self, "node_id", _node_id(self.node_id))
-        if not isinstance(self.operation, AgentOperation):
-            raise AgentProtocolError("operation is not supported")
-        if not isinstance(
-            self.authority_revision, str
-        ) or not AUTHORITY_REVISION.fullmatch(self.authority_revision):
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_wire_scalars(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        if "operation" in document and not isinstance(document["operation"], AgentOperation):
+            try:
+                document["operation"] = AgentOperation(document["operation"])
+            except (TypeError, ValueError):
+                pass
+        operation = document.get("operation")
+        payload = document.get("payload")
+        expected_model = PAYLOAD_MODELS.get(operation)
+        if expected_model is not None and isinstance(payload, Mapping):
+            document["payload"] = expected_model.model_validate(payload)
+        if "deadline" in document:
+            document["deadline"] = _deadline(document["deadline"])
+        return document
+
+    @model_validator(mode="after")
+    def validate_wire(self) -> AgentClaim:
+        _uuid(self.job_id, name="job_id")
+        _uuid(self.operation_id, name="operation_id")
+        _attempt(self.attempt)
+        _uuid(self.fence, name="fence")
+        _node_id(self.node_id)
+        expected_model = PAYLOAD_MODELS.get(self.operation)
+        if expected_model is None or not isinstance(self.payload, expected_model):
             raise AgentProtocolError(
-                "authority_revision must be a 64-character lowercase SHA-256"
+                f"payload model is not registered for {self.operation.value}"
             )
-        if not isinstance(self.payload_digest, str) or not DIGEST.fullmatch(
-            self.payload_digest
-        ):
-            raise AgentProtocolError("payload_digest must be a lowercase SHA-256")
-        payload = _validate_bounded_document(
-            self.payload, name="payload", operation=self.operation
+        payload_document = json.loads(canonical_message(self.payload))
+        maximum_bytes = (
+            MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+            if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            else MAX_DOCUMENT_BYTES
         )
-        if (
-            hashlib.sha256(canonical_message(payload)).hexdigest()
-            != self.payload_digest
-        ):
+        payload = _validate_bounded_document(
+            payload_document,
+            name="payload",
+            operation=self.operation,
+            maximum_bytes=maximum_bytes,
+        )
+        if hashlib.sha256(canonical_message(payload)).hexdigest() != self.payload_digest:
             raise AgentProtocolError("payload digest does not match payload")
-        if self.operation is AgentOperation.RECIPE_BUILD:
-            _validate_recipe_build_payload(payload)
-        elif self.operation is AgentOperation.AGENT_UPGRADE:
-            _validate_agent_upgrade_payload(payload)
-        object.__setattr__(self, "payload", payload)
+        object.__setattr__(self, "payload", self.payload)
         object.__setattr__(self, "deadline", _deadline(self.deadline))
+        return self
 
     @classmethod
     def parse(cls, raw: Any) -> AgentClaim:
-        value = _mapping(raw)
-        _fields(
-            value,
-            required={
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "operation",
-                "authority_revision",
-                "payload_digest",
-                "payload",
-                "deadline",
-            },
-        )
         try:
-            operation = AgentOperation(value["operation"])
-        except (TypeError, ValueError) as error:
-            raise AgentProtocolError("operation is not supported") from error
-        authority_revision = value["authority_revision"]
-        if not isinstance(authority_revision, str) or not AUTHORITY_REVISION.fullmatch(
-            authority_revision
-        ):
-            raise AgentProtocolError(
-                "authority_revision must be a 64-character lowercase SHA-256"
-            )
-        payload_digest = value["payload_digest"]
-        if not isinstance(payload_digest, str) or not DIGEST.fullmatch(payload_digest):
-            raise AgentProtocolError("payload_digest must be a lowercase SHA-256")
-        return cls(
-            **_attempt_fields(value),
-            operation=operation,
-            authority_revision=authority_revision,
-            payload_digest=payload_digest,
-            payload=value["payload"],
-        )
+            if isinstance(raw, Mapping) and isinstance(raw.get("payload"), Mapping):
+                operation = raw.get("operation")
+                try:
+                    operation_kind = AgentOperation(operation)
+                except (TypeError, ValueError):
+                    operation_kind = None
+                _validate_bounded_document(
+                    raw["payload"],
+                    name="payload",
+                    operation=operation_kind,
+                    maximum_bytes=(
+                        MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+                        if operation_kind
+                        in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+                        else MAX_DOCUMENT_BYTES
+                    ),
+                )
+            return cls.model_validate(raw)
+        except AgentProtocolError:
+            raise
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
 
-@dataclass(frozen=True)
-class AgentProgress:
-    schema_version: int
-    job_id: str
-    operation_id: str
-    attempt: int
-    fence: str
-    node_id: str
+class AgentProgress(_ProtocolEnvelopeModel):
+    schema_version: Literal[1]
+    job_id: CanonicalUUID
+    operation_id: CanonicalUUID
+    attempt: int = Field(strict=True, ge=1)
+    fence: CanonicalUUID
+    node_id: NodeIdentifier
     deadline: datetime
-    progress: Mapping[str, Any]
+    progress: OperationProgress
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "schema_version", _version(self.schema_version))
-        object.__setattr__(self, "job_id", _uuid(self.job_id, name="job_id"))
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_wire_scalars(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        if "deadline" in document:
+            document["deadline"] = _deadline(document["deadline"])
+        if "progress" in document and isinstance(document["progress"], Mapping):
+            # Canonical JSON is the one adapter needed to thaw durable mappings.
+            document["progress"] = json.loads(canonical_message(document["progress"]))
+        return document
+
+    @model_validator(mode="after")
+    def validate_wire(self) -> AgentProgress:
+        _uuid(self.job_id, name="job_id")
+        _uuid(self.operation_id, name="operation_id")
+        _attempt(self.attempt)
+        _uuid(self.fence, name="fence")
+        _node_id(self.node_id)
+        _deadline(self.deadline)
         object.__setattr__(
-            self, "operation_id", _uuid(self.operation_id, name="operation_id")
+            self,
+            "progress",
+            OperationProgress.model_validate(
+                json.loads(canonical_message(self.progress)), strict=True
+            ),
         )
-        object.__setattr__(self, "attempt", _attempt(self.attempt))
-        object.__setattr__(self, "fence", _uuid(self.fence, name="fence"))
-        object.__setattr__(self, "node_id", _node_id(self.node_id))
-        object.__setattr__(self, "deadline", _deadline(self.deadline))
-        object.__setattr__(
-            self, "progress", _validate_bounded_document(self.progress, name="progress")
-        )
+        return self
 
     @classmethod
     def parse(cls, raw: Any) -> AgentProgress:
-        value = _mapping(raw)
-        _fields(
-            value,
-            required={
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "deadline",
-                "progress",
-            },
-        )
-        return cls(**_attempt_fields(value), progress=value["progress"])
+        try:
+            return cls.model_validate(raw)
+        except AgentProtocolError:
+            raise
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
 
-@dataclass(frozen=True)
-class AgentDirective:
+class AgentDirective(_ProtocolEnvelopeModel):
     """Authenticated heartbeat response for deadline renewal and cancellation."""
 
-    schema_version: int
-    job_id: str
-    operation_id: str
-    attempt: int
-    fence: str
-    node_id: str
+    schema_version: Literal[1]
+    job_id: CanonicalUUID
+    operation_id: CanonicalUUID
+    attempt: int = Field(strict=True, ge=1)
+    fence: CanonicalUUID
+    node_id: NodeIdentifier
     deadline: datetime
     cancel_requested: bool
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "schema_version", _version(self.schema_version))
-        object.__setattr__(self, "job_id", _uuid(self.job_id, name="job_id"))
-        object.__setattr__(
-            self, "operation_id", _uuid(self.operation_id, name="operation_id")
-        )
-        object.__setattr__(self, "attempt", _attempt(self.attempt))
-        object.__setattr__(self, "fence", _uuid(self.fence, name="fence"))
-        object.__setattr__(self, "node_id", _node_id(self.node_id))
-        object.__setattr__(self, "deadline", _deadline(self.deadline))
-        if not isinstance(self.cancel_requested, bool):
-            raise AgentProtocolError("cancel_requested must be a boolean")
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_wire_scalars(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        if "deadline" in document:
+            document["deadline"] = _deadline(document["deadline"])
+        return document
+
+    @model_validator(mode="after")
+    def validate_wire(self) -> AgentDirective:
+        _uuid(self.job_id, name="job_id")
+        _uuid(self.operation_id, name="operation_id")
+        _attempt(self.attempt)
+        _uuid(self.fence, name="fence")
+        _node_id(self.node_id)
+        _deadline(self.deadline)
+        return self
 
     @classmethod
     def parse(cls, raw: Any) -> AgentDirective:
-        value = _mapping(raw)
-        _fields(
-            value,
-            required={
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "deadline",
-                "cancel_requested",
-            },
-        )
-        return cls(
-            **_attempt_fields(value),
-            cancel_requested=value["cancel_requested"],
-        )
+        try:
+            return cls.model_validate(raw)
+        except AgentProtocolError:
+            raise
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
 
-@dataclass(frozen=True)
-class AgentResult:
-    schema_version: int
-    job_id: str
-    operation_id: str
-    attempt: int
-    fence: str
-    node_id: str
+class AgentResult(_ProtocolEnvelopeModel):
+    schema_version: Literal[1]
+    job_id: CanonicalUUID
+    operation_id: CanonicalUUID
+    attempt: int = Field(strict=True, ge=1)
+    fence: CanonicalUUID
+    node_id: NodeIdentifier
     deadline: datetime
-    state: str
-    result: Mapping[str, Any]
+    state: Literal["succeeded", "failed", "cancelled", "waiting-for-operator"]
+    result: AgentResultPayload
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "schema_version", _version(self.schema_version))
-        object.__setattr__(self, "job_id", _uuid(self.job_id, name="job_id"))
-        object.__setattr__(
-            self, "operation_id", _uuid(self.operation_id, name="operation_id")
-        )
-        object.__setattr__(self, "attempt", _attempt(self.attempt))
-        object.__setattr__(self, "fence", _uuid(self.fence, name="fence"))
-        object.__setattr__(self, "node_id", _node_id(self.node_id))
-        object.__setattr__(self, "deadline", _deadline(self.deadline))
-        if self.state not in {
-            "succeeded",
-            "failed",
-            "cancelled",
-            "waiting-for-operator",
-        }:
-            raise AgentProtocolError("result state is not supported")
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_wire_scalars(cls, value: Any) -> Any:
+        if not isinstance(value, Mapping):
+            return value
+        document = dict(value)
+        if "deadline" in document:
+            document["deadline"] = _deadline(document["deadline"])
+        return document
+
+    @model_validator(mode="after")
+    def validate_wire(self) -> AgentResult:
+        _uuid(self.job_id, name="job_id")
+        _uuid(self.operation_id, name="operation_id")
+        _attempt(self.attempt)
+        _uuid(self.fence, name="fence")
+        _node_id(self.node_id)
+        _deadline(self.deadline)
+        result_document = json.loads(canonical_message(self.result))
         object.__setattr__(
             self,
             "result",
-            _validate_bounded_document(
-                self.result,
-                name="result",
-                typed_result_strings=True,
-            ),
+            self.result,
         )
+        _validate_bounded_document(
+            result_document,
+            name="result",
+            typed_result_strings=True,
+        )
+        return self
 
     @classmethod
     def parse(cls, raw: Any) -> AgentResult:
-        value = _mapping(raw)
-        _fields(
-            value,
-            required={
-                "schema_version",
-                "job_id",
-                "operation_id",
-                "attempt",
-                "fence",
-                "node_id",
-                "deadline",
-                "state",
-                "result",
-            },
-        )
-        return cls(
-            **_attempt_fields(value), state=value["state"], result=value["result"]
-        )
-
+        try:
+            return cls.model_validate(raw)
+        except AgentProtocolError:
+            raise
+        except ValidationError as error:
+            raise AgentProtocolError(str(error)) from error
 
 def schema_validator(schema_name: str) -> Draft202012Validator:
     """Return the package-mandated Draft 2020-12 validator for a wire schema."""
@@ -1226,17 +1251,155 @@ def schema_validator(schema_name: str) -> Draft202012Validator:
         "telemetry-report.schema.json",
     }:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}")
-    try:
-        document = json.loads(
-            (
-                importlib.resources.files("vonk_agent_protocol")
-                / "schemas"
-                / schema_name
-            ).read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError) as error:
-        raise AgentProtocolError("packaged protocol schema is invalid") from error
+    registry: dict[str, type[BaseModel]] = {
+        "agent-job.schema.json": AgentClaim,
+        "agent-result.schema.json": AgentResult,
+        "agent-directive.schema.json": AgentDirective,
+    }
+    if schema_name == "recipe-job-run.schema.json":
+        # Recipe job wire shape is generated from the Pydantic model graph.
+        # Keep the import local because recipe_jobs imports these primitives.
+        from .recipe_jobs import RecipeJobRunRequest
+
+        registry[schema_name] = RecipeJobRunRequest
+    if schema_name == "telemetry-report.schema.json":
+        # Telemetry is registered from the same Pydantic model used by the
+        # parser. The packaged JSON schema is an export artifact.
+        from .telemetry import TelemetryRequest
+
+        registry[schema_name] = TelemetryRequest
+    document = registry[schema_name].model_json_schema()
     return Draft202012Validator(document, format_checker=PROTOCOL_FORMAT_CHECKER)
+
+
+def _add_protocol_schema_constraints(document: dict[str, Any]) -> None:
+    """Add recursive boundary constraints to schemas derived from WireModel.
+
+    Pydantic describes the recursive JSON value types, while these two
+    constraints are security semantics shared by every extension map. Keeping
+    them attached during registry derivation makes ``schema_validator`` and
+    the runtime parser enforce the same boundary without a second schema file.
+    """
+
+    safe_property_names = {
+        "allOf": [
+            {"not": {"pattern": UNSAFE_SCHEMA_KEY_PATTERN}},
+            {"not": {"pattern": PATH_KEY.pattern}},
+        ]
+    }
+    json_value = document.get("$defs", {}).get("JsonValue")
+    if isinstance(json_value, Mapping):
+        for branch in json_value.get("anyOf", ()):
+            if isinstance(branch, dict) and branch.get("type") == "object":
+                branch["propertyNames"] = safe_property_names
+
+    def constrain_extension_objects(value: object) -> None:
+        if isinstance(value, dict):
+            if (
+                value.get("type") == "object"
+                and value.get("additionalProperties")
+                == {"$ref": "#/$defs/JsonValue"}
+            ):
+                value["propertyNames"] = safe_property_names
+            for child in value.values():
+                constrain_extension_objects(child)
+        elif isinstance(value, list):
+            for child in value:
+                constrain_extension_objects(child)
+
+    constrain_extension_objects(document)
+
+    definitions = document.get("$defs", {})
+    node_probe = definitions.get("NodeProbePayload")
+    if isinstance(node_probe, dict):
+        # Node probe gates are the only flat extension map in the request
+        # graph.  Exclude every other typed operation shape so the public
+        # ``oneOf`` remains truthful despite that bounded extension surface.
+        operation_shapes = []
+        for name, value in definitions.items():
+            if name in {"NodeProbePayload", "AgentOperation"} or not isinstance(
+                value, dict
+            ):
+                continue
+            required = value.get("required")
+            if isinstance(required, list) and required:
+                operation_shapes.append({"required": required})
+        if operation_shapes:
+            node_probe["not"] = {"anyOf": operation_shapes}
+
+    result_extensions = definitions.get("AgentResultExtensions")
+    if isinstance(result_extensions, dict):
+        result_shapes = []
+        for name, value in definitions.items():
+            if name in {"AgentResultExtensions", "AgentOperation"} or not isinstance(
+                value, dict
+            ):
+                continue
+            required = value.get("required")
+            if isinstance(required, list) and required:
+                result_shapes.append({"required": required})
+        result_shapes.append(
+            {"anyOf": [{"required": [name]} for name in ("reason", "error_code", "status")]}
+        )
+        result_extensions["not"] = {"anyOf": result_shapes}
+
+    # Current empty payload operation models are exact empty objects.
+    for name in (
+        "ReleaseInstallPayload",
+        "WorkloadPreparePayload",
+        "WorkloadStartPayload",
+        "WorkloadStopPayload",
+        "WorkloadHealthPayload",
+        "WorkloadVerifyPayload",
+    ):
+        value = definitions.get(name)
+        if isinstance(value, dict):
+            value["maxProperties"] = 0
+    properties = document.get("properties", {})
+    for name in ("payload", "result"):
+        value = properties.get(name)
+        if isinstance(value, dict):
+            if isinstance(value.get("anyOf"), list):
+                value["oneOf"] = value.pop("anyOf")
+            if value.get("type") == "object":
+                value["propertyNames"] = safe_property_names
+    result = properties.get("result")
+    if (
+        isinstance(result, dict)
+        and result.get("type") == "object"
+        and isinstance(json_value, Mapping)
+    ):
+        # Result strings are operator evidence and cannot carry client paths.
+        # Keep claim payload strings broad because typed operation payloads
+        # include authorized URLs and platform targets.
+        result_schema = deepcopy(json_value)
+        result_schema_name = "ResultJsonValue"
+        result_schema_text = json.dumps(result_schema)
+        result_schema_text = result_schema_text.replace(
+            "#/$defs/JsonValue", "#/$defs/ResultJsonValue"
+        )
+        result_schema = json.loads(result_schema_text)
+
+        def restrict_result_values(value: object) -> None:
+            if not isinstance(value, dict):
+                return
+            if value.get("type") == "string":
+                value["not"] = {"pattern": r"[/\\]"}
+            if value.get("type") == "object":
+                value["propertyNames"] = safe_property_names
+            for child in value.values():
+                if isinstance(child, dict):
+                    restrict_result_values(child)
+                elif isinstance(child, list):
+                    for item in child:
+                        restrict_result_values(item)
+
+        restrict_result_values(result_schema)
+        document.setdefault("$defs", {})[result_schema_name] = result_schema
+        result["additionalProperties"] = {"$ref": f"#/$defs/{result_schema_name}"}
+    deadline = properties.get("deadline")
+    if isinstance(deadline, dict):
+        deadline["pattern"] = r"(?:Z|\+00:00)$"
 
 
 def validate_schema_message(schema_name: str, raw: Any) -> Any:
@@ -1247,9 +1410,9 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         "agent-directive.schema.json": AgentDirective.parse,
     }
     if schema_name == "telemetry-report.schema.json":
-        from .telemetry import TelemetryReport
+        from .telemetry import TelemetryRequest
 
-        parsers[schema_name] = TelemetryReport.parse
+        parsers[schema_name] = TelemetryRequest.parse
     if schema_name == "recipe-job-run.schema.json":
         from .recipe_jobs import RecipeJobRunRequest
 
@@ -1258,7 +1421,13 @@ def validate_schema_message(schema_name: str, raw: Any) -> Any:
         parser = parsers[schema_name]
     except KeyError as error:
         raise AgentProtocolError(f"unknown protocol schema: {schema_name}") from error
-    errors = list(schema_validator(schema_name).iter_errors(raw))
-    if errors:
-        raise AgentProtocolError(f"schema validation failed: {errors[0].message}")
+    if schema_name not in {
+        "agent-job.schema.json",
+        "agent-result.schema.json",
+        "agent-directive.schema.json",
+        "recipe-job-run.schema.json",
+    }:
+        errors = list(schema_validator(schema_name).iter_errors(raw))
+        if errors:
+            raise AgentProtocolError(f"schema validation failed: {errors[0].message}")
     return parser(raw)

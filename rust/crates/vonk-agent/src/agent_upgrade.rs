@@ -83,12 +83,7 @@ impl AgentUpgradeExecutor<'_> {
             .client
             .agent_upgrade_grant(claim, &request.package_sha256, &request.package_signature)
             .await?;
-        let request_id = grant
-            .get("claims")
-            .and_then(|claims| claims.get("request_id"))
-            .and_then(serde_json::Value::as_str)
-            .ok_or(AgentUpgradeError::GrantInvalid)?
-            .to_owned();
+        let request_id = grant.claims.request_id.to_string();
         let body = canonical_json(&grant).map_err(|_| AgentUpgradeError::GrantInvalid)?;
         let response = tokio::task::spawn_blocking(move || call_helper(&body))
             .await

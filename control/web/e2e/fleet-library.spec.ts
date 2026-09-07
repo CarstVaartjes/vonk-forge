@@ -79,7 +79,7 @@ function libraryRunSwitchPlan(): components["schemas"]["RunSwitchPlan"] {
     schema_version: 2,
     generated_at: "2026-09-05T00:00:00Z",
     action: "run",
-    model_version_sha256: "e".repeat(64),
+    model_content_sha256: "e".repeat(64),
     recipe_revision_id: "revision-chat",
     recipe_content_sha256: "a".repeat(64),
     alias: "qwen-chat",
@@ -958,7 +958,7 @@ test("Library uses the schema 2 one-click Run path when the Controller exposes r
 
   const state = libraryFixtures.get(page)!;
   const canonical = canonicalRecipeDetail();
-  await expect.poll(() => state.lastRunSwitchPreviewBody).toMatchObject({schema_version: 2, model_version_sha256: canonical.model_documents[0]!.selection.model.content_sha256, recipe_revision_id: canonical.recipe.recipe_revision_id, action: "run", retention: "retain-cached"});
+  await expect.poll(() => state.lastRunSwitchPreviewBody).toMatchObject({schema_version: 2, model_content_sha256: canonical.model_documents[0]!.selection.model.content_sha256, recipe_revision_id: canonical.recipe.recipe_revision_id, action: "run", retention: "retain-cached"});
   await expect.poll(() => state.lastRunSwitchApplyBody).toMatchObject({schema_version: 2, plan_digest: "f".repeat(64), request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
   const progress = authority.getByRole("region", {name: `${pairedRecipeTitle} progress`});
   await expect(progress).toContainText("Copying model to Spark node");
@@ -1174,7 +1174,7 @@ test("Library pairs exact model selection with matching recipes and downloads an
   await expect(orphanRow).toContainText("No Recipe");
   const previewRequest = page.waitForRequest(request => request.url().endsWith("/api/v1/model-cache/download-preview"));
   await orphanRow.getByRole("button", {name: "Make available"}).click();
-  expect((await previewRequest).postDataJSON()).toMatchObject({schema_version: 2, model_version_sha256: unlinked.model.content_sha256});
+  expect((await previewRequest).postDataJSON()).toMatchObject({schema_version: 2, model_content_sha256: unlinked.model.content_sha256});
   await expect(page.getByText(/Downloading to NAS/)).toBeVisible();
 });
 

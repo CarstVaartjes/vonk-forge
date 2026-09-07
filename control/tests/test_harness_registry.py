@@ -689,7 +689,9 @@ def test_custom_adapter_requires_a_real_signed_source_bundle(
 ) -> None:
     store, issuer, receipt, _stored, bundle = signed_source_bundle
     registry = custom_registry(store, issuer)
-    tampered = replace(receipt, signature=replace(receipt.signature, value="0" * 128))
+    tampered = receipt.model_copy(
+        update={"signature": receipt.signature.model_copy(update={"value": "0" * 128})}
+    )
 
     with pytest.raises(HarnessCompileError, match="source bundle receipt"):
         registry.register(

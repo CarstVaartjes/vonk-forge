@@ -273,7 +273,6 @@ def assemble_production_worker(
     from .artifact_blob_store import ArtifactBlobStore
     from .artifact_jobs import ArtifactJobService
     from .artifact_maintenance import ArtifactMaintenanceCadence
-    from .artifact_sizes import DeclaredArtifactSizeResolver
     from .cluster_mappings import ClusterMappingService
     from .distributed_recovery import DistributedRecoveryCoordinator
     from .distribution import build_distribution_service_from_components
@@ -338,7 +337,6 @@ def assemble_production_worker(
         sessions,
         install_admission=InstallAdmissionService(
             sessions,
-            sizes=DeclaredArtifactSizeResolver(),
             inventory_max_age=300,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=compiled_plan_provider,

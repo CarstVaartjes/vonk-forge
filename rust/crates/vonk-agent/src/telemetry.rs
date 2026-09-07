@@ -23,6 +23,7 @@ const SEQUENCE_STATE_KEY: &str = "telemetry_sequence_v1";
 const SEQUENCE_LIMIT_EXCLUSIVE: u64 = i64::MAX as u64 + 1;
 pub const TELEMETRY_STATE_FILENAME: &str = "telemetry-state.sqlite";
 pub const MAX_REPORT_SAMPLES: usize = 16;
+const REPORT_BATCH_TARGET_BYTES: usize = 1024 * 1024;
 pub const COLLECTION_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_ACCELERATORS: usize = 16;
 const MAX_STORAGE_DEVICES: usize = 32;
@@ -30,6 +31,14 @@ const MAX_NETWORK_INTERFACES: usize = 32;
 const MAX_GPU_PROCESSES: usize = 5;
 const MAX_METRIC_SERIES: usize = 512;
 const MAX_CAPABILITIES: usize = 128;
+
+/// The exact wire envelope shared by batching and HTTP serialization.
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TelemetryRequest<'a> {
+    pub schema_version: u8,
+    pub samples: &'a [TelemetrySample],
+}
 
 #[derive(Debug, Error)]
 pub enum TelemetryError {
@@ -201,24 +210,6 @@ pub struct TelemetryMetrics {
     pub provenance: TelemetryProvenance,
 }
 
-impl Default for TelemetryMetrics {
-    fn default() -> Self {
-        Self {
-            schema_version: 2,
-            series: Vec::new(),
-            capabilities: Vec::new(),
-            runtimes: Vec::new(),
-            workloads: Vec::new(),
-            provenance: TelemetryProvenance {
-                collector: "legacy".to_owned(),
-                collector_version: "1".to_owned(),
-                host_uptime_seconds: None,
-                source_observed_at: None,
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TelemetrySample {
     pub boot_id: Uuid,
@@ -239,22 +230,11 @@ pub struct TelemetrySample {
     pub network_transmit_bytes_per_second: Option<f64>,
     pub gap_samples: i64,
     pub details: TelemetryDetails,
-    #[serde(default, skip_serializing_if = "TelemetryMetrics::is_empty")]
     pub metrics: TelemetryMetrics,
     #[serde(skip)]
     cpu_counters: Option<CpuCounters>,
     #[serde(skip)]
     network_counters: Option<NetworkCounters>,
-}
-
-impl TelemetryMetrics {
-    fn is_empty(value: &Self) -> bool {
-        value.series.is_empty()
-            && value.capabilities.is_empty()
-            && value.runtimes.is_empty()
-            && value.workloads.is_empty()
-            && value.provenance.collector == "legacy"
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1773,11 +1753,24 @@ impl TelemetryQueue {
     }
 
     pub fn batch(&self) -> Vec<TelemetrySample> {
-        self.samples
-            .iter()
-            .take(MAX_REPORT_SAMPLES)
-            .cloned()
-            .collect()
+        let mut batch = Vec::new();
+        for sample in self.samples.iter().take(MAX_REPORT_SAMPLES) {
+            batch.push(sample.clone());
+            let request = TelemetryRequest {
+                schema_version: 1,
+                samples: &batch,
+            };
+            if batch.len() > 1
+                && serde_json::to_vec(&request)
+                    .is_ok_and(|body| body.len() > REPORT_BATCH_TARGET_BYTES)
+            {
+                batch.pop();
+                break;
+            }
+        }
+        // A larger valid sample travels alone. Splitting a batch never
+        // changes its samples, sequence numbers, or acknowledgement state.
+        batch
     }
 
     pub fn acknowledge_prefix(&mut self, count: usize) -> Result<(), TelemetryError> {
@@ -1846,7 +1839,7 @@ pub fn read_boot_id(path: &Path) -> Result<Uuid, TelemetryError> {
     Ok(boot_id)
 }
 
-pub(crate) fn valid_report_batch(samples: &[TelemetrySample]) -> bool {
+pub fn valid_report_batch(samples: &[TelemetrySample]) -> bool {
     if samples.is_empty() || samples.len() > MAX_REPORT_SAMPLES {
         return false;
     }
@@ -1921,12 +1914,6 @@ fn valid_metrics(metrics: &TelemetryMetrics) -> bool {
         || metrics.runtimes.len() > 32
         || metrics.workloads.len() > 128
     {
-        return false;
-    }
-    let Ok(encoded) = serde_json::to_vec(metrics) else {
-        return false;
-    };
-    if encoded.len() > 48 * 1024 {
         return false;
     }
     let mut series_identities = std::collections::BTreeSet::new();
@@ -2056,14 +2043,44 @@ fn valid_metric_text(value: &str, maximum: usize) -> bool {
     !value.is_empty() && value.chars().count() <= maximum && !value.chars().any(char::is_control)
 }
 
-fn valid_metric_value(value: &serde_json::Value) -> bool {
+/// Return whether a rich metric value satisfies the shared JSON scalar contract.
+pub fn valid_metric_value(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(_) => true,
-        serde_json::Value::Number(number) => number
-            .as_f64()
-            .is_some_and(|value| value.is_finite() && value.abs() <= 1e15),
-        serde_json::Value::String(value) => valid_metric_text(value, 256),
+        serde_json::Value::Number(number) => {
+            let representation = number.to_string();
+            if representation.contains(['.', 'e', 'E']) {
+                number.as_f64().is_some_and(f64::is_finite)
+            } else {
+                representation.parse::<i64>().is_ok()
+            }
+        }
+        serde_json::Value::String(value) => value.chars().count() <= 256,
         serde_json::Value::Array(_) | serde_json::Value::Object(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod scalar_contract_tests {
+    use super::valid_metric_value;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn metric_scalar_contract_matches_json_values() {
+        assert!(valid_metric_value(&Value::Null));
+        assert!(valid_metric_value(&Value::Bool(true)));
+        assert!(valid_metric_value(&json!(i64::MIN)));
+        assert!(valid_metric_value(&json!(i64::MAX)));
+        assert!(valid_metric_value(&json!(f64::MAX)));
+        assert!(valid_metric_value(&Value::String(String::new())));
+        assert!(valid_metric_value(&Value::String("\u{0000}é".to_owned())));
+        assert!(valid_metric_value(&Value::String("x".repeat(256))));
+
+        assert!(!valid_metric_value(&json!(i64::MAX as u64 + 1)));
+        assert!(!valid_metric_value(&json!(i64::MIN as i128 - 1)));
+        assert!(!valid_metric_value(&Value::String("x".repeat(257))));
+        assert!(!valid_metric_value(&Value::Array(Vec::new())));
+        assert!(!valid_metric_value(&Value::Object(Default::default())));
     }
 }
 
