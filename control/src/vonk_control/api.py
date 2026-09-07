@@ -96,7 +96,6 @@ from .operation_api import (
     AuthorityResponse,
     ChangeResponse,
     EndpointResponse,
-    FleetStatusResponse,
     HealthzResponse,
     IdentityHistoryResponse,
     JobDetailResponse,
@@ -114,7 +113,6 @@ from .operation_api import (
     _global_list_operations,
     bounded_error_responses,
     decode_offset,
-    fleet_response,
     job_response,
     operation_detail_response,
 )
@@ -417,24 +415,11 @@ class AuditSink(Protocol):
 
 def refresh_fleet_metrics(
     metrics: MetricsRegistry,
-    fleet_state: Mapping[str, object],
+    fleet_snapshot: FleetSnapshot,
 ) -> None:
-    """Refresh bounded fleet series while omitting unknown probe ages."""
+    """Refresh metrics from the single typed FleetProjection evidence path."""
 
-    nodes = fleet_state.get("nodes")
-    if not isinstance(nodes, Sequence):
-        raise TypeError("fleet metrics nodes are invalid")
-    for node in nodes:
-        if not isinstance(node, Mapping):
-            raise TypeError("fleet metrics node is invalid")
-        probe_age = node.get("probe_age_seconds")
-        metrics.update_node(
-            str(node["id"]),
-            ready=node.get("healthy") is True,
-            memory_available_bytes=int(node["memory_available_bytes"]),
-            disk_available_bytes=int(node["disk_available_bytes"]),
-            probe_age_seconds=(None if probe_age is None else float(probe_age)),
-        )
+    metrics.update_fleet(fleet_snapshot)
 
 
 class ProposalChangeRequest(BaseModel):
@@ -857,22 +842,6 @@ def create_app(
                 "X-Accel-Buffering": "no",
             },
         )
-
-    @app.get(
-        "/api/v1/nodes/status",
-        response_model=FleetStatusResponse,
-        responses=bounded_error_responses(401),
-        operation_id="getNodeStatuses",
-        summary="Read explicit node health-probe evidence",
-        description=(
-            "Returns the node health-probe projection. The health_probe_stale field "
-            "refers only to explicit node.probe compute-gate evidence, not aggregate "
-            "Fleet readiness. Use /api/v1/fleet for live connection, inventory, and "
-            "telemetry readiness."
-        ),
-    )
-    def node_status_view(_actor: Actor = authenticated_actor) -> FleetStatusResponse:
-        return fleet_response(fleet())
 
     @app.patch(
         "/api/v1/nodes/{node_id}/profile",
@@ -1451,7 +1420,6 @@ def production_app() -> FastAPI:
     from .agent_upgrades import AgentUpgradeService
     from .audit import SqlAuditStore
     from .availability_production import build_recipe_image_availability
-    from .dashboard import DashboardService
     from .database_authority import (
         DatabaseAuthorityService,
         DatabaseChangeService,
@@ -1497,7 +1465,6 @@ def production_app() -> FastAPI:
     proposals = DatabaseProposalService(authority)
     changes = DatabaseChangeService(authority, proposals)
     database_bundles = DatabaseSourceBundleStore(sessions)
-    dashboard = DashboardService(authority, sessions)
     telemetry_repository = TelemetryRepository(sessions, clock=clock)
     fleet_event_repository = FleetEventRepository(sessions, clock=clock)
     visual_fleet = FleetProjection(
@@ -1775,8 +1742,7 @@ def production_app() -> FastAPI:
 
     def refresh_metrics() -> None:
         operational_metrics.refresh()
-        fleet_state = dashboard.fleet()
-        refresh_fleet_metrics(metrics, fleet_state)
+        refresh_fleet_metrics(metrics, visual_fleet.read())
         with sessions() as session:
             for kind, state, count in session.execute(
                 select(Job.kind, Job.state, func.count()).group_by(Job.kind, Job.state)
@@ -1823,7 +1789,7 @@ def production_app() -> FastAPI:
         jobs=job_service,
         tokens=token_codec,
         audits=audits_store,
-        fleet=dashboard.fleet,
+        fleet=visual_fleet.read,
         fleet_projection=visual_fleet,
         fleet_stream=visual_fleet_stream,
         library_projection=visual_library,
