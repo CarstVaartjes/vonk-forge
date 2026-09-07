@@ -31,6 +31,38 @@ fn generated_python_workload_fixture_round_trips_through_rust() {
 }
 
 #[test]
+fn recipe_topology_vocabulary_and_engine_backends_survive_validation() {
+    for mode in [
+        "single",
+        "distributed",
+        "tensor_parallel",
+        "pipeline_parallel",
+        "data_parallel",
+        "hybrid",
+        "ray",
+        "mpi",
+    ] {
+        for backend in ["tcp", "ucx", "future-engine-Δ"] {
+            let mut value = fixture();
+            value["topology"]["mode"] = json!(mode);
+            value["topology"]["backend"] = json!(backend);
+            let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+            plan.validate().unwrap();
+            assert_eq!(plan.topology.mode, mode);
+            assert_eq!(plan.topology.backend, backend);
+        }
+    }
+    let mut value = fixture();
+    value["topology"]["backend"] = json!("");
+    assert!(
+        serde_json::from_value::<CompiledExecutionPlan>(value)
+            .unwrap()
+            .validate()
+            .is_err()
+    );
+}
+
+#[test]
 fn endpoint_and_job_are_required_one_of_wire_keys() {
     let mut value = fixture();
     value.as_object_mut().unwrap().remove("endpoint");

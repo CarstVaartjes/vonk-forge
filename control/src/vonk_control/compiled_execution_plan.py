@@ -34,6 +34,10 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from vonk_agent_protocol import (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES,
+    canonical_message,
+)
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 ImageDigest = Annotated[str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")]
@@ -41,6 +45,7 @@ Identifier = Annotated[
     str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$")
 ]
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+MAX_COMPILED_EXECUTION_PLAN_BYTES = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
 _WEIGHT_ROLES = frozenset({"model", "weight", "weights"})
 
 
@@ -976,14 +981,24 @@ def compile_verified_execution_plan(
 
 
 def validate_compiled_launch_payload(value: object) -> dict[str, object]:
-    """Validate the shared schema-2 launch DTO at the Controller boundary."""
-
+    """Enforce canonical schema/security validation and the transport ceiling."""
     from vonk_agent_protocol import validate_compiled_execution_plan
 
+    payload = _mapping(value, "compiled launch plan")
     try:
-        return validate_compiled_execution_plan(value)
+        encoded = canonical_message(payload)
+    except ValueError as error:
+        raise CompiledExecutionPlanError("compiled launch plan is not JSON") from error
+    if len(encoded) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
+        raise CompiledExecutionPlanError("compiled launch plan is too large")
+    try:
+        # This calls CompiledExecutionPlan.model_validate, including all nested
+        # schema, identity, path, mount, runtime and security validators.
+        return validate_compiled_execution_plan(payload)
     except ValueError as error:
         raise CompiledExecutionPlanError(str(error)) from error
+
+
 __all__ = [
     "EMPTY_SHA256",
     "CompiledExecutionPlan",

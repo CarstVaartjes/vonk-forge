@@ -128,3 +128,25 @@ fn retained_inspection_preserves_live_tmp_and_cache_but_actual_start_resets_tmp(
     assert!(!marker.exists());
     assert_eq!(fs::read(cache).unwrap(), b"persistent cache");
 }
+
+#[test]
+fn real_751_artifact_spec_json_round_trips_through_persisted_loader() {
+    let plan: CompiledExecutionPlan = serde_json::from_str(include_str!(
+        "../../../../control/tests/fixtures/compiled_plan_751.json"
+    ))
+    .unwrap();
+    plan.validate().unwrap();
+    let root = tempdir().unwrap();
+    let directory = root.path().join("installations").join(INSTALLATION);
+    fs::create_dir_all(&directory).unwrap();
+    let encoded = serde_json::to_vec(&plan).unwrap();
+    assert!(encoded.len() > 500 * 1024);
+    fs::write(directory.join("spec.json"), &encoded).unwrap();
+    let runtime = OciRuntime {
+        runner: &NoProcess,
+        data_root: root.path(),
+        huggingface_curl_config: None,
+    };
+    let loaded = runtime.load_spec(INSTALLATION).unwrap();
+    assert_eq!(loaded.artifacts.len(), 751);
+}

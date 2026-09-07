@@ -34,8 +34,18 @@ class _Strict(BaseModel):
 def _safe_path(value: str, *, absolute: bool) -> str:
     if absolute and value == "/":
         return value
-    parts = value[1:].split("/") if absolute and value.startswith("/") else value.split("/")
-    if not value or len(value) > 512 or "\\" in value or "\x00" in value or any(part in {"", ".", ".."} for part in parts) or (absolute and not value.startswith("/")) or (not absolute and value.startswith("/")):
+    parts = (
+        value[1:].split("/") if absolute and value.startswith("/") else value.split("/")
+    )
+    if (
+        not value
+        or len(value) > 512
+        or "\\" in value
+        or "\x00" in value
+        or any(part in {"", ".", ".."} for part in parts)
+        or (absolute and not value.startswith("/"))
+        or (not absolute and value.startswith("/"))
+    ):
         raise ValueError("path is unsafe")
     return value
 
@@ -63,7 +73,13 @@ def _validate_ip(value: str | None) -> str | None:
     if value is None:
         return value
     parsed = ipaddress.ip_address(value)
-    if parsed.is_loopback or parsed.is_link_local or parsed.is_multicast or parsed.is_unspecified or str(parsed) != value:
+    if (
+        parsed.is_loopback
+        or parsed.is_link_local
+        or parsed.is_multicast
+        or parsed.is_unspecified
+        or str(parsed) != value
+    ):
         raise ValueError("address is invalid")
     return value
 
@@ -107,7 +123,9 @@ class CompiledPlacement(_Strict):
     port: int = Field(ge=1, le=65535)
     reserved_memory_bytes: int = Field(gt=0, le=16 * 1024**4)
 
-    _addresses_are_safe = field_validator("endpoint_address", "local_address", "master_address")(_validate_ip)
+    _addresses_are_safe = field_validator(
+        "endpoint_address", "local_address", "master_address"
+    )(_validate_ip)
 
 
 class CompiledRuntime(_Strict):
@@ -197,7 +215,21 @@ class CompiledArtifact(_Strict):
     @field_validator("path")
     @classmethod
     def path_is_relative(cls, value: str) -> str:
-        if not value or len(value) > 512 or "\\" in value or "\x00" in value or any(not part or part in {".", ".."} or any(not char.isascii() or not (char.isalnum() or char in "._-") for char in part) for part in value.split("/")):
+        if (
+            not value
+            or len(value) > 512
+            or "\\" in value
+            or "\x00" in value
+            or any(
+                not part
+                or part in {".", ".."}
+                or any(
+                    not char.isascii() or not (char.isalnum() or char in "._-")
+                    for char in part
+                )
+                for part in value.split("/")
+            )
+        ):
             raise ValueError("model path is unsafe")
         return value
 
@@ -217,7 +249,12 @@ class CompiledArtifact(_Strict):
 
     @model_validator(mode="after")
     def receipt_matches(self) -> CompiledArtifact:
-        if self.distribution_object.kind != "model" or self.distribution_object.name != self.path or self.distribution_object.sha256 != self.sha256 or self.distribution_object.bytes != self.size_bytes:
+        if (
+            self.distribution_object.kind != "model"
+            or self.distribution_object.name != self.path
+            or self.distribution_object.sha256 != self.sha256
+            or self.distribution_object.bytes != self.size_bytes
+        ):
             raise ValueError("artifact distribution receipt is inconsistent")
         if self.size_bytes == 0 and any(
             role in {"model", "weight", "weights"} for role in self.roles
@@ -243,11 +280,21 @@ class CompiledRuntimeImage(_Strict):
 
     @model_validator(mode="after")
     def receipt_matches(self) -> CompiledRuntimeImage:
-        if self.platform_manifest_digest != self.image_digest or self.distribution_object.kind != "oci-archive" or self.distribution_object.name != "image.oci.tar" or self.distribution_object.sha256 != self.oci_layout_sha256 or self.distribution_object.bytes != self.image_bytes:
+        if (
+            self.platform_manifest_digest != self.image_digest
+            or self.distribution_object.kind != "oci-archive"
+            or self.distribution_object.name != "image.oci.tar"
+            or self.distribution_object.sha256 != self.oci_layout_sha256
+            or self.distribution_object.bytes != self.image_bytes
+        ):
             raise ValueError("runtime image receipt is inconsistent")
-        if self.source == "published" and (self.build_id is not None or self.registry_manifest_digest is None):
+        if self.source == "published" and (
+            self.build_id is not None or self.registry_manifest_digest is None
+        ):
             raise ValueError("published image receipt is invalid")
-        if self.source == "controller-build" and (not self.build_id or self.registry_manifest_digest is not None):
+        if self.source == "controller-build" and (
+            not self.build_id or self.registry_manifest_digest is not None
+        ):
             raise ValueError("Controller image receipt is invalid")
         expected = f"localhost/vonk/compiled-runtime-{self.oci_layout_sha256}@{self.platform_manifest_digest}"
         if self.local_image_reference != expected:
@@ -271,7 +318,9 @@ class CompiledSecurityMount(_Strict):
             raise ValueError("outputs mount policy is invalid")
         if self.source == "inputs" and (self.target != "/inputs" or not self.read_only):
             raise ValueError("inputs mount policy is invalid")
-        if self.source == "model" and (self.target != "/models" and not self.target.startswith("/models/")):
+        if self.source == "model" and (
+            self.target != "/models" and not self.target.startswith("/models/")
+        ):
             raise ValueError("model mount policy is invalid")
         if self.source == "model" and not self.read_only:
             raise ValueError("model mount must be read-only")
@@ -298,25 +347,34 @@ class CompiledSecurity(_Strict):
             or not self.no_new_privileges
             or (
                 self.devices
-                and (
-                    len(self.devices) > 1
-                    or self.devices != ["nvidia.com/gpu=all"]
-                )
+                and (len(self.devices) > 1 or self.devices != ["nvidia.com/gpu=all"])
             )
         ):
             raise ValueError("security policy is invalid")
         if self.capabilities or len(self.mounts) > 4:
             raise ValueError("security policy is invalid")
         parts = self.user.split(":")
-        if len(parts) not in {1, 2} or any(not part or part.startswith("0") or not part.isdigit() for part in parts):
+        if len(parts) not in {1, 2} or any(
+            not part or part.startswith("0") or not part.isdigit() for part in parts
+        ):
             raise ValueError("security user is invalid")
         return self
 
 
 class CompiledTopology(_Strict):
     name: str
-    mode: Literal["single", "distributed"]
-    backend: Literal["local", "nccl", "gloo"]
+    mode: Literal[
+        "single",
+        "distributed",
+        "tensor_parallel",
+        "pipeline_parallel",
+        "data_parallel",
+        "hybrid",
+        "ray",
+        "mpi",
+    ]
+    # Engine-owned backend labels follow RecipeParallelism's string contract.
+    backend: str = Field(min_length=1, max_length=64)
     node_count: int = Field(gt=0)
     world_size: int = Field(gt=0)
     rank: int = Field(ge=0)
@@ -371,7 +429,9 @@ class CompiledEndpoint(_Strict):
 
 
 class CompiledJob(_Strict):
-    interface: Literal["image-job", "audio-job", "video-job", "mesh-job", "artifact-job"]
+    interface: Literal[
+        "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"
+    ]
     input: dict[str, Any] | None
     output_path: Literal["/outputs"]
     timeout_seconds: int = Field(ge=1, le=3600)
@@ -407,7 +467,12 @@ class CompiledExecutionPlan(_Strict):
         if (self.endpoint is None) == (self.job is None):
             raise ValueError("exactly one compiled interface is required")
         placement = self.runtime.placement
-        if self.runtime.image_digest != self.runtime_image.image_digest or (placement.rank, placement.role, placement.world_size) != (self.topology.rank, self.topology.role, self.topology.world_size) or placement.rank >= placement.world_size:
+        if (
+            self.runtime.image_digest != self.runtime_image.image_digest
+            or (placement.rank, placement.role, placement.world_size)
+            != (self.topology.rank, self.topology.role, self.topology.world_size)
+            or placement.rank >= placement.world_size
+        ):
             raise ValueError("compiled placement identity is inconsistent")
         if self.topology.world_size < self.topology.node_count:
             raise ValueError("compiled topology bounds are invalid")
@@ -454,7 +519,12 @@ class CompiledExecutionPlan(_Strict):
                 raise ValueError("compiled artifact digest sizes conflict")
         if sum(by_digest.values()) != self.identity.model_artifact_bytes:
             raise ValueError("compiled artifact bytes do not match identity")
-        expected_network = "bridge" if placement.endpoint_address is not None or placement.master_port is not None else "none"
+        expected_network = (
+            "bridge"
+            if placement.endpoint_address is not None
+            or placement.master_port is not None
+            else "none"
+        )
         if self.security.network_mode != expected_network:
             raise ValueError("compiled network policy does not match placement")
         return self

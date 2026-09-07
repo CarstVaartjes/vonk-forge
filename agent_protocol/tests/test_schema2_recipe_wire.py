@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from vonk_agent_protocol import (
     AgentClaim,
     AgentOperation,
@@ -16,11 +15,8 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-
 PLAN = json.loads(
-    (
-        Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json"
-    ).read_text()
+    (Path(__file__).parent / "fixtures" / "compiled-execution-plan-v2.json").read_text()
 )
 INSTALLATION_ID = "00000000-0000-4000-8000-000000000001"
 RUN_ID = "00000000-0000-4000-8000-000000000003"
@@ -105,6 +101,28 @@ def test_sanitized_compiled_plan_and_current_outer_payloads_round_trip() -> None
     start = RecipeOperationRequest.parse(AgentOperation.RECIPE_START, _start())
     assert install.schema_version == start.schema_version == 2
     assert start.mapping_id == MAPPING_ID
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "single",
+        "distributed",
+        "tensor_parallel",
+        "pipeline_parallel",
+        "data_parallel",
+        "hybrid",
+        "ray",
+        "mpi",
+    ],
+)
+@pytest.mark.parametrize("backend", ["tcp", "ucx", "future-engine-Δ"])
+def test_recipe_topology_vocabulary_survives_the_wire(mode, backend) -> None:
+    plan = copy.deepcopy(PLAN)
+    plan["topology"].update(mode=mode, backend=backend)
+    result = CompiledExecutionPlan.parse(plan)
+    assert result.topology.mode == mode
+    assert result.topology.backend == backend
 
 
 def test_install_accepts_deferred_distributed_rendezvous() -> None:
@@ -225,13 +243,14 @@ def test_start_phase_shape_matches_single_and_distributed_controller_modes() -> 
     for key in ("phase", "start_deadline", "run_generation"):
         del unphased_distributed[key]
     with pytest.raises(AgentProtocolError):
-        RecipeOperationRequest.parse(
-            AgentOperation.RECIPE_START, unphased_distributed
-        )
+        RecipeOperationRequest.parse(AgentOperation.RECIPE_START, unphased_distributed)
 
-    assert RecipeOperationRequest.parse(
-        AgentOperation.RECIPE_START, _distributed_start()
-    ).phase == "rank-launch"
+    assert (
+        RecipeOperationRequest.parse(
+            AgentOperation.RECIPE_START, _distributed_start()
+        ).phase
+        == "rank-launch"
+    )
 
 
 def test_schema2_rejects_legacy_flat_install_and_missing_required_options() -> None:

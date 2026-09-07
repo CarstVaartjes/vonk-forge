@@ -22,6 +22,11 @@ from vonk_agent_protocol import (
 )
 
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
+from .compiled_execution_plan import (
+    CompiledExecutionPlanError,
+    MAX_COMPILED_EXECUTION_PLAN_BYTES,
+    validate_compiled_launch_payload,
+)
 from .distributed_lifecycle import (
     DistributedLifecycleError,
     canonical_distributed_readiness,
@@ -3156,6 +3161,21 @@ class RecipeOperationService:
             if set(job_context) & set(job_payload):
                 raise RecipeOperationConflict("operation context is invalid")
             job_payload.update(json.loads(canonical_message(job_context)))
+        if kind in {"recipe.install", "recipe.start"}:
+            try:
+                for _node_id, payload in flattened:
+                    compiled_plan = payload.get("compiled_execution_plan")
+                    if not isinstance(compiled_plan, Mapping):
+                        raise CompiledExecutionPlanError(
+                            "compiled execution plan is missing"
+                        )
+                    validate_compiled_launch_payload(compiled_plan)
+            except (CompiledExecutionPlanError, TypeError, ValueError) as error:
+                raise RecipeOperationConflict(
+                    f"compiled execution plan is invalid: {error}"
+                ) from None
+            if len(canonical_message(job_payload)) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
+                raise RecipeOperationConflict("recipe operation job payload is too large")
         job = Job(
             id=job_id,
             request_id=request_id,

@@ -17,6 +17,10 @@ from uuid import UUID
 from jsonschema import Draft202012Validator, FormatChecker
 
 MAX_DOCUMENT_BYTES = 64 * 1024
+MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
+MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES = (
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES
+)
 NODE_ID = re.compile(r"spk_[0-9a-f]{32}\Z")
 AUTHORITY_REVISION = re.compile(r"[0-9a-f]{64}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -505,6 +509,7 @@ def _validate_bounded_document(
     name: str,
     operation: AgentOperation | None = None,
     typed_result_strings: bool = False,
+    maximum_bytes: int = MAX_DOCUMENT_BYTES,
 ) -> Any:
     if not isinstance(value, Mapping):
         raise AgentProtocolError(f"{name} must be a JSON object")
@@ -514,7 +519,7 @@ def _validate_bounded_document(
         typed_result_strings=typed_result_strings,
     )
     copied = _canonical_copy(value, name=name)
-    if len(canonical_message(copied)) > MAX_DOCUMENT_BYTES:
+    if len(canonical_message(copied)) > maximum_bytes:
         raise AgentProtocolError(f"{name} is too large")
     return copied
 
@@ -1035,8 +1040,16 @@ class AgentClaim:
             self.payload_digest
         ):
             raise AgentProtocolError("payload_digest must be a lowercase SHA-256")
+        maximum_bytes = (
+            MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES
+            if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}
+            else MAX_DOCUMENT_BYTES
+        )
         payload = _validate_bounded_document(
-            self.payload, name="payload", operation=self.operation
+            self.payload,
+            name="payload",
+            operation=self.operation,
+            maximum_bytes=maximum_bytes,
         )
         if self.operation in {AgentOperation.RECIPE_INSTALL, AgentOperation.RECIPE_START}:
             from .recipe_operations import RecipeInstallPayload, RecipeStartPayload
