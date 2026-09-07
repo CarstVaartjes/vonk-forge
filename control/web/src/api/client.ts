@@ -16,6 +16,7 @@ import type {
   FleetProfile,
   FleetProfileApplication,
   FleetProfileApplyInput,
+  FleetProfileRetryInput,
   FleetProfileCaptureInput,
   FleetProfileDuplicateInput,
   FleetProfileInput,
@@ -51,6 +52,8 @@ import type {
   JobDetail,
   JobResumeResponse,
   JobsResponse,
+  OperationsResponse,
+  OperationDetail,
   ChangeResponse,
   ProposalInput,
   ProposalPreview,
@@ -297,6 +300,12 @@ export class ApiClient implements ControlApi {
     }));
   }
 
+  async retryFleetProfileApplication(applicationId: string, input: FleetProfileRetryInput, signal?: AbortSignal): Promise<FleetProfileApplication> {
+    return resultData(await this.generated.POST("/api/v1/fleet-profile-applications/{application_id}/retry", {
+      params: {path: {application_id: applicationId}}, body: input, signal,
+    }));
+  }
+
   async previewRecipeRunSwitch(input: RunSwitchPreviewRequest, signal?: AbortSignal): Promise<RunSwitchPlan> {
     return resultData(await this.generated.POST("/api/v1/recipes/run-switch-plans/preview", {body: input, signal}));
   }
@@ -446,6 +455,12 @@ export class ApiClient implements ControlApi {
     return resultData(await this.generated.GET("/api/v1/library/placements/{placement_id}", {
       params: {path: {placement_id: placementId}},
       signal,
+    }));
+  }
+
+  async retryLibraryPlacement(placementId: string, input: FleetProfileRetryInput, signal?: AbortSignal) {
+    return resultData(await this.generated.POST("/api/v1/library/placements/{placement_id}/retry", {
+      params: {path: {placement_id: placementId}}, body: input, signal,
     }));
   }
 
@@ -743,6 +758,18 @@ export class ApiClient implements ControlApi {
   async jobs(cursor?: string): Promise<JobsResponse> {
     return resultData(await this.generated.GET("/api/v1/jobs", {
       params: {query: {cursor, limit: 20}},
+    }));
+  }
+
+  async operations(cursor?: string, signal?: AbortSignal): Promise<OperationsResponse> {
+    return resultData(await this.generated.GET("/api/v1/operations", {
+      params: {query: {cursor, limit: 20}}, signal,
+    }));
+  }
+
+  async operation(operationId: string, signal?: AbortSignal): Promise<OperationDetail> {
+    return resultData(await this.generated.GET("/api/v1/operations/{operation_id}", {
+      params: {path: {operation_id: operationId}}, signal,
     }));
   }
 

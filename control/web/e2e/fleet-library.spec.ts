@@ -1208,3 +1208,88 @@ test("Library retries a transient Model cache operation without restarting its t
   expect(downloadCalls).toBe(1);
   await expect(row.getByRole("button", {name: "Available on NAS"})).toBeVisible();
 });
+
+for (const width of [1280, 360]) {
+  test(`Profiles validate scope and ranks and save idle intent at ${width}px`, async ({page}, testInfo) => {
+    const writes: Record<string, unknown>[] = [];
+    await page.route("**/api/v1/fleet-profiles/00000000-0000-4000-8000-000000000101", async route => {
+      const input = route.request().postDataJSON() as Record<string, unknown>;
+      writes.push(input);
+      await route.fulfill({json: {...input, schema_version: 2, id: "00000000-0000-4000-8000-000000000101", profile_digest: "d".repeat(64), created_by: "admin", created_at: "2026-09-05T00:00:00Z", updated_at: "2026-09-05T00:00:00Z"}});
+    });
+    await page.setViewportSize({width, height: 900});
+    await page.goto("/library/profiles");
+    await page.getByRole("button", {name: "Edit profile"}).click();
+    const save = page.getByRole("button", {name: "Save profile", exact: true});
+    await page.getByRole("button", {name: "Clear scope"}).click();
+    const scope = page.getByRole("group", {name: "Fleet scope"});
+    await expect(scope).toHaveAttribute("aria-invalid", "true");
+    await expect(scope).toHaveAccessibleDescription(/Select at least one Spark/);
+    await expect(save).toBeDisabled();
+    await scope.scrollIntoViewIfNeeded();
+    await page.screenshot({path: testInfo.outputPath(`profile-empty-scope-${width}.png`)});
+    await page.getByRole("button", {name: "Select all Sparks"}).click();
+    const ranks = page.getByRole("group", {name: "Spark ranks"});
+    await ranks.getByRole("checkbox", {name: "Aurora", exact: true}).uncheck();
+    await ranks.getByRole("checkbox", {name: "Borealis", exact: true}).uncheck();
+    await expect(ranks).toHaveAttribute("aria-invalid", "true");
+    await expect(ranks).toHaveAccessibleDescription(/Select the Sparks for this placement/);
+    await expect(save).toBeDisabled();
+    await ranks.scrollIntoViewIfNeeded();
+    await page.screenshot({path: testInfo.outputPath(`profile-empty-ranks-${width}.png`)});
+    expect(writes).toHaveLength(0);
+    await ranks.getByRole("checkbox", {name: "Aurora", exact: true}).check();
+    await expect(save).toBeEnabled();
+    await page.getByRole("button", {name: "Remove placement"}).click();
+    await expect(page.getByText("All scoped Sparks are idle")).toBeVisible();
+    await save.click();
+    await expect.poll(() => writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({scope: {node_ids: [nodeId, borealisId]}, assignments: []});
+    await expect(page.getByText("Idle profile", {exact: true})).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({path: testInfo.outputPath(`profile-saved-idle-${width}.png`)});
+  });
+
+  test(`Profiles retry the linked application at ${width}px`, async ({page}, testInfo) => {
+    const failedId = "00000000-0000-4000-8000-000000000901";
+    const nextId = "00000000-0000-4000-8000-000000000902";
+    const base = {
+      schema_version: 2, id: failedId, profile_id: "00000000-0000-4000-8000-000000000101", profile_digest: "d".repeat(64), plan_digest: "e".repeat(64),
+      attempt: 1, retry_of_application_id: null, state: "failed", current_step: 1, total_steps: 2, current_operation_id: null,
+      status_reason: "Borealis disconnected after Aurora completed.", progress: {attempt: 1, retry_of_application_id: null, completed_steps: 1, total_steps: 2}, result: null,
+      created_at: "2026-09-05T00:00:00Z", updated_at: "2026-09-05T00:00:00Z",
+    };
+    const linked = {...base, id: nextId, attempt: 2, retry_of_application_id: failedId, state: "running", current_step: 0, total_steps: 1, status_reason: null, progress: {attempt: 2, retry_of_application_id: failedId, completed_steps: 0, total_steps: 1}};
+    const completed = {...linked, state: "succeeded", current_step: 1, progress: {...linked.progress, completed_steps: 1}, result: {changed: true, completed_steps: 1}};
+    let retryBody: Record<string, unknown> | undefined;
+    let readId: string | undefined;
+    let applyCount = 0;
+    await page.route("**/api/v1/fleet-profiles/*/status", route => route.fulfill({json: {
+      schema_version: 2, profile_id: base.profile_id, profile_digest: base.profile_digest,
+      state: readId ? "matched" : "drifted", matched: Boolean(readId), drifted: !readId,
+      scope: {node_ids: [nodeId, borealisId], idle_node_ids: []}, reasons: [], generated_at: base.updated_at,
+    }}));
+    await page.route("**/api/v1/fleet-profiles/*/preview", route => route.fulfill({json: switchableProfilePreview()}));
+    await page.route("**/api/v1/fleet-profiles/*/apply", route => { applyCount += 1; return route.fulfill({status: 202, json: base}); });
+    await page.route(`**/api/v1/fleet-profile-applications/${failedId}/retry`, route => { retryBody = route.request().postDataJSON(); return route.fulfill({status: 202, json: linked}); });
+    await page.route(`**/api/v1/fleet-profile-applications/${nextId}`, route => { readId = nextId; return route.fulfill({json: completed}); });
+    await page.setViewportSize({width, height: 900});
+    await page.goto("/library/profiles");
+    await page.getByRole("button", {name: "Switch profile", exact: true}).click();
+    const progress = page.getByRole("region", {name: "Profile switch progress"});
+    await expect(progress).toContainText(base.status_reason);
+    await progress.scrollIntoViewIfNeeded();
+    await page.screenshot({path: testInfo.outputPath(`profile-failed-${width}.png`)});
+    await progress.getByRole("button", {name: "Retry remaining work"}).click();
+    await expect.poll(() => retryBody).toEqual({request_key: expect.stringMatching(/^[0-9a-f-]{36}$/)});
+    await expect.poll(() => readId).toBe(nextId);
+    await expect(progress).toContainText("succeeded");
+    expect(applyCount).toBe(1);
+    await expect(page.getByText("Profile switch completed.", {exact: true})).toBeVisible();
+    await expect(page.getByText("Profile status: Up to date", {exact: true})).toBeVisible();
+    await expect(page.getByText("Remaining profile work is being rechecked against the current fleet.", {exact: true})).toHaveCount(0);
+    await expect(progress.getByRole("button", {name: "Retry remaining work"})).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({path: testInfo.outputPath(`profile-retried-${width}.png`)});
+  });
+}

@@ -229,6 +229,15 @@ class ModelCacheOperationResponse(StrictModel):
     def result_matches_operation(self) -> ModelCacheOperationResponse:
         if self.result is not None:
             parse_model_cache_result(self.kind, self.result)
+        if self.state == "succeeded":
+            if self.result is None or self.failure is not None:
+                raise ValueError("succeeded cache operation requires a result and no failure")
+        elif self.result is not None:
+            raise ValueError("cache result is only available on success")
+        if self.state == "failed" and self.failure is None:
+            raise ValueError("failed cache operation requires failure evidence")
+        if self.state == "running" and self.failure is not None:
+            raise ValueError("running cache operation cannot retain failure evidence")
         return self
 
 

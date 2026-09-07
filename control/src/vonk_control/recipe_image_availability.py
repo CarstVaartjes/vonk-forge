@@ -1238,8 +1238,11 @@ class RecipeImageAvailabilityService:
                     operation.state = "succeeded"
                     operation.result = result
                     operation.updated_at = self._clock()
-                    operation.payload = dict(operation.payload) | {"stage": "available"}
-                    operation.payload = dict(operation.payload) | {
+                    completed_payload = dict(operation.payload)
+                    completed_payload.pop("failure", None)
+                    completed_payload.pop("retry_after_at", None)
+                    operation.payload = completed_payload | {
+                        "stage": "available",
                         "claim_owner": None,
                         "claim_until": None,
                     }
@@ -1574,6 +1577,12 @@ class RecipeImageAvailabilityService:
         image_state = "succeeded" if image_ready else operation.state
         raw_failure = payload.get("failure")
         failure = raw_failure if isinstance(raw_failure, Mapping) else None
+        if operation.state == "succeeded" and (result is None or failure is not None):
+            raise ValueError("successful image availability requires a result and no failure")
+        if operation.state == "failed" and failure is None:
+            raise ValueError("failed image availability requires failure evidence")
+        if operation.state != "succeeded" and result is not None:
+            raise ValueError("image availability result requires success")
         if image_ready:
             image_bytes = image_result.get("image_bytes")
             image_progress.update(

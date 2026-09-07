@@ -23,6 +23,8 @@ _CURSOR_DOMAIN = b"vonk-forge/control-cursor/v1\0"
 _MAX_CURSOR_LENGTH = 512
 
 MUTATION_ROLES = {
+    ("POST", "/api/v1/fleet-profile-applications/{application_id}/retry"): frozenset({"administrator"}),
+    ("POST", "/api/v1/library/placements/{placement_id}/retry"): frozenset({"administrator"}),
     ("PATCH", "/api/v1/nodes/{node_id}/profile"): frozenset(
         {"operator", "administrator"}
     ),

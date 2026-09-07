@@ -1,7 +1,7 @@
 import {act, render, screen, waitFor, within} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {afterEach, vi} from "vitest";
-import type {ControlApi} from "../api/types";
+import type {ControlApi, OperationDetail} from "../api/types";
 import {ActivityPage, activityStatus} from "./activity";
 
 const NOW = new Date("2026-08-15T12:00:00Z");
@@ -74,19 +74,24 @@ function api(
     progress: {completed: 0, failed: 0, running: 1, total: 1},
   }),
   resumeJob = vi.fn().mockResolvedValue({id: "operation-1", state: "queued"}),
-): Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet"> {
+): Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet" | "operations" | "operation" | "retryFleetProfileApplication" | "retryLibraryPlacement"> {
   return {
+    operations: vi.fn().mockResolvedValue({schema_version: 2, operations: [], total: 0, next_cursor: null}),
+    operation: vi.fn(),
+    retryFleetProfileApplication: vi.fn(),
+    retryLibraryPlacement: vi.fn(),
     audit: loadAudit,
     job: loadJob,
     jobs: loadJobs,
     librarySnapshot: vi.fn().mockResolvedValue(emptyLibrary),
     resumeJob,
     visualFleet: vi.fn().mockResolvedValue(visualFleet),
-  } as unknown as Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet">;
+  } as unknown as Pick<ControlApi, "audit" | "job" | "jobs" | "librarySnapshot" | "resumeJob" | "visualFleet" | "operations" | "operation" | "retryFleetProfileApplication" | "retryLibraryPlacement">;
 }
 
 afterEach(() => {
   localStorage.clear();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -376,8 +381,8 @@ test("keeps available operations visible when audit loading fails and retries al
   render(<ActivityPage api={api(load, noJobs)} now={NOW}/>);
 
   expect(screen.getByText("Loading activity…")).toBeVisible();
-  expect(await screen.findByRole("alert")).toHaveTextContent("Audit history could not be loaded (audit authority unavailable). Showing operations only.");
-  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Audit history is unavailable and 0 of 0 operations");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Audit history could not be loaded (audit authority unavailable). Showing available activity only.");
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Audit history is unavailable and 0 of 0 jobs, plus 0 of 0 operations");
   await user.click(screen.getByRole("button", {name: "Retry all sources"}));
   await waitFor(() => expect(screen.getByText("No activity in the loaded window")).toBeVisible());
   expect(screen.queryByText("Some activity could not be loaded")).not.toBeInTheDocument();
@@ -417,14 +422,16 @@ test("resets pagination busy state when a new activity load supersedes load-more
   expect(screen.getByRole("button", {name: "Refresh activity"})).toBeEnabled();
 });
 
-test("shows a full retryable error only when both primary activity sources fail", async () => {
+test("shows a full retryable error only when all primary activity sources fail", async () => {
   const user = userEvent.setup();
   const loadAudit = vi.fn().mockRejectedValue(new Error("audit unavailable"));
   const loadJobs = vi.fn().mockRejectedValue(new Error("operations unavailable"));
-  render(<ActivityPage api={api(loadAudit, loadJobs)} now={NOW}/>);
+  const client = api(loadAudit, loadJobs);
+  vi.mocked(client.operations).mockRejectedValue(new Error("canonical operations unavailable"));
+  render(<ActivityPage api={client} now={NOW}/>);
 
   const alert = await screen.findByRole("alert");
-  expect(alert).toHaveTextContent("Unable to load audit history or operations");
+  expect(alert).toHaveTextContent("Unable to load audit history, jobs, or operations");
   expect(screen.queryByRole("region", {name: "Activity history coverage"})).not.toBeInTheDocument();
   await user.click(within(alert).getByRole("button", {name: "Try again"}));
   expect(loadAudit).toHaveBeenCalledTimes(2);
@@ -438,11 +445,145 @@ test("discloses bounded API windows and loads older operations when a cursor is 
   const user = userEvent.setup();
   render(<ActivityPage api={api(vi.fn().mockResolvedValue({events: []}), loadJobs)} now={NOW}/>);
 
-  expect(await screen.findByRole("region", {name: "Activity history coverage"})).toHaveTextContent("Loaded 0 audit records from the latest-100 API window and 1 of 2 operations");
+  const coverage = await screen.findByRole("region", {name: "Activity history coverage"});
+  expect(within(coverage).getByRole("status")).toHaveTextContent("Showing 1 loaded event. Load older activity below.");
+  const counts = within(coverage).getByText(/Loaded 0 audit records from the latest-100 API window/);
+  expect(counts).not.toBeVisible();
+  await user.click(within(coverage).getByText("History coverage"));
+  expect(counts).toBeVisible();
+  expect(coverage).toHaveTextContent("Loaded 0 audit records from the latest-100 API window and 1 of 2 jobs, plus 0 of 0 operations");
   await user.click(screen.getByRole("button", {name: "Load older operations"}));
 
   expect(await screen.findByRole("heading", {name: "Recipe Stop · Completed"})).toBeVisible();
-  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("2 of 2 operations");
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("2 of 2 jobs");
   expect(loadJobs).toHaveBeenNthCalledWith(2, "older-page");
   expect(screen.queryByRole("button", {name: "Load older operations"})).not.toBeInTheDocument();
+});
+
+function canonicalOperation(overrides: Partial<OperationDetail> = {}): OperationDetail {
+  return {
+    schema_version: 2, id: "profile-attempt-1", parent_id: null,
+    kind: "fleet-profile.apply", state: "failed", attempt: 1,
+    node_ids: [TARGET_ID], created_at: "2026-08-15T12:00:00Z",
+    progress: {phase: "prepare", completed_bytes: 0, total_bytes_known: false},
+    failure: {error_code: "child_operation_failed", summary: "Profile installation failed", detail: "Image verification failed on Mia Lab Spark.", retryable: true, uncertain: true},
+    recovery: {uncertain: true, actions: ["inspect", "retry"], explanation: "Inspect the installed state before retrying."},
+    ...overrides,
+  };
+}
+
+function canonicalApi(operations: OperationDetail[]) {
+  const client = api(vi.fn().mockResolvedValue({events: []}), vi.fn().mockResolvedValue({jobs: [], total: 0, next_cursor: null}));
+  vi.mocked(client.operations).mockResolvedValue({schema_version: 2, operations, total: operations.length, next_cursor: null});
+  return client;
+}
+
+test("shows canonical profile failure, attempt, phase and uncertain recovery directly in both views", async () => {
+  const user = userEvent.setup();
+  const client = canonicalApi([canonicalOperation()]);
+  render(<ActivityPage api={client} now={NOW}/>);
+  expect(await screen.findByText("Profile installation failed")).toBeVisible();
+  expect(screen.getByText("Image verification failed on Mia Lab Spark.")).toBeVisible();
+  expect(screen.getByText("Attempt 1 · Prepare")).toBeVisible();
+  expect(screen.getByText(/Outcome uncertain/)).toBeVisible();
+  expect(client.job).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", {name: "Table"}));
+  expect(screen.getByText("Profile installation failed")).toBeVisible();
+  await user.type(screen.getByLabelText("Search activity"), "verification failed");
+  expect(screen.getByText("Profile installation failed")).toBeVisible();
+});
+
+test.each(["fleet-profile.apply", "library.placement"])("retries %s with a stable UUID after uncertainty and displays the linked attempt", async kind => {
+  const user = userEvent.setup();
+  const first = canonicalOperation({kind});
+  const next = canonicalOperation({id: "profile-attempt-2", parent_id: first.id, kind, state: "running", attempt: 2, failure: null, recovery: {actions: ["inspect"], uncertain: false}});
+  const client = canonicalApi([first]);
+  const retry = kind === "library.placement" ? vi.mocked(client.retryLibraryPlacement) : vi.mocked(client.retryFleetProfileApplication);
+  retry.mockRejectedValueOnce(new Error("Connection lost")).mockResolvedValueOnce({id: next.id, attempt: 2, retry_of_application_id: first.id} as never);
+  vi.mocked(client.operation).mockResolvedValue(next);
+  render(<ActivityPage api={client} now={NOW}/>);
+  await user.click(await screen.findByRole("button", {name: "Retry operation"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Retry response could not be confirmed");
+  const firstKey = retry.mock.calls[0][1].request_key;
+  expect(firstKey).toMatch(/^[a-f0-9-]{36}$/);
+  await user.click(screen.getByRole("button", {name: "Table"}));
+  await user.click(screen.getByRole("button", {name: "Retry operation"}));
+  await waitFor(() => expect(client.operation).toHaveBeenCalledWith(next.id));
+  expect(retry).toHaveBeenNthCalledWith(2, first.id, {request_key: firstKey});
+  expect(await screen.findByText("Attempt 2 · Prepare · Updates automatically")).toBeVisible();
+  expect(screen.getByRole("button", {name: "Retry operation"})).toBeDisabled();
+  expect(screen.getByText("Profile installation failed")).toBeVisible();
+});
+
+test("canonical operations poll current detail while active", async () => {
+  const first = canonicalOperation({state: "running", failure: null, recovery: {actions: ["inspect"], uncertain: false}});
+  const client = canonicalApi([first]);
+  vi.mocked(client.operation).mockResolvedValue({...first, state: "succeeded", progress: {phase: "final_verify", completed_bytes: 0, total_bytes_known: false}});
+  vi.useFakeTimers();
+  render(<ActivityPage api={client} now={NOW}/>);
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5_001); });
+  vi.useRealTimers();
+  expect(client.operation).toHaveBeenCalledWith(first.id);
+  expect(await screen.findByRole("heading", {name: "Fleet Profile Apply · Completed"})).toBeVisible();
+});
+
+test("shows available canonical failures when jobs and audit fail", async () => {
+  const client = canonicalApi([canonicalOperation()]);
+  vi.mocked(client.jobs).mockRejectedValue(new Error("job storage unavailable"));
+  vi.mocked(client.audit).mockRejectedValue(new Error("audit unavailable"));
+  render(<ActivityPage api={client} now={NOW}/>);
+  expect(await screen.findByText("Profile installation failed")).toBeVisible();
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent("Jobs could not be loaded");
+  expect(alert).toHaveTextContent("Audit history could not be loaded");
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("jobs are unavailable, plus 1 of 1 operations");
+});
+
+test("keeps jobs visible when canonical operations fail", async () => {
+  const client = api();
+  vi.mocked(client.operations).mockRejectedValue(new Error("operation projection unavailable"));
+  render(<ActivityPage api={client} now={NOW}/>);
+  expect(await screen.findByRole("heading", {name: "Recipe Install · Running"})).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("Operations could not be loaded (operation projection unavailable)");
+});
+
+test("paginates jobs and canonical operations independently after a partial page error", async () => {
+  const user = userEvent.setup();
+  const first = canonicalOperation();
+  const second = canonicalOperation({id: "older-operation", kind: "library.placement"});
+  const client = canonicalApi([first]);
+  vi.mocked(client.operations)
+    .mockResolvedValueOnce({schema_version: 2, operations: [first], next_cursor: "operations-next", total: 2})
+    .mockRejectedValueOnce(new Error("cursor fetch failed"))
+    .mockResolvedValueOnce({schema_version: 2, operations: [first, second], next_cursor: null, total: 2});
+  vi.mocked(client.jobs)
+    .mockResolvedValueOnce({jobs: [], next_cursor: "jobs-next", total: 1})
+    .mockResolvedValueOnce({jobs: [{id: first.id, kind: "agent-upgrade", state: "running", created_at: "2026-08-15T12:00:00Z"}], next_cursor: null, total: 1});
+  render(<ActivityPage api={client} now={NOW}/>);
+  await user.click(await screen.findByRole("button", {name: "Load older operations"}));
+  expect(await screen.findByRole("heading", {name: "Agent Upgrade · Running"})).toBeVisible();
+  expect(screen.getByRole("alert")).toHaveTextContent("Older operations could not be loaded");
+  await user.click(screen.getByRole("button", {name: "Load older operations"}));
+  expect(await screen.findByRole("heading", {name: "Library Placement · Failed"})).toBeVisible();
+  expect(client.operations).toHaveBeenNthCalledWith(3, "operations-next");
+  expect(client.jobs).toHaveBeenCalledTimes(2);
+  expect(screen.getAllByText("Profile installation failed")).toHaveLength(2);
+  expect(screen.getByRole("region", {name: "Activity history coverage"})).toHaveTextContent("1 of 1 jobs, plus 2 of 2 operations");
+});
+
+test("retrieves the accepted retry using the same key when its detail fetch failed", async () => {
+  const user = userEvent.setup();
+  const first = canonicalOperation();
+  const next = canonicalOperation({id: "retry-accepted", attempt: 2, state: "succeeded", failure: null, recovery: {actions: ["inspect"], uncertain: false}});
+  const client = canonicalApi([first]);
+  vi.mocked(client.retryFleetProfileApplication).mockResolvedValue({id: next.id, attempt: 2} as never);
+  vi.mocked(client.operation).mockRejectedValueOnce(new Error("Detail unavailable")).mockResolvedValueOnce(next);
+  render(<ActivityPage api={client} now={NOW}/>);
+  await user.click(await screen.findByRole("button", {name: "Retry operation"}));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Retry accepted, but progress could not be loaded");
+  await user.click(screen.getByRole("button", {name: "Retry operation"}));
+  expect(await screen.findByText("Attempt 2 · Prepare")).toBeVisible();
+  const calls = vi.mocked(client.retryFleetProfileApplication).mock.calls;
+  expect(calls[0]).toEqual(calls[1]);
 });

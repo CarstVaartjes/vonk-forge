@@ -7,7 +7,10 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StringConstraints, model_validator
 
-from .fleet_profile_contract import FleetProfileApplicationProgress
+from .fleet_profile_contract import (
+    FleetProfileApplicationProgress,
+    FleetProfileApplicationResult,
+)
 from .library_contract import Digest, NodeId, UuidId
 from .strict_json import StrictJSONModel
 
@@ -115,6 +118,8 @@ class LibraryPlacementPreview(_StrictModel):
 class LibraryPlacementApplication(_StrictModel):
     schema_version: Literal[1] = 1
     id: UuidId
+    attempt: int = Field(default=1, ge=1)
+    retry_of_application_id: UuidId | None = None
     state: Literal[
         "queued", "running", "waiting-for-operator", "succeeded", "failed", "cancelled"
     ]
@@ -129,9 +134,25 @@ class LibraryPlacementApplication(_StrictModel):
     current_operation_id: UuidId | None
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None
     progress: FleetProfileApplicationProgress
+    result: FleetProfileApplicationResult | None = None
     locations: LibraryPlacementLocations
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def application_state_is_consistent(self) -> LibraryPlacementApplication:
+        if self.current_step > self.total_steps:
+            raise ValueError("placement step exceeds total steps")
+        if self.attempt != self.progress.attempt or self.retry_of_application_id != self.progress.retry_of_application_id:
+            raise ValueError("placement recovery identity disagrees with persisted progress")
+        if self.state == "succeeded":
+            if self.result is None or self.status_reason is not None:
+                raise ValueError("successful placement requires a result and no failure reason")
+            if self.current_step != self.total_steps or self.result.completed_steps != self.total_steps:
+                raise ValueError("successful placement must complete every planned step")
+        if self.state in {"failed", "waiting-for-operator"} and not (self.status_reason or "").strip():
+            raise ValueError("failed or waiting placement requires a failure reason")
+        return self
 
 
 __all__ = [

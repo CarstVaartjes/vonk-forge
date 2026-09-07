@@ -13,7 +13,6 @@ from pathlib import Path
 import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache_contract import ModelCacheOperationProgress
 from vonk_control.models import (
@@ -28,10 +27,11 @@ NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
 
 
 def _database(tmp_path: Path):
+    # Background transfers and the status poller need independent connections;
+    # sharing one in-memory connection races commits against active queries.
     engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
+        f"sqlite+pysqlite:///{tmp_path / 'cache.sqlite'}",
         connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)

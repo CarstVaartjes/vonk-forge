@@ -4072,6 +4072,12 @@
             "title": "Assignments",
             "type": "object"
           },
+          "attempt": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
           "child_progress": {
             "anyOf": [
               {
@@ -4116,6 +4122,16 @@
             ],
             "title": "Current Label"
           },
+          "intended_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileIntendedConfiguration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "library_placement": {
             "anyOf": [
               {
@@ -4140,6 +4156,18 @@
               }
             ],
             "title": "Operation Kind"
+          },
+          "retry_of_application_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of Application Id"
           },
           "step_results": {
             "additionalProperties": {
@@ -4194,6 +4222,12 @@
       "FleetProfileApplicationView": {
         "additionalProperties": false,
         "properties": {
+          "attempt": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -4249,6 +4283,18 @@
                 "type": "null"
               }
             ]
+          },
+          "retry_of_application_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of Application Id"
           },
           "schema_version": {
             "const": 2,
@@ -4832,6 +4878,44 @@
         "title": "FleetProfileInput",
         "type": "object"
       },
+      "FleetProfileIntendedConfiguration": {
+        "additionalProperties": false,
+        "description": "Immutable desired configuration captured when execution is admitted.",
+        "properties": {
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/FleetProfileAssignment"
+            },
+            "maxItems": 64,
+            "title": "Assignments",
+            "type": "array"
+          },
+          "installation_policy": {
+            "enum": [
+              "keep-cached",
+              "exact"
+            ],
+            "title": "Installation Policy",
+            "type": "string"
+          },
+          "profile_digest": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Profile Digest",
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/FleetProfileScope"
+          }
+        },
+        "required": [
+          "profile_digest",
+          "installation_policy",
+          "scope",
+          "assignments"
+        ],
+        "title": "FleetProfileIntendedConfiguration",
+        "type": "object"
+      },
       "FleetProfileLibraryPlacementContext": {
         "additionalProperties": false,
         "description": "Identity binding retained for replay of a direct Library placement.",
@@ -5297,6 +5381,21 @@
           "severity"
         ],
         "title": "FleetProfileReason",
+        "type": "object"
+      },
+      "FleetProfileRetryRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "request_key": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "title": "Request Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_key"
+        ],
+        "title": "FleetProfileRetryRequest",
         "type": "object"
       },
       "FleetProfileScope": {
@@ -7717,6 +7816,12 @@
             ],
             "title": "Alias"
           },
+          "attempt": {
+            "default": 1,
+            "minimum": 1.0,
+            "title": "Attempt",
+            "type": "integer"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -7773,6 +7878,28 @@
             "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
             "title": "Recipe Revision Id",
             "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FleetProfileApplicationResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retry_of_application_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry Of Application Id"
           },
           "schema_version": {
             "const": 1,
@@ -27011,6 +27138,111 @@
         "summary": "Get Application"
       }
     },
+    "/api/v1/fleet-profile-applications/{application_id}/retry": {
+      "post": {
+        "operationId": "retryFleetProfileApplication",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "application_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Application Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetProfileRetryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FleetProfileApplicationView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Retry Application"
+      }
+    },
     "/api/v1/fleet-profiles": {
       "get": {
         "operationId": "listFleetProfiles",
@@ -29262,6 +29494,111 @@
           }
         ],
         "summary": "Get Placement"
+      }
+    },
+    "/api/v1/library/placements/{placement_id}/retry": {
+      "post": {
+        "operationId": "retryLibraryPlacement",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "placement_id",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "title": "Placement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FleetProfileRetryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryPlacementApplication"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestValidationProblem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BoundedErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Retry Application"
       }
     },
     "/api/v1/library/recipe-image-availability": {

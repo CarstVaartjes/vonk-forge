@@ -42,7 +42,7 @@ test.beforeEach(async ({page}) => {
 test("the redesigned shell exposes the focused workspace routes", async ({page}) => {
   await page.route("**/api/v1/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: new Date().toISOString(), authority_revision: commit, nodes: []}}));
   await page.route("**/api/v1/library**", route => route.fulfill({json: {
-    schema_version: 1,
+    schema_version: 2,
     generated_at: new Date().toISOString(),
     freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
     models: [],
@@ -71,6 +71,7 @@ test("Activity combines friendly audit history and current operations", async ({
   const expectedBinary = "b".repeat(64);
   const expectedBuild = `sha256:${"c".repeat(64)}`;
   let detailRequests = 0;
+  await page.route("**/api/v1/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [], total: 0, next_cursor: null}}));
   await page.route("**/api/v1/audit", route => route.fulfill({json: {events: [{
     request_id: requestId,
     actor: "admin",
@@ -154,3 +155,68 @@ test("the sign-in screen remains focused, accessible, and usable on small screen
     await expectNoSeriousAccessibilityViolations(page);
   }
 });
+
+for (const scenario of [
+  {kind: "fleet-profile.apply", endpoint: "fleet-profile-applications", label: "Fleet Profile Apply", width: 1280},
+  {kind: "library.placement", endpoint: "library/placements", label: "Library Placement", width: 360},
+]) {
+  test(`Activity retries canonical ${scenario.kind} with the same key and follows the linked attempt`, async ({page}) => {
+    const originalId = "11111111-1111-4111-8111-111111111111";
+    const retryId = "22222222-2222-4222-8222-222222222222";
+    const requests: Array<{request_key: string}> = [];
+    let detailRequests = 0;
+    const failed = {
+      schema_version: 2, id: originalId, parent_id: null, kind: scenario.kind,
+      state: "failed", attempt: 1, node_ids: [], created_at: "2026-09-07T12:00:00Z",
+      progress: {phase: "prepare", completed_bytes: 0, total_bytes_known: false},
+      failure: {error_code: "child_operation_failed", summary: "Image installation failed", detail: "Verification failed on Studio Spark; completed work is retained.", retryable: true, uncertain: true},
+      recovery: {uncertain: true, actions: ["inspect", "retry"], explanation: "Inspect installed state before retrying."},
+    };
+    await page.setViewportSize({width: scenario.width, height: 900});
+    await page.route("**/api/v1/audit", route => route.fulfill({json: {events: []}}));
+    await page.route("**/api/v1/jobs?*", route => route.fulfill({json: {jobs: [], total: 0, next_cursor: null}}));
+    await page.route("**/api/v1/fleet", route => route.fulfill({json: {schema_version: 1, event_cursor: 0, generated_at: "2026-09-07T12:00:00Z", authority_revision: commit, nodes: []}}));
+    await page.route("**/api/v1/library?*", route => route.fulfill({json: {
+      schema_version: 2, generated_at: "2026-09-07T12:00:00Z",
+      freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
+      models: [], unlinked_recipes: [], next_cursor: null,
+    }}));
+    await page.route("**/api/v1/operations?*", route => route.fulfill({json: {schema_version: 2, operations: [failed], total: 1, next_cursor: null}}));
+    await page.route(`**/api/v1/${scenario.endpoint}/${originalId}/retry`, route => {
+      expect(route.request().method()).toBe("POST");
+      requests.push(route.request().postDataJSON());
+      if (requests.length === 1) return route.abort("failed");
+      return route.fulfill({json: {schema_version: 1, id: retryId, retry_of_application_id: originalId, attempt: 2, state: "running"}});
+    });
+    await page.route(`**/api/v1/operations/${retryId}`, route => {
+      detailRequests += 1;
+      return route.fulfill({json: {
+        ...failed, id: retryId, parent_id: originalId, attempt: 2,
+        state: detailRequests === 1 ? "running" : "succeeded",
+        failure: null, recovery: {actions: ["inspect"], uncertain: false},
+        progress: {phase: detailRequests === 1 ? "prepare" : "final_verify", completed_bytes: 0, total_bytes_known: false},
+      }});
+    });
+    await page.goto("/activity");
+    await expect(page.getByRole("heading", {name: `${scenario.label} · Failed`})).toBeVisible();
+    await expect(page.getByText("Image installation failed", {exact: true})).toBeVisible();
+    await expect(page.getByText("Verification failed on Studio Spark; completed work is retained.")).toBeVisible();
+    await expect(page.getByText("Attempt 1 · Prepare", {exact: true})).toBeVisible();
+    await expect(page.getByText(/Outcome uncertain/)).toBeVisible();
+    await page.getByRole("button", {name: "Retry operation", exact: true}).click();
+    await expect(page.getByRole("alert")).toContainText("Retry response could not be confirmed");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].request_key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    await page.getByRole("button", {name: "Retry operation", exact: true}).click();
+    await expect(page.getByRole("heading", {name: `${scenario.label} · Running`})).toBeVisible();
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual(requests[0]);
+    await expect(page.getByText("Attempt 2 · Prepare · Updates automatically", {exact: true})).toBeVisible();
+    await expect(page.getByRole("button", {name: "Retry operation", exact: true})).toBeDisabled();
+    await expect(page.getByRole("heading", {name: `${scenario.label} · Completed`})).toBeVisible({timeout: 7_000});
+    expect(detailRequests).toBeGreaterThanOrEqual(2);
+    await expect(page.getByRole("heading", {name: `${scenario.label} · Failed`})).toBeVisible();
+    await expectNoDocumentOverflow(page);
+    await expectNoSeriousAccessibilityViolations(page);
+  });
+}

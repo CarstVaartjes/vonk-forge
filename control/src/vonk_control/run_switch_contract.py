@@ -756,6 +756,19 @@ class RunSwitchOperation(_StrictModel):
     status_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     result: RunSwitchOperationResult | None = None
 
+    @model_validator(mode="after")
+    def terminal_evidence_is_consistent(self) -> RunSwitchOperation:
+        if self.state == "succeeded":
+            if self.result is None or not self.result.completed_phases:
+                raise ValueError("succeeded run-switch requires completed phase evidence")
+            if self.status_reason is not None or self.result.failed_phase is not None:
+                raise ValueError("succeeded run-switch cannot retain failure evidence")
+            if self.result.retryable or self.result.child_operation_id is not None:
+                raise ValueError("succeeded run-switch cannot retain pending recovery or child work")
+        if self.state == "failed" and not (self.status_reason or "").strip():
+            raise ValueError("failed run-switch requires a status reason")
+        return self
+
 
 class RunSwitchRetryRequest(_StrictModel):
     schema_version: Literal[2] = 2

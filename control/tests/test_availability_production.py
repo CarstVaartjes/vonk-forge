@@ -750,10 +750,19 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     assert production.service.run_pending() == 1
     completed = production.service.get(parent.id)
     assert completed.state == "succeeded", completed.failure
+    assert completed.failure is None
+    assert completed.supported_actions == ()
     assert completed.result is not None
     assert completed.result["model_child"]["state"] == "succeeded"
     with sessions() as session:
-        assert session.scalar(select(RuntimeImageReceipt)) is not None
+        receipt = session.scalar(select(RuntimeImageReceipt))
+        assert receipt is not None
+        assert completed.result["oci_archive_sha256"] == receipt.oci_archive_sha256
+        persisted = session.get(Job, parent.id)
+        assert persisted is not None
+        assert "failure" not in persisted.payload
+        assert "retry_after_at" not in persisted.payload
+        assert persisted.result == completed.result
     model_cache.close()
     model_http.close()
     production.close()

@@ -3972,6 +3972,7 @@ class RunSwitchOperationService:
                 return True
             if phase_index >= len(plan.phases):
                 job.state = "succeeded"
+                job.status_reason = None
                 progress = _complete_operation_progress(plan, progress)
                 job.result = _persisted_result(progress)
                 job.updated_at = now
@@ -5035,6 +5036,9 @@ def _complete_operation_progress(
     progress["members"] = list(entries.values())
     progress["phase"] = "final_verify"
     progress["subphase"] = None
+    progress["retryable"] = False
+    progress["failed_phase"] = None
+    progress["child_operation_id"] = None
     return progress
 
 

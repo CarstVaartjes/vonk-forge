@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -167,6 +167,18 @@ class ArtifactJobResponse(ArtifactJobContractModel):
     timeout_seconds: int = Field(ge=1, le=3_600)
     created_at: datetime
     updated_at: datetime
+
+
+    @model_validator(mode="after")
+    def terminal_evidence_is_consistent(self) -> ArtifactJobResponse:
+        if self.state == "succeeded":
+            if self.output_manifest_sha256 is None or not self.output_files or self.result_evidence is None:
+                raise ValueError("successful artifact job requires output manifest, files and result evidence")
+            if self.status_reason is not None:
+                raise ValueError("successful artifact job cannot retain a failure reason")
+        if self.state in {"failed", "waiting-for-operator"} and not (self.status_reason or "").strip():
+            raise ValueError("failed or waiting artifact job requires a status reason")
+        return self
 
 
 class ArtifactJobListResponse(ArtifactJobContractModel):
@@ -1570,7 +1582,7 @@ class ArtifactJobService:
             for item in self._files_in_session(session, job.id, "output")
         )
         contract = _canonical_contract(job.compiled_contract)
-        return ArtifactJobView(
+        view = ArtifactJobView(
             id=job.id,
             run_id=job.run_id,
             operation_id=job.operation_id,
@@ -1595,6 +1607,8 @@ class ArtifactJobService:
             created_at=job.created_at,
             updated_at=job.updated_at,
         )
+        ArtifactJobResponse.model_validate(view, from_attributes=True)
+        return view
 
 
 __all__ = [

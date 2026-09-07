@@ -13,6 +13,7 @@ from dateutil.parser import isoparse
 from typing import cast
 from typing import cast, Union
 from typing import Literal, Union, cast
+from typing import Union
 import datetime
 
 if TYPE_CHECKING:
@@ -44,6 +45,8 @@ class FleetProfileApplicationView:
             status_reason (Union[None, str]):
             total_steps (int):
             updated_at (datetime.datetime):
+            attempt (Union[Unset, int]):  Default: 1.
+            retry_of_application_id (Union[None, Unset, str]):
             schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
@@ -60,6 +63,8 @@ class FleetProfileApplicationView:
     status_reason: Union[None, str]
     total_steps: int
     updated_at: datetime.datetime
+    attempt: Union[Unset, int] = 1
+    retry_of_application_id: Union[None, Unset, str] = UNSET
     schema_version: Union[Literal[2], Unset] = 2
 
 
@@ -101,6 +106,14 @@ class FleetProfileApplicationView:
 
         updated_at = self.updated_at.isoformat()
 
+        attempt = self.attempt
+
+        retry_of_application_id: Union[None, Unset, str]
+        if isinstance(self.retry_of_application_id, Unset):
+            retry_of_application_id = UNSET
+        else:
+            retry_of_application_id = self.retry_of_application_id
+
         schema_version = self.schema_version
 
 
@@ -121,6 +134,10 @@ class FleetProfileApplicationView:
             "total_steps": total_steps,
             "updated_at": updated_at,
         })
+        if attempt is not UNSET:
+            field_dict["attempt"] = attempt
+        if retry_of_application_id is not UNSET:
+            field_dict["retry_of_application_id"] = retry_of_application_id
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -199,6 +216,18 @@ class FleetProfileApplicationView:
 
 
 
+        attempt = d.pop("attempt", UNSET)
+
+        def _parse_retry_of_application_id(data: object) -> Union[None, Unset, str]:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(Union[None, Unset, str], data)
+
+        retry_of_application_id = _parse_retry_of_application_id(d.pop("retry_of_application_id", UNSET))
+
+
         schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
         if schema_version != 2 and not isinstance(schema_version, Unset):
             raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
@@ -217,6 +246,8 @@ class FleetProfileApplicationView:
             status_reason=status_reason,
             total_steps=total_steps,
             updated_at=updated_at,
+            attempt=attempt,
+            retry_of_application_id=retry_of_application_id,
             schema_version=schema_version,
         )
 

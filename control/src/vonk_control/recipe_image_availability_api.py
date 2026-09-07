@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .auth import CursorCodec
 from .model_cache_contract import Digest
@@ -124,6 +124,16 @@ class RecipeImageAvailabilityResponse(StrictJSONModel):
     actions: list[RecipeImageAvailabilityAction] = Field(default_factory=list)
     created_at: str
     updated_at: str
+
+    @model_validator(mode="after")
+    def terminal_evidence_is_consistent(self) -> RecipeImageAvailabilityResponse:
+        if self.state == "succeeded" and (self.result is None or self.failure is not None):
+            raise ValueError("successful image availability requires a result and no failure")
+        if self.state == "failed" and self.failure is None:
+            raise ValueError("failed image availability requires failure evidence")
+        if self.state != "succeeded" and self.result is not None:
+            raise ValueError("image availability result requires success")
+        return self
 
 
 class RecipeImageAvailabilityListResponse(StrictJSONModel):

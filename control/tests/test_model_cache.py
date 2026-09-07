@@ -1286,3 +1286,52 @@ def test_activity_progress_with_unknown_total_has_no_rate_or_eta_fields() -> Non
     }
     assert "percent" not in progress
     assert "eta_seconds" not in progress
+
+
+def test_failed_eviction_exposes_durable_failure_after_restart(cache, tmp_path, monkeypatch):
+    service, sessions = cache
+    downloaded = _download(
+        service, [_artifact(tmp_path, b"eviction bytes")],
+        model_content_sha256="a" * 64,
+        request_key="00000000-0000-4000-8000-000000000071",
+    )
+    preview = service.eviction_preview(target_bytes=14)
+    operation = service.evict(
+        actor="test", request_key="00000000-0000-4000-8000-000000000072",
+        plan_digest=preview["plan_digest"], target_bytes=14,
+    )
+    original = Path.unlink
+
+    def fail_object_removal(path, *args, **kwargs):
+        if path.parent == service.root / "objects" or "objects" in path.parts:
+            raise OSError("object removal failed")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_object_removal)
+    service.run_pending()
+    restarted = ModelCacheService(sessions, service.root, reserve_bytes=0, fixture_sources=True)
+    app = FastAPI()
+    install_model_cache_routes(
+        app, actor_dependency=Depends(lambda: Actor("admin", "administrator")),
+        service=restarted, audits=[],
+    )
+    client = TestClient(app)
+    response = client.get(f"/api/v1/model-cache/operations/{operation.id}")
+    assert response.status_code == 200
+    document = response.json()
+    assert document["state"] == "failed"
+    assert document["result"] is None
+    assert document["failure"]["code"] == "model_cache.eviction_failed"
+    assert document["failure"]["detail"] == "object removal failed"
+    from vonk_control.model_cache_contract import ModelCacheOperationResponse
+    with pytest.raises(ValidationError, match="requires failure evidence"):
+        ModelCacheOperationResponse.model_validate(document | {"failure": None})
+    succeeded = client.get(f"/api/v1/model-cache/operations/{downloaded.id}").json()
+    assert succeeded["state"] == "succeeded"
+    with pytest.raises(ValidationError, match="requires a result"):
+        ModelCacheOperationResponse.model_validate(succeeded | {"result": None})
+    with sessions.begin() as session:
+        row = session.get(ModelCacheOperation, downloaded.id)
+        row.payload = {key: value for key, value in row.payload.items() if key != "result"}
+    with pytest.raises(ValidationError, match="requires a result"):
+        restarted.get_operation(downloaded.id)

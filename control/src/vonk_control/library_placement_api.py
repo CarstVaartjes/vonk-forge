@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Path, Request, status
 
 from .audit import AuditRecord
 from .auth import MUTATION_ROLES, Actor
+from .fleet_profile_contract import FleetProfileRetryRequest
 from .library_placement_contract import (
     LibraryPlacementApplication,
     LibraryPlacementApplyRequest,
@@ -18,6 +19,7 @@ from .library_placements import LibraryPlacementConflict
 from .operation_api import bounded_error_responses
 
 LIBRARY_PLACEMENT_OPERATION_IDS = {
+    ("post", "/api/v1/library/placements/{placement_id}/retry"): "retryLibraryPlacement",
     ("post", "/api/v1/library/placements/preview"): "previewLibraryPlacement",
     ("post", "/api/v1/library/placements"): "applyLibraryPlacement",
     ("get", "/api/v1/library/placements/{placement_id}"): "getLibraryPlacement",
@@ -135,6 +137,35 @@ def install_library_placement_routes(
             raise HTTPException(
                 status_code=503, detail="Library placement unavailable"
             ) from None
+
+
+    @app.post(
+        "/api/v1/library/placements/{placement_id}/retry",
+        response_model=LibraryPlacementApplication,
+        responses=bounded_error_responses(401, 403, 404, 409, 422, 503),
+        status_code=status.HTTP_202_ACCEPTED,
+        operation_id="retryLibraryPlacement",
+    )
+    def retry_application(
+        request: Request,
+        placement_id: Annotated[str, Path(pattern=_UUID)],
+        body: FleetProfileRetryRequest,
+        actor: Actor = authenticated,
+    ) -> LibraryPlacementApplication:
+        require_mutation(actor, "/api/v1/library/placements/{placement_id}/retry")
+        try:
+            result = placements().retry(placement_id, request_key=body.request_key, actor=actor.subject)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Application not found") from None
+        except LibraryPlacementConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)[:256]) from None
+        except HTTPException:
+            raise
+        except (OSError, RuntimeError, TypeError, ValueError):
+            raise HTTPException(status_code=503, detail="Application recovery unavailable") from None
+        audits.append(AuditRecord(request.state.request_id, actor.subject,
+            "library.placement.retry", None, (placement_id, result.id)))
+        return result
 
 
 __all__ = [

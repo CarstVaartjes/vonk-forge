@@ -816,6 +816,13 @@ def operation_detail_response(
 ) -> OperationDetailResponse:
     """Build the bounded generic read representation from a durable projection."""
 
+    # Families with a separate canonical failure field must retain that field;
+    # successful/partial result receipts are not a substitute for the failure.
+    failure = (
+        OperationFailureEvidence.model_validate(item["failure"], strict=True)
+        if item.get("failure") is not None
+        else None
+    ) if "failure" in item else _failure_projection(item.get("result"))
     return OperationDetailResponse(
         id=item["id"],
         parent_id=item.get("parent_id"),
@@ -826,14 +833,14 @@ def operation_detail_response(
         progress=_progress_projection(item.get("progress")),
         created_at=str(item["created_at"]),
         updated_at=(None if item.get("updated_at") is None else item["updated_at"]),
-        failure=_failure_projection(item.get("result")),
+        failure=failure,
         provenance=_provenance_projection(item.get("result")),
         evidence_download=_evidence_download_projection(item.get("result")),
         recovery=recovery_for_operation(
             item["state"],
             supported_actions=item.get("supported_actions"),
             available_actions=available_actions,
-            uncertain=bool(
+            uncertain=bool(failure is not None and failure.uncertain) or bool(
                 isinstance(item.get("result"), Mapping)
                 and item["result"].get("uncertain") is True
             ),

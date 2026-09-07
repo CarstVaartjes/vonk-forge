@@ -2129,3 +2129,91 @@ def test_artifact_job_rejects_symlink_input_and_unsafe_output_metadata(
     )
     assert result == 2
     assert payload["error_type"] == "control_api"
+
+
+def test_library_placement_preview_apply_and_get_preserve_controller_contract(tmp_path: Path) -> None:
+    recipe_id = "11111111-1111-4111-8111-111111111111"
+    request_key = "22222222-2222-4222-8222-222222222222"
+    intent = {
+        "recipe_id": recipe_id,
+        "node_ids": ["spk_" + "1" * 32, "spk_" + "2" * 32],
+        "desired_state": "running",
+        "alias": "chat",
+        "invocation": "button",
+    }
+    source = tmp_path / "placement.json"
+    source.write_text(json.dumps(intent))
+    base = "/api/v1/library/placements"
+    preview = {"allowed": False, "blockers": [{"code": "capacity", "detail": "Insufficient memory"}], "plan_digest": "d" * 64}
+    application = {"id": recipe_id, "state": "failed", "status_reason": "Spark offline", "progress": {"completed_steps": [0]}, "locations": {"installed": True, "running": False}}
+
+    class PlacementClient(_Client):
+        def request(self, method: str, path: str, payload: dict[str, object] | None = None, **kwargs: Any) -> dict[str, object]:
+            # Exercise the shipped API request contract, without importing Controller code.
+            _request_contract(path, method, payload)
+            return super().request(method, path, payload, **kwargs)
+
+    client = PlacementClient({("POST", base + "/preview"): preview, ("POST", base): application, ("GET", base + "/" + recipe_id): application})
+    output = StringIO()
+    with redirect_stdout(output):
+        assert cli.main(("library", "placement", "preview", "--input-file", str(source), "--json"), control_client=client) == 0
+    assert json.loads(output.getvalue()) == preview
+    assert client.calls[-1] == ("POST", base + "/preview", intent, None)
+    apply_args = ("library", "placement", "apply", "--input", json.dumps(intent), "--plan-digest", "d" * 64, "--request-key", request_key, "--json")
+    output = StringIO()
+    with redirect_stdout(output):
+        assert cli.main(apply_args, control_client=client) == 0
+    body = {**intent, "plan_digest": "d" * 64, "request_key": request_key}
+    assert json.loads(output.getvalue()) == {"mode": "plan", "apply": False, "method": "POST", "path": base, "body": body}
+    assert len(client.calls) == 1
+    output = StringIO()
+    with redirect_stdout(output):
+        assert cli.main((*apply_args, "--apply"), control_client=client) == 0
+    assert client.calls[-1] == ("POST", base, body, None)
+    assert json.loads(output.getvalue()) == application
+    output = StringIO()
+    with redirect_stdout(output):
+        assert cli.main(("library", "placement", "get", recipe_id, "--json"), control_client=client) == 0
+    assert json.loads(output.getvalue()) == application
+    assert client.calls[-1] == ("GET", base + "/" + recipe_id, None, None)
+
+
+@pytest.mark.parametrize("command,path", [
+    (("library", "placement", "retry", "application/id"), "/api/v1/library/placements/application%2Fid/retry"),
+    (("profiles", "retry", "application/id"), "/api/v1/fleet-profile-applications/application%2Fid/retry"),
+])
+def test_application_retry_requires_apply_and_returns_linked_attempt(command: tuple[str, ...], path: str) -> None:
+    key = "22222222-2222-4222-8222-222222222222"
+    response = {"id": "next-application", "retry_of_application_id": "application/id", "attempt": 2, "state": "queued"}
+    client = _Client({("POST", path): response})
+    output = StringIO()
+    with redirect_stdout(output):
+        assert cli.main((*command, "--request-key", key, "--json"), control_client=client) == 0
+    assert client.calls == []
+    assert json.loads(output.getvalue())["body"] == {"request_key": key}
+    output = StringIO()
+    with redirect_stdout(output):
+        assert cli.main((*command, "--request-key", key, "--apply", "--json"), control_client=client) == 0
+    assert client.calls == [("POST", path, {"request_key": key}, None)]
+    assert json.loads(output.getvalue()) == response
+
+
+@pytest.mark.parametrize("extra", [
+    ("--plan-digest", "invalid", "--request-key", "22222222-2222-4222-8222-222222222222"),
+    ("--plan-digest", "d" * 64, "--request-key", "invalid"),
+])
+def test_placement_rejects_invalid_binding_before_submission(extra: tuple[str, ...]) -> None:
+    client = _Client()
+    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+        assert cli.main(("library", "placement", "apply", "--input", "{}", *extra, "--apply", "--json"), control_client=client) != 0
+    assert client.calls == []
+
+
+def test_placement_apply_rejects_binding_fields_in_intent() -> None:
+    client = _Client()
+    with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+        assert cli.main((
+            "library", "placement", "apply", "--input", '{"plan_digest":"old"}',
+            "--plan-digest", "d" * 64, "--apply", "--json",
+        ), control_client=client) != 0
+    assert client.calls == []
