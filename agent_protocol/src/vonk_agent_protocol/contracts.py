@@ -15,8 +15,16 @@ from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
-from pydantic import BaseModel, Field, StrictBool, StrictFloat, StrictInt, StrictStr, ValidationError, model_validator
-from typing_extensions import TypeAliasType
+from pydantic import (
+    BaseModel,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    model_validator,
+)
 
 from .wire_model import OperationProgress, WireModel
 
@@ -93,15 +101,14 @@ class AgentProtocolError(ValueError):
     """A protocol message is invalid or outside the agent trust boundary."""
 
 
-JsonValue = TypeAliasType(
-    "JsonValue",
+type JsonValue = (
     StrictBool
     | StrictInt
     | StrictFloat
     | StrictStr
     | None
-    | list["JsonValue"]
-    | dict[str, "JsonValue"],
+    | list[JsonValue]
+    | dict[str, JsonValue]
 )
 JsonObject = dict[str, JsonValue]
 _UUID_PATTERN = (
