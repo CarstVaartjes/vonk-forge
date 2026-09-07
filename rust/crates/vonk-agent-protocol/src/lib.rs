@@ -435,15 +435,10 @@ pub struct DistributionObject {
 
 impl DistributionObject {
     pub fn validate(&self) -> Result<(), ProtocolError> {
-        let valid_name = self.name.len() <= 512
-            && self
-                .name
-                .as_bytes()
-                .first()
-                .is_some_and(u8::is_ascii_alphanumeric)
-            && self.name.as_bytes()[1..].iter().all(|byte| {
-                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'-')
-            });
+        let valid_name = !self.name.is_empty()
+            && self.name.len() <= 512
+            && !self.name.starts_with('/')
+            && !self.name.contains(['\\', '\0']);
         if !valid_name
             || self
                 .name
@@ -2309,8 +2304,15 @@ mod distribution_tests {
     #[test]
     fn object_name_validation_matches_python_boundary() {
         let mut value = assignment();
-        value.objects[0].name = "weights/model bin".to_owned();
-        assert!(value.validate().is_err());
+        for name in [
+            "weights/model bin",
+            "__init__.py",
+            "nested/UPPERCASE.bin",
+            "模型.bin",
+        ] {
+            value.objects[0].name = name.to_owned();
+            value.validate().unwrap();
+        }
         value.objects[0].name = "../model.bin".to_owned();
         assert!(value.validate().is_err());
     }

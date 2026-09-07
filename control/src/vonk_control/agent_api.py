@@ -37,6 +37,7 @@ from vonk_agent_protocol import (
     AgentProtocolError,
     AgentResult,
     ContainerRuntimeAction,
+    DistributionAssignment,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
     SignedPackageObjectReceipt,
@@ -2874,8 +2875,11 @@ def install_agent_routes(
     @agent.get(
         "/distribution/manifests/{plan_digest}",
         operation_id="getAgentDistributionManifest",
+        response_model=DistributionAssignment,
     )
-    def distribution_manifest(plan_digest: str, request: Request) -> Response:
+    def distribution_manifest(
+        plan_digest: str, request: Request, response: Response
+    ) -> DistributionAssignment:
         """Return the exact model plus OCI object set authorized for this node."""
         _scope_identity(request)
         required = _require_services(services)
@@ -2883,17 +2887,15 @@ def install_agent_routes(
         if required.distribution is None:
             raise HTTPException(status_code=503, detail="agent distribution is unavailable")
         try:
-            body = required.distribution.manifest(
+            assignment = required.distribution.authorize(
                 node_id=identity.node_id,
                 plan_digest=plan_digest,
             )
         except DistributionError as error:
             raise _distribution_error(error) from None
-        return Response(
-            content=canonical_message(body),
-            media_type="application/json",
-            headers={"Cache-Control": "no-store", "ETag": f'"plan:{plan_digest}"'},
-        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["ETag"] = f'"plan:{plan_digest}"'
+        return assignment
 
     @agent.get(
         "/distribution/objects/{sha256}",

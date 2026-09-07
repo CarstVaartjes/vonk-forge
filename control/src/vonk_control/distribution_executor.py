@@ -678,7 +678,7 @@ class DurableDistributionPhaseExecutor:
                     )
                 if receipt is None:
                     raise RuntimeError("published runtime image receipt authority changed")
-        return DistributionObject("image.oci.tar", layout_digest, image_bytes, "oci-archive")
+        return DistributionObject(name="image.oci.tar", sha256=layout_digest, bytes=image_bytes, kind="oci-archive")
 
     def _assignment(
         self,

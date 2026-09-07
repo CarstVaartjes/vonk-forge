@@ -22,7 +22,9 @@ use vonk_agent::{
     },
     oci::{RuntimeStartPlan, start_arguments_for_paths},
 };
-use vonk_agent_protocol::{AgentClaim, AgentResult, RecipeOperationRequest, RecipeStartRequest};
+use vonk_agent_protocol::{
+    AgentClaim, AgentResult, DistributionAssignment, RecipeOperationRequest, RecipeStartRequest,
+};
 
 const PROBE_DATA_ROOT: &str = "/var/lib/vonk-forge";
 
@@ -130,6 +132,7 @@ fn result_for(claim: &AgentClaim) -> Result<AgentResult, String> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let distribution_mode = std::env::args().nth(1).as_deref() == Some("--distribution");
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut output = io::BufWriter::new(stdout.lock());
@@ -138,9 +141,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if line.trim().is_empty() {
             continue;
         }
-        let claim: AgentClaim = serde_json::from_str(&line)?;
-        let result = result_for(&claim).map_err(io::Error::other)?;
-        serde_json::to_writer(&mut output, &result)?;
+        if distribution_mode {
+            let assignment: DistributionAssignment = serde_json::from_str(&line)?;
+            assignment.validate()?;
+            serde_json::to_writer(&mut output, &assignment)?;
+        } else {
+            let claim: AgentClaim = serde_json::from_str(&line)?;
+            let result = result_for(&claim).map_err(io::Error::other)?;
+            serde_json::to_writer(&mut output, &result)?;
+        }
         output.write_all(b"\n")?;
         output.flush()?;
     }

@@ -17,16 +17,23 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentProtocolError,
     AgentResult,
+    DistributionAssignment,
     RecipeOperationRequest,
     canonical_message,
 )
+from vonk_control.distribution import DistributionService, MemoryVerifiedObjectSource
 from vonk_control.models import AgentOperation, InstallationNode, RunNode
 
+from .test_agent_api import NODE_A, agent_headers
+from .test_agent_api import agent_system as _agent_system
+from .test_distribution import _assignment
 from .test_recipe_operations import (
     NOW,
     installed_recipe,
     setup_services,
 )
+
+agent_system = _agent_system
 
 
 @pytest.fixture(scope="session")
@@ -347,3 +354,36 @@ def test_controller_distributed_rank_and_collective_payloads_cross_rust_and_back
             )
         )
         assert {node.state for node in nodes_after_readiness} == {"running"}
+
+
+def test_controller_distribution_http_response_round_trips_through_rust(
+    agent_system, install_start_wire_probe: Path
+) -> None:
+    client, services, _tokens, clock = agent_system
+    source = MemoryVerifiedObjectSource()
+    assignment = _assignment(
+        NODE_A,
+        source.put(b"model payload"),
+        source.put(b"config!"),
+        source.put(b"oci archive"),
+    )
+    # The same descriptor must survive both the API model and Rust parser.
+    document = assignment.to_mapping()
+    document["objects"][0]["name"] = "weights/模型 weights.bin"
+    document["objects"][1]["name"] = "__init__.py"
+    assignment = DistributionAssignment.parse(document)
+    source.register_artifact_set(assignment.model_artifact_set_sha256, assignment.objects)
+    source.register_runtime_image(assignment.oci_image_digest, assignment.oci_archive_sha256)
+    service = DistributionService(source, clock=clock)
+    service.register(assignment)
+    object.__setattr__(services, "distribution", service)
+    response = client.get(
+        f"/agent/v1/distribution/manifests/{assignment.plan_digest}",
+        headers=agent_headers(NODE_A, "serial-a"),
+    )
+    assert response.status_code == 200
+    result = subprocess.run(
+        [str(install_start_wire_probe), "--distribution"],
+        input=response.text + "\n", capture_output=True, text=True, check=True,
+    )
+    assert DistributionAssignment.model_validate_json(result.stdout) == assignment

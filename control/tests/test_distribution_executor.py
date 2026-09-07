@@ -85,9 +85,9 @@ def test_complete_two_node_distribution_is_a_verified_skip() -> None:
 
 def test_partial_child_replays_and_aggregates_cached_target(agent_system) -> None:  # noqa: F811
     _client, services, _tokens, clock = agent_system
-    model = DistributionObject("weights/model.bin", "a" * 64, 10, "model")
-    config = DistributionObject("config/tokenizer.json", "b" * 64, 5, "model")
-    archive = DistributionObject("image.oci.tar", "c" * 64, 11, "oci-archive")
+    model = DistributionObject(name="weights/model.bin", sha256="a" * 64, bytes=10, kind="model")
+    config = DistributionObject(name="config/tokenizer.json", sha256="b" * 64, bytes=5, kind="model")
+    archive = DistributionObject(name="image.oci.tar", sha256="c" * 64, bytes=11, kind="oci-archive")
     source = MemoryVerifiedObjectSource({"a" * 64: b"x" * 10, "b" * 64: b"y" * 5, "c" * 64: b"z" * 11})
     source.register_artifact_set("d" * 64, (model, config))
     source.register_runtime_image("sha256:" + "e" * 64, archive.sha256)

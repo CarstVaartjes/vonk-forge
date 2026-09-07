@@ -15,6 +15,7 @@ from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from jsonschema import Draft202012Validator, FormatChecker
+from pydantic import BaseModel
 
 MAX_DOCUMENT_BYTES = 64 * 1024
 MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES = 16 * 1024 * 1024
@@ -140,6 +141,8 @@ def canonical_message(value: Any) -> bytes:
 
 
 def _to_wire(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return _to_wire(value.model_dump(mode="python"))
     if isinstance(value, StrEnum):
         return value.value
     if isinstance(value, datetime):
