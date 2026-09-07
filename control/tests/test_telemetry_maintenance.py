@@ -34,6 +34,8 @@ from vonk_control.telemetry import (
     TelemetrySampleInput,
 )
 
+from .telemetry_fixtures import telemetry_metrics, telemetry_metrics_document
+
 NODE_A = "spk_" + "a" * 32
 BOOT_A = "00000000-0000-4000-8000-000000000001"
 NOW = datetime(2026, 8, 15, 12, 4, tzinfo=UTC)
@@ -80,6 +82,7 @@ def _raw(
         network_transmit_bytes_per_second=None,
         gap_samples=gap_samples,
         details={},
+        metrics=telemetry_metrics_document(),
     )
 
 
@@ -103,6 +106,7 @@ def _input(*, sequence: int, observed_at: datetime, cpu: float) -> TelemetrySamp
         network_transmit_bytes_per_second=None,
         gap_samples=0,
         details=TelemetryDetailsInput(),
+        metrics=telemetry_metrics(),
     )
 
 

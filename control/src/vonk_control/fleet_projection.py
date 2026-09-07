@@ -48,7 +48,6 @@ from .telemetry_contract import (
     TelemetryMetrics,
     TelemetryRuntime,
     TelemetryWorkload,
-    empty_telemetry_metrics,
 )
 
 _REVISION_PATTERN = r"^[0-9a-f]{64}$"
@@ -246,16 +245,7 @@ class TelemetryPoint(_StrictModel):
     )
     gap_samples: int = Field(ge=0, le=_MAX_SIGNED_BIGINT)
     details: TelemetryDetails
-    # Scalar-only rows predate the rich contract.  Keep their schema-1 fleet
-    # and stream representation byte-compatible; new samples carry the
-    # explicit nested schema-2 document here.
-    metrics: TelemetryMetrics | None = Field(
-        default=None,
-        # Scalar-only points are the schema-1 wire exception.  Keep the
-        # optional rich document out of those responses while retaining its
-        # concrete type in the generated schema.
-        exclude_if=lambda value: value is None,
-    )
+    metrics: TelemetryMetrics
 
 
 class TelemetryMetricSummary(_StrictModel):
@@ -273,7 +263,7 @@ class TelemetryMetricSummary(_StrictModel):
     interface_name: Annotated[str, StringConstraints(min_length=1, max_length=64)] | None = None
     run_id: Text128 | None = None
     unit: Text32 = "unknown"
-    source: Text128 = "legacy"
+    source: Text128 = "controller-derived"
     measurement_kind: Text32 = "measured"
     aggregation: Text32 = "mean"
 
@@ -396,12 +386,7 @@ class TelemetryHistoryResponse(_StrictModel):
     resolution: TelemetryResolution
     maximum_points: int = Field(ge=1, le=3_000)
     points: list[TelemetryPoint | TelemetryRollupPoint] = Field(max_length=3_000)
-    metadata: TelemetryHistoryMetadata | None = Field(
-        default=None,
-        # Preserve the legacy history envelope when no rich-series metadata
-        # was available, without weakening the OpenAPI response type.
-        exclude_if=lambda value: value is None,
-    )
+    metadata: TelemetryHistoryMetadata
 
 
 class TelemetryCurrentResponse(_StrictModel):
@@ -468,7 +453,7 @@ def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
         network_transmit_bytes_per_second=value.network_transmit_bytes_per_second,
         gap_samples=value.gap_samples,
         details=_telemetry_details(value.details),
-        metrics=(metrics if any((metrics.series, metrics.capabilities, metrics.runtimes, metrics.workloads)) else None),
+        metrics=metrics,
     )
 
 
@@ -576,6 +561,7 @@ def _filter_metrics(
     if all(item is None for item in (key, device_id, interface_name, run_id)):
         return value
     return TelemetryMetrics(
+        schema_version=2,
         series=[
             item
             for item in value.series
@@ -845,18 +831,6 @@ class FleetProjection:
             if actual_start is not None and actual_end is not None
             else 0.0
         )
-        has_rich_metrics = any(
-            isinstance(value, TelemetrySampleView)
-            and any(
-                (
-                    value.metrics.series,
-                    value.metrics.capabilities,
-                    value.metrics.runtimes,
-                    value.metrics.workloads,
-                )
-            )
-            for value in points
-        )
         return TelemetryHistoryResponse(
             node_id=node_id,
             start=start_utc,
@@ -869,21 +843,17 @@ class FleetProjection:
                 else telemetry_rollup_point(value)
                 for value in points
             ],
-            metadata=(
-                TelemetryHistoryMetadata(
-                    requested_start=start_utc,
-                    requested_end=end_utc,
-                    actual_start=actual_start,
-                    actual_end=actual_end,
-                    requested_resolution=resolution,
-                    actual_resolution=resolution,
-                    point_count=len(points),
-                    coverage_seconds=coverage_seconds,
-                    gap_samples=gap_samples,
-                    downsampled=resolution != "raw",
-                )
-                if has_rich_metrics or resolution != "raw"
-                else None
+            metadata=TelemetryHistoryMetadata(
+                requested_start=start_utc,
+                requested_end=end_utc,
+                actual_start=actual_start,
+                actual_end=actual_end,
+                requested_resolution=resolution,
+                actual_resolution=resolution,
+                point_count=len(points),
+                coverage_seconds=coverage_seconds,
+                gap_samples=gap_samples,
+                downsampled=resolution != "raw",
             ),
         )
 
@@ -907,14 +877,13 @@ class FleetProjection:
         if value is None:
             raise KeyError(node_id)
         point = telemetry_point(value)
-        if point.metrics is not None:
-            point.metrics = _filter_metrics(
-                point.metrics,
-                key=key,
-                device_id=device_id,
-                interface_name=interface_name,
-                run_id=run_id,
-            )
+        point.metrics = _filter_metrics(
+            point.metrics,
+            key=key,
+            device_id=device_id,
+            interface_name=interface_name,
+            run_id=run_id,
+        )
         return TelemetryCurrentResponse(
             node_id=node_id,
             observed_at=point.observed_at,
@@ -940,7 +909,7 @@ class FleetProjection:
             run_id=run_id,
         )
         point = response.sample
-        metrics = point.metrics or empty_telemetry_metrics()
+        metrics = point.metrics
         return TelemetryCapabilitiesResponse(
             node_id=node_id,
             observed_at=point.observed_at,
@@ -958,7 +927,7 @@ class FleetProjection:
     ) -> TelemetryWorkloadsResponse:
         response = self.telemetry_current(node_id)
         point = response.sample
-        metrics = point.metrics or empty_telemetry_metrics()
+        metrics = point.metrics
         runtimes = [
             item
             for item in metrics.runtimes
@@ -1176,6 +1145,7 @@ class FleetProjection:
                 if len(workloads) >= _MAX_TELEMETRY_WORKLOADS:
                     break
         return TelemetryMetrics(
+            schema_version=2,
             series=list(metrics.series),
             capabilities=capabilities[:128],
             runtimes=runtimes,

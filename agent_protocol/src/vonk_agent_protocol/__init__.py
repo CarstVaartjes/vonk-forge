@@ -75,7 +75,17 @@ from .recipe_operations import (
     RecipeUninstallResult,
     parse_recipe_operation_result,
 )
-from .telemetry import TelemetryReport
+from .telemetry import (
+    TelemetryCapability,
+    TelemetryDetails,
+    TelemetryMetrics,
+    TelemetryProvenance,
+    TelemetryRequest,
+    TelemetryRuntime,
+    TelemetrySample,
+    TelemetrySeries,
+    TelemetryWorkload,
+)
 from .workload_packages import (
     WORKLOAD_RELEASE_LOCK_SCHEMA_ID,
     Compatibility,
@@ -170,7 +180,15 @@ __all__ = [
     "SignedPackageHelperGrant",
     "SignedPackageObjectReceipt",
     "SignedRecipeRunObservationReceipt",
-    "TelemetryReport",
+    "TelemetryCapability",
+    "TelemetryDetails",
+    "TelemetryMetrics",
+    "TelemetryProvenance",
+    "TelemetryRequest",
+    "TelemetryRuntime",
+    "TelemetrySample",
+    "TelemetrySeries",
+    "TelemetryWorkload",
     "canonical_message",
     "format_model_identity",
     "host_artifact_signing_bytes",
