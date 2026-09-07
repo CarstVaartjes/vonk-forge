@@ -29,6 +29,7 @@ from ..source_bundles import (
     SourceBundleError,
     SourceBundleStore,
 )
+from .canonical_metadata import CANONICAL_HARNESSES
 from .common import (
     HarnessCompileError,
     custom_adapter_command,
@@ -37,16 +38,7 @@ from .common import (
 )
 from .contracts import HarnessBinding, HarnessCompiler, HarnessMount, HarnessProjection
 
-BUILTIN_HARNESS_SLUGS = (
-    "vllm",
-    "sglang",
-    "tensorrt-llm",
-    "llama-cpp",
-    "ds4",
-    "diffusers",
-    "comfyui",
-    "pytorch-pipeline",
-)
+BUILTIN_HARNESS_SLUGS = tuple(metadata.slug for metadata in CANONICAL_HARNESSES)
 
 _ADAPTER_PATH = "harness-adapter-v1.json"
 _BUNDLE_MEDIA_TYPE = "application/vnd.vonk-forge.source-bundle.v1+tar"

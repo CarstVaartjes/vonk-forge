@@ -3,11 +3,11 @@ from __future__ import annotations
 import copy
 import json
 from importlib.resources import files
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 from vonk_control.harnesses.canonical import compile_canonical_harness
+from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_control.harnesses.common import HarnessCompileError
 from vonk_control.recipe_runtime_specs import (
     RecipeRuntimeSpecError,
@@ -31,7 +31,6 @@ BUILTINS = (
     "comfyui",
     "pytorch-pipeline",
 )
-HARNESS_ROOT = Path(__file__).resolve().parents[2] / "config/execution-harnesses"
 
 OPENAI_BUILTINS = {"vllm", "sglang", "tensorrt-llm", "llama-cpp", "ds4"}
 ENTRYPOINTS = {
@@ -97,14 +96,19 @@ def _example(name: str) -> dict[str, object]:
     )
 
 
-def test_config_contains_exactly_the_canonical_builtin_harness_assets() -> None:
-    paths = sorted(HARNESS_ROOT.glob("*.json"))
+def test_platform_metadata_contains_exactly_the_canonical_builtin_harnesses() -> None:
+    assert tuple(metadata.slug for metadata in CANONICAL_HARNESSES) == BUILTINS
 
-    assert {path.stem for path in paths} == set(BUILTINS)
-    for path in paths:
-        document = json.loads(path.read_text(encoding="utf-8"))
-        assert document["kind"] == "execution-harness"
-        assert document["compiler_slug"] == path.stem
+
+def test_platform_metadata_is_strict_and_has_current_capabilities() -> None:
+    vllm = next(item for item in CANONICAL_HARNESSES if item.slug == "vllm")
+    sglang = next(item for item in CANONICAL_HARNESSES if item.slug == "sglang")
+    assert vllm.topology_modes == ("single", "distributed")
+    assert sglang.topology_modes == ("single", "distributed")
+    assert vllm.security_exceptions == ("model.trust-remote-code",)
+    assert sglang.security_exceptions == ("model.trust-remote-code",)
+    with pytest.raises(ValidationError):
+        type(vllm).model_validate({**vllm.model_dump(), "schema_version": 1})
 
 
 @pytest.fixture(scope="module")

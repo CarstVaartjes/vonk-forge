@@ -5,17 +5,14 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from importlib.resources import files
-from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
 from .catalog_contract import (
-    canonical_catalog_document,
     catalog_content_sha256,
-    parse_catalog_json,
 )
 from .harnesses import BUILTIN_HARNESS_SLUGS, HarnessProjection, HarnessRegistry
+from .harnesses.canonical_metadata import canonical_harness
 from .harnesses.common import HarnessCompileError
 from .schema_resources import read_runtime_schema
 
@@ -519,18 +516,10 @@ def _documents(slug: str) -> tuple[dict[str, object], dict[str, object]]:
 
 
 def _builtin_harness_document(slug: str) -> dict[str, object]:
-    packaged = files("vonk_control").joinpath("execution-harnesses", f"{slug}.json")
-    if packaged.is_file():
-        payload = packaged.read_bytes()
-    else:
-        root = Path(__file__).resolve().parents[3]
-        payload = (root / "config/execution-harnesses" / f"{slug}.json").read_bytes()
-    document = dict(parse_catalog_json(payload))
-    if payload != canonical_catalog_document(document) + b"\n":
-        raise HarnessConformanceError(
-            "built-in harness catalog document is noncanonical"
-        )
-    return document
+    try:
+        return canonical_harness(slug).model_dump(mode="json")
+    except ValueError as error:
+        raise HarnessConformanceError("unknown execution harness") from error
 
 
 def _conformance_recipe(

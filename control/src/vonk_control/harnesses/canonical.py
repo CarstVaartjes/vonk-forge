@@ -27,41 +27,14 @@ from ..runtime_writable_paths import (
     validate_paths,
     writable_paths,
 )
+from .canonical_metadata import (
+    CANONICAL_HARNESSES,
+    canonical_harness,
+)
 from .common import HarnessCompileError, validate_projection
 from .contracts import HarnessBinding, HarnessMount, HarnessProjection
 
-_BUILTINS = frozenset(
-    {
-        "vllm",
-        "sglang",
-        "tensorrt-llm",
-        "llama-cpp",
-        "ds4",
-        "diffusers",
-        "comfyui",
-        "pytorch-pipeline",
-    }
-)
-_EXECUTABLES: dict[str, frozenset[str]] = {
-    "vllm": frozenset({"vllm", "vllm-serve"}),
-    "sglang": frozenset({"sglang", "sglang-serve"}),
-    "tensorrt-llm": frozenset({"trtllm-serve", "tensorrt-llm"}),
-    "llama-cpp": frozenset({"llama-server", "llama-cpp"}),
-    "ds4": frozenset({"ds4-serve", "ds4"}),
-    "diffusers": frozenset({"diffusers-job", "diffusers"}),
-    "comfyui": frozenset({"comfyui-job", "comfyui"}),
-    "pytorch-pipeline": frozenset({"pytorch-pipeline", "pytorch"}),
-}
-_WRAPPERS = {
-    "vllm": "/opt/vonk/bin/vllm",
-    "sglang": "/opt/vonk/bin/sglang-serve",
-    "tensorrt-llm": "/usr/local/bin/trtllm-serve",
-    "llama-cpp": "/opt/vonk/bin/llama-server",
-    "ds4": "/opt/vonk/bin/ds4-serve",
-    "diffusers": "/opt/vonk/bin/diffusers-job",
-    "comfyui": "/opt/vonk/bin/comfyui-job",
-    "pytorch-pipeline": "/opt/vonk/bin/pytorch-pipeline",
-}
+_BUILTINS = frozenset(metadata.slug for metadata in CANONICAL_HARNESSES)
 _JOB_INTERFACES = frozenset(
     {"image-job", "audio-job", "video-job", "mesh-job", "artifact-job"}
 )
@@ -243,7 +216,7 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
             or "//" in entrypoint[0]
         ):
             raise HarnessCompileError("recipe entrypoint is outside the trusted harness path")
-    elif executable not in _EXECUTABLES[recipe.runtime.engine]:
+    elif executable not in canonical_harness(recipe.runtime.engine).executables:
         raise HarnessCompileError("recipe entrypoint does not match its engine harness")
     if any(type(item) is not str or not item or len(item) > 4096 or "\x00" in item for item in entrypoint):
         raise HarnessCompileError("recipe entrypoint contains invalid argv data")
@@ -379,26 +352,21 @@ def _distributed_args(
 
 
 def _harness_security(slug: str, topology: object) -> tuple[tuple[str, ...], bool]:
-    path = Path(__file__).parents[4] / "config" / "execution-harnesses" / f"{slug}.json"
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        raise HarnessCompileError("trusted execution harness identity is unavailable") from error
-    requirements = document.get("capability_requirements")
-    exceptions = document.get("security_exceptions")
-    if not isinstance(requirements, list) or not isinstance(exceptions, list):
-        raise HarnessCompileError("trusted execution harness security identity is invalid")
-    devices = ("nvidia.com/gpu=all",) if "nvidia-gpu" in requirements else ()
-    host_network = "host-network" in exceptions and getattr(topology, "mode", None) == "distributed"
+    metadata = canonical_harness(slug)
+    devices = (
+        ("nvidia.com/gpu=all",)
+        if "nvidia-gpu" in metadata.capability_requirements
+        else ()
+    )
+    host_network = (
+        "host-network" in metadata.security_exceptions
+        and getattr(topology, "mode", None) == "distributed"
+    )
     return devices, host_network
 
 
 def _harness_digest(slug: str) -> str:
-    path = Path(__file__).parents[4] / "config" / "execution-harnesses" / f"{slug}.json"
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return _digest({"kind": "execution-harness", "slug": slug, "contract_version": 1})
+    return canonical_harness(slug).content_sha256
 
 
 def compile_canonical_harness(
@@ -428,7 +396,7 @@ def compile_canonical_harness(
     environment = _environment(recipe)
     mounts = _model_mounts(recipe, models, role)
     command = list(_argv(recipe, _settings(recipe, settings)))
-    wrapper = _WRAPPERS[slug]
+    wrapper = canonical_harness(slug).wrapper
     entry = tuple(recipe.runtime.entrypoint)
     # Trusted absolute entrypoints remain authored by the recipe repository.
     # Short names retain the platform wrapper fallback used by examples.
