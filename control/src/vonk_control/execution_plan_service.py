@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from .compiled_execution_plan import (
     CompiledExecutionPlanError,
@@ -122,12 +123,22 @@ class ControllerExecutionPlanService:
         ):
             raise ExecutionPlanCompilationError("recipe revision digest is unavailable")
         try:
+            recipe = _canonical_recipe(revision.document, resolved_entities)
+        except (TypeError, ValueError) as error:
+            raise ExecutionPlanCompilationError(
+                "recipe does not satisfy the canonical contract"
+            ) from error
+        if content_sha256(recipe) != revision.content_digest:
+            raise ExecutionPlanCompilationError(
+                "recipe revision digest does not match the canonical document"
+            )
+        try:
             resolved = (
                 dict(resolved_entities)
                 if resolved_entities is not None
                 else resolve_recipe_entities(session, revision.document)
             )
-            models = tuple(resolved["models"])
+            models = _canonical_models(resolved["models"])
             manifest = self._model_cache.resolve_artifact_set(
                 recipe_revision_sha256=revision.content_digest,
             )
@@ -155,14 +166,14 @@ class ControllerExecutionPlanService:
             ) from error
 
         document = revision.document
-        world_size = _world_size(document, len(mapping_nodes))
+        world_size = _world_size(recipe)
         result: dict[str, dict[str, object]] = {}
         for node in sorted(mapping_nodes, key=lambda item: (item.rank, item.node_id)):
-            package = _build_package(build) if _is_source_build(document) else None
+            package = _build_package(build) if _is_source_build(recipe) else None
             try:
                 runtime_spec = compile_runtime_spec(
-                    document,
-                    resolved_entities={"models": models},
+                    recipe,
+                    resolved_entities={"recipe": recipe, "models": models},
                     parameters=parameters,
                     role=node.role,
                     rank=node.rank,
@@ -176,7 +187,7 @@ class ControllerExecutionPlanService:
                     model_objects=model_objects,
                     runtime_image=receipt,
                 )
-                placement = _placement(document, runtime_spec, node, world_size)
+                placement = _placement(recipe, runtime_spec, node, world_size)
                 result[node.node_id] = compiled.to_compiled_launch_payload(
                     runtime_spec,
                     placement=placement,
@@ -262,9 +273,40 @@ def _runtime_receipt_mapping(receipt: object) -> dict[str, object]:
     return value
 
 
-def _is_source_build(document: Mapping[str, object]) -> bool:
-    execution = document.get("execution")
-    return isinstance(execution, Mapping) and execution.get("mode") == "build"
+def _canonical_recipe(
+    document: Mapping[str, object], resolved_entities: Mapping[str, object] | None
+) -> RecipeDefinition:
+    """Return the producer-resolved canonical recipe after validating its source."""
+
+    parsed = RecipeDefinition.model_validate(document)
+    resolved = resolved_entities.get("recipe") if resolved_entities is not None else None
+    if resolved is None:
+        return parsed
+    if not isinstance(resolved, RecipeDefinition):
+        raw = getattr(resolved, "document", resolved)
+        resolved = RecipeDefinition.model_validate(raw)
+    if content_sha256(resolved) != content_sha256(parsed):
+        raise ValueError("resolved recipe projection does not match the revision")
+    return resolved
+
+
+def _canonical_models(value: object) -> tuple[ModelDefinition, ...]:
+    """Validate resolved model revisions before selecting their exact files."""
+
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise TypeError("canonical model projections are missing")
+    result: list[ModelDefinition] = []
+    for item in value:
+        if isinstance(item, ModelDefinition):
+            result.append(item)
+            continue
+        raw = getattr(item, "document", item)
+        result.append(ModelDefinition.model_validate(raw))
+    return tuple(result)
+
+
+def _is_source_build(recipe: RecipeDefinition) -> bool:
+    return recipe.execution.mode == "build"
 
 
 def _build_package(build: RecipeBuild) -> dict[str, object]:
@@ -291,37 +333,30 @@ def _image_digest(value: object) -> str:
     return digest
 
 
-def _world_size(document: Mapping[str, object], fallback: int) -> int:
-    topology = document.get("topology")
-    parallelism = topology.get("parallelism") if isinstance(topology, Mapping) else None
-    value = parallelism.get("world_size") if isinstance(parallelism, Mapping) else None
-    return value if type(value) is int and value > 0 else max(1, fallback)
+def _world_size(recipe: RecipeDefinition) -> int:
+    return recipe.topology.parallelism.world_size
 
 
 def _placement(
-    document: Mapping[str, object],
+    recipe: RecipeDefinition,
     runtime_spec: Mapping[str, object],
     node: ClusterMappingNode,
     world_size: int,
 ) -> dict[str, object]:
     endpoint = runtime_spec.get("endpoint")
-    role_resources: Mapping[str, object] | None = None
-    raw_topology = document.get("topology")
-    roles = raw_topology.get("roles") if isinstance(raw_topology, Mapping) else None
-    if isinstance(roles, Sequence) and not isinstance(roles, (str, bytes)):
-        for raw_role in roles:
-            if isinstance(raw_role, Mapping) and raw_role.get("name") == node.role:
-                candidate = raw_role.get("resources")
-                if isinstance(candidate, Mapping):
-                    role_resources = candidate
-                break
-    memory = role_resources.get("memory") if role_resources else None
-    reserved = memory.get("startup_peak_bytes") if isinstance(memory, Mapping) else None
+    role = next((item for item in recipe.topology.roles if item.name == node.role), None)
+    if role is None:
+        raise ExecutionPlanCompilationError(
+            f"mapped role {node.role!r} is absent from the canonical recipe topology"
+        )
+    reserved = role.resources.memory.startup_peak_bytes
     if type(reserved) is not int or reserved <= 0:
-        reserved = 1
-    port = endpoint.get("port") if isinstance(endpoint, Mapping) else 1024
-    if type(port) is not int or port <= 0:
-        port = 1024
+        raise ExecutionPlanCompilationError("canonical recipe role memory is invalid")
+    if not isinstance(endpoint, Mapping):
+        raise ExecutionPlanCompilationError("compiled runtime endpoint is unavailable")
+    port = endpoint.get("port")
+    if type(port) is not int or port <= 0 or port > 65535:
+        raise ExecutionPlanCompilationError("compiled runtime endpoint port is invalid")
     return {
         "endpoint_address": None,
         "rank": node.rank,
@@ -345,17 +380,14 @@ def _bind_runtime_artifacts(
     if not isinstance(raw_artifacts, Sequence) or isinstance(raw_artifacts, (str, bytes)):
         raise ExecutionPlanCompilationError("canonical runtime model artifacts are unavailable")
     by_identity: dict[tuple[str, str], Mapping[str, object]] = {}
-    for model in models:
-        document = getattr(model, "document", None)
-        identity = getattr(model, "content_digest", None)
-        if not isinstance(document, Mapping) or not isinstance(identity, str):
-            continue
-        files = document.get("files")
-        if not isinstance(files, Sequence) or isinstance(files, (str, bytes)):
-            continue
-        for raw in files:
-            if isinstance(raw, Mapping) and isinstance(raw.get("id"), str):
-                by_identity[(identity, str(raw["id"]))] = raw
+    try:
+        canonical_models = _canonical_models(models)
+    except (TypeError, ValueError) as error:
+        raise ExecutionPlanCompilationError("canonical model projection is invalid") from error
+    for model in canonical_models:
+        identity = content_sha256(model)
+        for file in model.files:
+            by_identity[(identity, file.id)] = file.model_dump(mode="json")
     bound: list[dict[str, object]] = []
     for raw in raw_artifacts:
         if not isinstance(raw, Mapping):
