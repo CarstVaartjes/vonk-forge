@@ -65,7 +65,7 @@ def test_tracked_admin_contract_has_direct_enrollment_and_typed_errors() -> None
         "progress"
     ]
     assert any(
-        option.get("$ref") == "#/components/schemas/JobOperationProgress"
+        option.get("$ref") == "#/components/schemas/OperationProgress"
         for option in progress["anyOf"]
     )
 
@@ -241,6 +241,18 @@ def test_streaming_artifact_transfers_are_not_generated_as_typed_clients() -> No
     assert "downloadArtifactJobResult" not in typescript
     assert not (PYTHON_CLIENT / "api/default/upload_artifact_job_input.py").exists()
     assert not (PYTHON_CLIENT / "api/default/download_artifact_job_result.py").exists()
+
+    source_bundle = operations["downloadRecipeSourceBundle"]
+    assert source_bundle["x-vonk-streaming-transport"] is True
+    assert source_bundle["responses"]["200"]["content"] == {
+        "application/vnd.vonk-forge.source-bundle.v1+tar": {
+            "schema": {"format": "binary", "type": "string"}
+        }
+    }
+    assert "downloadRecipeSourceBundle" not in typescript
+    assert not (
+        PYTHON_CLIENT / "api/default/download_recipe_source_bundle.py"
+    ).exists()
 
 
 def test_admin_schema_is_secret_free() -> None:

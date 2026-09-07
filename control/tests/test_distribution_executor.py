@@ -14,6 +14,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import DistributionAssignment, DistributionObject
+from vonk_agent_protocol.contracts import ArtifactDistributionPayload
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_control.auth import TokenCodec
 from vonk_control.distribution import (
@@ -355,7 +356,13 @@ def test_partial_child_failure_is_projected_after_aggregation(agent_system) -> N
         )
         session.add(child)
         session.flush()
-        services.operations.enqueue_in_session(session, child.id, NODE_A, "artifact.distribution.v1", "f" * 64, {"schema_version": 1, "plan_digest": "f" * 64}, operation_id=str(uuid4()))
+        services.operations.enqueue_in_session(
+            session, child.id, NODE_A, "artifact.distribution.v1", "f" * 64,
+            ArtifactDistributionPayload(
+                schema_version=1, authority_revision="f" * 64, plan_digest="f" * 64,
+            ).model_dump(mode="json"),
+            operation_id=str(uuid4()),
+        )
         operation = session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
         operation.state = "failed"
         operation.current_attempt = 1
