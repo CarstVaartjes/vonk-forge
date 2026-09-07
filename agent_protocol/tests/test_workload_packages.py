@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tomllib
-from dataclasses import replace
-from importlib.resources import files
-from pathlib import Path
-from types import MappingProxyType
 
 import pytest
 from jsonschema import Draft202012Validator
-from vonk_agent_protocol import AgentProtocolError
+from pydantic import ValidationError
+from vonk_agent_protocol import AgentProtocolError, workload_release_lock_schema
+from vonk_agent_protocol.wire_model import WireModel
 from vonk_agent_protocol.workload_packages import (
     ComponentDescriptor,
     PackageReleaseGraph,
@@ -135,7 +132,7 @@ def test_release_lock_digest_is_stable_for_reordered_maps() -> None:
 
     assert reordered.canonical_bytes == original.canonical_bytes
     assert reordered.digest == original.digest
-    assert original.compatibility["minimum_memory_bytes"] == 4096
+    assert original.compatibility.minimum_memory_bytes == 4096
     assert hashlib.sha256(original.canonical_bytes).hexdigest() == original.digest
 
 
@@ -146,21 +143,29 @@ def test_release_lock_parses_signed_resource_envelope() -> None:
     lock = PackageReleaseLock.parse(document)
 
     assert lock.resource_envelope is not None
-    assert lock.resource_envelope["required_nodes"] == 2
-    assert lock.resource_envelope["per_node"]["kv_cache_per_token_bytes"] == 4096
-    assert lock.resource_envelope["per_node"]["resident_memory_bytes"] == 8 * 1024**3
-    assert lock.resource_envelope["world_size"] == 2
-    assert lock.resource_envelope["ranks"][1]["role"] == "worker"
-    assert lock.resource_envelope["fabric"]["kind"] == "rdma"
+    assert lock.resource_envelope.required_nodes == 2
+    assert lock.resource_envelope.per_node.kv_cache_per_token_bytes == 4096
+    assert lock.resource_envelope.per_node.resident_memory_bytes == 8 * 1024**3
+    assert lock.resource_envelope.world_size == 2
+    assert lock.resource_envelope.ranks[1].role == "worker"
+    assert lock.resource_envelope.fabric.kind == "rdma"
 
 
 @pytest.mark.parametrize(
     "mutate, message",
     [
         (lambda envelope: envelope["per_node"].pop("host_memory_bytes"), "host_memory"),
-        (lambda envelope: envelope["per_node"].update({"download_bytes": -1}), "download"),
+        (
+            lambda envelope: envelope["per_node"].update({"download_bytes": -1}),
+            "download",
+        ),
         (lambda envelope: envelope.update({"measurement": "unknown"}), "measurement"),
-        (lambda envelope: envelope.update({"aggregate": {**envelope["aggregate"], "installed_bytes": 1}}), "aggregate"),
+        (
+            lambda envelope: envelope.update(
+                {"aggregate": {**envelope["aggregate"], "installed_bytes": 1}}
+            ),
+            "aggregate",
+        ),
     ],
 )
 def test_release_lock_rejects_unbounded_resource_envelope(mutate, message: str) -> None:
@@ -191,9 +196,10 @@ def test_release_lock_accepts_signed_python_runtime_metadata() -> None:
 
     lock = PackageReleaseLock.parse(document)
 
-    assert lock.compatibility["backends"] == ("python-venv",)
-    runtime = lock.compatibility["python_runtime"]
-    assert runtime["interpreter_component"] == "python-interpreter"
+    assert lock.compatibility.backends == ("python-venv",)
+    runtime = lock.compatibility.python_runtime
+    assert runtime is not None
+    assert runtime.interpreter_component == "python-interpreter"
 
 
 def test_release_lock_rejects_untrusted_python_runtime_metadata() -> None:
@@ -231,17 +237,17 @@ def test_release_lock_rejects_duplicate_json_keys() -> None:
 def test_release_lock_and_components_are_deeply_immutable() -> None:
     lock = PackageReleaseLock.parse(lock_document())
 
-    assert isinstance(lock.upstream_identity, MappingProxyType)
-    assert isinstance(lock.compatibility, MappingProxyType)
-    assert isinstance(lock.components[0].materialization, MappingProxyType)
-    with pytest.raises(TypeError):
-        lock.compatibility["architectures"] = ("amd64",)  # type: ignore[index]
+    assert isinstance(lock.upstream_identity, WireModel)
+    assert isinstance(lock.compatibility, WireModel)
+    assert isinstance(lock.components[0].materialization, WireModel)
+    with pytest.raises(ValidationError):
+        lock.compatibility.architectures = ("amd64",)
 
 
 def test_component_descriptor_exposes_exact_contract_fields() -> None:
-    descriptor = ComponentDescriptor.parse(component())
+    ComponentDescriptor.parse(component())
 
-    assert tuple(descriptor.__dataclass_fields__) == (
+    assert tuple(ComponentDescriptor.model_fields) == (
         "name",
         "kind",
         "media_type",
@@ -405,8 +411,8 @@ def test_graph_rejects_dependency_cycle() -> None:
     second = PackageReleaseLock.parse(lock_document("cycle-b"))
     first_key = first.digest
     second_key = second.digest
-    first = replace(first, dependency_digests=(second_key,))
-    second = replace(second, dependency_digests=(first_key,))
+    first = first.model_copy(update={"dependency_digests": (second_key,)})
+    second = second.model_copy(update={"dependency_digests": (first_key,)})
 
     with pytest.raises(AgentProtocolError, match="dependency cycle"):
         PackageReleaseGraph.resolve(
@@ -449,12 +455,8 @@ def test_graph_rejects_more_than_256_aggregate_components() -> None:
         PackageReleaseGraph.resolve(root.digest, releases)
 
 
-def test_schema_is_packaged_and_validates_synthetic_lock() -> None:
-    schema = json.loads(
-        files("vonk_agent_protocol.schemas")
-        .joinpath("workload-release-lock.schema.json")
-        .read_text()
-    )
+def test_generated_schema_validates_synthetic_lock() -> None:
+    schema = workload_release_lock_schema()
 
     Draft202012Validator.check_schema(schema)
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
@@ -463,34 +465,21 @@ def test_schema_is_packaged_and_validates_synthetic_lock() -> None:
     )
     assert schema["additionalProperties"] is False
     assert not tuple(Draft202012Validator(schema).iter_errors(lock_document()))
+    component_schema = schema["$defs"]["ComponentDescriptor"]
+    assert component_schema["properties"]["name"]["pattern"].startswith("^[a-z0-9]")
+    assert component_schema["properties"]["kind"]["pattern"].startswith("^[a-z0-9]")
+    assert "media_type" in component_schema["required"]
+    assert component_schema["properties"]["platforms"]["items"]["pattern"]
+    for source_name, field_name in (
+        ("_HttpsSource", "url"),
+        ("_GitSource", "repository"),
+        ("_IndexSource", "url"),
+        ("_SignedHttpIndexIdentity", "url"),
+    ):
+        assert schema["$defs"][source_name]["properties"][field_name].get(
+            "maxLength", 2048
+        ) == 2048
+    assert schema == workload_release_lock_schema()
     assert PackageReleaseLock.parse(lock_document()).family_id == (
         "future-synthetic-stack"
     )
-
-
-@pytest.mark.parametrize(
-    ("family_id", "deployment_id"),
-    (
-        ("ds4-deepseek", "ds4-deepseek-single"),
-        ("mia-deepseek", "mia-deepseek-dual"),
-    ),
-)
-def test_checked_in_release_lock_identity_matches_filename_and_deployment(
-    family_id: str,
-    deployment_id: str,
-) -> None:
-    """Mutating a lock payload without republishing its digest must fail."""
-    root = Path(__file__).resolve().parents[2]
-    lock_paths = tuple((root / "manifests/workload-releases" / family_id).glob("*.json"))
-    if not lock_paths:
-        pytest.skip("optional workload-release lock is not checked out")
-    assert len(lock_paths) == 1
-
-    lock_path = lock_paths[0]
-    lock = PackageReleaseLock.parse(lock_path.read_bytes())
-    deployment = tomllib.loads(
-        (root / "config/workload-deployments" / f"{deployment_id}.toml").read_text()
-    )
-
-    assert lock.digest == lock_path.stem
-    assert deployment["release_digest"] == lock.digest

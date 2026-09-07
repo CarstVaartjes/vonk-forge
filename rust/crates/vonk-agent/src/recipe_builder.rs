@@ -12,12 +12,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tempfile::{Builder, TempDir};
 use thiserror::Error;
 use uuid::Uuid;
-use vonk_agent_protocol::RecipeBuildRequest;
+use vonk_agent_protocol::{
+    RecipeBuildEvidence, RecipeBuildPolicy, RecipeBuildPolicyFinding, RecipeBuildRequest,
+};
 
 use crate::{
     base_images::{BaseImageError, BaseImageStore},
@@ -165,15 +166,23 @@ fn process_error_diagnostic(error: &ProcessError) -> &'static str {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct RecipeBuildEvidence {
-    pub build_input_sha256: String,
-    pub image_bytes: u64,
-    pub image_digest: String,
-    // Protocol-v1 name retained for compatibility; Spark binds the complete
-    // docker-save archive here.
-    pub oci_layout_sha256: String,
-    pub policy: SourcePolicyReport,
+impl From<SourcePolicyReport> for RecipeBuildPolicy {
+    fn from(value: SourcePolicyReport) -> Self {
+        Self {
+            passed: value.passed,
+            dockerfile: value.dockerfile,
+            findings: value
+                .findings
+                .into_iter()
+                .map(|finding| RecipeBuildPolicyFinding {
+                    code: finding.code.to_owned(),
+                    path: finding.path,
+                    line: finding.line,
+                    detail: finding.detail.to_owned(),
+                })
+                .collect(),
+        }
+    }
 }
 
 pub struct RecipeBuilder<'a, R> {
@@ -551,7 +560,7 @@ impl<R: ProcessRunner> RecipeBuilder<'_, R> {
             image_bytes,
             image_digest,
             oci_layout_sha256,
-            policy,
+            policy: policy.into(),
         })
     }
 }

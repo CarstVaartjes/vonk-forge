@@ -51,6 +51,16 @@ def verify(
                 result = results.get(job)
                 if result != expected:
                     errors.append(f"{job} result is {result!r}, expected {expected!r}")
+    wire_expected = (
+        "success"
+        if selected.get("rust") == "true" or selected.get("control") == "true"
+        else "skipped"
+    )
+    if results.get("controller-spark-wire") != wire_expected:
+        errors.append(
+            f"controller-spark-wire result is {results.get('controller-spark-wire')!r}, "
+            f"expected {wire_expected!r}"
+        )
     return errors
 
 

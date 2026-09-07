@@ -36,7 +36,7 @@ rustls-pemfile = "2.2.0"
 rustix = { version = "1.1.4", features = ["fs", "net", "process"] }
 sd-listen-fds = "0.2.0"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = { version = "1.0.142", features = ["preserve_order"] }
+serde_json = { version = "1.0.142", features = ["preserve_order", "arbitrary_precision"] }
 serde_yaml = "0.9.34"
 sha2 = "0.11.0"
 tempfile = "3.20.0"

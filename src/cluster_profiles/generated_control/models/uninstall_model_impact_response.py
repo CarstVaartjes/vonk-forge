@@ -24,16 +24,16 @@ class UninstallModelImpactResponse:
             cleanup_node_ids (list[str]):
             dependent_recipe_ids (list[str]):
             effect (str):
+            model_content_sha256 (str):
             model_title (str):
-            model_version_sha256 (str):
             retained_node_ids (list[str]):
      """
 
     cleanup_node_ids: list[str]
     dependent_recipe_ids: list[str]
     effect: str
+    model_content_sha256: str
     model_title: str
-    model_version_sha256: str
     retained_node_ids: list[str]
 
 
@@ -51,9 +51,9 @@ class UninstallModelImpactResponse:
 
         effect = self.effect
 
-        model_title = self.model_title
+        model_content_sha256 = self.model_content_sha256
 
-        model_version_sha256 = self.model_version_sha256
+        model_title = self.model_title
 
         retained_node_ids = self.retained_node_ids
 
@@ -66,8 +66,8 @@ class UninstallModelImpactResponse:
             "cleanup_node_ids": cleanup_node_ids,
             "dependent_recipe_ids": dependent_recipe_ids,
             "effect": effect,
+            "model_content_sha256": model_content_sha256,
             "model_title": model_title,
-            "model_version_sha256": model_version_sha256,
             "retained_node_ids": retained_node_ids,
         })
 
@@ -86,9 +86,9 @@ class UninstallModelImpactResponse:
 
         effect = d.pop("effect")
 
-        model_title = d.pop("model_title")
+        model_content_sha256 = d.pop("model_content_sha256")
 
-        model_version_sha256 = d.pop("model_version_sha256")
+        model_title = d.pop("model_title")
 
         retained_node_ids = cast(list[str], d.pop("retained_node_ids"))
 
@@ -97,8 +97,8 @@ class UninstallModelImpactResponse:
             cleanup_node_ids=cleanup_node_ids,
             dependent_recipe_ids=dependent_recipe_ids,
             effect=effect,
+            model_content_sha256=model_content_sha256,
             model_title=model_title,
-            model_version_sha256=model_version_sha256,
             retained_node_ids=retained_node_ids,
         )
 

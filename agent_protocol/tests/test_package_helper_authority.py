@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import replace
-
 import pytest
 from vonk_agent_protocol import AgentProtocolError
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_GRANT_DOMAIN,
     HostHelperGrantClaims,
-    HostHelperOperation,
-    HostOperationKind,
+    RestartVonkUnitOperation,
     host_helper_grant_signing_bytes,
+    parse_host_operation,
 )
+from vonk_agent_protocol.wire_model import WireModel
 from vonk_agent_protocol.workload_packages import (
     PackageHelperGrantClaims,
     PackageHelperOperation,
@@ -64,7 +63,9 @@ def receipt_claims() -> PackageObjectReceiptClaims:
 def test_helper_grant_round_trips_exact_typed_claims() -> None:
     grant = SignedPackageHelperGrant(
         claims=grant_claims(),
-        signature=PackageHelperSignature("ed25519", KEY_ID, SIGNATURE),
+        signature=PackageHelperSignature(
+            algorithm="ed25519", key_id=KEY_ID, value=SIGNATURE
+        ),
     )
 
     parsed = SignedPackageHelperGrant.parse(grant.to_mapping())
@@ -72,6 +73,8 @@ def test_helper_grant_round_trips_exact_typed_claims() -> None:
     assert parsed == grant
     assert parsed.claims.operation is PackageHelperOperation.VERIFY_RELEASE
     assert parsed.claims.request_digest == REQUEST_DIGEST
+    assert isinstance(parsed.claims, WireModel)
+    assert isinstance(parsed.signature, WireModel)
 
 
 def test_helper_grant_signing_bytes_are_domain_separated_and_canonical() -> None:
@@ -95,20 +98,27 @@ def test_helper_grant_signing_bytes_are_domain_separated_and_canonical() -> None
 
 def test_helper_grant_requires_a_bounded_fifteen_minute_lifetime() -> None:
     with pytest.raises(AgentProtocolError, match="expiry"):
-        replace(grant_claims(), expires_at=2_000_000_901)
+        PackageHelperGrantClaims.parse(
+            grant_claims().to_mapping() | {"expires_at": 2_000_000_901}
+        )
     with pytest.raises(AgentProtocolError, match="expiry"):
-        replace(grant_claims(), expires_at=2_000_000_000)
+        PackageHelperGrantClaims.parse(
+            grant_claims().to_mapping() | {"expires_at": 2_000_000_000}
+        )
 
 
 def test_object_receipt_has_explicit_same_key_envelope_but_distinct_domain() -> None:
     receipt = SignedPackageObjectReceipt(
         claims=receipt_claims(),
-        signature=PackageHelperSignature("ed25519", KEY_ID, SIGNATURE),
+        signature=PackageHelperSignature(
+            algorithm="ed25519", key_id=KEY_ID, value=SIGNATURE
+        ),
     )
 
     parsed = SignedPackageObjectReceipt.parse(receipt.to_mapping())
 
     assert parsed == receipt
+    assert isinstance(parsed, WireModel)
     assert parsed.claims.relative_name == "objects/sha256/" + "e" * 64
     assert package_object_receipt_signing_bytes(parsed.claims).startswith(
         b"Vonk Forge-WORKLOAD-PACKAGE-OBJECT-RECEIPT-V1\x00"
@@ -120,7 +130,10 @@ def test_object_receipt_has_explicit_same_key_envelope_but_distinct_domain() -> 
 
 def test_object_receipt_rejects_a_noncanonical_object_location() -> None:
     with pytest.raises(AgentProtocolError, match="relative name"):
-        replace(receipt_claims(), relative_name="objects/sha256/" + "f" * 64)
+        PackageObjectReceiptClaims.parse(
+            receipt_claims().to_mapping()
+            | {"relative_name": "objects/sha256/" + "f" * 64}
+        )
 
 
 def test_host_helper_grant_has_a_distinct_narrow_authority_domain() -> None:
@@ -131,9 +144,7 @@ def test_host_helper_grant_has_a_distinct_narrow_authority_domain() -> None:
         node_id="spk_" + "1" * 32,
         issued_at=2_000_000_000,
         expires_at=2_000_000_060,
-        operation=HostHelperOperation(
-            HostOperationKind.RESTART_VONK_UNIT, {"unit": "agent"}
-        ),
+        operation=RestartVonkUnitOperation(type="restart-vonk-unit", unit="agent"),
     )
 
     encoded = host_helper_grant_signing_bytes(claims)
@@ -169,7 +180,7 @@ def test_host_helper_protocol_rejects_paths_and_untyped_process_control(
     document: dict[str, object],
 ) -> None:
     with pytest.raises(AgentProtocolError):
-        HostHelperOperation.parse(document)
+        parse_host_operation(document)
 
 
 @pytest.mark.parametrize(
@@ -188,4 +199,4 @@ def test_host_helper_protocol_rejects_removed_agent_lifecycle_operations(
     document: dict[str, object],
 ) -> None:
     with pytest.raises(AgentProtocolError, match="operation|unit"):
-        HostHelperOperation.parse(document)
+        parse_host_operation(document)

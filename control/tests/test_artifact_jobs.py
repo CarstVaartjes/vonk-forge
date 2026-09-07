@@ -492,7 +492,12 @@ def test_artifact_job_stages_exact_inputs_enqueues_and_persists_result(
         expected_sha256=output_digest,
         content=output_content,
     )
-    output = RecipeJobFile("output.png", "image/png", 4, output_digest)
+    output = RecipeJobFile(
+        name="output.png",
+        media_type="image/png",
+        size_bytes=4,
+        sha256=output_digest,
+    )
     result = {
         "schema_version": 1,
         "job_id": job.id,
@@ -677,8 +682,8 @@ def test_artifact_job_rejects_unrepresentable_output_media_mapping(tmp_path) -> 
         slot["media_types"] = ["image/avif", "image/png"]
         slot["extensions"] = [".avif", ".png"]
 
-    _sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
-        tmp_path, recipe_transform=transform
+    _sessions, _operations, _queue, service, run_id, _node_id = (
+        running_artifact_service(tmp_path, recipe_transform=transform)
     )
 
     with pytest.raises(ArtifactJobError, match="output slot contract"):
@@ -700,8 +705,8 @@ def test_artifact_job_rejects_cross_slot_output_extension_collision(tmp_path) ->
         )
         document["interfaces"][0]["output"]["slots"].append(duplicate)
 
-    _sessions, _operations, _queue, service, run_id, _node_id = running_artifact_service(
-        tmp_path, recipe_transform=transform
+    _sessions, _operations, _queue, service, run_id, _node_id = (
+        running_artifact_service(tmp_path, recipe_transform=transform)
     )
 
     with pytest.raises(ArtifactJobError, match="extensions"):
@@ -736,9 +741,9 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
             }
         )
         output["slots"].append(detailed)
-        document["validation"]["serving"]["checks"][0]["request"][
-            "output_slot"
-        ] = "detailed"
+        document["validation"]["serving"]["checks"][0]["request"]["output_slot"] = (
+            "detailed"
+        )
 
     sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path, recipe_transform=transform
@@ -776,7 +781,10 @@ def test_artifact_output_uses_longest_signed_suffix_for_same_media_type(
         content=output_content,
     )
     produced = RecipeJobFile(
-        "artifact.vonk.bin", media_type, len(output_content), output_digest
+        name="artifact.vonk.bin",
+        media_type=media_type,
+        size_bytes=len(output_content),
+        sha256=output_digest,
     )
     result = {
         "schema_version": 1,

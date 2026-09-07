@@ -1,18 +1,20 @@
 use std::{
     fs,
-    future::Future,
     io::{BufReader, Cursor},
     path::Path,
     time::Duration,
 };
 
 use rcgen::PublicKeyData;
-use reqwest::{Certificate, Client, StatusCode};
+use reqwest::{Certificate, Client};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use url::Url;
 use x509_parser::{extensions::GeneralName, parse_x509_certificate, pem::parse_x509_pem};
+
+pub use vonk_agent_protocol::EnrollmentEvidence;
+use vonk_agent_protocol::EnrollmentRequest;
 
 use crate::{
     config::AgentConfig,
@@ -40,8 +42,6 @@ pub enum PairingError {
     Transport(#[from] reqwest::Error),
     #[error("controller rejected pairing")]
     Rejected,
-    #[error("timed out waiting for pairing approval")]
-    ApprovalTimeout,
     #[error("controller pairing response is invalid")]
     Response,
     #[error("controller pairing returned unexpected HTTP status {0}")]
@@ -52,35 +52,7 @@ pub enum PairingError {
     Identity(#[from] crate::identity::IdentityError),
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct EnrollmentEvidence {
-    pub agent_digest: String,
-    pub boot_id: String,
-    pub csr_public_key_fingerprint: String,
-    pub hardware_fingerprint: String,
-    pub host_key_fingerprint: String,
-    pub node_id: String,
-    pub observation_receipt_public_key: String,
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct EnrollmentRequest<'a> {
-    csr: &'a str,
-    evidence: &'a EnrollmentEvidence,
-    grant_token: &'a str,
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct EnrollmentResponse {
-    pub id: String,
-    pub node_id: String,
-    pub state: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IssuedResponse {
     pub node_id: String,
@@ -93,42 +65,13 @@ pub struct IssuedResponse {
     pub generation: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EnrollmentOutcome {
-    Pending(EnrollmentResponse),
-    Issued,
-}
-
-pub async fn complete_pairing_with<F, Fut, O>(
-    max_attempts: usize,
-    retry_interval: Duration,
-    mut attempt: F,
-    mut observe_pending: O,
-) -> Result<(), PairingError>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<EnrollmentOutcome, PairingError>>,
-    O: FnMut(&EnrollmentResponse),
-{
-    for attempt_number in 0..max_attempts {
-        match attempt().await? {
-            EnrollmentOutcome::Issued => return Ok(()),
-            EnrollmentOutcome::Pending(pending) => observe_pending(&pending),
-        }
-        if attempt_number + 1 < max_attempts {
-            tokio::time::sleep(retry_interval).await;
-        }
-    }
-    Err(PairingError::ApprovalTimeout)
-}
-
 pub async fn pair(
     config: &AgentConfig,
     enrollment: &Url,
     token: &str,
     ca_sha256: &str,
     evidence: EnrollmentEvidence,
-) -> Result<EnrollmentOutcome, PairingError> {
+) -> Result<(), PairingError> {
     validate_token(token)?;
     if enrollment != &config.enrollment_url || ca_sha256 != config.ca_sha256 {
         return Err(PairingError::CaPin);
@@ -157,6 +100,7 @@ pub async fn pair(
     evidence
         .csr_public_key_fingerprint
         .clone_from(&pending.public_key_fingerprint);
+    evidence.validate().map_err(|_| PairingError::Response)?;
     let client = Client::builder()
         .https_only(true)
         .tls_built_in_root_certs(false)
@@ -172,9 +116,9 @@ pub async fn pair(
         .post(endpoint)
         .header("content-type", "application/json")
         .json(&EnrollmentRequest {
-            csr,
-            evidence: &evidence,
-            grant_token: token,
+            csr: csr.to_owned(),
+            evidence,
+            grant_token: token.to_owned(),
         })
         .send()
         .await?;
@@ -189,44 +133,29 @@ pub async fn pair(
     if body.len() > MAX_RESPONSE_BYTES {
         return Err(PairingError::Response);
     }
-    let parsed = validate_enrollment_response(status, &body, &config.node_id)?;
-    if status == StatusCode::OK.as_u16() {
-        let issued: IssuedResponse =
-            serde_json::from_slice(&body).map_err(|_| PairingError::Response)?;
-        validate_issued(&issued, &pending, &config.node_id)?;
-        persist_paired_identity(
-            &credential_root,
-            &IdentityMaterial {
-                node_id: issued.node_id,
-                private_key_pem: pending.private_key_pem,
-                certificate_pem: issued.certificate_pem.into_bytes(),
-                chain_pem: issued.chain_pem.into_bytes(),
-                serial: issued.serial,
-                fingerprint: issued.fingerprint,
-                generation: issued.generation,
-            },
-        )?;
-    }
-    Ok(parsed)
+    let issued = validate_enrollment_response(status, &body, &config.node_id)?;
+    validate_issued(&issued, &pending, &config.node_id)?;
+    persist_paired_identity(
+        &credential_root,
+        &IdentityMaterial {
+            node_id: issued.node_id,
+            private_key_pem: pending.private_key_pem,
+            certificate_pem: issued.certificate_pem.into_bytes(),
+            chain_pem: issued.chain_pem.into_bytes(),
+            serial: issued.serial,
+            fingerprint: issued.fingerprint,
+            generation: issued.generation,
+        },
+    )?;
+    Ok(())
 }
 
 pub fn validate_enrollment_response(
     status: u16,
     body: &[u8],
     node_id: &str,
-) -> Result<EnrollmentOutcome, PairingError> {
+) -> Result<IssuedResponse, PairingError> {
     match status {
-        202 => {
-            let pending: EnrollmentResponse =
-                serde_json::from_slice(body).map_err(|_| PairingError::Response)?;
-            if pending.node_id != node_id
-                || !matches!(pending.state.as_str(), "pending-approval" | "issuing")
-                || pending.id.is_empty()
-            {
-                return Err(PairingError::Response);
-            }
-            Ok(EnrollmentOutcome::Pending(pending))
-        }
         200 => {
             let issued: IssuedResponse =
                 serde_json::from_slice(body).map_err(|_| PairingError::Response)?;
@@ -239,7 +168,7 @@ pub fn validate_enrollment_response(
             {
                 return Err(PairingError::Response);
             }
-            Ok(EnrollmentOutcome::Issued)
+            Ok(issued)
         }
         401 | 403 | 409 | 410 => Err(PairingError::Rejected),
         _ => Err(PairingError::Status(status)),

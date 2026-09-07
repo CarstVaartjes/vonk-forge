@@ -12,9 +12,14 @@ import re
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from vonk_agent_protocol import (
+    OperationCheckpoint,
+    OperationMemberProgress,
+    OperationProgress,
+    normalize_operation_progress,
+)
 
 from .logging import redact_text
 
@@ -46,101 +51,10 @@ class OperationRecoveryAction(StrEnum):
     INSPECT = "inspect"
 
 
-class OperationCheckpoint(BaseModel):
-    """A restart-safe cursor identifying the last completed durable unit."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    key: str = Field(min_length=1, max_length=128)
-    sequence: int = Field(ge=0)
-    cursor: str | None = Field(default=None, max_length=512)
-    digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-
-
-class OperationMemberProgress(BaseModel):
-    """Progress for one node, rank, shard, or other operation member."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    member_id: str = Field(min_length=1, max_length=128)
-    phase: str = Field(min_length=1, max_length=80)
-    completed_bytes: int = Field(default=0, ge=0)
-    total_bytes: int | None = Field(default=None, ge=0)
-    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
-    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
-    state: str = Field(default="running", min_length=1, max_length=32)
-
-    @model_validator(mode="after")
-    def totals_are_consistent(self) -> OperationMemberProgress:
-        if self.total_bytes is not None and self.completed_bytes > self.total_bytes:
-            raise ValueError("completed bytes cannot exceed total bytes")
-        return self
-
-
-class OperationProgress(BaseModel):
-    """Canonical progress payload persisted on the current operation attempt."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    phase: str = Field(min_length=1, max_length=80)
-    completed_bytes: int = Field(default=0, ge=0)
-    total_bytes: int | None = Field(default=None, ge=0)
-    bytes_per_second: float | None = Field(default=None, ge=0, le=10**15)
-    eta_seconds: float | None = Field(default=None, ge=0, le=10**9)
-    total_bytes_known: bool = False
-    checkpoint: OperationCheckpoint | None = None
-    members: list[OperationMemberProgress] = Field(
-        default_factory=list, max_length=1024
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def accept_compact_wire_names(cls, value: Any) -> Any:
-        if not isinstance(value, Mapping):
-            return value
-        value = dict(value)
-        # Keep one canonical API vocabulary while accepting common agent names
-        # at the boundary during the rollout of this contract.
-        aliases = {
-            "bytes_done": "completed_bytes",
-            "bytes_completed": "completed_bytes",
-            "bytes_total": "total_bytes",
-            "rate_bytes_per_second": "bytes_per_second",
-            "rate": "bytes_per_second",
-        }
-        for source, target in aliases.items():
-            if target not in value and source in value:
-                value[target] = value[source]
-            value.pop(source, None)
-        if "total_unknown" in value and "total_bytes_known" not in value:
-            value["total_bytes_known"] = not bool(value["total_unknown"])
-        value.pop("total_unknown", None)
-        if value.get("total_bytes") is not None and "total_bytes_known" not in value:
-            value["total_bytes_known"] = True
-        return value
-
-    @model_validator(mode="after")
-    def totals_are_explicit_and_consistent(self) -> OperationProgress:
-        if self.total_bytes_known != (self.total_bytes is not None):
-            raise ValueError(
-                "total_bytes_known must be false when total_bytes is unknown and true when present"
-            )
-        if (
-            self.completed_bytes > self.total_bytes
-            if self.total_bytes is not None
-            else False
-        ):
-            raise ValueError("completed bytes cannot exceed total bytes")
-        member_ids = [member.member_id for member in self.members]
-        if len(member_ids) != len(set(member_ids)):
-            raise ValueError("operation progress members must be unique")
-        return self
-
-
 class OperationFailureEvidence(BaseModel):
     """Small, sanitized operator evidence safe to expose in status responses."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     error_code: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
     summary: str = Field(min_length=1, max_length=256)
@@ -164,11 +78,13 @@ class AvailabilityRecoveryAction(StrEnum):
 class AvailabilityOperationFailure(BaseModel):
     """Shared failure wire contract for model and image availability."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     code: str = Field(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")
     detail: str = Field(min_length=1, max_length=512)
-    recovery_actions: list[AvailabilityRecoveryAction] = Field(default_factory=list, max_length=8)
+    recovery_actions: list[AvailabilityRecoveryAction] = Field(
+        default_factory=list, max_length=8
+    )
     retryable: bool = False
     retry_time: str | None = Field(default=None, max_length=64)
     retry_after_seconds: int | None = Field(default=None, ge=0)
@@ -177,15 +93,40 @@ class AvailabilityOperationFailure(BaseModel):
     free_bytes: int | None = Field(default=None, ge=0)
     shortfall_bytes: int | None = Field(default=None, ge=0)
 
+    @field_validator("recovery_actions", mode="before")
+    @classmethod
+    def parse_recovery_actions(cls, value: object) -> object:
+        """Accept the enum's string wire representation in Python mappings.
+
+        Strict validation still rejects numeric and boolean values.  The
+        explicit conversion only bridges FastAPI's decoded request mapping and
+        the same canonical strings accepted by JSON-mode validation.
+        """
+
+        if not isinstance(value, (list, tuple)):
+            return value
+        try:
+            return [
+                item
+                if isinstance(item, AvailabilityRecoveryAction)
+                else AvailabilityRecoveryAction(item)
+                for item in value
+            ]
+        except (TypeError, ValueError) as error:
+            raise ValueError("recovery_actions contains an invalid action") from error
+
     @model_validator(mode="after")
     def validate_retry_and_capacity(self) -> AvailabilityOperationFailure:
         if self.retry_after_seconds is not None and self.retry_time is None:
             raise ValueError("retry_after_seconds requires retry_time")
         if self.retry_time is not None:
-            if re.fullmatch(
-                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
-                self.retry_time,
-            ) is None:
+            if (
+                re.fullmatch(
+                    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})",
+                    self.retry_time,
+                )
+                is None
+            ):
                 raise ValueError("retry_time must be RFC3339")
             try:
                 parsed = datetime.fromisoformat(self.retry_time)
@@ -201,12 +142,14 @@ class AvailabilityOperationFailure(BaseModel):
             assert self.free_bytes is not None
             assert self.shortfall_bytes is not None
             if self.shortfall_bytes != max(0, self.required_bytes - self.free_bytes):
-                raise ValueError("shortfall_bytes does not match required and free bytes")
+                raise ValueError(
+                    "shortfall_bytes does not match required and free bytes"
+                )
         return self
 
 
 class OperationEvidenceProvenance(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     source: str = Field(min_length=1, max_length=128)
     collected_at: str | None = Field(default=None, max_length=64)
@@ -215,7 +158,7 @@ class OperationEvidenceProvenance(BaseModel):
 
 
 class OperationEvidenceDownload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     media_type: str = Field(min_length=1, max_length=128)
     size_bytes: int = Field(ge=0)
@@ -224,57 +167,11 @@ class OperationEvidenceDownload(BaseModel):
 
 
 class OperationRecovery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     uncertain: bool = False
     actions: list[OperationRecoveryAction] = Field(default_factory=list, max_length=4)
     explanation: str | None = Field(default=None, max_length=512)
-
-
-def normalize_operation_progress(value: Mapping[str, object]) -> dict[str, object]:
-    """Validate and canonicalize progress while retaining the legacy phase-only shape."""
-
-    parsed = OperationProgress.model_validate(value)
-    document = parsed.model_dump(mode="json", exclude_none=True)
-    # Empty optional collections are omitted so the old phase-only response is
-    # byte-for-byte stable for callers that have not adopted the contract.
-    if not document.get("members"):
-        document.pop("members", None)
-    if parsed.checkpoint is None:
-        document.pop("checkpoint", None)
-    if (
-        parsed.completed_bytes == 0
-        and "completed_bytes" not in value
-        and "bytes_done" not in value
-        and "bytes_completed" not in value
-    ):
-        document.pop("completed_bytes", None)
-    extended = bool(
-        set(value)
-        & {
-            "completed_bytes",
-            "bytes_done",
-            "bytes_completed",
-            "total_bytes",
-            "bytes_total",
-            "bytes_per_second",
-            "rate_bytes_per_second",
-            "rate",
-            "eta_seconds",
-            "checkpoint",
-            "members",
-            "total_bytes_known",
-            "total_unknown",
-        }
-    )
-    if (
-        parsed.total_bytes_known is False
-        and not extended
-        and "total_bytes_known" not in value
-        and "total_unknown" not in value
-    ):
-        document.pop("total_bytes_known", None)
-    return document
 
 
 def validate_progress_update(
@@ -286,9 +183,11 @@ def validate_progress_update(
     if not previous:
         return normalized
     old = normalize_operation_progress(previous)
-    # A legacy heartbeat may report only a new phase. Keep the last durable
+    # A phase-only heartbeat may report only a new phase. Keep the last durable
     # counters/checkpoint instead of treating omitted fields as zero/reset.
     for key in (
+        "kind",
+        "object_sha256",
         "completed_bytes",
         "total_bytes",
         "total_bytes_known",

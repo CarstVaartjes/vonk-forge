@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Generate the packaged telemetry schema from the canonical Pydantic model."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "agent_protocol" / "src"))
+
+from vonk_agent_protocol.telemetry import TelemetryRequest
+
+OUTPUT = ROOT / "agent_protocol/src/vonk_agent_protocol/schemas/telemetry-report.schema.json"
+
+
+def schema_bytes() -> bytes:
+    document = TelemetryRequest.model_json_schema()
+    document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://vonk-forge.invalid/schemas/telemetry-report.schema.json",
+        "$comment": "Derived from vonk_agent_protocol.telemetry.TelemetryRequest; runtime validation is Pydantic.",
+        **document,
+    }
+    return (json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(
+        "utf-8"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--check", action="store_true", help="fail when the artifact is stale")
+    args = parser.parse_args()
+    expected = schema_bytes()
+    actual = OUTPUT.read_bytes() if OUTPUT.exists() else None
+    if args.check:
+        if actual != expected:
+            print(f"{OUTPUT} is not generated from TelemetryRequest", file=sys.stderr)
+            return 1
+        return 0
+    OUTPUT.write_bytes(expected)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

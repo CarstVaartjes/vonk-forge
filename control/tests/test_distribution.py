@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from vonk_agent_protocol import DistributionAssignment, DistributionObject
 from vonk_control.distribution import (
+    CompositeVerifiedObjectSource,
     DistributionError,
     DistributionService,
     MemoryVerifiedObjectSource,
@@ -65,6 +66,13 @@ def test_controller_serves_one_verified_assignment_to_two_nodes(agent_system) ->
         headers=agent_headers(NODE_A, "serial-a"),
     )
     assert manifest.status_code == 200
+    assert DistributionAssignment.model_validate_json(manifest.content) == assignment
+    assert manifest.headers["cache-control"] == "no-store"
+    assert manifest.headers["etag"] == f'"plan:{assignment.plan_digest}"'
+    response_schema = client.app.openapi()["paths"][
+        "/agent/v1/distribution/manifests/{plan_digest}"
+    ]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+    assert response_schema == {"$ref": "#/components/schemas/DistributionAssignment"}
     assert {item["sha256"] for item in manifest.json()["objects"]} == {
         model_digest,
         config_digest,
@@ -123,11 +131,68 @@ def test_distribution_assignment_survives_controller_service_restart(agent_syste
     DistributionService(source, clock=clock, sessions=sessions).register(assignment)
 
     restarted = DistributionService(source, clock=clock, sessions=sessions)
-    assert restarted.manifest(node_id=NODE_A, plan_digest=assignment.plan_digest)["assignment_id"] == assignment.assignment_id
+    assert restarted.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest).assignment_id == assignment.assignment_id
     restarted.revoke(plan_digest=assignment.plan_digest, node_id=NODE_A)
     with pytest.raises(DistributionError) as caught:
         restarted.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
     assert caught.value.code == "distribution.revoked"
+
+
+def test_separate_api_process_serves_worker_registered_model_files(agent_system, tmp_path) -> None:
+    client, services, _, clock = agent_system
+    image_source = MemoryVerifiedObjectSource()
+    model_digest = image_source.put(b"model payload")
+    config_digest = image_source.put(b"config!")
+    archive_digest = image_source.put(b"oci archive")
+    assignment = _assignment(NODE_A, model_digest, config_digest, archive_digest)
+    model_objects = tuple(item for item in assignment.objects if item.kind == "model")
+    for item in model_objects:
+        (tmp_path / item.sha256).write_bytes(image_source.objects[item.sha256])
+        del image_source.objects[item.sha256]
+    image_source.register_runtime_image(assignment.oci_image_digest, archive_digest)
+
+    class Cache:
+        class Manifest:
+            digest = assignment.model_artifact_set_sha256
+
+        def manifest_for_artifact_set(self, digest):
+            assert digest == assignment.model_artifact_set_sha256
+            return self.Manifest()
+
+        def resolve_verified_artifact_set(self, digest):
+            assert digest == assignment.model_artifact_set_sha256
+            return tuple(
+                {"path": item.name, "sha256": item.sha256, "bytes": item.bytes, "file": tmp_path / item.sha256}
+                for item in model_objects
+            )
+
+        def verified_artifact_file(self, set_digest, digest, path):
+            assert set_digest == assignment.model_artifact_set_sha256
+            item = next(item for item in model_objects if item.sha256 == digest and item.name == path)
+            return tmp_path / item.sha256, item.bytes, item.sha256
+
+    def process_service():
+        # Each process has a new adapter and no shared in-memory path index.
+        source = CompositeVerifiedObjectSource(
+            ModelCacheVerifiedObjectSource.from_service(Cache()), image_source
+        )
+        return DistributionService(source, clock=clock, sessions=services.sessions)
+
+    process_service().register(assignment)
+    # Serving must also work again after the API process restarts.
+    for _ in range(2):
+        object.__setattr__(services, "distribution", process_service())
+        for item in model_objects:
+            response = client.get(
+                f"/agent/v1/distribution/objects/{item.sha256}?plan_digest={assignment.plan_digest}",
+                headers={
+                    **agent_headers(NODE_A, "serial-a"),
+                    "Range": f"bytes=0-{item.bytes - 1}",
+                    "If-Range": f'"sha256:{item.sha256}"',
+                },
+            )
+            assert response.status_code == 206
+            assert response.content == (tmp_path / item.sha256).read_bytes()
 
 
 def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> None:
@@ -168,7 +233,7 @@ def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> Non
             return path, len(payload), digest
 
     source = ModelCacheVerifiedObjectSource.from_service(Cache())
-    obj = DistributionObject("weights/model.bin", digest, len(payload), "model")
+    obj = DistributionObject(name="weights/model.bin", sha256=digest, bytes=len(payload), kind="model")
     assert source.verify_artifact_set("b" * 64, (obj,))
     opened = source.open_verified(digest, len(payload))
     assert opened.stream.read() == payload

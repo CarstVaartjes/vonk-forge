@@ -1,7 +1,7 @@
 import {render, screen} from "@testing-library/react";
 import {buildLibraryRecipeRecords, filterLibraryRecipeRecords, EMPTY_LIBRARY_WORKCELL_FILTERS, LibraryWorkcell} from "./library-workcell";
 import {librarySnapshot} from "../test-fixtures/library";
-import {modelVersionKey} from "../lib/library-route";
+import {modelKey} from "../lib/library-route";
 
 test("builds the requested model inventory shape", () => {
   expect(librarySnapshot.models).toHaveLength(92);
@@ -28,17 +28,17 @@ test("filters by exact model identity", () => {
 });
 test("keeps URL-selected Models in the paired right pane", () => {
   const model = librarySnapshot.models[79]!;
-  const modelKey = modelVersionKey(model.model);
-  render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey}} snapshot={librarySnapshot}/>);
+  const key = modelKey(model.model);
+  render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: key}} snapshot={librarySnapshot}/>);
   expect(screen.getByText("No Recipe linked")).toBeVisible();
   expect(screen.getByLabelText("Recipes matching selected Model")).toHaveTextContent("No Recipe linked");
 });
 
 test("keeps same-Model Recipe variants together and shows creator attribution", () => {
   const model = librarySnapshot.models.find(entry => entry.model.publisher === "lightricks" && entry.model.slug === "ltx-2-gemma3-text-encoder-dfcc2108")!;
-  const modelKey = modelVersionKey(model.model);
-  const records = buildLibraryRecipeRecords(librarySnapshot).filter(record => record.modelKey === modelKey && record.recipe);
-  render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey}} snapshot={librarySnapshot}/>);
+  const key = modelKey(model.model);
+  const records = buildLibraryRecipeRecords(librarySnapshot).filter(record => record.modelKey === key && record.recipe);
+  render(<LibraryWorkcell api={{} as never} filters={EMPTY_LIBRARY_WORKCELL_FILTERS} onFiltersChange={() => undefined} onNavigate={() => undefined} onQueryChange={() => undefined} query="" route={{kind: "model", modelKey: key}} snapshot={librarySnapshot}/>);
 
   const pane = screen.getByLabelText("Recipes matching selected Model");
   expect(records).toHaveLength(4);

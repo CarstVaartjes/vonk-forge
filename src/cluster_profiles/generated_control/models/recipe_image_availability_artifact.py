@@ -32,7 +32,7 @@ class RecipeImageAvailabilityArtifact:
             roles (list[str]):
             sha256 (str):
             source (str):
-            model_version_sha256 (Union[None, Unset, str]):
+            model_content_sha256 (Union[None, Unset, str]):
             repository (Union[None, Unset, str]):
             revision (Union[None, Unset, str]):
      """
@@ -45,7 +45,7 @@ class RecipeImageAvailabilityArtifact:
     roles: list[str]
     sha256: str
     source: str
-    model_version_sha256: Union[None, Unset, str] = UNSET
+    model_content_sha256: Union[None, Unset, str] = UNSET
     repository: Union[None, Unset, str] = UNSET
     revision: Union[None, Unset, str] = UNSET
 
@@ -72,11 +72,11 @@ class RecipeImageAvailabilityArtifact:
 
         source = self.source
 
-        model_version_sha256: Union[None, Unset, str]
-        if isinstance(self.model_version_sha256, Unset):
-            model_version_sha256 = UNSET
+        model_content_sha256: Union[None, Unset, str]
+        if isinstance(self.model_content_sha256, Unset):
+            model_content_sha256 = UNSET
         else:
-            model_version_sha256 = self.model_version_sha256
+            model_content_sha256 = self.model_content_sha256
 
         repository: Union[None, Unset, str]
         if isinstance(self.repository, Unset):
@@ -103,8 +103,8 @@ class RecipeImageAvailabilityArtifact:
             "sha256": sha256,
             "source": source,
         })
-        if model_version_sha256 is not UNSET:
-            field_dict["model_version_sha256"] = model_version_sha256
+        if model_content_sha256 is not UNSET:
+            field_dict["model_content_sha256"] = model_content_sha256
         if repository is not UNSET:
             field_dict["repository"] = repository
         if revision is not UNSET:
@@ -134,14 +134,14 @@ class RecipeImageAvailabilityArtifact:
 
         source = d.pop("source")
 
-        def _parse_model_version_sha256(data: object) -> Union[None, Unset, str]:
+        def _parse_model_content_sha256(data: object) -> Union[None, Unset, str]:
             if data is None:
                 return data
             if isinstance(data, Unset):
                 return data
             return cast(Union[None, Unset, str], data)
 
-        model_version_sha256 = _parse_model_version_sha256(d.pop("model_version_sha256", UNSET))
+        model_content_sha256 = _parse_model_content_sha256(d.pop("model_content_sha256", UNSET))
 
 
         def _parse_repository(data: object) -> Union[None, Unset, str]:
@@ -173,7 +173,7 @@ class RecipeImageAvailabilityArtifact:
             roles=roles,
             sha256=sha256,
             source=source,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             repository=repository,
             revision=revision,
         )
