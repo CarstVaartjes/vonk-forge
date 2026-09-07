@@ -922,9 +922,15 @@ PAYLOAD_MODELS: dict[AgentOperation, type[BaseModel]] = {
 # payload registry so Controller ingress can resolve the stored operation and
 # validate the exact result graph before accepting it.
 RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
+    AgentOperation.AGENT_UPGRADE: AgentResultExtensions,
     AgentOperation.NODE_PROBE: NodeProbeResult,
+    AgentOperation.RELEASE_INSTALL: AgentResultExtensions,
+    AgentOperation.WORKLOAD_PREPARE: AgentResultExtensions,
+    AgentOperation.WORKLOAD_START: AgentResultExtensions,
+    AgentOperation.WORKLOAD_STOP: AgentResultExtensions,
     AgentOperation.WORKLOAD_HEALTH: NodeProbeHealthResult,
     AgentOperation.WORKLOAD_VERIFY: NodeProbeHealthResult,
+    AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionResult,
     AgentOperation.RECIPE_INSTALL: AgentInstallResult,
     AgentOperation.RECIPE_START: RecipeStartResult,
     AgentOperation.RECIPE_STOP: RecipeStopResult,
@@ -933,7 +939,6 @@ RESULT_MODELS: dict[AgentOperation, type[BaseModel]] = {
     AgentOperation.RECIPE_BUILD: RecipeBuildEvidence,
     AgentOperation.RECIPE_IMAGE_IMPORT: RecipeImageImportEvidence,
     AgentOperation.RECIPE_JOB_RUN: RecipeJobRunResult,
-    AgentOperation.ARTIFACT_DISTRIBUTION: ArtifactDistributionResult,
 }
 
 
@@ -955,9 +960,12 @@ def validate_result_for_operation(
         operation_kind = AgentOperation(operation)
     except (TypeError, ValueError) as error:
         raise AgentProtocolError("agent result operation is invalid") from error
-    model = RESULT_MODELS.get(operation_kind)
-    if model is None:
-        return None
+    try:
+        model = RESULT_MODELS[operation_kind]
+    except KeyError as error:
+        raise AgentProtocolError(
+            f"result model is not registered for {operation_kind.value}"
+        ) from error
     if state != "succeeded":
         return None
     try:
