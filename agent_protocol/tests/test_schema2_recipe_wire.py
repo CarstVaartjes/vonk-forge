@@ -3,6 +3,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -186,6 +188,110 @@ def test_plan_rejects_unsafe_paths() -> None:
     value["artifacts"][0]["path"] = "../escape"
     with pytest.raises(AgentProtocolError):
         CompiledExecutionPlan.parse(value)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "模型 weights_file.safetensors",
+        "模型 file_" * 64,
+    ],
+)
+def test_plan_accepts_canonical_unicode_space_and_max_length_paths(path: str) -> None:
+    value = copy.deepcopy(PLAN)
+    value["artifacts"][0]["path"] = path
+    value["artifacts"][0]["distribution_object"]["name"] = path
+    publisher = "发布者 " + "_" * 124
+    value["artifacts"][0]["model"]["publisher"] = publisher
+
+    plan = CompiledExecutionPlan.parse(value)
+    assert plan.artifacts[0].path == path
+    assert len(plan.artifacts[0].path) <= 512
+    assert plan.artifacts[0].model.publisher == publisher
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/absolute", "../escape", "nested//file", "nested/./file", "nested/../file", "bad\\name", "bad\x00name", "x" * 513],
+)
+def test_plan_rejects_unsafe_or_oversized_model_paths(path: str) -> None:
+    value = copy.deepcopy(PLAN)
+    value["artifacts"][0]["path"] = path
+    value["artifacts"][0]["distribution_object"]["name"] = path
+    with pytest.raises(AgentProtocolError):
+        CompiledExecutionPlan.parse(value)
+
+
+@pytest.mark.parametrize("publisher", ["publisher\x00", "p" * 129])
+def test_plan_rejects_unsafe_or_oversized_model_publisher(publisher: str) -> None:
+    value = copy.deepcopy(PLAN)
+    value["artifacts"][0]["model"]["publisher"] = publisher
+    with pytest.raises(AgentProtocolError):
+        CompiledExecutionPlan.parse(value)
+
+
+@pytest.fixture(scope="session")
+def compiled_plan_wire_probe() -> Path:
+    repository = Path(__file__).resolve().parents[2]
+    configured_probe = os.environ.get("VONK_COMPILED_PLAN_WIRE_PROBE")
+    if configured_probe:
+        probe = Path(configured_probe)
+        if not probe.is_absolute():
+            probe = repository / probe
+    else:
+        target_root = Path(os.environ.get("CARGO_TARGET_DIR", repository / "target"))
+        if not target_root.is_absolute():
+            target_root = repository / target_root
+        probe = target_root / "debug" / "examples" / "compiled_plan_wire_probe"
+        subprocess.run(
+            [
+                "cargo",
+                "build",
+                "--locked",
+                "--package",
+                "vonk-agent",
+                "--example",
+                "compiled_plan_wire_probe",
+            ],
+            cwd=repository,
+            check=True,
+        )
+    if not probe.is_file() or not os.access(probe, os.X_OK):
+        raise AssertionError(f"compiled plan wire probe is not executable: {probe}")
+    return probe
+
+
+def _rust_compiled_plan_accepts(probe: Path, value: dict[str, object]) -> bool:
+    completed = subprocess.run(
+        [str(probe)],
+        input=json.dumps(value, ensure_ascii=False) + "\n",
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
+def test_python_compiled_plan_producer_crosses_rust_parser(
+    compiled_plan_wire_probe: Path,
+) -> None:
+    for path in ("模型 weights_file.safetensors", "模型 file_" * 64):
+        value = copy.deepcopy(PLAN)
+        value["artifacts"][0]["path"] = path
+        value["artifacts"][0]["distribution_object"]["name"] = path
+        value["artifacts"][0]["model"]["publisher"] = "发布者 " + "_" * 124
+        authored = CompiledExecutionPlan.parse(value).model_dump(mode="json")
+        assert _rust_compiled_plan_accepts(compiled_plan_wire_probe, authored)
+
+    for path in ("../escape", "nested//file", "bad\\name", "bad\x00name", "x" * 513):
+        value = copy.deepcopy(PLAN)
+        value["artifacts"][0]["path"] = path
+        value["artifacts"][0]["distribution_object"]["name"] = path
+        assert not _rust_compiled_plan_accepts(compiled_plan_wire_probe, value)
+
+    value = copy.deepcopy(PLAN)
+    value["artifacts"][0]["model"]["publisher"] = "p" * 129
+    assert not _rust_compiled_plan_accepts(compiled_plan_wire_probe, value)
 
 
 def test_plan_rejects_non_boolean_security_values() -> None:

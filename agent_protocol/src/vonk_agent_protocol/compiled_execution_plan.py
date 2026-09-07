@@ -177,15 +177,25 @@ class CompiledArtifactMount(_Strict):
 
 
 class CompiledModelIdentity(_Strict):
-    publisher: str = Field(min_length=1, max_length=64)
+    # Model references are public catalog text, rather than container names.
+    # Keep the wire boundary bounded and NUL-safe while preserving Unicode and
+    # spaces accepted by the canonical model contract.
+    publisher: str = Field(min_length=1, max_length=128)
     slug: str = Field(min_length=1, max_length=64)
     content_sha256: Digest
 
-    @field_validator("publisher", "slug")
+    @field_validator("publisher")
     @classmethod
-    def names_are_canonical(cls, value: str) -> str:
+    def publisher_is_safe_text(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("model identity publisher is invalid")
+        return value
+
+    @field_validator("slug")
+    @classmethod
+    def slug_is_canonical(cls, value: str) -> str:
         if not _valid_name(value):
-            raise ValueError("model identity name is invalid")
+            raise ValueError("model identity slug is invalid")
         return value
 
 
@@ -217,10 +227,6 @@ class CompiledArtifact(_Strict):
             or any(
                 not part
                 or part in {".", ".."}
-                or any(
-                    not char.isascii() or not (char.isalnum() or char in "._-")
-                    for char in part
-                )
                 for part in value.split("/")
             )
         ):

@@ -61,6 +61,7 @@ from vonk_control.recipe_start_payloads import (
 )
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
+from vonk_forge_contracts.model import ModelFile, ModelReference
 
 from tests.recipe_library_source import recipe_library_root
 
@@ -251,6 +252,43 @@ def _compile(
         model_objects=_model_objects(),
         runtime_image=selected_image,
     )
+
+
+def test_controller_compiler_preserves_canonical_model_path_and_publisher_text() -> None:
+    spec = _spec()
+    path = "模型 file_" * 64
+    publisher = "发布者 " + "_" * 124
+    canonical_file = ModelFile(
+        id="weights",
+        path=path,
+        sha256=hashlib.sha256(b"verified model bytes").hexdigest(),
+        size_bytes=len(b"verified model bytes"),
+        roles=["entrypoint", "weights"],
+    )
+    canonical_reference = ModelReference(
+        publisher=publisher,
+        slug="synthetic-model",
+        content_sha256="e" * 64,
+    )
+    artifact = spec["artifacts"][0]
+    assert isinstance(artifact, dict)
+    artifact["path"] = canonical_file.path
+    artifact["model"]["publisher"] = canonical_reference.publisher
+    spec["identity"]["execution_sha256"] = execution_identity_sha256(spec)
+    model_object = _model_objects()[0]
+    model_object["path"] = path
+    model_object["distribution_object"]["name"] = path
+
+    plan = compile_verified_execution_plan(
+        spec,
+        model_artifact_set_sha256="d" * 64,
+        model_objects=[model_object],
+        runtime_image=_image(),
+    )
+    assert plan.artifacts[0].path == path
+    assert plan.artifacts[0].model.publisher == publisher
+    assert len(plan.artifacts[0].path) == 512
+    assert len(plan.artifacts[0].model.publisher) == 128
 
 
 def test_prebuilt_plan_binds_exact_file_and_controller_archive_receipts() -> None:

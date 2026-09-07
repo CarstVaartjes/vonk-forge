@@ -524,7 +524,7 @@ pub struct DistributionObject {
 impl DistributionObject {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         let valid_name = !self.name.is_empty()
-            && self.name.len() <= 512
+            && self.name.chars().count() <= 512
             && !self.name.starts_with('/')
             && !self.name.contains(['\\', '\0']);
         if !valid_name
@@ -2601,7 +2601,11 @@ mod distribution_tests {
             value.objects[0].name = name.to_owned();
             value.validate().unwrap();
         }
+        value.objects[0].name = "模型 file_".repeat(64);
+        value.validate().unwrap();
         value.objects[0].name = "../model.bin".to_owned();
+        assert!(value.validate().is_err());
+        value.objects[0].name = "model\0.bin".to_owned();
         assert!(value.validate().is_err());
     }
 

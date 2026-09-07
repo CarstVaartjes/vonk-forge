@@ -18,6 +18,7 @@ PROBES = {
     "VONK_BUILD_IMPORT_WIRE_PROBE": ("vonk-agent-protocol", "build_import_wire_probe"),
     "VONK_INVENTORY_WIRE_PROBE": ("vonk-agent-protocol", "inventory_wire_probe"),
     "VONK_TELEMETRY_WIRE_PROBE": ("vonk-agent", "telemetry_wire_probe"),
+    "VONK_COMPILED_PLAN_WIRE_PROBE": ("vonk-agent", "compiled_plan_wire_probe"),
 }
 
 
