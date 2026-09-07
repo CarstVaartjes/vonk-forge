@@ -439,8 +439,19 @@ impl CompiledSecurity {
 impl CompiledTopology {
     fn validate(&self) -> Result<(), WorkloadError> {
         if !valid_name(&self.name)
-            || !matches!(self.mode.as_str(), "single" | "distributed")
-            || !matches!(self.backend.as_str(), "local" | "nccl" | "gloo")
+            || !matches!(
+                self.mode.as_str(),
+                "single"
+                    | "distributed"
+                    | "tensor_parallel"
+                    | "pipeline_parallel"
+                    | "data_parallel"
+                    | "hybrid"
+                    | "ray"
+                    | "mpi"
+            )
+            || self.backend.is_empty()
+            || self.backend.chars().count() > 64
             || self.node_count == 0
             || self.world_size == 0
             || self.rank >= self.world_size
