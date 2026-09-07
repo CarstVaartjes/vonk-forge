@@ -574,6 +574,13 @@ class AgentGrantResponse(StrictJSONModel):
     grant: dict[str, object]
 
 
+class HostHelperGrantResponse(AgentGrantResponse):
+    @field_validator("grant")
+    @classmethod
+    def canonical_host_grant(cls, value: dict[str, object]) -> dict[str, object]:
+        return SignedHostHelperGrant.parse(value).to_mapping()
+
+
 class PackageHelperReceiptsResponse(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     receipts: list[dict[str, object]]
@@ -588,7 +595,7 @@ class RecipeRunObservationGrantResponse(StrictJSONModel):
 
 def _host_grant_response(grant: object) -> dict[str, object]:
     parsed = SignedHostHelperGrant.parse(grant.to_mapping())
-    return AgentGrantResponse(grant=parsed.to_mapping()).model_dump()
+    return HostHelperGrantResponse(grant=parsed.to_mapping()).model_dump()
 
 
 def _package_grant_response(grant: object) -> dict[str, object]:
