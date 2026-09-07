@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -15,6 +15,7 @@ pub const MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES: usize =
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES + MAX_DOCUMENT_BYTES;
 pub const RECIPE_RUN_OBSERVATION_RECEIPT_AUTHORITY: &str = "vonk.recipe-run-observation-helper";
+pub const RECIPE_RUN_OBSERVATION_SCHEMA_VERSION: u8 = 2;
 const RECIPE_RUN_OBSERVATION_RECEIPT_DOMAIN: &[u8] = b"VONK-RECIPE-RUN-OBSERVATION-RECEIPT-V1\0";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -196,6 +197,55 @@ impl RecipeRunObservationReceipt {
         }
         Ok(())
     }
+}
+
+/// The only current Controller observation payload.  The receipt and its
+/// enrolled public key are mandatory so a plain run/readiness boolean can
+/// never cross the authenticated agent boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeRunObservationWire {
+    pub schema_version: u8,
+    pub node_id: String,
+    #[serde(flatten)]
+    pub binding: RecipeRunInspectionBinding,
+    pub observed_at: DateTime<Utc>,
+    pub endpoint_ready: Option<bool>,
+    pub observation_identity_sha256: String,
+    pub grant: Value,
+    pub helper_receipt: RecipeRunObservationReceipt,
+    pub observation_receipt_public_key: String,
+}
+
+impl RecipeRunObservationWire {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        self.binding.validate()?;
+        self.helper_receipt.validate()?;
+        if self.schema_version != 1
+            || !valid_node_id(&self.node_id)
+            || self.node_id.is_empty()
+            || !lower_hex(&self.observation_identity_sha256, 64)
+            || !lower_hex(&self.observation_receipt_public_key, 64)
+            || !self.grant.is_object()
+            || self.helper_receipt.claims.node_id != self.node_id
+            || self.helper_receipt.claims.observation_identity_sha256
+                != self.observation_identity_sha256
+            || self.observed_at.timestamp() != self.helper_receipt.claims.observed_at
+            || (self.binding.local_address == self.binding.master_address)
+                != self.endpoint_ready.is_some()
+        {
+            return Err(ProtocolError::Identity("recipe run observation"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeRunObservationsWire<'a> {
+    pub schema_version: u8,
+    pub observed_at: DateTime<Utc>,
+    pub runs: &'a [RecipeRunObservationWire],
 }
 
 pub fn recipe_run_observation_receipt_signing_bytes(

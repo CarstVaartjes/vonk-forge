@@ -72,10 +72,8 @@ from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import (
     RecipeOperationConflict,
     RecipeOperationService,
-    RecipeRunObservation,
     _recipe_model_identities,
     prepare_exact_recipe_run_observation_nodes,
-    record_recipe_run_observations,
 )
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
@@ -3368,142 +3366,6 @@ def test_run_status_projects_exact_rank_health_without_agent_secrets(
         )
 
 
-def test_legacy_snapshot_updates_single_run_and_ignores_exact_distributed_run(
-    tmp_path: Path,
-) -> None:
-    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
-        tmp_path, nodes=2, distributed_lifecycle=True
-    )
-    install_plan = service.preview_install(mapping_id, build_id)
-    install = service.install(
-        install_plan,
-        plan_digest=install_plan.plan_digest,
-        actor="admin",
-        request_id="b" * 36,
-    )
-    for node_id in nodes:
-        service.record_node_result(
-            install.id, node_id, succeeded=True, evidence={"installed_bytes": 120}
-        )
-    run_plan = service.preview_run(install.owner_id, "observed-gang")
-    start = service.start(
-        run_plan,
-        plan_digest=run_plan.plan_digest,
-        actor="admin",
-        request_id="c" * 36,
-    )
-    while service.get(start.id).state == "running":
-        with sessions() as session:
-            operations = tuple(
-                session.scalars(
-                    select(AgentOperation).where(
-                        AgentOperation.parent_job_id == start.id,
-                        AgentOperation.state == "queued",
-                    )
-                )
-            )
-        for operation in operations:
-            service.record_node_result(
-                start.id,
-                operation.node_id,
-                succeeded=True,
-                evidence=start_evidence(operation.payload),
-            )
-
-    legacy_run_id = str(uuid.uuid4())
-    with sessions.begin() as session:
-        exact_run = session.get(RecipeRun, start.owner_id)
-        assert exact_run.plan["observation_schema_version"] == 2
-        exact_rank = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == exact_run.id,
-                RunNode.node_id == nodes[0],
-            )
-        )
-        assert exact_rank is not None
-        exact_rank.state = "failed"
-        session.add(
-            RecipeRun(
-                id=legacy_run_id,
-                installation_id=exact_run.installation_id,
-                mapping_id=exact_run.mapping_id,
-                mapping_generation=exact_run.mapping_generation,
-                run_generation=1,
-                alias="legacy-single",
-                plan_digest="d" * 64,
-                plan={"schema_version": 1, "observation_schema_version": 1},
-                state="running",
-                route_state="withdrawn",
-                actor="admin",
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-        session.add(
-            RunNode(
-                run_id=legacy_run_id,
-                node_id=nodes[0],
-                rank=0,
-                role="single",
-                state="running",
-                port=9000,
-                reserved_memory_bytes=1,
-                updated_at=NOW,
-            )
-        )
-
-    record_recipe_run_observations(
-        sessions,
-        nodes[0],
-        NOW + timedelta(seconds=1),
-        (
-            RecipeRunObservation(start.owner_id, True),
-            RecipeRunObservation(legacy_run_id, True),
-        ),
-    )
-    with sessions() as session:
-        exact_rank = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.node_id == nodes[0],
-            )
-        )
-        legacy_rank = session.scalar(
-            select(RunNode).where(RunNode.run_id == legacy_run_id)
-        )
-        assert exact_rank.state == "failed"
-        assert exact_rank.updated_at.replace(tzinfo=UTC) == NOW
-        assert legacy_rank.state == "running"
-        assert legacy_rank.updated_at.replace(tzinfo=UTC) == NOW + timedelta(seconds=1)
-
-    record_recipe_run_observations(sessions, nodes[0], NOW + timedelta(seconds=2), ())
-    with sessions() as session:
-        exact_rank = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.node_id == nodes[0],
-            )
-        )
-        legacy_rank = session.scalar(
-            select(RunNode).where(RunNode.run_id == legacy_run_id)
-        )
-        assert exact_rank.state == "failed"
-        assert legacy_rank.state == "failed"
-
-    with sessions.begin() as session:
-        assigned = prepare_exact_recipe_run_observation_nodes(
-            session, nodes[1], NOW + timedelta(seconds=3), set()
-        )
-        assert [node.run_id for node in assigned] == [start.owner_id]
-    with sessions() as session:
-        exact_worker = session.scalar(
-            select(RunNode).where(
-                RunNode.run_id == start.owner_id,
-                RunNode.node_id == nodes[1],
-            )
-        )
-        assert exact_worker.state == "failed"
-
     with sessions.begin() as session:
         exact_run = session.get(RecipeRun, start.owner_id)
         exact_worker = session.scalar(
@@ -4405,20 +4267,6 @@ def test_distributed_rank_loss_withdraws_route_when_recovery_authority_is_missin
             )
         )
     assert publisher.aliases[-1] == ()
-
-
-def test_run_observation_snapshot_rejects_duplicate_and_naive_evidence(
-    tmp_path: Path,
-) -> None:
-    sessions, _service, _queue, _mapping_id, _build_id, nodes = setup_services(tmp_path)
-    observation = RecipeRunObservation(str(uuid.uuid4()), True)
-
-    with pytest.raises(ValueError, match="duplicated"):
-        record_recipe_run_observations(
-            sessions, nodes[0], NOW, (observation, observation)
-        )
-    with pytest.raises(ValueError, match="timezone-aware"):
-        record_recipe_run_observations(sessions, nodes[0], NOW.replace(tzinfo=None), ())
 
 
 def test_multinode_start_is_bound_to_authenticated_fabric_rendezvous(

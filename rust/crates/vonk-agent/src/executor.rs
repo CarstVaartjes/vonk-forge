@@ -319,6 +319,9 @@ impl<R> RecipeExecutor<'_, R> {
                     grant: outcome.grant,
                     observation_identity_sha256: outcome.observation_identity_sha256,
                     helper_receipt: outcome.receipt,
+                    observation_receipt_public_key: hex::encode(
+                        self.observation_receipt_public_key,
+                    ),
                 };
                 self.client
                     .report_exact_recipe_run_observations(std::slice::from_ref(&observation))

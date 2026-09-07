@@ -15,15 +15,15 @@ use url::Url;
 use vonk_agent_protocol::{
     AgentClaim, AgentDirective, AgentProgress, AgentResult, DistributionAssignment,
     HostRuntimeAction, HostRuntimeRequest, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
-    RecipeRunInspectionBinding, RecipeRunObservationReceipt, canonical_json, hex_sha256,
-    parse_strict,
+    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION, RecipeRunInspectionBinding, RecipeRunObservationWire,
+    RecipeRunObservationsWire, canonical_json, hex_sha256, parse_strict,
 };
 
 use crate::{
     config::AgentConfig,
     identity::{IdentityPaths, active_identity_paths},
     inventory::Inventory,
-    oci::{MAX_MANAGED_RECIPE_RUNS, RecipeRunObservation},
+    oci::MAX_MANAGED_RECIPE_RUNS,
     pair::{IssuedResponse, verify_ca_pin},
     runtime_identity::AgentRuntimeIdentity,
     telemetry::{TelemetrySample, valid_report_batch},
@@ -83,35 +83,7 @@ struct InventoryRequest<'a> {
     inventory: &'a Inventory,
 }
 
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct RecipeRunObservationsRequest<'a> {
-    schema_version: u8,
-    observed_at: chrono::DateTime<chrono::Utc>,
-    runs: &'a [RecipeRunObservation],
-}
-
-#[derive(Serialize)]
-#[serde(deny_unknown_fields)]
-struct ExactRecipeRunObservationsRequest<'a> {
-    schema_version: u8,
-    observed_at: chrono::DateTime<chrono::Utc>,
-    runs: &'a [ExactRecipeRunObservation],
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExactRecipeRunObservation {
-    pub schema_version: u8,
-    pub node_id: String,
-    pub observed_at: chrono::DateTime<chrono::Utc>,
-    #[serde(flatten)]
-    pub binding: RecipeRunInspectionBinding,
-    pub endpoint_ready: Option<bool>,
-    pub grant: serde_json::Value,
-    pub observation_identity_sha256: String,
-    pub helper_receipt: RecipeRunObservationReceipt,
-}
+pub type ExactRecipeRunObservation = RecipeRunObservationWire;
 
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
@@ -1102,43 +1074,6 @@ impl AgentHttpClient {
         }
     }
 
-    pub async fn report_recipe_run_observations(
-        &self,
-        observations: &[RecipeRunObservation],
-    ) -> Result<(), ClientError> {
-        if observations.len() > MAX_MANAGED_RECIPE_RUNS {
-            return Err(ClientError::Protocol);
-        }
-        let mut run_ids = std::collections::BTreeSet::new();
-        for observation in observations {
-            let run_id =
-                uuid::Uuid::parse_str(&observation.run_id).map_err(|_| ClientError::Protocol)?;
-            if run_id.to_string() != observation.run_id
-                || !run_ids.insert(observation.run_id.as_str())
-            {
-                return Err(ClientError::Protocol);
-            }
-        }
-        let response = self
-            .client
-            .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
-            .json(&RecipeRunObservationsRequest {
-                schema_version: 1,
-                observed_at: chrono::Utc::now(),
-                runs: observations,
-            })
-            .send()
-            .await?;
-        if response.status() == StatusCode::NO_CONTENT
-            || (response.status() == StatusCode::NOT_FOUND && observations.is_empty())
-        {
-            Ok(())
-        } else {
-            classify_status(response.status())?;
-            Err(ClientError::Protocol)
-        }
-    }
-
     pub async fn report_exact_recipe_run_observations(
         &self,
         observations: &[ExactRecipeRunObservation],
@@ -1148,10 +1083,7 @@ impl AgentHttpClient {
         }
         let mut run_ids = std::collections::BTreeSet::new();
         for observation in observations {
-            observation
-                .binding
-                .validate()
-                .map_err(|_| ClientError::Protocol)?;
+            observation.validate().map_err(|_| ClientError::Protocol)?;
             let grant_claims = observation
                 .grant
                 .get("claims")
@@ -1170,6 +1102,11 @@ impl AgentHttpClient {
                     .claims
                     .observation_identity_sha256
                     != observation.observation_identity_sha256
+                || hex::decode(&observation.observation_receipt_public_key)
+                    .ok()
+                    .filter(|key| key.len() == 32)
+                    .map(|key| hex_sha256(&key))
+                    != Some(observation.helper_receipt.signature.key_id.clone())
                 || grant_claims
                     .get("request_id")
                     .and_then(serde_json::Value::as_str)
@@ -1189,16 +1126,14 @@ impl AgentHttpClient {
         let response = self
             .client
             .post(self.endpoint("/agent/v1/recipe-runs/observations")?)
-            .json(&ExactRecipeRunObservationsRequest {
-                schema_version: 2,
+            .json(&RecipeRunObservationsWire {
+                schema_version: RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
                 observed_at: chrono::Utc::now(),
                 runs: observations,
             })
             .send()
             .await?;
-        if response.status() == StatusCode::NO_CONTENT
-            || (response.status() == StatusCode::NOT_FOUND && observations.is_empty())
-        {
+        if response.status() == StatusCode::NO_CONTENT {
             Ok(())
         } else {
             classify_status(response.status())?;
@@ -1524,7 +1459,7 @@ mod tests {
         valid_reported_hostname,
     };
     use crate::{
-        oci::{OciRuntime, RecipeRunObservation},
+        oci::OciRuntime,
         process::{ProcessError, ProcessOutput, ProcessRunner, Program},
         telemetry::TelemetrySample,
         workloads::CompiledExecutionPlan,
@@ -1610,7 +1545,7 @@ mod tests {
             },
             signature: RecipeRunObservationReceiptSignature {
                 algorithm: "ed25519".to_owned(),
-                key_id: "a".repeat(64),
+                key_id: hex_sha256(&[0; 32]),
                 value: "b".repeat(128),
             },
         }
@@ -2733,6 +2668,7 @@ mod tests {
             }}),
             observation_identity_sha256: "e".repeat(64),
             helper_receipt,
+            observation_receipt_public_key: "00".repeat(32),
         }];
         let (client, server) = observation_client(204);
         client
@@ -2755,88 +2691,6 @@ mod tests {
         assert_eq!(body["runs"][0]["endpoint_ready"], serde_json::Value::Null);
         assert_eq!(body["runs"][0]["run_generation"], 3);
         assert!(body["runs"][0]["observed_at"].is_string());
-    }
-
-    #[tokio::test]
-    async fn recipe_run_observations_post_strict_bounded_shape_and_accept_only_204() {
-        let observations = vec![RecipeRunObservation {
-            run_id: "45ea6921-50c9-4971-be2a-4cd04ce05069".to_owned(),
-            ready: true,
-        }];
-        let (client, server) = observation_client(204);
-
-        client
-            .report_recipe_run_observations(&observations)
-            .await
-            .unwrap();
-
-        let request = server.join().unwrap();
-        let (headers, body) = request
-            .windows(4)
-            .position(|value| value == b"\r\n\r\n")
-            .map(|index| (&request[..index], &request[index + 4..]))
-            .unwrap();
-        let headers = std::str::from_utf8(headers).unwrap();
-        assert!(headers.starts_with("POST /agent/v1/recipe-runs/observations HTTP/1.1\r\n"));
-        let body: serde_json::Value = serde_json::from_slice(body).unwrap();
-        let mut keys = body
-            .as_object()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        keys.sort();
-        assert_eq!(keys, ["observed_at", "runs", "schema_version"]);
-        assert_eq!(body["schema_version"], 1);
-        assert_eq!(
-            body["runs"],
-            serde_json::json!([{
-                "ready": true,
-                "run_id": "45ea6921-50c9-4971-be2a-4cd04ce05069"
-            }])
-        );
-        let observed_at = DateTime::parse_from_rfc3339(body["observed_at"].as_str().unwrap())
-            .unwrap()
-            .with_timezone(&Utc);
-        assert!((Utc::now() - observed_at).num_seconds().abs() < 5);
-
-        let (client, server) = observation_client(200);
-        assert!(matches!(
-            client.report_recipe_run_observations(&observations).await,
-            Err(ClientError::Protocol)
-        ));
-        server.join().unwrap();
-    }
-
-    #[tokio::test]
-    async fn absent_observation_endpoint_is_optional_only_without_managed_runs() {
-        let (client, server) = observation_client(404);
-
-        client.report_recipe_run_observations(&[]).await.unwrap();
-        server.join().unwrap();
-
-        let observations = vec![RecipeRunObservation {
-            run_id: "45ea6921-50c9-4971-be2a-4cd04ce05069".to_owned(),
-            ready: true,
-        }];
-        let (client, server) = observation_client(404);
-        assert!(matches!(
-            client.report_recipe_run_observations(&observations).await,
-            Err(ClientError::Protocol)
-        ));
-        server.join().unwrap();
-    }
-
-    #[tokio::test]
-    async fn absent_endpoint_compatibility_does_not_mask_authentication_errors() {
-        for status in [401, 403] {
-            let (client, server) = observation_client(status);
-            assert!(matches!(
-                client.report_recipe_run_observations(&[]).await,
-                Err(ClientError::Authentication)
-            ));
-            server.join().unwrap();
-        }
     }
 
     #[tokio::test]
@@ -2981,26 +2835,6 @@ mod tests {
                 "status {status} classified as {error:?}"
             );
         }
-    }
-
-    #[tokio::test]
-    async fn recipe_run_observations_reject_unbounded_payload_before_transport() {
-        let client = AgentHttpClient {
-            client: reqwest::Client::new(),
-            controller: Url::parse("http://127.0.0.1:9/").unwrap(),
-            node_id: "spk_0123456789abcdef0123456789abcdef".to_owned(),
-        };
-        let observations = (0..=64)
-            .map(|value| RecipeRunObservation {
-                run_id: uuid::Uuid::from_u128(value).to_string(),
-                ready: false,
-            })
-            .collect::<Vec<_>>();
-
-        assert!(matches!(
-            client.report_recipe_run_observations(&observations).await,
-            Err(ClientError::Protocol)
-        ));
     }
 
     #[tokio::test]

@@ -38,6 +38,7 @@ from vonk_agent_protocol import (
     AgentResult,
     ContainerRuntimeAction,
     DistributionAssignment,
+    RecipeRunObservationsWire,
     SignedHostHelperGrant,
     SignedPackageHelperGrant,
     SignedPackageObjectReceipt,
@@ -98,9 +99,7 @@ from .models import (
 from .operation_api import bounded_error_responses
 from .presence import AgentPresenceService, ManagementAddressPolicy, PresenceError
 from .recipe_operations import (
-    RecipeRunObservation,
     prepare_exact_recipe_run_observation_nodes,
-    record_recipe_run_observations,
 )
 from .runtime_image_preparation import IMAGE_CACHE_DIRECTORY
 from .source_bundles import SourceBundleError, SourceBundleStore
@@ -680,18 +679,7 @@ class InventoryRequest(StrictJSONModel):
         return self
 
 
-class RecipeRunObservationRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    run_id: str = Field(
-        pattern=(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        )
-    )
-    ready: bool = Field(strict=True)
-
-
-class RecipeRunObservationIdentityRequest(StrictJSONModel):
+class RecipeRunObservationGrantRequest(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: Literal[1]
     node_id: str = Field(pattern=r"^spk_[0-9a-f]{32}$")
@@ -713,9 +701,6 @@ class RecipeRunObservationIdentityRequest(StrictJSONModel):
     master_port: int = Field(ge=1024, le=65535, strict=True)
     port: int = Field(ge=1024, le=65535, strict=True)
     runtime_arguments_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class RecipeRunObservationGrantRequest(RecipeRunObservationIdentityRequest):
     job_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
     operation_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
     attempt: int = Field(ge=1, le=2**31 - 1, strict=True)
@@ -734,67 +719,6 @@ class RecipeRunObservationGrantRequest(RecipeRunObservationIdentityRequest):
                 "expires_in_seconds",
             }
         )
-
-
-class RecipeRunExactObservationRequest(RecipeRunObservationIdentityRequest):
-    observed_at: datetime
-    observation_identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    endpoint_ready: bool | None = Field(default=None, strict=True)
-    grant: dict[str, object]
-    helper_receipt: dict[str, object]
-
-    @field_validator("observed_at", mode="before")
-    @classmethod
-    def parse_observed_at(cls, value: object) -> object:
-        return _strict_json_datetime(value)
-
-    @field_validator("observed_at")
-    @classmethod
-    def aware_observed_at(cls, value: datetime) -> datetime:
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("recipe run observation time must be timezone-aware")
-        return value
-
-    def observation_identity(self) -> dict[str, object]:
-        return self.model_dump(
-            exclude={
-                "observation_identity_sha256",
-                "observed_at",
-                "process_running",
-                "endpoint_ready",
-                "grant",
-                "helper_receipt",
-            }
-        )
-
-
-class RecipeRunObservationsRequest(StrictJSONModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    schema_version: Literal[1, 2]
-    observed_at: datetime
-    runs: list[RecipeRunObservationRequest | RecipeRunExactObservationRequest] = Field(
-        max_length=64
-    )
-
-    @field_validator("observed_at", mode="before")
-    @classmethod
-    def parse_observed_at(cls, value: object) -> object:
-        return _strict_json_datetime(value)
-
-    @model_validator(mode="after")
-    def unique_runs(self) -> RecipeRunObservationsRequest:
-        if self.schema_version == 1 and any(
-            not isinstance(run, RecipeRunObservationRequest) for run in self.runs
-        ):
-            raise ValueError("recipe run observation version is invalid")
-        if self.schema_version == 2 and any(
-            not isinstance(run, RecipeRunExactObservationRequest) for run in self.runs
-        ):
-            raise ValueError("recipe run observation version is invalid")
-        identities = [run.run_id for run in self.runs]
-        if len(identities) != len(set(identities)):
-            raise ValueError("recipe run observation is duplicated")
-        return self
 
 
 class TelemetryDetailsRequest(StrictJSONModel):
@@ -2055,7 +1979,7 @@ def install_agent_routes(
 
     @agent.post("/recipe-runs/observations", status_code=status.HTTP_204_NO_CONTENT)
     def recipe_run_observations(
-        body: RecipeRunObservationsRequest, request: Request
+        body: RecipeRunObservationsWire, request: Request
     ) -> Response:
         _scope_identity(request)
         required = _require_services(services)
@@ -2075,102 +1999,78 @@ def install_agent_routes(
                 detail="recipe run observation time is outside the accepted window",
             )
         try:
-            if body.schema_version == 1:
-                legacy = tuple(
-                    RecipeRunObservation(run.run_id, run.ready)
-                    for run in body.runs
-                    if isinstance(run, RecipeRunObservationRequest)
+            authority = None
+            by_run = {run.run_id: run for run in body.runs}
+            with required.sessions.begin() as session:
+                assigned = prepare_exact_recipe_run_observation_nodes(
+                    session, identity.node_id, observed_at, set(by_run)
                 )
-                if len(legacy) != len(body.runs):
-                    raise ValueError("recipe run observation version is invalid")
-                record_recipe_run_observations(
-                    required.sessions, identity.node_id, observed_at, legacy
-                )
-            else:
-                authority = host_runtime_service()
-                exact = tuple(
-                    run
-                    for run in body.runs
-                    if isinstance(run, RecipeRunExactObservationRequest)
-                )
-                if len(exact) != len(body.runs):
-                    raise ValueError("recipe run observation version is invalid")
-                by_run = {run.run_id: run for run in exact}
-                with required.sessions.begin() as session:
-                    assigned = prepare_exact_recipe_run_observation_nodes(
-                        session, identity.node_id, observed_at, set(by_run)
-                    )
-                    for node in assigned:
-                        run = session.get(RecipeRun, node.run_id)
-                        assert run is not None
-                        evidence = by_run.get(node.run_id)
-                        if evidence is None:
-                            continue
-                        if (
-                            evidence.observed_at.tzinfo is None
-                            or evidence.observed_at.utcoffset() is None
-                        ):
-                            raise ValueError(
-                                "recipe run observation time must be timezone-aware"
-                            )
-                        evidence_observed_at = evidence.observed_at.astimezone(UTC)
-                        if evidence.run_generation != run.run_generation:
-                            raise ValueError(
-                                "recipe run observation generation is stale"
-                            )
-                        if (
-                            _now(node.updated_at).astimezone(UTC)
-                            >= evidence_observed_at
-                        ):
-                            raise ValueError("recipe run observation was replayed")
-                        try:
-                            (
-                                observed_identity,
-                                process_running,
-                                receipt_sha256,
-                            ) = authority.consume_recipe_run_observation_grant(
-                                session,
-                                node_id=identity.node_id,
-                                certificate_serial=identity.certificate_serial,
-                                identity=evidence.observation_identity(),
-                                observed_at=evidence_observed_at,
-                                received_at=now,
-                                signed_grant=evidence.grant,
-                                helper_receipt=evidence.helper_receipt,
-                            )
-                        except HostHelperAuthorityError:
-                            # An authenticated same-generation identity mismatch is
-                            # rank failure, not permission to keep serving.
-                            node.state = "failed"
-                            node.observed_run_generation = None
-                            node.observation_receipt_sha256 = None
-                            node.observation_endpoint_ready = None
-                            node.updated_at = evidence_observed_at
-                            continue
-                        mapping = session.get(ClusterMapping, run.mapping_id)
-                        owner = (
-                            mapping is not None
-                            and mapping.endpoint_owner_node_id == identity.node_id
+                for node in assigned:
+                    run = session.get(RecipeRun, node.run_id)
+                    assert run is not None
+                    evidence = by_run.get(node.run_id)
+                    if evidence is None:
+                        continue
+                    evidence_observed_at = evidence.observed_at.astimezone(UTC)
+                    if (
+                        node.observation_receipt_public_key
+                        != evidence.observation_receipt_public_key
+                    ):
+                        raise ValueError("recipe run observation receipt key is stale")
+                    if evidence.run_generation != run.run_generation:
+                        raise ValueError("recipe run observation generation is stale")
+                    if authority is None:
+                        authority = host_runtime_service()
+                    if _now(node.updated_at).astimezone(UTC) >= evidence_observed_at:
+                        raise ValueError("recipe run observation was replayed")
+                    try:
+                        (
+                            observed_identity,
+                            process_running,
+                            receipt_sha256,
+                        ) = authority.consume_recipe_run_observation_grant(
+                            session,
+                            node_id=identity.node_id,
+                            certificate_serial=identity.certificate_serial,
+                            identity=evidence.observation_identity(),
+                            observed_at=evidence_observed_at,
+                            received_at=now,
+                            signed_grant=evidence.grant,
+                            helper_receipt=evidence.helper_receipt.model_dump(mode="json"),
                         )
-                        if (
-                            observed_identity != evidence.observation_identity_sha256
-                            or (owner and type(evidence.endpoint_ready) is not bool)
-                            or (not owner and evidence.endpoint_ready is not None)
-                        ):
-                            node.state = "failed"
-                        elif node.state != "failed":
-                            node.state = (
-                                "running"
-                                if process_running
-                                and (not owner or evidence.endpoint_ready is True)
-                                else "failed"
-                            )
-                        node.observed_run_generation = run.run_generation
-                        node.observation_receipt_sha256 = receipt_sha256
-                        node.observation_endpoint_ready = (
-                            evidence.endpoint_ready if owner else None
-                        )
+                    except HostHelperAuthorityError:
+                        # An authenticated same-generation identity mismatch is
+                        # rank failure, not permission to keep serving.
+                        node.state = "failed"
+                        node.observed_run_generation = None
+                        node.observation_receipt_sha256 = None
+                        node.observation_endpoint_ready = None
                         node.updated_at = evidence_observed_at
+                        continue
+                    mapping = session.get(ClusterMapping, run.mapping_id)
+                    owner = (
+                        mapping is not None
+                        and mapping.endpoint_owner_node_id == identity.node_id
+                    )
+                    if (
+                        observed_identity != evidence.observation_identity_sha256
+                        or (owner and type(evidence.endpoint_ready) is not bool)
+                        or (not owner and evidence.endpoint_ready is not None)
+                    ):
+                        node.state = "failed"
+                    elif node.state != "failed":
+                        node.state = (
+                            "running"
+                            if process_running
+                            and (not owner or evidence.endpoint_ready is True)
+                            else "failed"
+                        )
+                    node.observed_run_generation = run.run_generation
+                    node.observation_receipt_sha256 = receipt_sha256
+                    node.observation_endpoint_ready = (
+                        evidence.endpoint_ready if owner else None
+                    )
+                    node.updated_at = evidence_observed_at
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         return Response(status_code=status.HTTP_204_NO_CONTENT)

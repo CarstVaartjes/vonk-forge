@@ -985,7 +985,7 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
 ) -> None:
     client, _services, _, clock = agent_system
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "observed_at": clock.now.isoformat(),
         "runs": [],
     }

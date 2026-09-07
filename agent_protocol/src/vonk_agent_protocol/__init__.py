@@ -58,6 +58,14 @@ from .recipe_operations import (
     RecipeOperationRequest,
     RecipeStartPayload,
 )
+from .recipe_observations import (
+    RECIPE_RUN_OBSERVATION_SCHEMA_VERSION,
+    RecipeRunObservationReceiptWire,
+    RecipeRunObservationReceiptClaimsWire,
+    RecipeRunObservationReceiptSignatureWire,
+    RecipeRunObservationWire,
+    RecipeRunObservationsWire,
+)
 from .telemetry import TelemetryReport
 from .workload_packages import (
     ComponentDescriptor,
@@ -112,6 +120,12 @@ __all__ = [
     "RecipeJobRunResult",
     "RecipeOperationRequest",
     "RecipeRunObservationReceiptClaims",
+    "RecipeRunObservationReceiptWire",
+    "RecipeRunObservationReceiptClaimsWire",
+    "RecipeRunObservationReceiptSignatureWire",
+    "RecipeRunObservationWire",
+    "RecipeRunObservationsWire",
+    "RECIPE_RUN_OBSERVATION_SCHEMA_VERSION",
     "RecipeStartPayload",
     "RestartUnit",
     "SignedHostHelperGrant",

@@ -83,13 +83,6 @@ pub const MAX_MANAGED_RECIPE_RUNS: usize = 64;
 const MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES;
 const MAX_RUN_DIRECTORY_ENTRIES: usize = 4096;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-pub struct RecipeRunObservation {
-    pub run_id: String,
-    pub ready: bool,
-}
-
 #[derive(Debug, Clone)]
 pub struct RecipeRunInspectionPlan {
     pub binding: RecipeRunInspectionBinding,
@@ -190,13 +183,6 @@ struct RunLifecycle {
     placement: Placement,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     observation: Option<RecipeRunInspectionBinding>,
-}
-
-struct RecipeRunProbe {
-    run_id: String,
-    address: Option<IpAddr>,
-    port: u16,
-    health_path: String,
 }
 
 pub struct RuntimeStartPlan {
@@ -955,94 +941,6 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             });
         }
         Ok(plans)
-    }
-
-    pub fn recipe_run_observations(&self) -> Result<Vec<RecipeRunObservation>, OciError> {
-        let probes = self.recipe_run_probes()?;
-        probes
-            .into_iter()
-            .map(|probe| {
-                let ready = probe.address.is_some_and(|address| {
-                    self.readiness_request(address, probe.port, &probe.health_path)
-                });
-                Ok(RecipeRunObservation {
-                    run_id: probe.run_id,
-                    ready,
-                })
-            })
-            .collect()
-    }
-
-    fn recipe_run_probes(&self) -> Result<Vec<RecipeRunProbe>, OciError> {
-        let runs = self.data_root.join("runs");
-        let metadata = match fs::symlink_metadata(&runs) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
-            Err(error) => return Err(error.into()),
-        };
-        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-            return Err(OciError::Artifact);
-        }
-        let mut run_ids = Vec::new();
-        for entry in fs::read_dir(&runs)? {
-            if run_ids.len() == MAX_RUN_DIRECTORY_ENTRIES {
-                return Err(OciError::Artifact);
-            }
-            let entry = entry?;
-            let file_type = entry.file_type()?;
-            let run_id = entry
-                .file_name()
-                .into_string()
-                .map_err(|_| OciError::Artifact)?;
-            if !canonical_uuid(&run_id) || !file_type.is_dir() || file_type.is_symlink() {
-                return Err(OciError::Artifact);
-            }
-            run_ids.push(run_id);
-        }
-        run_ids.sort_unstable();
-
-        let mut probes = Vec::with_capacity(run_ids.len());
-        for run_id in run_ids {
-            let lifecycle = match self.load_run_lifecycle(&run_id) {
-                Ok(lifecycle) => lifecycle,
-                Err(OciError::Artifact | OciError::Json(_) | OciError::Workload(_)) => continue,
-                Err(error) => return Err(error),
-            };
-            let Some((spec, _, placement, observation)) = lifecycle else {
-                continue;
-            };
-            if observation.is_some() {
-                continue;
-            }
-            if placement.world_size > 1 {
-                return Err(OciError::Artifact);
-            }
-            let Some(endpoint) = spec.endpoint.as_ref() else {
-                continue;
-            };
-            if endpoint.health_path.contains(['?', '#', '\0'])
-                || !endpoint
-                    .health_path
-                    .bytes()
-                    .all(|byte| byte.is_ascii_graphic())
-            {
-                continue;
-            }
-            if probes.len() == MAX_MANAGED_RECIPE_RUNS {
-                return Err(OciError::Artifact);
-            }
-            probes.push(RecipeRunProbe {
-                run_id,
-                address: Some(
-                    placement
-                        .endpoint_address
-                        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
-                ),
-                port: placement.port,
-                health_path: endpoint.health_path.clone(),
-            });
-        }
-        Ok(probes)
     }
 
     pub(crate) fn readiness_request(&self, address: IpAddr, port: u16, health_path: &str) -> bool {

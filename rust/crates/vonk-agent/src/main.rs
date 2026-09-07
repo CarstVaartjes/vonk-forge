@@ -287,31 +287,12 @@ async fn run_control_lane(
                 eprintln!("vonk-agent: exact recipe observation failed: {error}");
             }
         }
-        let observations = executor.recipes.runtime.recipe_run_observations()?;
         let wait_seconds = claim_wait_seconds(
             config.poll_max_seconds,
-            observations.len() + exact_observation_count,
+            exact_observation_count,
             readiness_published,
         );
-        let observation_entropy =
-            SystemTime::now().duration_since(UNIX_EPOCH)?.subsec_nanos() as u64;
         let operation = async {
-            match client.report_recipe_run_observations(&observations).await {
-                Ok(()) => observation_failures = 0,
-                Err(error) => match observation_failure_action(&error) {
-                    ObservationFailureAction::BackoffThenClaim => {
-                        observation_failures = observation_failures.saturating_add(1);
-                        tokio::time::sleep(backoff_delay(
-                            observation_failures,
-                            observation_entropy,
-                            config.poll_min_seconds,
-                            config.poll_max_seconds,
-                        ))
-                        .await;
-                    }
-                    ObservationFailureAction::Stop => return Err(LoopError::Client(error)),
-                },
-            }
             run_once_with_claim_hook(
                 &client,
                 &mut state,
@@ -499,12 +480,6 @@ where
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ObservationFailureAction {
-    BackoffThenClaim,
-    Stop,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ExactObservationDisposition {
     managed_run_count: usize,
     transition_not_ready: bool,
@@ -516,14 +491,6 @@ fn exact_observation_disposition(
     ExactObservationDisposition {
         managed_run_count: result.as_ref().copied().unwrap_or(0),
         transition_not_ready: result.as_ref().is_err_and(|error| error.not_ready()),
-    }
-}
-
-fn observation_failure_action(error: &ClientError) -> ObservationFailureAction {
-    if error.retryable() {
-        ObservationFailureAction::BackoffThenClaim
-    } else {
-        ObservationFailureAction::Stop
     }
 }
 
@@ -546,8 +513,8 @@ fn claim_wait_seconds(
 #[cfg(test)]
 mod tests {
     use super::{
-        LaneExit, ObservationFailureAction, claim_wait_seconds, exact_observation_disposition,
-        observation_failure_action, supervise_lanes, telemetry_retry_after,
+        LaneExit, claim_wait_seconds, exact_observation_disposition, supervise_lanes,
+        telemetry_retry_after,
     };
     use std::future;
     use vonk_agent::client::ClientError;
@@ -595,21 +562,6 @@ mod tests {
     }
 
     #[test]
-    fn retryable_observation_failure_backs_off_then_allows_claim() {
-        assert_eq!(
-            observation_failure_action(&ClientError::Retryable),
-            ObservationFailureAction::BackoffThenClaim
-        );
-    }
-
-    #[test]
-    fn non_retryable_observation_failure_stops_the_loop() {
-        assert_eq!(
-            observation_failure_action(&ClientError::Protocol),
-            ObservationFailureAction::Stop
-        );
-    }
-
     #[tokio::test]
     async fn retryable_telemetry_failure_schedules_retry_without_delaying_claim_lane() {
         let retry_after = telemetry_retry_after(&ClientError::Retryable, 1, 0, 5, 60);
