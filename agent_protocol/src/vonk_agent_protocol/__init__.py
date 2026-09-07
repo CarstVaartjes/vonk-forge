@@ -1,3 +1,9 @@
+from .build_import import (
+    RecipeBuildEvidence,
+    RecipeBuildRequest,
+    RecipeImageImportEvidence,
+    RecipeImageImportRequest,
+)
 from .compiled_execution_plan import (
     CompiledExecutionPlan,
     CompiledExecutionPlanError,
@@ -105,6 +111,10 @@ __all__ = [
     "PackageObjectReceiptClaims",
     "PackageReleaseGraph",
     "PackageReleaseLock",
+    "RecipeBuildEvidence",
+    "RecipeBuildRequest",
+    "RecipeImageImportEvidence",
+    "RecipeImageImportRequest",
     "RecipeInstallPayload",
     "RecipeJobFile",
     "RecipeJobInputFile",

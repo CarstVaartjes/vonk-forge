@@ -860,11 +860,51 @@ pub struct RecipeImageImportRequest {
     pub kind: String,
     pub mapping_generation: u64,
     pub mapping_id: Uuid,
-    // Protocol-v1 name retained for compatibility. Docker-backed nodes bind
-    // the complete docker-save archive digest in this field.
+    // The field binds the complete Docker archive digest for the imported
+    // image, including when the producer uses Docker-backed storage.
     pub oci_layout_sha256: String,
     pub schema_version: u8,
     pub source_node_id: String,
+}
+
+/// Typed receipt emitted after a recipe image has been built and the exported
+/// archive has been bound to its content identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildEvidence {
+    pub build_input_sha256: String,
+    pub image_bytes: u64,
+    pub image_digest: String,
+    pub oci_layout_sha256: String,
+    pub policy: RecipeBuildPolicy,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildPolicy {
+    pub passed: bool,
+    pub dockerfile: String,
+    pub findings: Vec<RecipeBuildPolicyFinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeBuildPolicyFinding {
+    pub code: String,
+    pub path: String,
+    pub line: Option<usize>,
+    pub detail: String,
+}
+
+/// Typed receipt emitted after a node verifies and imports the exact build
+/// archive identified by the Controller operation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecipeImageImportEvidence {
+    pub build_id: Uuid,
+    pub image_bytes: u64,
+    pub image_digest: String,
+    pub oci_layout_sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
