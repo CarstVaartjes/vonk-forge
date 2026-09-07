@@ -112,14 +112,30 @@ separate results.
   with seven opt-in skips. Connected readiness checks pass actual start results
   through Controller persistence, grant issuance, helper signing, Rust
   serialization and Controller consumption. They do not execute a model.
-- Old orchestration removal remains in progress. Its complete retirement is
-  explicitly authorized. Automatic review rejected deleting still-referenced
-  modules, so the current route authority and API/worker wiring are being
-  made independent first; old modules are not being preserved as a supported
-  execution path.
+- The old orchestration, agent reconciliation, and worker-authority modules
+  and their dedicated tests are removed at `14d88a1b`. Current recipe and
+  upgrade result consumers are wired directly. The unused worker token,
+  internal API settings, Compose secret, and authority network are removed at
+  `a4d96e2e`; 60 settings/authorization tests and 45 real Compose/bundle checks
+  pass (two separate Linux-only runtime-initialization checks remain skipped).
+  Browser clients use current Activity and Fleet fields; 69 tests and the
+  production build pass. The old probe-derived Dashboard and NodeStatus API
+  are removed at `187b5bf9`; 71 current Fleet/API/metrics checks pass.
+  Command/queue graph retirement, current route authority, monitoring consumers,
+  and the final catalog dependency cleanup remain in progress.
   The bundled protocol wheel and generated API clients must be refreshed after
   those merges, followed by the combined suite. These focused checks do not
   constitute a release-wide pass.
+- The mandatory client-generator check invokes the repository-pinned generator
+  and fails on generator warnings or unavailable tooling. Arbitrary JSON values
+  survive generated Python round trips. All 24 generator/catalog/selector
+  checks pass at `4d979a0b`. The wider Controller sweep collected 1,865 tests:
+  1,812 passed, 19 failed, three skipped, and 31 required Rust-probe checks
+  lacked their Linux runner. Two failures were fixed at root (the removed
+  POST-job permission entry and a distribution fixture missing its required
+  authority); the 17 old protocol/queue fixture failures are assigned to the
+  current-operation worker. The complete suite must run again after composition,
+  with the dedicated Rust probes supplied.
 - Image preparation, cache persistence, availability, and launch compilation
   now use one Pydantic receipt. The duplicate class, field-alias property and
   dictionary fallbacks are removed. All declared receipt fields are required,
@@ -138,13 +154,17 @@ separate results.
   nested Docker on the fresh OrbStack VM cannot unpack the baseline LiteLLM
   layer containing `/dev/console`. Source-built Controller images and ARM64
   binaries exist, but this is neither signed release nor physical acceptance.
-- The user approved deleting all remaining legacy code. Removal of old catalog
-  ModelGroup/ModelVersion schema branches, validators, and seed/test documents
-  has a validated canonical replacement in an isolated worker, but automatic
-  approval review requires explicit confirmation of the exact validator,
-  schema, sidecar and supply-chain input removals. That request is pending;
-  the blocked removals are paused. Active platform harness/runtime wire
-  contracts remain supported. Separate exact approvals remain pending for
+- The user approved deleting obsolete PostgreSQL tables and records and
+  assuming a fresh state. Existing model/image cache contents are also
+  disposable if the current contract changes their layout or metadata. No
+  compatibility code is required to preserve that state. Database changes
+  will be applied with the matching Controller/worker update, not ahead of it.
+- Catalog ModelGroup/ModelVersion schema branches, validators, and seed/test
+  documents are obsolete. Automatic review rejected deleting them while
+  consumers or integrity checks still depended on them. The worker is first
+  replacing those consumers and their verification coverage, retaining the
+  files until current-path independence is proven. This does not make the old
+  formats a supported execution path. Separate exact approvals remain pending for
   removing repeated full-file hashes at trusted internal handoffs and the
   qualification CLI's duplicate territorial metadata check. Those changes have
   not been performed.
