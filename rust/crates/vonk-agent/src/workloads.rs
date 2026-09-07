@@ -12,6 +12,14 @@ pub enum WorkloadError {
 
 pub const EMPTY_SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
+fn deserialize_required_nullable<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 // These bounds carry the compiler's structured argv without treating engine
 // arguments as container-engine options.  Keep the first item non-empty (it
 // is the executable), while subsequent items are opaque values and may be
@@ -104,6 +112,7 @@ pub struct CompiledWorkloadIdentity {
     pub recipe_revision_sha256: String,
     pub execution_sha256: String,
     pub harness_sha256: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub build_input_sha256: Option<String>,
     pub model_artifact_set_sha256: String,
     pub model_artifact_bytes: u64,
@@ -129,12 +138,16 @@ pub struct CompiledEnvironmentEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct CompiledRuntimePlacement {
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub endpoint_address: Option<IpAddr>,
     pub rank: u32,
     pub role: String,
     pub world_size: u32,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub local_address: Option<IpAddr>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_address: Option<IpAddr>,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub master_port: Option<u16>,
     pub port: u16,
     pub reserved_memory_bytes: u64,
@@ -173,6 +186,7 @@ pub struct ModelArtifactIdentity {
 #[serde(deny_unknown_fields)]
 pub struct CompiledRuntimeImage {
     pub image_digest: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub registry_manifest_digest: Option<String>,
     pub platform_manifest_digest: String,
     pub local_image_config_id: String,
@@ -183,6 +197,7 @@ pub struct CompiledRuntimeImage {
     pub architecture: String,
     pub runtime_interface: String,
     pub source: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub build_id: Option<String>,
     pub distribution_object: DistributionObject,
 }
@@ -234,6 +249,7 @@ pub struct CompiledEndpoint {
 #[serde(deny_unknown_fields)]
 pub struct CompiledJob {
     pub interface: String,
+    #[serde(deserialize_with = "deserialize_required_nullable")]
     pub input: Option<serde_json::Value>,
     pub output_path: String,
     pub timeout_seconds: u16,
