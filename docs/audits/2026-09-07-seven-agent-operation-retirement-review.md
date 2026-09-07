@@ -55,19 +55,19 @@ Migration `0023`, based on `0022_current_telemetry_defaults`, creates the
 authority table and matching current foreign keys, then removes the four graph
 tables and the Job graph column/index. It does not copy arbitrary
 `Reconciliation` rows into the new table. It inserts the fixed current route
-authority and resets the singleton route owner to unowned. Old filesystem
-markers therefore fail closed against durable state until
-`RecipeRouteService.maintain` republishes or withdraws from current
-`RecipeRun`/`RunNode` state. This avoids both a dual reader and pretending an
-old graph marker is current. Historical migration files remain inert.
+authority and preserves only the current publication whose identity is exactly
+`RECIPE_ROUTE_AUTHORITY_ID`, including its owner generation, every digest,
+activation marker and lease. Publications and owners tied to any other old
+graph identity are discarded. Historical migration files remain inert.
 
 The migration test starts from `0022` on PostgreSQL with current Recipe runs,
-an old graph, route publication/owner, activation marker, lease, generations
-and all digest fields. After upgrade it proves Recipe/Run/Job data survives,
-the fixed current authority exists, the owner is unowned, every graph table and
-`jobs.reconciliation_id` is absent, and the database schema matches the ORM.
-It then runs current route maintenance and proves a fresh marker and owner are
-created from current Recipe state.
+an old graph, one current fixed route publication/owner, activation marker,
+lease, generations and all digest fields. After upgrade it proves current
+Recipe/Run/Job data and every fixed publication value survive, the fixed
+current authority exists, every non-fixed graph publication and graph Job is
+gone, every graph table and `jobs.reconciliation_id` is absent, and the
+database schema matches the ORM. It then proves current route maintenance can
+renew, withdraw, recover and publish through the preserved owner.
 
 ### Route runtime and API projection
 
@@ -77,12 +77,15 @@ empty graph shown in the current source. It locks or creates the fixed
 updates the already locked singleton owner. The route candidate, exact
 per-rank readiness, recovery deadline, withdrawal and renewal logic remain.
 
-`route_runtime.py` changes the internal marker field, `RouteBundleRequest`,
-`ActivationMarker`, publication, withdrawal, verification and compare-and-swap
-paths from `reconciliation_id` to `authority_id` in one change. There is no old
-key reader. The UUID check, filesystem lock, immutable generation directory,
-atomic writes, route/LiteLLM/manifest hashes, lease checks and supervisor
-activation acknowledgement remain unchanged.
+The serialized `ActivationMarker.reconciliation_id` key remains unchanged in
+this prerequisite because its canonical bytes and digest already protect the
+current filesystem marker. It contains the fixed current route authority UUID,
+not an old graph document. Renaming it inside a database migration would break
+the current marker or require a dual reader. Runtime code treats it as the one
+current authority identity; there is no alternate key, alias or fallback.
+Database/ORM fields use `authority_id`. The UUID check, filesystem lock,
+immutable generation directory, atomic writes, route/LiteLLM/manifest hashes,
+lease checks and supervisor activation acknowledgement remain unchanged.
 
 `operation_api.py::_DurableOperationProjection.endpoint` resolves the locked
 owner and publication through `authority_id`; it no longer loads or gates on a
