@@ -64,6 +64,11 @@ from .recipe_action_plans import (
 from .recipe_builds import RecipeBuildPlan, RecipeBuildService
 from .recipe_routes import RecipeRouteService, route_publication_transaction
 from .recipe_runtime_specs import recipe_topology
+from .recipe_start_payloads import (
+    RecipeStartPayloadError,
+    RecipeStartPlacement,
+    build_recipe_start_payload,
+)
 from .run_admission import RunAdmissionService, RunPlan
 from .source_policy import SourcePolicyReport
 
@@ -962,58 +967,54 @@ class RecipeOperationService:
             run.updated_at = now
             recipe_digest = revision.content_digest
             assert recipe_digest is not None
-            start_payloads = tuple(
-                (
-                    node.node_id,
-                    {
-                        "schema_version": 2,
-                        "run_id": run_id,
-                        "installation_id": plan.installation_id,
-                        "recipe_revision_id": plan.recipe_revision_id,
-                        "recipe_content_sha256": recipe_digest,
-                        "mapping_id": run.mapping_id,
-                        "mapping_generation": run.mapping_generation,
-                        "image_digest": installation.image_digest,
-                        "plan_digest": plan.plan_digest,
-                        "alias": plan.alias,
-                        "rank": node.rank,
-                        "role": node.role,
-                        "port": node.port,
-                        "reserved_memory_bytes": node.required_memory_bytes,
-                        "endpoint_address": (
-                            presences[node.node_id]
-                            if node.endpoint_owner
-                            else node.fabric_address
+            def start_payload(node: object) -> tuple[str, Mapping[str, object]]:
+                endpoint_owner = getattr(node, "endpoint_owner", None)
+                node_id = getattr(node, "node_id", None)
+                if type(endpoint_owner) is not bool or not isinstance(node_id, str):
+                    raise RecipeOperationConflict("recipe run placement is invalid")
+                try:
+                    payload = build_recipe_start_payload(
+                        run_id=run_id,
+                        installation_id=plan.installation_id,
+                        recipe_revision_id=plan.recipe_revision_id,
+                        recipe_content_sha256=recipe_digest,
+                        mapping_id=run.mapping_id,
+                        mapping_generation=run.mapping_generation,
+                        run_generation=run.run_generation,
+                        image_digest=installation.image_digest,
+                        plan_digest=plan.plan_digest,
+                        alias=plan.alias,
+                        placement=RecipeStartPlacement(
+                            node_id,
+                            node.rank,
+                            node.role,
+                            node.port,
+                            node.required_memory_bytes,
+                            node.fabric_address,
                         ),
-                        "world_size": world_size,
-                        "compiled_execution_plan": _compiled_plan_for_start(
-                            compiled_plans[node.node_id],
-                            node=node,
-                            endpoint_address=(
-                                presences[node.node_id] if node.endpoint_owner else None
-                            ),
-                            master_address=master_address,
-                            master_port=master_port,
-                            world_size=world_size,
+                        endpoint_address=(
+                            presences[node_id] if endpoint_owner else node.fabric_address
                         ),
-                        "local_address": (
+                        compiled_endpoint_address=(
+                            presences[node_id] if endpoint_owner else None
+                        ),
+                        world_size=world_size,
+                        compiled_execution_plan=compiled_plans[node_id],
+                        local_address=(
                             node.fabric_address if world_size > 1 else None
                         ),
-                        "master_address": master_address,
-                        "master_port": master_port,
-                        **(
-                            {
-                                "phase": "rank-launch",
-                                "start_deadline": start_deadline,
-                                "run_generation": run.run_generation,
-                            }
-                            if start_deadline is not None
-                            else {}
-                        ),
-                    },
-                )
-                for node in plan.nodes
-            )
+                        master_address=master_address,
+                        master_port=master_port,
+                        phase="rank-launch" if start_deadline is not None else None,
+                        start_deadline=start_deadline,
+                    )
+                except (KeyError, RecipeStartPayloadError) as error:
+                    raise RecipeOperationConflict(
+                        "recipe start payload is invalid"
+                    ) from error
+                return node_id, payload
+
+            start_payloads = tuple(start_payload(node) for node in plan.nodes)
             role_phases = _role_phases(start_order, start_payloads)
             phases = role_phases
             if start_deadline is not None:
@@ -3227,62 +3228,6 @@ class RecipeOperationService:
         ):
             reservation.state = "released"
             reservation.released_at = now
-
-
-def _compiled_plan_for_start(
-    value: Mapping[str, object],
-    *,
-    node: object,
-    endpoint_address: str | None,
-    master_address: str | None,
-    master_port: int | None,
-    world_size: int,
-) -> dict[str, object]:
-    """Bind live rank placement to an immutable receipt-bound launch plan."""
-
-    payload = json.loads(canonical_message(value))
-    runtime = payload.get("runtime")
-    placement = runtime.get("placement") if isinstance(runtime, Mapping) else None
-    if not isinstance(runtime, dict) or not isinstance(placement, dict):
-        raise RecipeOperationConflict("compiled execution plan placement is invalid")
-    node_id = getattr(node, "node_id", None)
-    rank = getattr(node, "rank", None)
-    role = getattr(node, "role", None)
-    port = getattr(node, "port", None)
-    reserved = getattr(node, "required_memory_bytes", None)
-    fabric_address = getattr(node, "fabric_address", None)
-    if (
-        not isinstance(node_id, str)
-        or type(rank) is not int
-        or not isinstance(role, str)
-        or type(port) is not int
-        or type(reserved) is not int
-    ):
-        raise RecipeOperationConflict("compiled execution plan placement is incomplete")
-    placement.update(
-        {
-            "endpoint_address": endpoint_address,
-            "rank": rank,
-            "role": role,
-            "world_size": world_size,
-            "local_address": fabric_address if world_size > 1 else None,
-            "master_address": master_address,
-            "master_port": master_port,
-            "port": port,
-            "reserved_memory_bytes": reserved,
-        }
-    )
-    security = payload.get("security")
-    if isinstance(security, dict):
-        security["network_mode"] = (
-            "bridge"
-            if endpoint_address is not None or master_port is not None
-            else "none"
-        )
-    topology = payload.get("topology")
-    if isinstance(topology, dict):
-        topology.update({"rank": rank, "role": role, "world_size": world_size})
-    return payload
 
 
 def _required_string(value: Mapping[str, object], key: str) -> str:
