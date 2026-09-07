@@ -9,7 +9,7 @@ Last researched: 2026-08-16
 - Every other required model is expected to run on one GPU node individually.
 - Fitting individually does not imply that arbitrary models may remain loaded together. Every recipe starts as exclusive and becomes shareable only after its exact N-way placement passes co-residency acceptance.
 - The user-facing Library selects an accepted immutable recipe revision and mapping. There is no separate cluster-profile authority or hidden model fallback.
-- The active physical qualification pass currently covers the two DeepSeek recipes. Image, 3D, video, and audio rows are tracked in the [model target ledger](operators/model-targets.md) and are not presented as runnable defaults until their exact recipes pass acceptance.
+- The active physical qualification pass currently covers the two DeepSeek recipes. Other model and recipe candidates remain in the canonical recipe library until their exact immutable definitions pass acceptance; they are not presented as runnable defaults.
 
 Each GPU node is marketed as having 128 GB of unified memory shared by the
 operating system, CPU, and GPU. The cluster inventory exposes

@@ -1,3 +1,8 @@
+.library-recipe-detail {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
 .recipe-authority {
   container-type: inline-size;
   min-width: 0;
@@ -104,6 +109,17 @@
   }
 }
 
+@media (max-width: 760px) {
+  .recipe-fit-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .recipe-fit-strip > div + div {
+    border-block-start: 1px solid var(--border);
+    border-inline-start: 0;
+  }
+}
+
 .identity-note {
   color: var(--text-subtle);
   font-size: 0.72rem;
@@ -170,6 +186,19 @@
   border-top: 1px solid var(--border);
   margin-top: 1rem;
   padding-top: 1rem;
+}
+
+.library-model-detail-list,
+.library-model-detail-list ul,
+.library-model-detail-list li,
+.library-model-detail-list li > div {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.library-model-detail-list li {
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .section-heading h4,
@@ -275,15 +304,15 @@
   padding: 0.8rem;
 }
 
-.recipe-qualification-disclosure {
+.recipe-execution-disclosure {
   margin-top: 1rem;
 }
 
-.recipe-qualification-disclosure > summary {
+.recipe-execution-disclosure > summary {
   display: none;
 }
 
-.recipe-qualification-body {
+.recipe-execution-body {
   min-width: 0;
 }
 
@@ -870,12 +899,12 @@
     display: none;
   }
 
-  .recipe-qualification-disclosure {
+  .recipe-execution-disclosure {
     border-top: 1px solid var(--border);
     padding-top: 0.4rem;
   }
 
-  .recipe-qualification-disclosure > summary {
+  .recipe-execution-disclosure > summary {
     align-items: center;
     color: var(--mint-strong);
     cursor: pointer;
@@ -887,30 +916,30 @@
     padding: 0.6rem 0;
   }
 
-  .recipe-qualification-disclosure > summary::-webkit-details-marker {
+  .recipe-execution-disclosure > summary::-webkit-details-marker {
     display: none;
   }
 
-  .recipe-qualification-disclosure > summary span,
-  .recipe-qualification-disclosure > summary small {
+  .recipe-execution-disclosure > summary span,
+  .recipe-execution-disclosure > summary small {
     display: block;
   }
 
-  .recipe-qualification-disclosure > summary small {
+  .recipe-execution-disclosure > summary small {
     color: var(--text-muted);
     font-size: 0.7rem;
     font-weight: 500;
     margin-top: 0.12rem;
   }
 
-  .recipe-qualification-disclosure > summary svg {
+  .recipe-execution-disclosure > summary svg {
     flex: 0 0 auto;
     height: 1rem;
     transition: transform 160ms cubic-bezier(.16, 1, .3, 1);
     width: 1rem;
   }
 
-  .recipe-qualification-disclosure[open] > summary svg {
+  .recipe-execution-disclosure[open] > summary svg {
     transform: rotate(180deg);
   }
 }

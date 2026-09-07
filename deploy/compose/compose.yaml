@@ -11,18 +11,20 @@ x-bounded-logging: &bounded-logging
 x-api-environment: &api-environment
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
+  VONK_HF_TOKEN_FILE: /run/vonk-normalized-secrets/hf-token
   VONK_TOKEN_SIGNING_KEY_FILE: /run/vonk-normalized-secrets/token-signing-key
   VONK_METRICS_TOKEN_FILE: /run/vonk-normalized-secrets/metrics-token
   VONK_STATE_PATH: /state
-  VONK_GLOBAL_CATALOG_URL: ${VONK_GLOBAL_CATALOG_URL:-https://vonkforge.ai}
   # The API remains on internal networks. Caddy relays only read-only requests
   # to the explicitly scoped public recipe and agent-release authorities.
   VONK_RECIPE_LIBRARY_API_URL: http://caddy:8083
+  # Empty selects the immutable raw GitHub package reader, which resolves
+  # main once through the API and pins every request to that commit.
+  VONK_RECIPE_LIBRARY_PACKAGE_URL: ${VONK_RECIPE_LIBRARY_PACKAGE_URL:-}
   VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS: ${VONK_RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS:-900}
   VONK_AGENT_RELEASE_API_URL: http://caddy:8084
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
-  VONK_OPERATOR_JURISDICTION: ${VONK_OPERATOR_JURISDICTION:-}
   VONK_AGENT_ARTIFACT_ROOT: /state/agent-artifacts
   VONK_AGENT_CONTROLLER_ORIGIN: https://${VONK_AGENT_HOSTNAME:?set Caddy agent hostname}:8443
   VONK_AGENT_ENROLLMENT_ORIGIN: https://${VONK_AGENT_ENROLL_HOSTNAME:?set Caddy enrollment hostname}:8443
@@ -42,11 +44,11 @@ x-api-environment: &api-environment
 x-worker-environment: &worker-environment
   VONK_DEPLOYMENT_MODE: production
   VONK_DATABASE_URL_FILE: /run/vonk-normalized-secrets/database-url
+  VONK_HF_TOKEN_FILE: /run/vonk-normalized-secrets/hf-token
   VONK_WORKER_API_TOKEN_FILE: /run/vonk-normalized-secrets/worker-api-token
   VONK_INTERNAL_API_URL: http://control-api:8000
   VONK_MANAGEMENT_CIDRS: ${VONK_MANAGEMENT_CIDRS:?set trusted GPU node management CIDRs}
   VONK_DIRECT_FABRIC_CIDRS: ${VONK_DIRECT_FABRIC_CIDRS:-}
-  VONK_OPERATOR_JURISDICTION: ${VONK_OPERATOR_JURISDICTION:-}
   VONK_STATE_PATH: /state
   VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES: ${VONK_ARTIFACT_JOB_STORAGE_MAX_BYTES:-17179869184}
   VONK_ARTIFACT_JOB_RETENTION_SECONDS: ${VONK_ARTIFACT_JOB_RETENTION_SECONDS:-604800}
@@ -102,9 +104,10 @@ services:
       VONK_AGENT_CA_TIMEOUT_SECONDS: ${AGENT_CA_TIMEOUT_SECONDS:-3}
       VONK_AGENT_CA_MAX_RESPONSE_BYTES: ${AGENT_CA_MAX_RESPONSE_BYTES:-65536}
       VONK_AGENT_PROXY_AUTH_FILE: /run/vonk-normalized-secrets/agent-proxy-auth
-    secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
+    secrets: [admin-password, package-helper-grant-private-key, package-helper-receipt-private-key, host-runtime-grant-private-key, database-url, token-signing-key, metrics-token, agent-client-ca, agent-intermediate-certificate, controller-ca, agent-proxy-auth, worker-api-token, hf-token, litellm-master-key, litellm-upstream-key, litellm-database-url, grafana-admin-password, agent-ca-credential, agent-ca-provisioner-public-jwk, step-ca-root-certificate, step-ca-intermediate-key, step-ca-password, step-ca-config]
     volumes:
       - control-state:/state
+      - agent-artifacts:/state/agent-artifacts
       - workload-tuf-publication:/workload-tuf
       - route-publications:/routes
       - litellm-supervisor-state:/supervisor
@@ -117,12 +120,11 @@ services:
       - ./prometheus/alerts.yaml:/run/vonk-source-assets/prometheus/alerts.yaml:ro
       - ./grafana/provisioning:/run/vonk-source-assets/grafana/provisioning:ro
       - ./grafana/dashboards:/run/vonk-source-assets/grafana/dashboards:ro
-    # OCI archives are transfer staging only; PostgreSQL owns the build
-    # authority and the enrolled node owns the imported runtime image. Never
-    # make the controller's temporary upload bytes part of persistent state.
-    tmpfs:
-      - /tmp
-      - /state/agent-artifacts
+    # Built OCI archives can be tens of GiB and must remain available while
+    # they are distributed to every mapped Spark. Keep them off tmpfs and in a
+    # dedicated volume so Controller restarts do not invalidate accepted
+    # builds. PostgreSQL remains the authority for their lifecycle.
+    tmpfs: [/tmp]
     networks: [application, data, agent-proxy, worker-authority, ca]
     depends_on:
       postgres: {condition: service_healthy}
@@ -149,8 +151,12 @@ services:
       - normalized-private-keys:/run/vonk-normalized-secrets:ro
       - litellm-supervisor-state:/supervisor:ro
       - control-state:/state
+      - agent-artifacts:/state/agent-artifacts
     tmpfs: [/tmp]
-    networks: [data, worker-authority]
+    # The cache worker fetches pinned models and OCI images from public
+    # providers. Keep its outbound network separate from ingress and do not
+    # publish worker ports; the API and database retain internal networks.
+    networks: [data, worker-authority, artifact-egress]
     depends_on:
       postgres: {condition: service_healthy}
       control-api: {condition: service_healthy}
@@ -183,7 +189,7 @@ services:
       retries: 10
 
   litellm:
-    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2}
+    image: ${LITELLM_IMAGE:?set a digest-pinned Vonk LiteLLM image}
     restart: unless-stopped
     logging: *bounded-logging
     entrypoint: [/bin/sh, /run/vonk-normalized-secrets/runtime-assets/litellm/entrypoint.sh]
@@ -194,7 +200,7 @@ services:
     environment:
       HOME: /root
       XDG_CACHE_HOME: /root/.cache
-      PRISMA_QUERY_ENGINE_BINARY: /root/.cache/prisma-python/binaries/5.4.2/ac9d7041ed77bcc8a8dbd2ab6616b39013829574/node_modules/@prisma/engines/query-engine-debian-openssl-3.0.x
+      PRISMA_QUERY_ENGINE_BINARY: /opt/vonk-litellm/prisma/query-engine
       DISABLE_ADMIN_UI: "False"
       LITELLM_UI_PATH: /tmp/litellm-ui
       LITELLM_MASTER_KEY_FILE: /run/vonk-normalized-secrets/litellm-master-key
@@ -326,6 +332,10 @@ services:
       retries: 10
 
 secrets:
+  # An optional credential used only by the Controller for gated/private
+  # Hugging Face model-cache downloads. Public downloads remain anonymous.
+  hf-token:
+    file: "${HF_TOKEN_FILE:-/dev/null}"
   admin-password:
     file: "${ADMIN_PASSWORD_FILE:?set Vonk administrator password secret file}"
   database-url:
@@ -384,6 +394,7 @@ networks:
   agent-proxy: {internal: true}
   application: {internal: true}
   worker-authority: {internal: true}
+  artifact-egress: {}
   data: {internal: true}
   litellm-data: {internal: true}
   cluster-egress: {}
@@ -397,6 +408,7 @@ networks:
 volumes:
   postgres-data: {}
   control-state: {}
+  agent-artifacts: {}
   caddy-data: {}
   caddy-config: {}
   litellm-supervisor-state: {}

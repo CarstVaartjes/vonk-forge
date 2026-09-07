@@ -204,6 +204,12 @@ def run_fresh_fleet_library_smoke() -> dict[str, object]:
                 "hardware_fingerprint": "hardware-c",
                 "agent_digest": "c" * 64,
                 "boot_id": "boot-c",
+                "observation_receipt_public_key": (
+                    ed25519.Ed25519PrivateKey.generate()
+                    .public_key()
+                    .public_bytes_raw()
+                    .hex()
+                ),
             },
         },
     )

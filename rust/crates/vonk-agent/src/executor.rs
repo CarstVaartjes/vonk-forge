@@ -14,26 +14,84 @@ use std::{
 use crate::runtime_identity::AgentRuntimeIdentity;
 use crate::{
     agent_upgrade::AgentUpgradeExecutor,
-    client::{AgentHttpClient, ClientError, ExactRecipeRunObservation},
-    health::{HealthEvidence, wait_ready, wait_ready_until},
+    client::{
+        AgentHttpClient, ClientError, DistributionDownloadEvidence, DistributionProgress,
+        ExactRecipeRunObservation,
+    },
+    health::{wait_ready, wait_ready_until},
     host_runtime::{HostRuntimeBoundary, HostRuntimeOutcome},
     image_importer::ImageImporter,
-    oci::{OciRuntime, RecipeRunStartIdentity},
+    oci::{OciError, OciRuntime, RecipeRunStartIdentity},
     process::ProcessRunner,
     recipe_builder::RecipeBuilder,
     state::{BeginDecision, StateError, StateStore},
-    workloads::{Placement, image_digest},
+    workloads::{CompiledExecutionPlan, Placement},
 };
 use vonk_agent_protocol::{
-    AgentClaim, AgentDirective, AgentProgress, AgentResult, HostRuntimeAction, RecipeJobEvidence,
-    RecipeJobFile, RecipeJobOutputLimits, RecipeJobOutputManifest, RecipeJobOutputMapping,
-    RecipeJobRunResult, RecipeOperationRequest, RecipeStartPhase, canonical_json, hex_sha256,
+    AgentClaim, AgentDirective, AgentProgress, AgentResult, ArtifactDistributionRequest,
+    HostRuntimeAction, ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
+    RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
+    RecipeStartPhase, RecipeStartRequest, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const JOB_CANCEL_EXIT_CODE: i32 = 130;
 const JOB_CANCEL_STOP_TIMEOUT_SECONDS: u16 = 5;
 const JOB_CANCEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(20);
+
+pub fn parse_compiled_execution_plan(value: &Value) -> Result<CompiledExecutionPlan, OciError> {
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone())?;
+    plan.validate()?;
+    Ok(plan)
+}
+
+fn same_installed_workload(
+    installed: &CompiledExecutionPlan,
+    requested: &CompiledExecutionPlan,
+) -> bool {
+    installed.identity == requested.identity
+        && installed.artifacts == requested.artifacts
+        && installed.runtime.executable == requested.runtime.executable
+        && installed.runtime.argv == requested.runtime.argv
+        && installed.runtime.env == requested.runtime.env
+        && installed.runtime.image_digest == requested.runtime.image_digest
+        && installed.runtime_image == requested.runtime_image
+        && installed.security.devices == requested.security.devices
+        && installed.security.capabilities == requested.security.capabilities
+        && installed.security.host_network == requested.security.host_network
+        && installed.security.privileged == requested.security.privileged
+        && installed.security.user == requested.security.user
+        && installed.security.mounts == requested.security.mounts
+        && installed.security.read_only_root == requested.security.read_only_root
+        && installed.security.no_new_privileges == requested.security.no_new_privileges
+        && installed.lifecycle == requested.lifecycle
+        && installed.endpoint == requested.endpoint
+        && installed.job == requested.job
+        && installed.topology.name == requested.topology.name
+        && installed.topology.mode == requested.topology.mode
+        && installed.topology.backend == requested.topology.backend
+        && installed.topology.node_count == requested.topology.node_count
+}
+
+pub fn readiness_identity(spec: &CompiledExecutionPlan) -> (String, String) {
+    let image_digest = spec
+        .runtime
+        .image_digest
+        .strip_prefix("sha256:")
+        .unwrap_or_default()
+        .to_owned();
+    let model_identity = spec
+        .artifacts
+        .first()
+        .map(|artifact| {
+            format!(
+                "{}/{}@{}",
+                artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256
+            )
+        })
+        .unwrap_or_default();
+    (image_digest, model_identity)
+}
 
 struct JobScopeCleanup<'runtime, 'data, R: ProcessRunner> {
     runtime: &'runtime OciRuntime<'data, R>,
@@ -366,6 +424,156 @@ fn evidence_with_digest(mut evidence: Value) -> (Value, String) {
     (evidence, evidence_digest)
 }
 
+/// Build the exact runtime argument vector used for start, inspection, and a
+/// pre-start hook. The caller supplies the complete command slice because
+/// `RuntimeStartPlan::pre_start` already contains a complete hook invocation.
+pub fn runtime_arguments_for_plan(
+    plan: &crate::oci::RuntimeStartPlan,
+    command: &[String],
+) -> Vec<String> {
+    let mut arguments = vec![
+        plan.archive_sha256.clone(),
+        plan.registry_index_digest.clone(),
+        plan.platform_manifest_digest.clone(),
+        plan.image_reference.clone(),
+    ];
+    arguments.extend(command.iter().cloned());
+    arguments
+}
+
+pub fn runtime_arguments_digest(arguments: &[String]) -> Result<String, ProtocolError> {
+    canonical_json(&arguments.to_vec()).map(|value| hex_sha256(&value))
+}
+
+pub fn recipe_install_success_body(installed_bytes: u64) -> Value {
+    json!({"installed_bytes": installed_bytes})
+}
+
+pub fn recipe_uninstall_success_body(removed_model_bytes: u64) -> Value {
+    json!({
+        "uninstalled": true,
+        "removed_model_bytes": removed_model_bytes,
+    })
+}
+
+pub fn recipe_model_cleanup_success_body(
+    uninstalled_installations: usize,
+    removed_model_bytes: u64,
+) -> Value {
+    json!({
+        "uninstalled_installations": uninstalled_installations,
+        "removed_model_bytes": removed_model_bytes,
+    })
+}
+
+pub fn recipe_start_success_body(
+    request: &RecipeStartRequest,
+    spec: &CompiledExecutionPlan,
+    artifact_set_digest: &str,
+    runtime_guard_arguments: &[String],
+) -> Result<Value, ProtocolError> {
+    let runtime_arguments_sha256 = runtime_arguments_digest(runtime_guard_arguments)?;
+    let (image_digest, model_identity) = readiness_identity(spec);
+    let endpoint = format!(
+        "http://{}:{}",
+        match request.endpoint_address {
+            std::net::IpAddr::V4(address) => address.to_string(),
+            std::net::IpAddr::V6(address) => format!("[{address}]"),
+        },
+        request.port
+    );
+    let evidence = match request.phase {
+        Some(RecipeStartPhase::RankLaunch) => json!({
+            "phase": "rank-launch",
+            "run_id": request.run_id.to_string(),
+            "run_generation": request.run_generation,
+            "recipe_revision_id": request.recipe_revision_id.to_string(),
+            "recipe_content_sha256": request.recipe_content_sha256,
+            "image_digest": image_digest,
+            "artifact_set_digest": artifact_set_digest,
+            "runtime_arguments_sha256": runtime_arguments_sha256,
+            "model_identity": model_identity,
+            "rank": request.rank,
+            "role": request.role,
+            "world_size": request.world_size,
+            "local_address": request.local_address,
+            "master_address": request.master_address,
+            "master_port": request.master_port,
+            "memory_reservation_bytes": request.reserved_memory_bytes,
+            "process_running": true,
+            "fabric_projection_bound": true,
+            "launched": true,
+        }),
+        Some(RecipeStartPhase::CollectiveReadiness) => json!({
+            "phase": "collective-readiness",
+            "run_id": request.run_id.to_string(),
+            "run_generation": request.run_generation,
+            "recipe_revision_id": request.recipe_revision_id.to_string(),
+            "recipe_content_sha256": request.recipe_content_sha256,
+            "image_digest": image_digest,
+            "artifact_set_digest": artifact_set_digest,
+            "runtime_arguments_sha256": runtime_arguments_sha256,
+            "model_identity": model_identity,
+            "rank": request.rank,
+            "role": request.role,
+            "world_size": request.world_size,
+            "local_address": request.local_address,
+            "master_address": request.master_address,
+            "master_port": request.master_port,
+            "endpoint": endpoint,
+            "memory_reservation_bytes": request.reserved_memory_bytes,
+            "ready": true,
+        }),
+        None => {
+            let evidence = json!({
+                "recipe_revision_id": request.recipe_revision_id.to_string(),
+                "recipe_content_sha256": request.recipe_content_sha256,
+                "image_digest": image_digest,
+                "artifact_set_digest": artifact_set_digest,
+                "model_identity": model_identity,
+                "rank": request.rank,
+                "world_size": request.world_size,
+                "endpoint": endpoint,
+                "memory_reservation_bytes": request.reserved_memory_bytes,
+                "ready": true,
+            });
+            let (evidence, evidence_digest) = evidence_with_digest(evidence);
+            return Ok(json!({
+                "endpoint": endpoint,
+                "evidence": evidence,
+                "evidence_digest": evidence_digest,
+            }));
+        }
+    };
+    let (evidence, evidence_digest) = evidence_with_digest(evidence);
+    Ok(match request.phase {
+        Some(RecipeStartPhase::CollectiveReadiness) => json!({
+            "endpoint": endpoint,
+            "evidence": evidence,
+            "evidence_digest": evidence_digest,
+        }),
+        Some(RecipeStartPhase::RankLaunch) => {
+            json!({"evidence": evidence, "evidence_digest": evidence_digest})
+        }
+        None => unreachable!("single-node result returned above"),
+    })
+}
+
+fn distribution_success_evidence(evidence: DistributionDownloadEvidence) -> Value {
+    evidence_with_digest(json!({
+        "assignment_id": evidence.assignment_id,
+        "model_artifact_set_sha256": evidence.model_artifact_set_sha256,
+        "verified": true,
+        "verified_digests": evidence.model_digests,
+        "verified_image_digest": evidence.oci_image_digest,
+        "imported_image_digest": evidence.oci_image_digest,
+        "verified_oci_layout_sha256": evidence.oci_archive_sha256,
+        "oci_image_digest": evidence.oci_image_digest,
+        "downloaded_bytes": evidence.downloaded_bytes,
+    }))
+    .0
+}
+
 fn before_phase_deadline(
     lease_deadline: &tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
     start_deadline: Option<&DateTime<FixedOffset>>,
@@ -424,6 +632,138 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
         lease_deadline: tokio::sync::watch::Receiver<DateTime<FixedOffset>>,
         mut cancellation: tokio::sync::watch::Receiver<bool>,
     ) -> ExecutionResult {
+        if claim.operation == "artifact.distribution.v1" {
+            if claim.validate().is_err() {
+                return failed("artifact distribution claim is invalid");
+            }
+            let request: ArtifactDistributionRequest =
+                match serde_json::from_value(claim.payload.clone()) {
+                    Ok(request) => request,
+                    Err(_) => return failed("artifact distribution request is invalid"),
+                };
+            if request.validate().is_err() || request.plan_digest != claim.authority_revision {
+                return failed("artifact distribution plan identity is invalid");
+            }
+            let destination = self.runtime.data_root.join("distribution");
+            let (progress_sender, mut progress_receiver) =
+                tokio::sync::watch::channel::<Option<DistributionProgress>>(None);
+            let progress_client = self.client.clone();
+            let progress_claim = claim.clone();
+            let progress_deadline = lease_deadline.clone();
+            let progress_task = tokio::spawn(async move {
+                // Progress is a snapshot, not an event log. Coalesce fast
+                // transfer updates instead of accumulating an unbounded queue
+                // of heartbeat requests before image import can begin.
+                let mut cadence = tokio::time::interval(Duration::from_secs(1));
+                cadence.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                while progress_receiver.changed().await.is_ok() {
+                    cadence.tick().await;
+                    let Some(item) = progress_receiver.borrow_and_update().clone() else {
+                        continue;
+                    };
+                    let progress = AgentProgress {
+                        attempt: progress_claim.attempt,
+                        deadline: *progress_deadline.borrow(),
+                        fence: progress_claim.fence,
+                        job_id: progress_claim.job_id,
+                        node_id: progress_claim.node_id.clone(),
+                        operation_id: progress_claim.operation_id,
+                        progress: json!({
+                            "phase": "copying",
+                            "object_sha256": item.object_sha256,
+                            "kind": item.kind,
+                            "bytes": item.bytes,
+                            "total_bytes": item.total_bytes,
+                        }),
+                        schema_version: 1,
+                    };
+                    let _ = progress_client.heartbeat(&progress).await;
+                }
+            });
+            let download = {
+                let mut result = None;
+                let archive_root = self.runtime.data_root.join("oci-archives");
+                for attempt in 0..3_u32 {
+                    let progress_sender = progress_sender.clone();
+                    let current = self
+                        .client
+                        .download_distribution_with_progress(
+                            &request.plan_digest,
+                            &destination,
+                            &archive_root,
+                            move |item| {
+                                progress_sender.send_replace(Some(item));
+                            },
+                        )
+                        .await;
+                    match current {
+                        Ok(value) => {
+                            result = Some(Ok(value));
+                            break;
+                        }
+                        Err(error) if error.retryable() && attempt < 2 => {
+                            tokio::time::sleep(Duration::from_millis(100 * (attempt + 1) as u64))
+                                .await;
+                        }
+                        Err(error) => {
+                            result = Some(Err(error));
+                            break;
+                        }
+                    }
+                }
+                result.expect("bounded distribution retry always records a result")
+            };
+            // The reporter exits only when every sender is dropped. Keep it
+            // alive through retries, then close it before waiting; otherwise
+            // a finished transfer can wait forever before importing its image.
+            drop(progress_sender);
+            let _ = progress_task.await;
+            return match download {
+                Ok(evidence) => {
+                    let importer = ImageImporter {
+                        data_root: self.runtime.data_root,
+                    };
+                    let archive = match importer.retain_verified_distribution_archive(
+                        &evidence.oci_archive_sha256,
+                        &evidence.oci_image_digest,
+                        evidence.oci_archive_bytes,
+                        &evidence.oci_archive_path,
+                    ) {
+                        Ok(path) => path,
+                        Err(_) => return failed("distributed OCI archive could not be retained"),
+                    };
+                    if let Err(error) = self
+                        .execute_host_runtime(
+                            claim,
+                            HostRuntimeAction::ImageImport,
+                            importer.distribution_runtime_arguments(
+                                &evidence.oci_archive_sha256,
+                                &evidence.oci_image_digest,
+                                evidence.oci_archive_bytes,
+                                &archive,
+                            ),
+                        )
+                        .await
+                    {
+                        // HostRuntimeError exposes only bounded, stable
+                        // categories, never helper stderr or credentials.
+                        return ExecutionResult {
+                            state: "failed",
+                            body: json!({
+                                "reason": format!(
+                                    "distributed OCI image could not be imported: {error}"
+                                ),
+                            }),
+                        };
+                    }
+                    ExecutionResult {
+                        state: "succeeded",
+                        body: distribution_success_evidence(evidence),
+                    }
+                }
+                Err(_) => failed("Controller distribution could not be verified and retained"),
+            };
+        }
         let request = match RecipeOperationRequest::parse(claim) {
             Ok(request) => request,
             Err(_) => return failed("recipe operation payload is invalid"),
@@ -486,18 +826,49 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 let importer = ImageImporter {
                     data_root: self.runtime.data_root,
                 };
-                let archive = match importer.staging_path(claim.operation_id) {
-                    Ok(path) => path,
-                    Err(_) => return failed("image import staging is unavailable"),
+                let archive = match importer.verified_cached_archive(&request) {
+                    Ok(Some(path)) => path,
+                    Ok(None) => {
+                        let staging = match importer.staging_path(claim.operation_id) {
+                            Ok(path) => path,
+                            Err(_) => return failed("image import staging is unavailable"),
+                        };
+                        let mut downloaded = false;
+                        for attempt in 0..3_u32 {
+                            match self
+                                .client
+                                .download_artifact(
+                                    &request.oci_layout_sha256,
+                                    request.image_bytes,
+                                    &staging,
+                                )
+                                .await
+                            {
+                                Ok(()) => {
+                                    downloaded = true;
+                                    break;
+                                }
+                                Err(error) if error.retryable() && attempt < 2 => {
+                                    tokio::time::sleep(Duration::from_millis(
+                                        100 * (attempt + 1) as u64,
+                                    ))
+                                    .await;
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        if !downloaded {
+                            return failed("exact OCI image archive is unavailable");
+                        }
+                        match importer.retain_verified_archive(&request, &staging) {
+                            Ok(path) => path,
+                            Err(_) => {
+                                return failed("verified OCI image archive could not be retained");
+                            }
+                        }
+                    }
+                    Err(_) => return failed("OCI image archive cache is invalid"),
                 };
-                if self
-                    .client
-                    .download_artifact(&request.oci_layout_sha256, request.image_bytes, &archive)
-                    .await
-                    .is_err()
-                {
-                    return failed("exact OCI image archive is unavailable");
-                }
                 match importer.verify(&request, &archive) {
                     Ok(evidence) => match self
                         .execute_host_runtime(
@@ -582,8 +953,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     || request.timeout_seconds == 0
                     || request.timeout_seconds > job.timeout_seconds
                     || spec.endpoint.is_some()
-                    || image_digest(&spec.runtime.image)
-                        .is_none_or(|digest| format!("sha256:{digest}") != request.image_digest)
+                    || spec.runtime.image_digest != request.image_digest
                 {
                     return failed_job(
                         &request,
@@ -727,9 +1097,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 };
-                for hook in plan.pre_start {
-                    let mut arguments = vec![plan.image_digest.clone()];
-                    arguments.extend(hook);
+                for hook in &plan.pre_start {
+                    let arguments = runtime_arguments_for_plan(&plan, hook);
                     if self
                         .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
                         .await
@@ -745,7 +1114,12 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 }
-                let mut arguments = vec![plan.image_digest];
+                let mut arguments = vec![
+                    plan.archive_sha256,
+                    plan.registry_index_digest,
+                    plan.platform_manifest_digest,
+                    plan.image_reference,
+                ];
                 arguments.extend(plan.main);
                 let outcome = run_interruptible_job(
                     self.execute_host_runtime_outcome(claim, HostRuntimeAction::Start, arguments),
@@ -927,6 +1301,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 }
             }
             RecipeOperationRequest::Install(request) => {
+                let inline_spec =
+                    match parse_compiled_execution_plan(&request.compiled_execution_plan) {
+                        Ok(spec) => spec,
+                        Err(_) => return failed("compiled execution plan is invalid"),
+                    };
                 let spec = match self
                     .client
                     .recipe_spec(&request.installation_id.to_string())
@@ -935,13 +1314,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     Ok(spec) => spec,
                     Err(_) => return failed("digest-bound recipe specification is unavailable"),
                 };
-                if spec.identity.recipe_revision_sha256 != request.recipe_content_sha256
+                if spec != inline_spec
                     || spec.topology.role != request.role
                     || spec.topology.rank != request.rank
-                    || image_digest(&spec.runtime.image)
-                        .map(|value| format!("sha256:{value}"))
-                        .as_deref()
-                        != Some(request.image_digest.as_str())
+                {
+                    return failed("compiled execution plan does not match the accepted install");
+                }
+                if spec.identity.recipe_revision_sha256.is_empty()
+                    || spec.topology.role != request.role
                 {
                     return failed("recipe specification does not match the accepted install");
                 }
@@ -950,8 +1330,15 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         claim,
                         HostRuntimeAction::ImageInspect,
                         vec![
-                            spec.runtime.image.clone(),
-                            request.image_digest.clone(),
+                            spec.runtime_image.oci_layout_sha256.clone(),
+                            spec.runtime_image
+                                .registry_manifest_digest
+                                .clone()
+                                .unwrap_or_else(|| {
+                                    spec.runtime_image.platform_manifest_digest.clone()
+                                }),
+                            spec.runtime_image.platform_manifest_digest.clone(),
+                            spec.runtime_image.local_image_reference(),
                             spec.security.user.clone(),
                         ],
                     )
@@ -967,16 +1354,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     return failed("local disk capacity changed after install admission");
                 }
-                if self
-                    .runtime
-                    .install(
-                        &spec,
-                        &request.installation_id.to_string(),
-                        &request.recipe_content_sha256,
-                    )
-                    .is_err()
-                {
-                    return failed("recipe artifacts or container image could not be installed");
+                match self.runtime.install(
+                    &spec,
+                    &request.installation_id.to_string(),
+                    &spec.identity.recipe_revision_sha256,
+                ) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        let (stage, category) = error.safe_install_context();
+                        return failed_owned(format!(
+                            "recipe artifacts or container image could not be installed (stage={stage}; category={category})"
+                        ));
+                    }
                 }
                 let installed_bytes = self
                     .runtime
@@ -984,21 +1373,50 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .unwrap_or(request.expected_bytes);
                 ExecutionResult {
                     state: "succeeded",
-                    body: json!({"installed_bytes": installed_bytes}),
+                    body: recipe_install_success_body(installed_bytes),
                 }
             }
             RecipeOperationRequest::Start(request) => {
                 let installation_id = request.installation_id.to_string();
+                let spec = match parse_compiled_execution_plan(&request.compiled_execution_plan) {
+                    Ok(spec) => spec,
+                    Err(_) => return failed("compiled execution plan is invalid"),
+                };
+                if spec.identity.recipe_revision_sha256 != request.recipe_content_sha256
+                    || spec.runtime.image_digest != request.image_digest
+                    || spec.topology.rank != request.rank
+                    || spec.topology.role != request.role
+                    || spec.topology.world_size != request.world_size
+                    || spec.runtime.placement.rank != request.rank
+                    || spec.runtime.placement.role != request.role
+                    || spec.runtime.placement.world_size != request.world_size
+                    || spec.runtime.placement.port != request.port
+                    || spec.runtime.placement.reserved_memory_bytes != request.reserved_memory_bytes
+                    || spec.runtime.placement.local_address != request.local_address
+                    || spec.runtime.placement.master_address != request.master_address
+                    || spec.runtime.placement.master_port != request.master_port
+                    || (spec.runtime.placement.endpoint_address.is_some()
+                        && spec.runtime.placement.endpoint_address
+                            != Some(request.endpoint_address))
+                    || (spec.runtime.placement.endpoint_address.is_none()
+                        && request.world_size > 1
+                        && request.local_address != Some(request.endpoint_address))
+                {
+                    return failed("compiled execution plan does not match start identity");
+                }
                 if self.runtime.recipe_digest(&installation_id).ok().as_deref()
                     != Some(&request.recipe_content_sha256)
                     || self.runtime.verify_installation(&installation_id).is_err()
                 {
                     return failed("installed recipe identity or artifact manifest does not match");
                 }
-                let spec = match self.runtime.load_spec(&installation_id) {
+                let installed_spec = match self.runtime.load_spec(&installation_id) {
                     Ok(spec) => spec,
                     Err(_) => return failed("installed recipe specification is corrupt"),
                 };
+                if !same_installed_workload(&installed_spec, &spec) {
+                    return failed("start plan does not match installed workload identity");
+                }
                 let Some(endpoint) = spec.endpoint.as_ref() else {
                     return failed("installed recipe is not a persistent service");
                 };
@@ -1095,9 +1513,8 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 if collective_readiness && !plan.pre_start.is_empty() {
                     return failed("retained workload unexpectedly contains start hooks");
                 }
-                for hook in plan.pre_start {
-                    let mut arguments = vec![plan.image_digest.clone()];
-                    arguments.extend(hook);
+                for hook in &plan.pre_start {
+                    let arguments = runtime_arguments_for_plan(&plan, hook);
                     if self
                         .execute_host_runtime(claim, HostRuntimeAction::Start, arguments)
                         .await
@@ -1107,8 +1524,7 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         return failed("container runtime pre-start hook failed");
                     }
                 }
-                let mut arguments = vec![plan.image_digest];
-                arguments.extend(plan.main);
+                let arguments = runtime_arguments_for_plan(&plan, &plan.main);
                 let runtime_guard_arguments = arguments.clone();
                 if collective_readiness {
                     if self
@@ -1196,38 +1612,18 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 return failed("rank launch evidence is unavailable");
                             }
                         };
-                    let runtime_arguments_sha256 = match canonical_json(&runtime_guard_arguments) {
-                        Ok(arguments) => hex_sha256(&arguments),
+                    let body = match recipe_start_success_body(
+                        &request,
+                        &spec,
+                        &artifact_set_digest,
+                        &runtime_guard_arguments,
+                    ) {
+                        Ok(body) => body,
                         Err(_) => return failed("rank launch evidence is unavailable"),
                     };
-                    let evidence = json!({
-                        "phase": "rank-launch",
-                        "run_id": run_id,
-                        "run_generation": request.run_generation,
-                        "recipe_revision_id": request.recipe_revision_id.to_string(),
-                        "recipe_content_sha256": request.recipe_content_sha256,
-                        "image_digest": image_digest(&spec.runtime.image).unwrap_or_default(),
-                        "artifact_set_digest": artifact_set_digest,
-                        "runtime_arguments_sha256": runtime_arguments_sha256,
-                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}@{}", artifact.repository, artifact.revision)).unwrap_or_default(),
-                        "rank": request.rank,
-                        "role": request.role,
-                        "world_size": request.world_size,
-                        "local_address": request.local_address,
-                        "master_address": request.master_address,
-                        "master_port": request.master_port,
-                        "memory_reservation_bytes": request.reserved_memory_bytes,
-                        "process_running": true,
-                        "fabric_projection_bound": true,
-                        "launched": true,
-                    });
-                    let (evidence, evidence_digest) = evidence_with_digest(evidence);
                     return ExecutionResult {
                         state: "succeeded",
-                        body: json!({
-                            "evidence": evidence,
-                            "evidence_digest": evidence_digest,
-                        }),
+                        body,
                     };
                 }
                 let runtime_guard = async {
@@ -1295,93 +1691,36 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                                 return failed("collective readiness evidence is unavailable");
                             }
                         };
-                    let endpoint_url = format!(
-                        "http://{}:{}",
-                        match request.endpoint_address {
-                            std::net::IpAddr::V4(address) => address.to_string(),
-                            std::net::IpAddr::V6(address) => format!("[{address}]"),
-                        },
-                        request.port
-                    );
-                    let runtime_arguments_sha256 = match canonical_json(&runtime_guard_arguments) {
-                        Ok(arguments) => hex_sha256(&arguments),
+                    let body = match recipe_start_success_body(
+                        &request,
+                        &spec,
+                        &artifact_set_digest,
+                        &runtime_guard_arguments,
+                    ) {
+                        Ok(body) => body,
                         Err(_) => return failed("collective readiness evidence is unavailable"),
                     };
-                    let evidence = json!({
-                        "phase": "collective-readiness",
-                        "run_id": run_id,
-                        "run_generation": request.run_generation,
-                        "recipe_revision_id": request.recipe_revision_id.to_string(),
-                        "recipe_content_sha256": request.recipe_content_sha256,
-                        "image_digest": image_digest(&spec.runtime.image).unwrap_or_default(),
-                        "artifact_set_digest": artifact_set_digest,
-                        "runtime_arguments_sha256": runtime_arguments_sha256,
-                        "model_identity": spec.artifacts.first().map(|artifact| format!("{}@{}", artifact.repository, artifact.revision)).unwrap_or_default(),
-                        "rank": request.rank,
-                        "role": request.role,
-                        "world_size": request.world_size,
-                        "local_address": request.local_address,
-                        "master_address": request.master_address,
-                        "master_port": request.master_port,
-                        "endpoint": endpoint_url,
-                        "memory_reservation_bytes": request.reserved_memory_bytes,
-                        "ready": true,
-                    });
-                    let (evidence, evidence_digest) = evidence_with_digest(evidence);
                     return ExecutionResult {
                         state: "succeeded",
-                        body: json!({
-                            "endpoint": endpoint_url,
-                            "evidence": evidence,
-                            "evidence_digest": evidence_digest,
-                        }),
+                        body,
                     };
                 }
-                let evidence = HealthEvidence {
-                    recipe_revision_id: request.recipe_revision_id.to_string(),
-                    recipe_content_sha256: request.recipe_content_sha256,
-                    image_digest: image_digest(&spec.runtime.image)
-                        .unwrap_or_default()
-                        .to_owned(),
-                    artifact_set_digest: self
-                        .runtime
-                        .artifact_set_digest(&installation_id)
-                        .unwrap_or_default(),
-                    model_identity: spec
-                        .artifacts
-                        .first()
-                        .map(|artifact| format!("{}@{}", artifact.repository, artifact.revision))
-                        .unwrap_or_default(),
-                    rank: request.rank,
-                    world_size: request.world_size,
-                    endpoint: format!(
-                        "http://{}:{}",
-                        match request.endpoint_address {
-                            std::net::IpAddr::V4(address) => address.to_string(),
-                            std::net::IpAddr::V6(address) => format!("[{address}]"),
-                        },
-                        request.port
-                    ),
-                    memory_reservation_bytes: request.reserved_memory_bytes,
-                    ready: true,
+                let artifact_set_digest = match self.runtime.artifact_set_digest(&installation_id) {
+                    Ok(digest) => digest,
+                    Err(_) => return failed("readiness evidence is unavailable"),
                 };
-                let evidence_digest = canonical_json(&evidence)
-                    .map(|value| hex_sha256(&value))
-                    .unwrap_or_default();
-                let mut evidence_value = serde_json::to_value(&evidence).unwrap_or_default();
-                if let Some(document) = evidence_value.as_object_mut() {
-                    document.insert(
-                        "evidence_digest".to_owned(),
-                        Value::String(evidence_digest.clone()),
-                    );
-                }
+                let body = match recipe_start_success_body(
+                    &request,
+                    &spec,
+                    &artifact_set_digest,
+                    &runtime_guard_arguments,
+                ) {
+                    Ok(body) => body,
+                    Err(_) => return failed("readiness evidence is unavailable"),
+                };
                 ExecutionResult {
                     state: "succeeded",
-                    body: json!({
-                        "endpoint": evidence.endpoint,
-                        "evidence": evidence_value,
-                        "evidence_digest": evidence_digest,
-                    }),
+                    body,
                 }
             }
             RecipeOperationRequest::Stop(request) => {
@@ -1397,9 +1736,24 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 {
                     failed("container runtime could not stop the workload")
                 } else {
-                    if let Some(image_digest) = plan.image_digest {
+                    if let (
+                        Some(archive_sha256),
+                        Some(registry_index_digest),
+                        Some(platform_manifest_digest),
+                        Some(image_reference),
+                    ) = (
+                        plan.archive_sha256,
+                        plan.registry_index_digest,
+                        plan.platform_manifest_digest,
+                        plan.image_reference,
+                    ) {
                         for hook in plan.post_stop {
-                            let mut arguments = vec![image_digest.clone()];
+                            let mut arguments = vec![
+                                archive_sha256.clone(),
+                                registry_index_digest.clone(),
+                                platform_manifest_digest.clone(),
+                                image_reference.clone(),
+                            ];
                             arguments.extend(hook);
                             if self
                                 .execute_host_runtime(claim, HostRuntimeAction::Stop, arguments)
@@ -1435,11 +1789,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                         );
                     }
                 }
-                let removed_model_bytes = match request.cleanup_model_version_sha256 {
-                    Some(model_version_sha256) => self.runtime.uninstall_with_model_cleanup(
+                let removed_model_bytes = match request.cleanup_model_content_sha256 {
+                    Some(model_content_sha256) => self.runtime.uninstall_with_model_cleanup(
                         &installation_id,
                         &request.recipe_content_sha256,
-                        &model_version_sha256,
+                        &model_content_sha256,
                     ),
                     None => self
                         .runtime
@@ -1451,14 +1805,11 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                 } else {
                     ExecutionResult {
                         state: "succeeded",
-                        body: json!({
-                            "uninstalled": true,
-                            "removed_model_bytes": removed_model_bytes.unwrap_or(0),
-                        }),
+                        body: recipe_uninstall_success_body(removed_model_bytes.unwrap_or(0)),
                     }
                 }
             }
-            RecipeOperationRequest::ModelUninstall(request) => {
+            RecipeOperationRequest::ModelCleanup(request) => {
                 let installations = request
                     .installations
                     .into_iter()
@@ -1471,14 +1822,14 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
                     .collect::<Vec<_>>();
                 match self
                     .runtime
-                    .uninstall_model(&installations, &request.model_version_sha256)
+                    .uninstall_model(&installations, &request.model_content_sha256)
                 {
                     Ok(removed_model_bytes) => ExecutionResult {
                         state: "succeeded",
-                        body: json!({
-                            "uninstalled_installations": installations.len(),
-                            "removed_model_bytes": removed_model_bytes,
-                        }),
+                        body: recipe_model_cleanup_success_body(
+                            installations.len(),
+                            removed_model_bytes,
+                        ),
                     },
                     Err(_) => failed("model dependencies could not be safely removed"),
                 }
@@ -1488,6 +1839,13 @@ impl<R: ProcessRunner> Executor for RecipeExecutor<'_, R> {
 }
 
 fn failed(reason: &'static str) -> ExecutionResult {
+    ExecutionResult {
+        state: "failed",
+        body: json!({"reason": reason}),
+    }
+}
+
+fn failed_owned(reason: String) -> ExecutionResult {
     ExecutionResult {
         state: "failed",
         body: json!({"reason": reason}),
@@ -1890,6 +2248,7 @@ fn normalize_execution_result(claim: &AgentClaim, executed: ExecutionResult) -> 
         .unwrap_or("agent operation failed");
     let error_code = match claim.operation.as_str() {
         "agent.upgrade.v1" => "agent_upgrade_failed",
+        "artifact.distribution.v1" => "artifact_distribution_failed",
         "recipe.build.v1" => "recipe_build_failed",
         "recipe.image.import.v1" => "recipe_image_import_failed",
         "recipe.job.run.v1" => "recipe_job_run_failed",
@@ -2013,12 +2372,13 @@ async fn run_heartbeats<C: LoopClient>(
 mod tests {
     use super::{
         ExecutionResult, Executor, InterruptibleJob, LoopClient, RecipeExecutor, RunOncePolicy,
-        normalize_execution_result, output_media_type, run_interruptible_job,
+        distribution_success_evidence, normalize_execution_result, output_media_type,
+        parse_compiled_execution_plan, readiness_identity, run_interruptible_job,
         run_once_with_claim_hook, run_once_with_heartbeat_interval, wait_for_launch_stability,
         wait_ready_with_runtime_guard,
     };
     use crate::{
-        client::{AgentHttpClient, ClientError},
+        client::{AgentHttpClient, ClientError, DistributionDownloadEvidence},
         oci::OciRuntime,
         process::{ProcessError, ProcessOutput, ProcessRunner, Program},
         runtime_identity::AgentRuntimeIdentity,
@@ -2026,7 +2386,7 @@ mod tests {
     };
     use async_trait::async_trait;
     use chrono::{DateTime, Duration as ChronoDuration, FixedOffset, Utc};
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::{
         fs,
         io::{Read, Write},
@@ -2042,10 +2402,43 @@ mod tests {
     use uuid::Uuid;
     use vonk_agent_protocol::{
         AgentClaim, AgentDirective, AgentProgress, AgentResult, RecipeJobOutputMapping,
-        canonical_json, hex_sha256,
+        RecipeOperationRequest, canonical_json, hex_sha256,
     };
 
     const NODE_ID: &str = "spk_0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn readiness_identity_uses_controller_evidence_digest_forms() {
+        let value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let (image_digest, model_identity) = readiness_identity(&plan);
+        assert_eq!(image_digest, &plan.runtime.image_digest[7..]);
+        let artifact = &plan.artifacts[0];
+        assert_eq!(
+            model_identity,
+            format!(
+                "{}/{}@{}",
+                artifact.model.publisher, artifact.model.slug, artifact.model.content_sha256
+            )
+        );
+    }
+
+    #[test]
+    fn compiled_plan_parser_rejects_malformed_or_unsafe_mounts() {
+        let mut value: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        assert!(parse_compiled_execution_plan(&value).is_ok());
+        value["security"]["mounts"][0]["target"] = json!("/etc");
+        assert!(parse_compiled_execution_plan(&value).is_err());
+        value["security"]["mounts"][0]["target"] = json!("/models");
+        value["runtime"].as_object_mut().unwrap().remove("argv");
+        assert!(parse_compiled_execution_plan(&value).is_err());
+    }
 
     struct NoProcess;
 
@@ -2167,6 +2560,172 @@ mod tests {
                 "status": "failed",
             })
         );
+    }
+
+    #[test]
+    fn distribution_result_is_digest_bound_and_controller_safe() {
+        let archive_digest = "a".repeat(64);
+        let image_digest = format!("sha256:{}", "b".repeat(64));
+        let body = distribution_success_evidence(DistributionDownloadEvidence {
+            assignment_id: Uuid::new_v4(),
+            model_artifact_set_sha256: "c".repeat(64),
+            model_digests: vec!["d".repeat(64)],
+            model_paths: vec![std::path::PathBuf::from("/run/private/model.bin")],
+            oci_archive_path: std::path::PathBuf::from("/run/private/image.oci.tar"),
+            oci_archive_sha256: archive_digest.clone(),
+            oci_archive_bytes: 123,
+            oci_image_digest: image_digest.clone(),
+            downloaded_bytes: 456,
+        });
+        let evidence_digest = body["evidence_digest"].as_str().unwrap();
+        let mut without_digest = body.clone();
+        without_digest
+            .as_object_mut()
+            .unwrap()
+            .remove("evidence_digest");
+        assert_eq!(
+            evidence_digest,
+            hex_sha256(&canonical_json(&without_digest).unwrap())
+        );
+        assert!(body.get("model_files").is_none());
+        assert!(body.get("oci_archive").is_none());
+        assert_eq!(body["verified_oci_layout_sha256"], archive_digest);
+        assert_eq!(body["verified_image_digest"], image_digest);
+
+        let result = AgentResult {
+            attempt: 1,
+            deadline: (Utc::now() + ChronoDuration::seconds(20))
+                .with_timezone(&FixedOffset::east_opt(0).unwrap()),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: NODE_ID.to_owned(),
+            operation_id: Uuid::new_v4(),
+            result: body,
+            schema_version: 1,
+            state: "succeeded".to_owned(),
+        };
+        result.validate().unwrap();
+    }
+
+    #[test]
+    fn distribution_failure_uses_operation_specific_result_code() {
+        let mut distribution_claim = claim();
+        distribution_claim.operation = "artifact.distribution.v1".to_owned();
+        let result = normalize_execution_result(
+            &distribution_claim,
+            ExecutionResult {
+                state: "failed",
+                body: json!({"reason": "distribution object digest mismatch"}),
+            },
+        );
+        assert_eq!(result.body["error_code"], "artifact_distribution_failed");
+        assert_eq!(result.body["status"], "failed");
+    }
+
+    #[tokio::test]
+    async fn controller_model_cleanup_payload_is_parsed_and_executed() {
+        let data = tempdir().unwrap();
+        let runtime_root = tempdir().unwrap();
+        let installation_id = "00000000-0000-4000-8000-000000000001";
+        let plan: Value = serde_json::from_str(include_str!(
+            "../../../../control/tests/fixtures/compiled_workload_v2.json"
+        ))
+        .unwrap();
+        let model_content_sha256 = plan["artifacts"][0]["model"]["content_sha256"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let installation = data.path().join("installations").join(installation_id);
+        fs::create_dir_all(&installation).unwrap();
+        fs::write(
+            installation.join("spec.json"),
+            serde_json::to_vec(&plan).unwrap(),
+        )
+        .unwrap();
+        let recipe_content_sha256 = plan["identity"]["recipe_revision_sha256"].as_str().unwrap();
+        fs::write(
+            installation.join("recipe-content.sha256"),
+            recipe_content_sha256,
+        )
+        .unwrap();
+
+        let payload = json!({
+            "schema_version": 1,
+            "model_content_sha256": model_content_sha256,
+            "plan_digest": "b".repeat(64),
+            "installations": [{
+                "installation_id": installation_id,
+                "recipe_content_sha256": recipe_content_sha256,
+            }],
+        });
+        let claim = AgentClaim {
+            attempt: 1,
+            authority_revision: "b".repeat(64),
+            deadline: (Utc::now() + ChronoDuration::seconds(20))
+                .with_timezone(&FixedOffset::east_opt(0).unwrap()),
+            fence: Uuid::new_v4(),
+            job_id: Uuid::new_v4(),
+            node_id: NODE_ID.to_owned(),
+            operation: "recipe.model-uninstall.v1".to_owned(),
+            operation_id: Uuid::new_v4(),
+            payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
+            payload,
+            schema_version: 1,
+        };
+        let client = AgentHttpClient::for_http_test("http://127.0.0.1/", NODE_ID);
+        let runner = NoProcess;
+        let executor = RecipeExecutor {
+            client: &client,
+            runtime: OciRuntime {
+                runner: &runner,
+                data_root: data.path(),
+                huggingface_curl_config: None,
+            },
+            runtime_root: runtime_root.path(),
+            observation_receipt_public_key: [0; 32],
+        };
+        let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(claim.deadline);
+        let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
+
+        let result = executor.execute(&claim, lease_deadline, cancellation).await;
+
+        assert_eq!(result.state, "succeeded");
+        assert_eq!(result.body["uninstalled_installations"], 1);
+        assert_eq!(result.body["removed_model_bytes"], 0);
+        assert!(!installation.exists());
+
+        fs::create_dir_all(&installation).unwrap();
+        fs::write(
+            installation.join("spec.json"),
+            serde_json::to_vec(&plan).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            installation.join("recipe-content.sha256"),
+            recipe_content_sha256,
+        )
+        .unwrap();
+        let uninstall_payload = json!({
+            "schema_version": 1,
+            "installation_id": installation_id,
+            "recipe_content_sha256": recipe_content_sha256,
+            "cleanup_model_content_sha256": model_content_sha256,
+            "plan_digest": "b".repeat(64),
+        });
+        let mut uninstall_claim = claim.clone();
+        uninstall_claim.operation = "recipe.uninstall".to_owned();
+        uninstall_claim.payload_digest = hex_sha256(&canonical_json(&uninstall_payload).unwrap());
+        uninstall_claim.payload = uninstall_payload;
+        let (_lease_sender, lease_deadline) = tokio::sync::watch::channel(uninstall_claim.deadline);
+        let (_cancel_sender, cancellation) = tokio::sync::watch::channel(false);
+
+        let result = executor
+            .execute(&uninstall_claim, lease_deadline, cancellation)
+            .await;
+
+        assert_eq!(result.state, "succeeded");
+        assert_eq!(result.body["uninstalled"], true);
+        assert!(!installation.exists());
     }
 
     #[test]
@@ -2417,8 +2976,20 @@ mod tests {
     }
 
     fn claim() -> AgentClaim {
-        let payload = json!({"plan_digest": "a".repeat(64)});
-        AgentClaim {
+        let plan: Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/tests/fixtures/compiled-execution-plan-v2.json"
+        ))
+        .unwrap();
+        let payload = json!({
+            "schema_version": 2,
+            "installation_id": "00000000-0000-4000-8000-000000000001",
+            "plan_digest": "a".repeat(64),
+            "rank": 0,
+            "role": "entrypoint",
+            "expected_bytes": 1,
+            "compiled_execution_plan": plan,
+        });
+        let claim = AgentClaim {
             attempt: 1,
             authority_revision: "b".repeat(64),
             deadline: (Utc::now() + ChronoDuration::seconds(20))
@@ -2431,7 +3002,9 @@ mod tests {
             payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
             payload,
             schema_version: 1,
-        }
+        };
+        RecipeOperationRequest::parse(&claim).unwrap();
+        claim
     }
 
     #[tokio::test]

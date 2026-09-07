@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from .recipe_contract import RecipeContractError, recipe_topology
+from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 
 
 class TopologyError(ValueError):
@@ -29,7 +29,7 @@ def validate_topology(
 ) -> tuple[Placement, ...]:
     try:
         topology = recipe_topology(recipe)
-    except RecipeContractError as error:
+    except RecipeRuntimeSpecError as error:
         raise TopologyError("topology.invalid", str(error)) from error
     ordered = tuple(sorted(placements, key=lambda item: item.rank))
     nodes = [item.node_id for item in ordered]

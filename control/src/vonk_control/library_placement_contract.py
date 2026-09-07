@@ -5,19 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import ConfigDict, Field, StringConstraints, model_validator
 
-UuidId = Annotated[
-    str,
-    StringConstraints(
-        pattern=(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
-            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-        )
-    ),
-]
-NodeId = Annotated[str, StringConstraints(pattern=r"^spk_[0-9a-f]{32}$")]
-Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+from .library_contract import Digest, NodeId, UuidId
+from .strict_json import StrictJSONModel
+
 Alias = Annotated[
     str,
     StringConstraints(
@@ -28,7 +20,7 @@ Alias = Annotated[
 ]
 
 
-class _StrictModel(BaseModel):
+class _StrictModel(StrictJSONModel):
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 

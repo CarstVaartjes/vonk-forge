@@ -62,6 +62,7 @@ class Ds4HarnessCompiler:
             recipe,
             distribution,
             frozenset({"DS4_LOG_LEVEL", "HF_HUB_OFFLINE"}),
+            engine_slug=self.slug,
         )
         return projection(
             slug=self.slug,

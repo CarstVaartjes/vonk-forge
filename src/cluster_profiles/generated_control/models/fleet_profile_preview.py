@@ -10,12 +10,15 @@ from ..types import UNSET, Unset
 from dateutil.parser import isoparse
 from typing import cast
 from typing import Literal, Union, cast
+from typing import Union
 import datetime
 
 if TYPE_CHECKING:
+  from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
+  from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
+  from ..models.fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
   from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
   from ..models.fleet_profile_plan_step import FleetProfilePlanStep
-  from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
   from ..models.fleet_profile_reason import FleetProfileReason
 
 
@@ -38,9 +41,11 @@ class FleetProfilePreview:
             profile_id (str):
             profile_name (str):
             reasons (list['FleetProfileReason']):
+            scope (FleetProfileScopePreview):
             steps (list['FleetProfilePlanStep']):
             summary (FleetProfilePlanSummary):
-            schema_version (Union[Literal[1], Unset]):  Default: 1.
+            preparations (Union[Unset, list['FleetProfileAssignmentPreparation']]):
+            schema_version (Union[Literal[2], Unset]):  Default: 2.
      """
 
     allowed: bool
@@ -51,18 +56,22 @@ class FleetProfilePreview:
     profile_id: str
     profile_name: str
     reasons: list['FleetProfileReason']
+    scope: 'FleetProfileScopePreview'
     steps: list['FleetProfilePlanStep']
     summary: 'FleetProfilePlanSummary'
-    schema_version: Union[Literal[1], Unset] = 1
+    preparations: Union[Unset, list['FleetProfileAssignmentPreparation']] = UNSET
+    schema_version: Union[Literal[2], Unset] = 2
 
 
 
 
 
     def to_dict(self) -> dict[str, Any]:
+        from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
+        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
+        from ..models.fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
         from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
         from ..models.fleet_profile_plan_step import FleetProfilePlanStep
-        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
         from ..models.fleet_profile_reason import FleetProfileReason
         allowed = self.allowed
 
@@ -90,6 +99,8 @@ class FleetProfilePreview:
 
 
 
+        scope = self.scope.to_dict()
+
         steps = []
         for steps_item_data in self.steps:
             steps_item = steps_item_data.to_dict()
@@ -98,6 +109,15 @@ class FleetProfilePreview:
 
 
         summary = self.summary.to_dict()
+
+        preparations: Union[Unset, list[dict[str, Any]]] = UNSET
+        if not isinstance(self.preparations, Unset):
+            preparations = []
+            for preparations_item_data in self.preparations:
+                preparations_item = preparations_item_data.to_dict()
+                preparations.append(preparations_item)
+
+
 
         schema_version = self.schema_version
 
@@ -113,9 +133,12 @@ class FleetProfilePreview:
             "profile_id": profile_id,
             "profile_name": profile_name,
             "reasons": reasons,
+            "scope": scope,
             "steps": steps,
             "summary": summary,
         })
+        if preparations is not UNSET:
+            field_dict["preparations"] = preparations
         if schema_version is not UNSET:
             field_dict["schema_version"] = schema_version
 
@@ -125,9 +148,11 @@ class FleetProfilePreview:
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.fleet_profile_scope_preview import FleetProfileScopePreview
+        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
+        from ..models.fleet_profile_assignment_preparation import FleetProfileAssignmentPreparation
         from ..models.fleet_profile_plan_summary import FleetProfilePlanSummary
         from ..models.fleet_profile_plan_step import FleetProfilePlanStep
-        from ..models.fleet_profile_assignment_preview import FleetProfileAssignmentPreview
         from ..models.fleet_profile_reason import FleetProfileReason
         d = dict(src_dict)
         allowed = d.pop("allowed")
@@ -165,6 +190,11 @@ class FleetProfilePreview:
             reasons.append(reasons_item)
 
 
+        scope = FleetProfileScopePreview.from_dict(d.pop("scope"))
+
+
+
+
         steps = []
         _steps = d.pop("steps")
         for steps_item_data in (_steps):
@@ -180,9 +210,19 @@ class FleetProfilePreview:
 
 
 
-        schema_version = cast(Union[Literal[1], Unset] , d.pop("schema_version", UNSET))
-        if schema_version != 1 and not isinstance(schema_version, Unset):
-            raise ValueError(f"schema_version must match const 1, got '{schema_version}'")
+        preparations = []
+        _preparations = d.pop("preparations", UNSET)
+        for preparations_item_data in (_preparations or []):
+            preparations_item = FleetProfileAssignmentPreparation.from_dict(preparations_item_data)
+
+
+
+            preparations.append(preparations_item)
+
+
+        schema_version = cast(Union[Literal[2], Unset] , d.pop("schema_version", UNSET))
+        if schema_version != 2 and not isinstance(schema_version, Unset):
+            raise ValueError(f"schema_version must match const 2, got '{schema_version}'")
 
         fleet_profile_preview = cls(
             allowed=allowed,
@@ -193,8 +233,10 @@ class FleetProfilePreview:
             profile_id=profile_id,
             profile_name=profile_name,
             reasons=reasons,
+            scope=scope,
             steps=steps,
             summary=summary,
+            preparations=preparations,
             schema_version=schema_version,
         )
 

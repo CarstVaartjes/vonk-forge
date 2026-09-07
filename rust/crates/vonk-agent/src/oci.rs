@@ -1,30 +1,27 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
-    net::{IpAddr, ToSocketAddrs},
+    io::{Read, Seek, SeekFrom, Write},
+    net::IpAddr,
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use url::Url;
 use vonk_agent_protocol::{
-    RecipeRunInspectionBinding, canonical_json as canonical_protocol_json,
-    hex_sha256 as protocol_sha256,
+    MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES, RecipeRunInspectionBinding,
+    canonical_json as canonical_protocol_json, hex_sha256 as protocol_sha256,
 };
 
 use crate::{
+    compiled_oci::{CompiledOciPaths, project},
     health::readiness_endpoint,
     inventory::{available_disk_bytes, available_memory_bytes},
     process::{ProcessError, ProcessRunner, Program},
-    workloads::{
-        ArgumentValue, ArtifactSpec, Placement, WorkloadError, WorkloadSpec, image_digest,
-        managed_path,
-    },
+    workloads::{CompiledExecutionPlan, Placement, WorkloadError, managed_path},
 };
 
 #[derive(Debug, Error)]
@@ -45,6 +42,35 @@ pub enum OciError {
     Json(#[from] serde_json::Error),
     #[error("local disk or memory capacity changed after admission")]
     Capacity,
+    #[error("install {stage} failed: {source}")]
+    Install {
+        stage: &'static str,
+        #[source]
+        source: Box<OciError>,
+    },
+}
+
+impl OciError {
+    pub fn safe_install_context(&self) -> (&'static str, &'static str) {
+        match self {
+            Self::Install { stage, source } => (*stage, source.safe_category()),
+            error => ("unknown", error.safe_category()),
+        }
+    }
+
+    fn safe_category(&self) -> &'static str {
+        match self {
+            Self::Process(_) => "process",
+            Self::Workload(_) => "workload",
+            Self::Runtime => "runtime",
+            Self::ImageDigest => "image-digest",
+            Self::Artifact => "artifact",
+            Self::Io(_) => "storage",
+            Self::Json(_) => "metadata",
+            Self::Capacity => "capacity",
+            Self::Install { source, .. } => source.safe_category(),
+        }
+    }
 }
 
 pub struct OciRuntime<'a, R> {
@@ -54,8 +80,8 @@ pub struct OciRuntime<'a, R> {
 }
 
 pub const MAX_MANAGED_RECIPE_RUNS: usize = 64;
+const MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES: usize = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES;
 const MAX_RUN_DIRECTORY_ENTRIES: usize = 4096;
-const MAX_HTTP_FILE_NAME_BYTES: usize = 255;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -74,7 +100,7 @@ pub struct RecipeRunInspectionPlan {
 }
 
 type LoadedRunLifecycle = (
-    WorkloadSpec,
+    CompiledExecutionPlan,
     String,
     Placement,
     Option<RecipeRunInspectionBinding>,
@@ -98,58 +124,50 @@ pub struct JobOutputState {
     pub manifest_sha256: String,
 }
 
-#[derive(Debug, Serialize)]
-struct RuntimeContract<'a> {
+const INSTALLATION_METADATA_SCHEMA_VERSION: u8 = 2;
+const INSTALLATION_METADATA_FILE: &str = "model-metadata.json";
+const MAX_COMPILED_DOCUMENT_BYTES: u64 = MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES as u64;
+const TRUSTED_RUNTIME_UID: u32 = 10_001;
+
+type PhysicalArtifactIdentity = (
+    String,
+    String,
+    u64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    u64,
+    String,
+);
+type PhysicalMaterialization = (PathBuf, PhysicalArtifactIdentity);
+
+fn install_error(stage: &'static str, source: OciError) -> OciError {
+    OciError::Install {
+        stage,
+        source: Box::new(source),
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct InstallationMetadataReceipt {
     schema_version: u8,
-    interface: &'static str,
-    installation_id: &'a str,
-    run_id: &'a str,
-    artifacts: Vec<RuntimeArtifact>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    endpoint: Option<RuntimeEndpoint<'a>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    job: Option<RuntimeJob<'a>>,
-    placement: RuntimePlacement<'a>,
+    entries: Vec<InstallationMetadataEntry>,
 }
 
-#[derive(Debug, Serialize)]
-struct RuntimeArtifact {
-    id: String,
-    kind: String,
-    repository: String,
-    revision: String,
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(deny_unknown_fields)]
+struct InstallationMetadataEntry {
+    selection_id: String,
     path: String,
-}
-
-#[derive(Debug, Serialize)]
-struct RuntimeEndpoint<'a> {
-    listen_host: &'static str,
-    listen_port: u16,
-    protocol: &'a str,
-    model_aliases: &'a [String],
-    health_path: &'a str,
-}
-
-#[derive(Debug, Serialize)]
-struct RuntimeJob<'a> {
-    interface: &'a str,
-    input: &'a Option<serde_json::Value>,
-    input_path: &'static str,
-    output_path: &'a str,
-    timeout_seconds: u16,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parameters: Option<&'a serde_json::Value>,
-}
-
-#[derive(Debug, Serialize)]
-struct RuntimePlacement<'a> {
-    endpoint_address: Option<std::net::IpAddr>,
-    rank: u32,
-    role: &'a str,
-    world_size: u32,
-    local_address: Option<std::net::IpAddr>,
-    master_address: Option<std::net::IpAddr>,
-    master_port: Option<u16>,
+    sha256: String,
+    size_bytes: u64,
+    dev: u64,
+    ino: u64,
+    mtime_ns: i128,
+    ctime_ns: i128,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,6 +201,10 @@ struct RecipeRunProbe {
 
 pub struct RuntimeStartPlan {
     pub image_digest: String,
+    pub registry_index_digest: String,
+    pub platform_manifest_digest: String,
+    pub archive_sha256: String,
+    pub image_reference: String,
     pub pre_start: Vec<Vec<String>>,
     pub main: Vec<String>,
 }
@@ -190,7 +212,33 @@ pub struct RuntimeStartPlan {
 pub struct RuntimeStopPlan {
     pub remove: Vec<String>,
     pub image_digest: Option<String>,
+    pub registry_index_digest: Option<String>,
+    pub platform_manifest_digest: Option<String>,
+    pub archive_sha256: Option<String>,
+    pub image_reference: Option<String>,
     pub post_stop: Vec<Vec<String>>,
+}
+
+/// Project one validated workload into the exact Podman argument vector used
+/// by `start_arguments`.  This remains pure so protocol probes can exercise
+/// the same argument construction without touching the host runtime.
+pub fn start_arguments_for_paths(
+    spec: &CompiledExecutionPlan,
+    paths: &CompiledOciPaths,
+    run_id: &str,
+) -> Result<Vec<String>, OciError> {
+    let invocation = project(spec, paths).map_err(|_| OciError::Runtime)?;
+    let mut arguments = invocation.podman_arguments();
+    arguments.splice(
+        1..1,
+        [
+            "--name".to_owned(),
+            format!("vonk-{run_id}"),
+            "--restart".to_owned(),
+            "no".to_owned(),
+        ],
+    );
+    Ok(arguments)
 }
 
 fn runtime_policy() -> Result<RuntimePolicy, OciError> {
@@ -346,7 +394,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     pub fn install(
         &self,
-        spec: &WorkloadSpec,
+        spec: &CompiledExecutionPlan,
         installation_id: &str,
         recipe_content_sha256: &str,
     ) -> Result<(), OciError> {
@@ -357,68 +405,108 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         {
             return Err(OciError::Artifact);
         }
-        self.verify_image(spec)?;
-        let installation = managed_path(self.data_root, "installations", installation_id)?;
-        let models = self.data_root.join("models").join("sha256");
-        fs::create_dir_all(&models)?;
-        fs::create_dir_all(&installation)?;
-        fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))?;
-        for artifact in &spec.artifacts {
-            self.materialize_artifact(&models, artifact)?;
+        self.verify_image(spec)
+            .map_err(|error| install_error("image-verification", error))?;
+        let installation = managed_path(self.data_root, "installations", installation_id)
+            .map_err(|error| install_error("installation-path", OciError::Workload(error)))?;
+        fs::create_dir_all(&installation)
+            .map_err(OciError::Io)
+            .map_err(|error| install_error("installation-directory", error))?;
+        fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))
+            .map_err(OciError::Io)
+            .map_err(|error| install_error("installation-directory", error))?;
+        self.ensure_runtime_cache(installation_id)
+            .map_err(|error| install_error("runtime-cache", error))?;
+        self.materialize_compiled_models(spec, installation_id)
+            .map_err(|error| install_error("model-materialization", error))?;
+        self.verify_compiled_image_archive(spec)
+            .map_err(|error| install_error("image-archive", error))?;
+        let encoded_spec = serde_json::to_vec(spec)
+            .map_err(OciError::Json)
+            .map_err(|error| install_error("installation-metadata", error))?;
+        if encoded_spec.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES {
+            return Err(install_error("installation-metadata", OciError::Artifact));
         }
-        atomic_write(&installation, "spec.json", &serde_json::to_vec(spec)?)?;
+        write_installation_metadata(&installation, spec)
+            .map_err(|error| install_error("installation-metadata", error))?;
+        atomic_write(&installation, "spec.json", &encoded_spec)
+            .map_err(|error| install_error("installation-metadata", error))?;
         atomic_write(
             &installation,
             "recipe-content.sha256",
             recipe_content_sha256.as_bytes(),
-        )?;
-        File::open(&installation)?.sync_all()?;
+        )
+        .map_err(|error| install_error("installation-metadata", error))?;
+        File::open(&installation)
+            .map_err(OciError::Io)
+            .and_then(|file| file.sync_all().map_err(OciError::Io))
+            .map_err(|error| install_error("installation-metadata", error))?;
         Ok(())
     }
 
-    pub fn verify_image(&self, spec: &WorkloadSpec) -> Result<(), OciError> {
+    /// Materialize only the model files authorized by a compiled Controller
+    /// plan. Distribution objects live under the plan-independent,
+    /// content-addressed model object root; artifact-set membership remains in
+    /// the typed plan and each selected path is an explicit projection.
+    pub fn materialize_compiled_models(
+        &self,
+        plan: &CompiledExecutionPlan,
+        installation_id: &str,
+    ) -> Result<Vec<PathBuf>, OciError> {
+        materialize_compiled_models(self.data_root, plan, installation_id)
+    }
+
+    pub fn verify_image(&self, spec: &CompiledExecutionPlan) -> Result<(), OciError> {
         spec.validate()?;
         let policy = runtime_policy()?;
-        let image_name = spec
-            .runtime
-            .image
-            .split_once('@')
-            .map(|(name, _)| name)
-            .ok_or(OciError::ImageDigest)?;
-        let build_id = image_name
-            .strip_prefix("localhost/vonk/recipe-build-")
-            .ok_or(OciError::ImageDigest)?;
-        if spec.runtime.interface != policy.runtime_interface
-            || spec.runtime.architecture != policy.architecture
+        if spec.runtime_image.runtime_interface != policy.runtime_interface
+            // Compiled plans use the Agent architecture identifier, while the
+            // image policy uses the OCI platform identifier. Match their one
+            // supported pair explicitly; neither contract accepts aliases.
+            || !matches!(
+                (spec.runtime_image.architecture.as_str(), policy.architecture.as_str()),
+                ("linux-arm64", "linux/arm64")
+            )
             || policy.required_image_label.name != "ai.vonkforge.runtime-interface"
-            || policy.required_image_label.value != "v1"
-            || uuid::Uuid::parse_str(build_id)
-                .ok()
-                .is_none_or(|value| value.to_string() != build_id)
-            || image_digest(&spec.runtime.image).is_none()
+            || spec.runtime_image.runtime_interface_label != policy.required_image_label.value
+            || spec.runtime.image_digest != spec.runtime_image.image_digest
         {
             return Err(OciError::ImageDigest);
         }
         Ok(())
     }
 
+    fn verify_compiled_image_archive(
+        &self,
+        plan: &CompiledExecutionPlan,
+    ) -> Result<PathBuf, OciError> {
+        let archive = self
+            .data_root
+            .join("oci-archives")
+            .join(&plan.runtime_image.oci_layout_sha256);
+        let metadata = fs::symlink_metadata(&archive)?;
+        if metadata.file_type().is_symlink()
+            || !trusted_model_metadata(&metadata, plan.runtime_image.image_bytes)
+        {
+            return Err(OciError::ImageDigest);
+        }
+        Ok(archive)
+    }
+
     pub fn start_arguments(
         &self,
-        spec: &WorkloadSpec,
+        spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
         placement: &Placement,
     ) -> Result<Vec<String>, OciError> {
         spec.validate()?;
         placement.validate()?;
-        let endpoint = spec.endpoint.as_ref();
-        let job = spec.job.as_ref();
-        if (placement.world_size > 1) != spec.runtime.placement_environment.is_some() {
-            return Err(OciError::Runtime);
-        }
-        if spec.security.host_network
-            && (placement.world_size < 2
-                || endpoint.is_none_or(|endpoint| placement.port != endpoint.port))
+        if placement.rank != spec.runtime.placement.rank
+            || placement.role != spec.runtime.placement.role
+            || placement.world_size != spec.runtime.placement.world_size
+            || placement.port != spec.runtime.placement.port
+            || placement.reserved_memory_bytes != spec.runtime.placement.reserved_memory_bytes
         {
             return Err(OciError::Runtime);
         }
@@ -426,219 +514,44 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let run_root = managed_path(self.data_root, "runs", run_id)?;
         let outputs = run_root.join("outputs");
         let metadata = self.run_metadata_path(run_id)?;
-        let shared_memory_bytes =
-            (placement.reserved_memory_bytes / 8).clamp(64 * 1024 * 1024, 16 * 1024 * 1024 * 1024);
-        let mut arguments = vec!["run".to_owned()];
-        if job.is_some() {
-            arguments.extend([
-                "--name".to_owned(),
-                format!("vonk-{run_id}"),
-                "--restart".to_owned(),
-                "no".to_owned(),
-            ]);
-        } else {
-            arguments.extend([
-                "--detach".to_owned(),
-                "--name".to_owned(),
-                format!("vonk-{run_id}"),
-                "--restart".to_owned(),
-                "no".to_owned(),
-            ]);
-        }
-        arguments.extend([
-            "--read-only".to_owned(),
-            "--tmpfs".to_owned(),
-            "/tmp:rw,nosuid,nodev,mode=1777,size=1073741824".to_owned(),
-            "--init".to_owned(),
-            "--pull".to_owned(),
-            "never".to_owned(),
-            "--log-driver".to_owned(),
-            "local".to_owned(),
-            "--log-opt".to_owned(),
-            "max-size=10m".to_owned(),
-            "--log-opt".to_owned(),
-            "max-file=3".to_owned(),
-            "--cap-drop=ALL".to_owned(),
-            "--security-opt=no-new-privileges".to_owned(),
-            "--network".to_owned(),
-            if spec.security.host_network {
-                "host".to_owned()
-            } else {
-                "bridge".to_owned()
+        let runtime_cache =
+            managed_path(self.data_root, "installations", installation_id)?.join("runtime-cache");
+        start_arguments_for_paths(
+            spec,
+            &CompiledOciPaths {
+                image_archive: self
+                    .data_root
+                    .join("oci-archives")
+                    .join(&spec.runtime_image.oci_layout_sha256),
+                model_root: self
+                    .data_root
+                    .join("installations")
+                    .join(installation_id)
+                    .join("models"),
+                input_root: spec.job.as_ref().map(|_| run_root.join("inputs")),
+                output_root: outputs,
+                cache_root: runtime_cache,
+                runtime_spec: metadata.join("runtime.json"),
             },
-            "--pids-limit".to_owned(),
-            "4096".to_owned(),
-            "--memory".to_owned(),
-            placement.reserved_memory_bytes.to_string(),
-            "--memory-swap".to_owned(),
-            placement.reserved_memory_bytes.to_string(),
-            "--shm-size".to_owned(),
-            shared_memory_bytes.to_string(),
-            "--user".to_owned(),
-            spec.security.user.clone(),
-            "--env".to_owned(),
-            format!("VONK_RANK={}", placement.rank),
-            "--env".to_owned(),
-            format!("VONK_WORLD_SIZE={}", placement.world_size),
-            "--env".to_owned(),
-            "VONK_RUNTIME_SPEC=/run/vonk/runtime.json".to_owned(),
-            "--env".to_owned(),
-            "VONK_MODEL_ROOT=/models".to_owned(),
-        ]);
-        if let Some(endpoint) = endpoint {
-            arguments.extend([
-                "--env".to_owned(),
-                "VONK_LISTEN_HOST=0.0.0.0".to_owned(),
-                "--env".to_owned(),
-                format!("VONK_LISTEN_PORT={}", endpoint.port),
-            ]);
-        } else if let Some(job) = job {
-            arguments.extend([
-                "--env".to_owned(),
-                "VONK_INPUT_ROOT=/inputs".to_owned(),
-                "--env".to_owned(),
-                "VONK_OUTPUT_ROOT=/outputs".to_owned(),
-                "--env".to_owned(),
-                format!("VONK_JOB_TIMEOUT_SECONDS={}", job.timeout_seconds),
-            ]);
+            run_id,
+        )
+    }
+
+    fn ensure_runtime_cache(&self, installation_id: &str) -> Result<PathBuf, OciError> {
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        let cache = installation.join("runtime-cache");
+        fs::create_dir_all(&cache)?;
+        fs::set_permissions(&cache, fs::Permissions::from_mode(0o700))?;
+        let metadata = fs::symlink_metadata(&cache)?;
+        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
+            return Err(OciError::Artifact);
         }
-        if spec.security.host_network {
-            arguments.extend([
-                "--ipc".to_owned(),
-                "host".to_owned(),
-                "--device".to_owned(),
-                "/dev/infiniband:/dev/infiniband".to_owned(),
-                "--ulimit".to_owned(),
-                "memlock=-1:-1".to_owned(),
-                "--ulimit".to_owned(),
-                "stack=67108864:67108864".to_owned(),
-            ]);
-        } else if let Some(endpoint) = endpoint {
-            arguments.extend([
-                "--publish".to_owned(),
-                match placement.endpoint_address {
-                    Some(IpAddr::V4(address)) => {
-                        format!("{address}:{}:{}", placement.port, endpoint.port)
-                    }
-                    Some(IpAddr::V6(address)) => {
-                        format!("[{address}]:{}:{}", placement.port, endpoint.port)
-                    }
-                    None => format!("{}:{}", placement.port, endpoint.port),
-                },
-            ]);
-        }
-        if let Some(binding) = &spec.runtime.placement_environment {
-            let master = placement.master_address.ok_or(OciError::Runtime)?;
-            let local = placement.local_address.ok_or(OciError::Runtime)?;
-            let master_port = placement.master_port.ok_or(OciError::Runtime)?;
-            arguments.extend([
-                "--env".to_owned(),
-                format!("{}={master}", binding.master_address),
-                "--env".to_owned(),
-                format!("{}={local}", binding.local_address),
-            ]);
-            arguments.extend([
-                "--env".to_owned(),
-                format!("{}={master_port}", binding.master_port),
-            ]);
-            if placement.rank == 0 && !spec.security.host_network {
-                let publication = match master {
-                    IpAddr::V4(address) => {
-                        format!("{address}:{master_port}:{master_port}")
-                    }
-                    IpAddr::V6(address) => {
-                        format!("[{address}]:{master_port}:{master_port}")
-                    }
-                };
-                arguments.extend(["--publish".to_owned(), publication]);
-            }
-        }
-        if spec
-            .security
-            .devices
-            .iter()
-            .any(|device| device == "nvidia.com/gpu=all")
-        {
-            arguments.extend(["--device".to_owned(), "nvidia.com/gpu=all".to_owned()]);
-        }
-        for environment in &spec.runtime.environment {
-            let Some(value) = &environment.value else {
-                return Err(OciError::Runtime);
-            };
-            let value = match value {
-                ArgumentValue::Boolean(value) => value.to_string(),
-                ArgumentValue::Integer(value) => value.to_string(),
-                ArgumentValue::String(value) => value.clone(),
-            };
-            arguments.extend(["--env".to_owned(), format!("{}={value}", environment.name)]);
-        }
-        let storage_artifacts = self.storage_artifacts_for_spec(spec, installation_id)?;
-        if storage_artifacts.len() != spec.artifacts.len() {
-            return Err(OciError::Runtime);
-        }
-        for (artifact, storage_artifact) in spec.artifacts.iter().zip(&storage_artifacts) {
-            let source = self
-                .data_root
-                .join("models")
-                .join("sha256")
-                .join(artifact_key(storage_artifact)?);
-            arguments.extend([
-                "--mount".to_owned(),
-                format!(
-                    "type=bind,src={},dst={},readonly",
-                    source.display(),
-                    artifact.mount.target
-                ),
-            ]);
-        }
-        for mount in &spec.security.mounts {
-            match mount.source.as_str() {
-                // The model mount remains part of the signed security policy. Each artifact is
-                // mounted separately above so the shared cache root is never exposed.
-                "model" => continue,
-                "outputs" => {
-                    let mut value =
-                        format!("type=bind,src={},dst={}", outputs.display(), mount.target);
-                    if mount.read_only {
-                        value.push_str(",readonly");
-                    }
-                    arguments.extend(["--mount".to_owned(), value]);
-                }
-                "inputs" => {
-                    let value = format!(
-                        "type=bind,src={},dst={},readonly",
-                        run_root.join("inputs").display(),
-                        mount.target
-                    );
-                    arguments.extend(["--mount".to_owned(), value]);
-                }
-                _ => return Err(OciError::Runtime),
-            }
-        }
-        arguments.extend([
-            "--mount".to_owned(),
-            format!(
-                "type=bind,src={},dst=/run/vonk/runtime.json,readonly",
-                metadata.join("runtime.json").display()
-            ),
-        ]);
-        arguments.push(spec.runtime.image.clone());
-        arguments.extend(spec.runtime.entrypoint.iter().cloned());
-        for argument in &spec.runtime.arguments {
-            arguments.push(format!("--{}", argument.name.replace('_', "-")));
-            match &argument.value {
-                ArgumentValue::Boolean(true) => {}
-                ArgumentValue::Boolean(false) => arguments.push("false".to_owned()),
-                ArgumentValue::Integer(value) => arguments.push(value.to_string()),
-                ArgumentValue::String(value) => arguments.push(value.clone()),
-            }
-        }
-        Ok(arguments)
+        Ok(cache)
     }
 
     pub fn prepare_start(
         &self,
-        spec: &WorkloadSpec,
+        spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
         placement: &Placement,
@@ -648,7 +561,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     pub fn prepare_start_with_inspection_identity(
         &self,
-        spec: &WorkloadSpec,
+        spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
         placement: &Placement,
@@ -659,7 +572,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     fn prepare_start_internal(
         &self,
-        spec: &WorkloadSpec,
+        spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
         placement: &Placement,
@@ -672,6 +585,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let outputs = state.join("outputs");
         fs::create_dir_all(&outputs)?;
         fs::set_permissions(&outputs, fs::Permissions::from_mode(0o700))?;
+        reset_runtime_tmp(&outputs)?;
+        self.ensure_runtime_cache(installation_id)?;
         if spec.job.is_some() {
             let inputs = state.join("inputs");
             let metadata = fs::symlink_metadata(&inputs)?;
@@ -682,15 +597,13 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let metadata = self.ensure_run_metadata(run_id)?;
         self.write_runtime_contract(spec, installation_id, run_id, placement, None)?;
         let main = self.start_arguments(spec, installation_id, run_id, placement)?;
-        let runtime_image_digest = format!(
-            "sha256:{}",
-            image_digest(&spec.runtime.image).ok_or(OciError::ImageDigest)?
-        );
+        let runtime_image_digest = spec.runtime_image.image_digest.clone();
+        let runtime_image_reference = spec.runtime_image.local_image_reference();
         let pre_start = spec
             .lifecycle
             .pre_start
             .iter()
-            .map(|hook| hook_arguments(&main, &spec.runtime.image, hook))
+            .map(|hook| hook_arguments(&main, &runtime_image_reference, hook))
             .collect::<Result<Vec<_>, _>>()?;
         let observation = identity
             .map(|identity| {
@@ -704,13 +617,22 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 {
                     return Err(OciError::Artifact);
                 }
-                let mut arguments = vec![runtime_image_digest.clone()];
+                let registry_index_digest = spec
+                    .runtime_image
+                    .registry_manifest_digest
+                    .clone()
+                    .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone());
+                let platform_manifest_digest = spec.runtime_image.platform_manifest_digest.clone();
+                let mut arguments = vec![
+                    spec.runtime_image.oci_layout_sha256.clone(),
+                    registry_index_digest,
+                    platform_manifest_digest,
+                    runtime_image_reference.clone(),
+                ];
                 arguments.extend(main.clone());
                 let binding = RecipeRunInspectionBinding {
                     artifact_set_digest: self.artifact_set_digest(installation_id)?,
-                    image_digest: image_digest(&spec.runtime.image)
-                        .ok_or(OciError::ImageDigest)?
-                        .to_owned(),
+                    image_digest: runtime_image_digest[7..].to_owned(),
                     installation_id: uuid::Uuid::parse_str(installation_id)
                         .map_err(|_| OciError::Artifact)?,
                     local_address,
@@ -721,7 +643,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                     model_identity: spec
                         .artifacts
                         .first()
-                        .map(|artifact| format!("{}@{}", artifact.repository, artifact.revision))
+                        .map(|artifact| {
+                            format!(
+                                "{}/{}@{}",
+                                artifact.model.publisher,
+                                artifact.model.slug,
+                                artifact.model.content_sha256
+                            )
+                        })
                         .ok_or(OciError::Artifact)?,
                     port: placement.port,
                     rank: placement.rank,
@@ -750,6 +679,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         )?;
         Ok(RuntimeStartPlan {
             image_digest: runtime_image_digest,
+            registry_index_digest: spec
+                .runtime_image
+                .registry_manifest_digest
+                .clone()
+                .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone()),
+            platform_manifest_digest: spec.runtime_image.platform_manifest_digest.clone(),
+            archive_sha256: spec.runtime_image.oci_layout_sha256.clone(),
+            image_reference: spec.runtime_image.local_image_reference(),
             pre_start,
             main,
         })
@@ -764,7 +701,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     /// container under the same run id.
     pub fn prepare_retained_start(
         &self,
-        spec: &WorkloadSpec,
+        spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
         placement: &Placement,
@@ -781,11 +718,18 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         {
             return Err(OciError::Runtime);
         }
+        // Retained reconstruction is inspection/collective-readiness only.
+        // Reset writable state only in prepare_start_internal for a real start.
         Ok(RuntimeStartPlan {
-            image_digest: format!(
-                "sha256:{}",
-                image_digest(&spec.runtime.image).ok_or(OciError::ImageDigest)?
-            ),
+            image_digest: spec.runtime_image.image_digest.clone(),
+            registry_index_digest: spec
+                .runtime_image
+                .registry_manifest_digest
+                .clone()
+                .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone()),
+            platform_manifest_digest: spec.runtime_image.platform_manifest_digest.clone(),
+            archive_sha256: spec.runtime_image.oci_layout_sha256.clone(),
+            image_reference: spec.runtime_image.local_image_reference(),
             pre_start: Vec::new(),
             main: self.start_arguments(spec, installation_id, run_id, placement)?,
         })
@@ -793,7 +737,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     pub fn prepare_retained_start_with_inspection_identity(
         &self,
-        spec: &WorkloadSpec,
+        spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
         placement: &Placement,
@@ -816,7 +760,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     pub fn prepare_job_start(
         &self,
-        spec: &WorkloadSpec,
+        spec: &CompiledExecutionPlan,
         installation_id: &str,
         run_id: &str,
         placement: &Placement,
@@ -852,26 +796,45 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             .as_ref()
             .map(|(spec, _, _, _)| spec.lifecycle.stop_timeout_seconds)
             .unwrap_or(30);
-        let (image_digest, post_stop) = match lifecycle {
+        let (
+            image_digest,
+            registry_index_digest,
+            platform_manifest_digest,
+            archive_sha256,
+            image_reference,
+            post_stop,
+        ) = match lifecycle {
             Some((spec, installation_id, placement, _)) => {
                 let main = self.start_arguments(&spec, &installation_id, run_id, &placement)?;
                 (
-                    Some(format!(
-                        "sha256:{}",
-                        image_digest(&spec.runtime.image).ok_or(OciError::ImageDigest)?
-                    )),
+                    Some(spec.runtime_image.image_digest.clone()),
+                    Some(
+                        spec.runtime_image
+                            .registry_manifest_digest
+                            .clone()
+                            .unwrap_or_else(|| spec.runtime_image.platform_manifest_digest.clone()),
+                    ),
+                    Some(spec.runtime_image.platform_manifest_digest.clone()),
+                    Some(spec.runtime_image.oci_layout_sha256.clone()),
+                    Some(spec.runtime_image.local_image_reference()),
                     spec.lifecycle
                         .post_stop
                         .iter()
-                        .map(|hook| hook_arguments(&main, &spec.runtime.image, hook))
+                        .map(|hook| {
+                            hook_arguments(&main, &spec.runtime_image.local_image_reference(), hook)
+                        })
                         .collect::<Result<Vec<_>, _>>()?,
                 )
             }
-            None => (None, Vec::new()),
+            None => (None, None, None, None, None, Vec::new()),
         };
         Ok(RuntimeStopPlan {
             remove: vec![run_id.to_owned(), stop_timeout.to_string()],
             image_digest,
+            registry_index_digest,
+            platform_manifest_digest,
+            archive_sha256,
+            image_reference,
             post_stop,
         })
     }
@@ -939,20 +902,31 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
                 || binding.port != placement.port
                 || binding.recipe_content_sha256 != self.recipe_digest(&installation_id)?
                 || binding.artifact_set_digest != self.artifact_set_digest(&installation_id)?
-                || binding.image_digest
-                    != image_digest(&spec.runtime.image).ok_or(OciError::ImageDigest)?
+                || binding.image_digest != spec.runtime_image.image_digest[7..]
                 || binding.model_identity
                     != spec
                         .artifacts
                         .first()
-                        .map(|artifact| format!("{}@{}", artifact.repository, artifact.revision))
+                        .map(|artifact| {
+                            format!(
+                                "{}/{}@{}",
+                                artifact.model.publisher,
+                                artifact.model.slug,
+                                artifact.model.content_sha256
+                            )
+                        })
                         .ok_or(OciError::Artifact)?
             {
                 return Err(OciError::Artifact);
             }
             let retained =
                 self.prepare_retained_start(&spec, &installation_id, &run_id, &placement)?;
-            let mut arguments = vec![retained.image_digest];
+            let mut arguments = vec![
+                retained.archive_sha256.clone(),
+                retained.registry_index_digest.clone(),
+                retained.platform_manifest_digest.clone(),
+                retained.image_reference.clone(),
+            ];
             arguments.extend(retained.main);
             if binding.runtime_arguments_sha256
                 != protocol_sha256(
@@ -1189,40 +1163,49 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(())
     }
 
+    /// Remove one installation's materialized model files when the signed
+    /// Controller plan proves that this node is the last consumer of the
+    /// model. The global distribution cache is reusable shared state and is
+    /// retained for future installs.
     pub fn uninstall_with_model_cleanup(
         &self,
         installation_id: &str,
         expected_recipe_digest: &str,
-        model_version_sha256: &str,
+        model_content_sha256: &str,
     ) -> Result<u64, OciError> {
+        if !lower_hex(model_content_sha256, 64) {
+            return Err(OciError::Artifact);
+        }
         let (_, persisted) = self.load_persisted_spec(installation_id)?;
         if self.recipe_digest(installation_id)? != expected_recipe_digest
-            || !spec_references_model(&persisted, model_version_sha256)
+            || !spec_references_model(&persisted, model_content_sha256)
         {
             return Err(OciError::Artifact);
         }
-        let candidate_keys = persisted
-            .artifacts
-            .iter()
-            .map(artifact_key)
-            .collect::<Result<BTreeSet<_>, _>>()?;
         let remaining = self.installed_specs_except(&[installation_id])?;
         if remaining
             .iter()
-            .any(|(_, spec)| spec_references_model(spec, model_version_sha256))
+            .any(|(_, spec)| spec_references_model(spec, model_content_sha256))
         {
             return Err(OciError::Artifact);
         }
+        let removed_model_bytes =
+            materialized_model_bytes(self.data_root, installation_id, &persisted)?;
         self.uninstall(installation_id, expected_recipe_digest)?;
-        self.remove_unreferenced_artifacts(&candidate_keys)
+        Ok(removed_model_bytes)
     }
 
+    /// Explicit model cleanup is a Controller-authorized cascade.  Every
+    /// installation identity and recipe digest is checked before any storage
+    /// mutation, and shared model objects remain when another installation
+    /// still references the same physical object. The global distribution
+    /// cache is retained; this operation only removes installation state.
     pub fn uninstall_model(
         &self,
         installations: &[(String, String)],
-        model_version_sha256: &str,
+        model_content_sha256: &str,
     ) -> Result<u64, OciError> {
-        if installations.is_empty() {
+        if installations.is_empty() || !lower_hex(model_content_sha256, 64) {
             return Err(OciError::Artifact);
         }
         let target_ids = installations
@@ -1232,97 +1215,70 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         if target_ids.len() != installations.len() {
             return Err(OciError::Artifact);
         }
-        let mut candidate_keys = BTreeSet::new();
+        let mut removed_model_bytes = 0_u64;
         for (installation_id, expected_recipe_digest) in installations {
             let (_, persisted) = self.load_persisted_spec(installation_id)?;
             if self.recipe_digest(installation_id)? != *expected_recipe_digest
-                || !spec_references_model(&persisted, model_version_sha256)
+                || !spec_references_model(&persisted, model_content_sha256)
             {
                 return Err(OciError::Artifact);
             }
-            for artifact in &persisted.artifacts {
-                candidate_keys.insert(artifact_key(artifact)?);
-            }
+            removed_model_bytes = removed_model_bytes
+                .checked_add(materialized_model_bytes(
+                    self.data_root,
+                    installation_id,
+                    &persisted,
+                )?)
+                .ok_or(OciError::Artifact)?;
         }
         let excluded = target_ids.iter().copied().collect::<Vec<_>>();
         let remaining = self.installed_specs_except(&excluded)?;
         if remaining
             .iter()
-            .any(|(_, spec)| spec_references_model(spec, model_version_sha256))
+            .any(|(_, spec)| spec_references_model(spec, model_content_sha256))
         {
             return Err(OciError::Artifact);
         }
         for (installation_id, expected_recipe_digest) in installations {
             self.uninstall(installation_id, expected_recipe_digest)?;
         }
-        self.remove_unreferenced_artifacts(&candidate_keys)
+        Ok(removed_model_bytes)
     }
 
     fn installed_specs_except(
         &self,
         excluded: &[&str],
-    ) -> Result<Vec<(String, WorkloadSpec)>, OciError> {
+    ) -> Result<Vec<(String, CompiledExecutionPlan)>, OciError> {
         let root = self.data_root.join("installations");
+        let metadata = fs::symlink_metadata(&root)?;
+        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+            return Err(OciError::Artifact);
+        }
+        let excluded = excluded.iter().copied().collect::<BTreeSet<_>>();
         let mut entries = fs::read_dir(&root)?.collect::<Result<Vec<_>, _>>()?;
         if entries.len() > MAX_RUN_DIRECTORY_ENTRIES {
             return Err(OciError::Artifact);
         }
         entries.sort_by_key(fs::DirEntry::file_name);
-        let excluded = excluded.iter().copied().collect::<BTreeSet<_>>();
         let mut result = Vec::with_capacity(entries.len());
         for entry in entries {
-            let name = entry
+            let installation_id = entry
                 .file_name()
                 .into_string()
                 .map_err(|_| OciError::Artifact)?;
-            if excluded.contains(name.as_str()) {
+            if excluded.contains(installation_id.as_str()) {
                 continue;
             }
-            let metadata = entry.file_type()?;
-            if !metadata.is_dir() || metadata.is_symlink() {
+            let file_type = entry.file_type()?;
+            if !file_type.is_dir() || file_type.is_symlink() {
                 return Err(OciError::Artifact);
             }
-            let (_, persisted) = self.load_persisted_spec(&name)?;
-            result.push((name, persisted));
+            result.push((installation_id.clone(), self.load_spec(&installation_id)?));
         }
         Ok(result)
     }
 
-    fn remove_unreferenced_artifacts(
-        &self,
-        candidate_keys: &BTreeSet<String>,
-    ) -> Result<u64, OciError> {
-        let referenced = self
-            .installed_specs_except(&[])?
-            .into_iter()
-            .flat_map(|(_, spec)| spec.artifacts)
-            .map(|artifact| artifact_key(&artifact))
-            .collect::<Result<BTreeSet<_>, _>>()?;
-        let root = self.data_root.join("models").join("sha256");
-        let mut removed_bytes = 0_u64;
-        for key in candidate_keys.difference(&referenced) {
-            if !lower_hex(key, 64) {
-                return Err(OciError::Artifact);
-            }
-            let path = root.join(key);
-            let metadata = match fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error.into()),
-            };
-            if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-                return Err(OciError::Artifact);
-            }
-            removed_bytes = removed_bytes
-                .checked_add(read_manifest(&path)?.total_bytes)
-                .ok_or(OciError::Artifact)?;
-            fs::remove_dir_all(&path)?;
-        }
-        File::open(&root)?.sync_all()?;
-        Ok(removed_bytes)
-    }
-
-    pub fn load_spec(&self, installation_id: &str) -> Result<WorkloadSpec, OciError> {
+    pub fn load_spec(&self, installation_id: &str) -> Result<CompiledExecutionPlan, OciError> {
         self.load_persisted_spec(installation_id)
             .map(|(spec, _)| spec)
     }
@@ -1330,13 +1286,16 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     fn load_persisted_spec(
         &self,
         installation_id: &str,
-    ) -> Result<(WorkloadSpec, WorkloadSpec), OciError> {
+    ) -> Result<(CompiledExecutionPlan, CompiledExecutionPlan), OciError> {
         let persisted = self.read_persisted_spec(installation_id)?;
         persisted.validate()?;
         Ok((persisted.clone(), persisted))
     }
 
-    fn read_persisted_spec(&self, installation_id: &str) -> Result<WorkloadSpec, OciError> {
+    fn read_persisted_spec(
+        &self,
+        installation_id: &str,
+    ) -> Result<CompiledExecutionPlan, OciError> {
         let installation = managed_path(self.data_root, "installations", installation_id)?;
         let directory_metadata = fs::symlink_metadata(&installation)?;
         if !directory_metadata.file_type().is_dir() || directory_metadata.file_type().is_symlink() {
@@ -1346,43 +1305,79 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let metadata = fs::symlink_metadata(&path)?;
         if !metadata.file_type().is_file()
             || metadata.file_type().is_symlink()
-            || metadata.len() > 64 * 1024
+            || metadata.len() > MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64
         {
             return Err(OciError::Artifact);
         }
-        serde_json::from_slice(&read_regular_file(&path, 64 * 1024)?).map_err(OciError::Json)
-    }
-
-    fn storage_artifacts_for_spec(
-        &self,
-        spec: &WorkloadSpec,
-        installation_id: &str,
-    ) -> Result<Vec<ArtifactSpec>, OciError> {
-        match self.load_persisted_spec(installation_id) {
-            Ok((loaded, persisted)) if loaded == *spec => Ok(persisted.artifacts),
-            Ok(_) => Err(OciError::Runtime),
-            Err(OciError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(spec.artifacts.clone())
-            }
-            Err(error) => Err(error),
-        }
+        serde_json::from_slice(&read_regular_file(
+            &path,
+            MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES as u64,
+        )?)
+        .map_err(OciError::Json)
     }
 
     pub fn verify_installation(&self, installation_id: &str) -> Result<(), OciError> {
-        let (spec, persisted) = self.load_persisted_spec(installation_id)?;
-        if spec.artifacts.len() != persisted.artifacts.len() {
-            return Err(OciError::Artifact);
-        }
-        let models = self.data_root.join("models").join("sha256");
-        for (artifact, storage_artifact) in spec.artifacts.iter().zip(&persisted.artifacts) {
-            let destination = models.join(artifact_key(storage_artifact)?);
-            if artifact.kind == "http.file" {
-                let (_, file_name) = http_file_url(&artifact.repository)?;
-                verify_cached_http_file(&destination, &file_name, artifact)?;
-            } else {
-                verify_manifest(&destination)?;
+        let (_, plan) = self.load_persisted_spec(installation_id)?;
+        let installation = managed_path(self.data_root, "installations", installation_id)?;
+        let models = installation.join("models");
+        let receipt = read_installation_metadata(&installation)?
+            .filter(|receipt| receipt_matches_plan(receipt, &plan));
+        let receipt_index = receipt.as_ref().map(|receipt| {
+            receipt
+                .entries
+                .iter()
+                .map(|entry| ((entry.selection_id.as_str(), entry.path.as_str()), entry))
+                .collect::<BTreeMap<_, _>>()
+        });
+        if receipt.is_some() {
+            let mut fast_path = true;
+            for artifact in unique_plan_artifacts(&plan) {
+                let destination = models.join(&artifact.selection_id).join(&artifact.path);
+                let Some(entry) = receipt_index.as_ref().and_then(|index| {
+                    index.get(&(artifact.selection_id.as_str(), artifact.path.as_str()))
+                }) else {
+                    fast_path = false;
+                    break;
+                };
+                let (_, metadata) = open_trusted_model_file(&destination, artifact.size_bytes)?;
+                if !metadata_matches_receipt(&metadata, entry) {
+                    fast_path = false;
+                    break;
+                }
+            }
+            if fast_path {
+                return Ok(());
             }
         }
+
+        let unique_artifacts = unique_plan_artifacts(&plan);
+        let mut refreshed = Vec::with_capacity(unique_artifacts.len());
+        for artifact in unique_artifacts {
+            let destination = models.join(&artifact.selection_id).join(&artifact.path);
+            let (mut file, metadata) = open_trusted_model_file(&destination, artifact.size_bytes)?;
+            if let Some(entry) = receipt_index.as_ref().and_then(|index| {
+                index
+                    .get(&(artifact.selection_id.as_str(), artifact.path.as_str()))
+                    .filter(|entry| metadata_matches_receipt(&metadata, entry))
+            }) {
+                refreshed.push((**entry).clone());
+                continue;
+            }
+            if sha256_open_file(&mut file, &metadata)? != artifact.sha256 {
+                return Err(OciError::Artifact);
+            }
+            refreshed.push(installation_metadata_entry(artifact, &metadata));
+        }
+        refreshed.sort();
+        atomic_write(
+            &installation,
+            INSTALLATION_METADATA_FILE,
+            &serde_json::to_vec(&InstallationMetadataReceipt {
+                schema_version: INSTALLATION_METADATA_SCHEMA_VERSION,
+                entries: refreshed,
+            })?,
+        )?;
+        File::open(&installation)?.sync_all()?;
         Ok(())
     }
 
@@ -1422,91 +1417,24 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         let mut files = BTreeMap::new();
         let mut total = 0;
         visit_files(&installation, &installation, &mut files, &mut total)?;
-        let (_, persisted) = self.load_persisted_spec(installation_id)?;
-        for artifact in &persisted.artifacts {
-            let manifest = read_manifest(
-                &self
-                    .data_root
-                    .join("models")
-                    .join("sha256")
-                    .join(artifact_key(artifact)?),
-            )?;
-            total = total
-                .checked_add(manifest.total_bytes)
-                .ok_or(OciError::Artifact)?;
-        }
         Ok(total)
     }
 
     pub fn artifact_set_digest(&self, installation_id: &str) -> Result<String, OciError> {
         let (_, persisted) = self.load_persisted_spec(installation_id)?;
-        let mut identities = Vec::with_capacity(persisted.artifacts.len());
-        for artifact in &persisted.artifacts {
-            let key = artifact_key(artifact)?;
-            let manifest = read_manifest(&self.data_root.join("models").join("sha256").join(&key))?;
-            identities.push(serde_json::json!({
-                "artifact": artifact,
-                "key": key,
-                "manifest": manifest,
-            }));
-        }
-        Ok(hex::encode(Sha256::digest(serde_json::to_vec(
-            &identities,
-        )?)))
+        Ok(persisted.identity.model_artifact_set_sha256)
     }
 
     fn write_runtime_contract(
         &self,
-        spec: &WorkloadSpec,
-        installation_id: &str,
-        run_id: &str,
-        placement: &Placement,
-        parameters: Option<&serde_json::Value>,
+        spec: &CompiledExecutionPlan,
+        _installation_id: &str,
+        _run_id: &str,
+        _placement: &Placement,
+        _parameters: Option<&serde_json::Value>,
     ) -> Result<(), OciError> {
-        let metadata = self.run_metadata_path(run_id)?;
-        let artifacts = spec
-            .artifacts
-            .iter()
-            .map(|artifact| RuntimeArtifact {
-                id: artifact.id.clone(),
-                kind: artifact.kind.clone(),
-                repository: artifact.repository.clone(),
-                revision: artifact.revision.clone(),
-                path: artifact.mount.target.clone(),
-            })
-            .collect();
-        let contract = RuntimeContract {
-            schema_version: 1,
-            interface: "vonk.runtime.v1",
-            installation_id,
-            run_id,
-            artifacts,
-            endpoint: spec.endpoint.as_ref().map(|endpoint| RuntimeEndpoint {
-                listen_host: "0.0.0.0",
-                listen_port: endpoint.port,
-                protocol: &endpoint.protocol,
-                model_aliases: &endpoint.model_aliases,
-                health_path: &endpoint.health_path,
-            }),
-            job: spec.job.as_ref().map(|job| RuntimeJob {
-                interface: &job.interface,
-                input: &job.input,
-                input_path: "/inputs",
-                output_path: &job.output_path,
-                timeout_seconds: job.timeout_seconds,
-                parameters,
-            }),
-            placement: RuntimePlacement {
-                endpoint_address: placement.endpoint_address,
-                rank: placement.rank,
-                role: &placement.role,
-                world_size: placement.world_size,
-                local_address: placement.local_address,
-                master_address: placement.master_address,
-                master_port: placement.master_port,
-            },
-        };
-        atomic_write(&metadata, "runtime.json", &serde_json::to_vec(&contract)?)?;
+        let metadata = self.run_metadata_path(_run_id)?;
+        atomic_write(&metadata, "runtime.json", &serde_json::to_vec(spec)?)?;
         Ok(())
     }
 
@@ -1527,476 +1455,43 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             manifest_sha256,
         })
     }
-
-    fn materialize_artifact(
-        &self,
-        models: &Path,
-        artifact: &crate::workloads::ArtifactSpec,
-    ) -> Result<(), OciError> {
-        let key = artifact_key(artifact)?;
-        let destination = models.join(&key);
-        let http_file = if artifact.kind == "http.file" {
-            Some(http_file_url(&artifact.repository)?)
-        } else {
-            None
-        };
-        if destination.exists() {
-            return match &http_file {
-                Some((_, file_name)) => verify_cached_http_file(&destination, file_name, artifact),
-                None => verify_manifest(&destination),
-            };
-        }
-        let staging = models.join(format!(".{key}.{}.staging", std::process::id()));
-        fs::create_dir(&staging)?;
-        let download = match artifact.kind.as_str() {
-            "huggingface.snapshot" => self.download_huggingface(&staging, artifact),
-            "http.file" => {
-                http_file
-                    .as_ref()
-                    .ok_or(OciError::Artifact)
-                    .and_then(|(url, file_name)| {
-                        self.download_https(
-                            url,
-                            &staging.join(file_name),
-                            artifact.download_bytes,
-                            false,
-                        )
-                    })
-            }
-            "oci.artifact" => oci_endpoint(&artifact.repository).and_then(|endpoint| {
-                let address = match endpoint.address {
-                    IpAddr::V4(address) => address.to_string(),
-                    IpAddr::V6(address) => format!("[{address}]"),
-                };
-                let arguments = vec![
-                    "pull".to_owned(),
-                    format!("{}@{}", artifact.repository, artifact.revision),
-                    "--resolve".to_owned(),
-                    format!("{}:{}:{}", endpoint.hostname, endpoint.port, address),
-                    "--output".to_owned(),
-                    staging.display().to_string(),
-                ];
-                let output = self.runner.run_bounded_directory(
-                    Program::Oras,
-                    &arguments,
-                    Duration::from_secs(3600),
-                    &staging,
-                    artifact.download_bytes,
-                )?;
-                if output.success {
-                    Ok(())
-                } else {
-                    Err(OciError::Artifact)
-                }
-            }),
-            _ => Err(OciError::Artifact),
-        };
-        if download.is_err() {
-            let _ = fs::remove_dir_all(&staging);
-            return Err(OciError::Artifact);
-        }
-        let manifest = create_manifest(&staging)?;
-        if manifest.total_bytes != artifact.download_bytes
-            || http_file.as_ref().is_some_and(|(_, file_name)| {
-                manifest.files.get(file_name).map(String::as_str)
-                    != artifact.revision.strip_prefix("sha256:")
-            })
-        {
-            let _ = fs::remove_dir_all(&staging);
-            return Err(OciError::Artifact);
-        }
-        atomic_write(
-            &staging,
-            ".vonk-manifest.json",
-            &serde_json::to_vec(&manifest)?,
-        )?;
-        fs::rename(&staging, &destination)?;
-        File::open(models)?.sync_all()?;
-        Ok(())
-    }
-
-    fn download_huggingface(
-        &self,
-        staging: &Path,
-        artifact: &crate::workloads::ArtifactSpec,
-    ) -> Result<(), OciError> {
-        let repository = huggingface_repository(&artifact.repository)?;
-        let mut metadata_url =
-            Url::parse("https://huggingface.co/api/models").map_err(|_| OciError::Artifact)?;
-        metadata_url
-            .path_segments_mut()
-            .map_err(|_| OciError::Artifact)?
-            .extend(repository)
-            .push("revision")
-            .push(&artifact.revision);
-        let metadata_path = staging.join(".huggingface-model.json");
-        self.download_https(&metadata_url, &metadata_path, 8 * 1024 * 1024, true)?;
-        let metadata = fs::read(&metadata_path)?;
-        fs::remove_file(&metadata_path)?;
-        if metadata.len() > 8 * 1024 * 1024 {
-            return Err(OciError::Artifact);
-        }
-        let model: HuggingFaceModel = serde_json::from_slice(&metadata)?;
-        if model.siblings.is_empty() || model.siblings.len() > 20_000 {
-            return Err(OciError::Artifact);
-        }
-        let mut remaining = artifact.download_bytes;
-        let mut selector_matches = vec![false; artifact.include_paths.len()];
-        for file in model.siblings {
-            let relative = safe_relative_path(&file.rfilename)?;
-            let included = artifact.include_paths.is_empty()
-                || artifact.include_paths.iter().enumerate().fold(
-                    false,
-                    |included, (index, selector)| {
-                        let matched = selector.strip_suffix('/').map_or_else(
-                            || file.rfilename == *selector,
-                            |prefix| {
-                                file.rfilename
-                                    .strip_prefix(prefix)
-                                    .is_some_and(|tail| tail.starts_with('/'))
-                            },
-                        );
-                        selector_matches[index] |= matched;
-                        included || matched
-                    },
-                );
-            if !included {
-                continue;
-            }
-            let destination = staging.join(&relative);
-            if let Some(parent) = destination.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            let mut url = Url::parse("https://huggingface.co/").map_err(|_| OciError::Artifact)?;
-            url.path_segments_mut()
-                .map_err(|_| OciError::Artifact)?
-                .extend(repository.iter().copied())
-                .push("resolve")
-                .push(&artifact.revision)
-                .extend(
-                    relative
-                        .components()
-                        .filter_map(|component| match component {
-                            Component::Normal(value) => value.to_str(),
-                            _ => None,
-                        }),
-                );
-            url.query_pairs_mut().append_pair("download", "true");
-            self.download_https(&url, &destination, remaining, true)?;
-            let downloaded = fs::metadata(&destination)?.len();
-            remaining = remaining
-                .checked_sub(downloaded)
-                .ok_or(OciError::Artifact)?;
-            if let Some(lfs) = file.lfs
-                && (!lower_hex(&lfs.sha256, 64) || sha256_file(&destination)? != lfs.sha256)
-            {
-                return Err(OciError::Artifact);
-            }
-        }
-        if remaining != 0 || selector_matches.iter().any(|matched| !matched) {
-            return Err(OciError::Artifact);
-        }
-        Ok(())
-    }
-
-    fn download_https(
-        &self,
-        url: &Url,
-        destination: &Path,
-        maximum_bytes: u64,
-        allow_huggingface_auth: bool,
-    ) -> Result<(), OciError> {
-        if maximum_bytes == 0 {
-            return Err(OciError::Artifact);
-        }
-        let mut current = url.clone();
-        for _ in 0..=5 {
-            let endpoint = public_https_endpoint(&current)?;
-            let mut arguments = curl_arguments(&current, destination, maximum_bytes, &endpoint);
-            if allow_huggingface_auth
-                && current.host_str() == Some("huggingface.co")
-                && let Some(path) = self.huggingface_curl_config
-            {
-                validate_curl_config(path)?;
-                arguments.splice(0..0, ["--config".to_owned(), path.display().to_string()]);
-            }
-            let output = self
-                .runner
-                .run(Program::Curl, &arguments, Duration::from_secs(3600))?;
-            if !output.success {
-                return Err(OciError::Artifact);
-            }
-            let status = std::str::from_utf8(&output.stdout)
-                .map_err(|_| OciError::Artifact)?
-                .trim_end_matches(['\r', '\n']);
-            let (code, redirect) = status.split_once('\t').ok_or(OciError::Artifact)?;
-            let code = code.parse::<u16>().map_err(|_| OciError::Artifact)?;
-            if (200..300).contains(&code) {
-                if fs::metadata(destination)?.len() > maximum_bytes {
-                    return Err(OciError::Artifact);
-                }
-                return Ok(());
-            }
-            if !(300..400).contains(&code) || redirect.is_empty() {
-                return Err(OciError::Artifact);
-            }
-            current = current.join(redirect).map_err(|_| OciError::Artifact)?;
-        }
-        Err(OciError::Artifact)
-    }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ArtifactManifest {
-    schema_version: u8,
-    files: BTreeMap<String, String>,
-    total_bytes: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct HuggingFaceModel {
-    siblings: Vec<HuggingFaceFile>,
-}
-
-#[derive(Debug, Deserialize)]
-struct HuggingFaceFile {
-    rfilename: String,
-    lfs: Option<HuggingFaceLfs>,
-}
-
-#[derive(Debug, Deserialize)]
-struct HuggingFaceLfs {
-    sha256: String,
-}
-
-fn huggingface_repository(value: &str) -> Result<[&str; 2], OciError> {
-    let parts = value.split('/').collect::<Vec<_>>();
-    if parts.len() != 2
-        || parts.iter().any(|part| {
-            part.is_empty()
-                || part.len() > 96
-                || !part
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        })
-    {
-        return Err(OciError::Artifact);
-    }
-    Ok([parts[0], parts[1]])
-}
-
-fn http_file_url(value: &str) -> Result<(Url, String), OciError> {
-    if value
-        .bytes()
-        .any(|byte| byte.is_ascii_control() || byte == b'\\')
-    {
-        return Err(OciError::Artifact);
-    }
-    let url = Url::parse(value).map_err(|_| OciError::Artifact)?;
-    let file_name = url
-        .path()
-        .rsplit('/')
-        .next()
-        .ok_or(OciError::Artifact)?
-        .to_owned();
-    if file_name.is_empty()
-        || matches!(file_name.as_str(), "." | "..")
-        || file_name.len() > MAX_HTTP_FILE_NAME_BYTES
-        || !file_name.is_ascii()
-        || file_name
-            .bytes()
-            .any(|byte| byte.is_ascii_control() || matches!(byte, b'%' | b'/' | b'\\'))
-    {
-        return Err(OciError::Artifact);
-    }
-    Ok((url, file_name))
-}
-
-fn verify_cached_http_file(
-    root: &Path,
-    file_name: &str,
-    artifact: &crate::workloads::ArtifactSpec,
-) -> Result<(), OciError> {
-    let manifest = read_manifest(root)?;
-    let expected_digest = artifact
-        .revision
-        .strip_prefix("sha256:")
-        .ok_or(OciError::Artifact)?;
-    if manifest.total_bytes != artifact.download_bytes
-        || manifest.files.len() != 1
-        || manifest.files.get(file_name).map(String::as_str) != Some(expected_digest)
-    {
-        return Err(OciError::Artifact);
-    }
-    verify_manifest(root)
-}
-
-fn safe_relative_path(value: &str) -> Result<PathBuf, OciError> {
-    if value.is_empty()
-        || value.len() > 512
-        || value.contains('\0')
-        || value.contains('\\')
-        || value.split('/').count() > 32
-    {
-        return Err(OciError::Artifact);
-    }
-    let path = PathBuf::from(value);
-    if path
-        .components()
-        .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(OciError::Artifact);
-    }
-    Ok(path)
-}
-
-struct PublicEndpoint {
-    hostname: String,
-    port: u16,
-    address: IpAddr,
-}
-
-fn public_https_endpoint(url: &Url) -> Result<PublicEndpoint, OciError> {
-    public_https_endpoint_with(url, |hostname, port| {
-        (hostname, port)
-            .to_socket_addrs()
-            .map_err(|_| OciError::Artifact)
-            .map(|addresses| addresses.map(|address| address.ip()).collect())
-    })
-}
-
-fn public_https_endpoint_with<F>(url: &Url, resolver: F) -> Result<PublicEndpoint, OciError>
-where
-    F: FnOnce(&str, u16) -> Result<Vec<IpAddr>, OciError>,
-{
-    if url.scheme() != "https"
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(OciError::Artifact);
-    }
-    let hostname = url.host_str().ok_or(OciError::Artifact)?.to_owned();
-    let port = url.port_or_known_default().ok_or(OciError::Artifact)?;
-    let addresses = resolver(&hostname, port)?;
-    if addresses.is_empty() || addresses.iter().any(|address| !is_public_ip(*address)) {
-        return Err(OciError::Artifact);
-    }
-    Ok(PublicEndpoint {
-        hostname,
-        port,
-        address: addresses[0],
-    })
-}
-
-fn oci_endpoint(repository: &str) -> Result<PublicEndpoint, OciError> {
-    if repository.contains("://")
-        || repository.contains('@')
-        || repository.contains('?')
-        || repository.contains('#')
-    {
-        return Err(OciError::Artifact);
-    }
-    let url = Url::parse(&format!("https://{repository}")).map_err(|_| OciError::Artifact)?;
-    if url.host_str() != Some("ghcr.io")
-        || url.path() == "/"
-        || url.path().contains("//")
-        || url.path().contains("..")
-    {
-        return Err(OciError::Artifact);
-    }
-    public_https_endpoint(&url)
-}
-
-fn is_public_ip(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => {
-            let octets = address.octets();
-            !address.is_private()
-                && !address.is_loopback()
-                && !address.is_link_local()
-                && !address.is_broadcast()
-                && !address.is_documentation()
-                && !address.is_multicast()
-                && !address.is_unspecified()
-                && octets[0] != 0
-                && !(octets[0] == 100 && (64..=127).contains(&octets[1]))
-                && !(octets[0] == 192 && octets[1] == 0 && octets[2] == 0)
-                && !(octets[0] == 198 && matches!(octets[1], 18 | 19))
-                && octets[0] < 240
-        }
-        IpAddr::V6(address) => {
-            if let Some(mapped) = address.to_ipv4_mapped() {
-                return is_public_ip(IpAddr::V4(mapped));
-            }
-            let segments = address.segments();
-            // Fail closed to ordinary globally routed unicast space. Exclude
-            // the IETF special-purpose blocks at the start of 2001::/16,
-            // deprecated 6to4, and the documentation allocation.
-            segments[0] & 0xe000 == 0x2000
-                && !(segments[0] == 0x2001 && segments[1] < 0x0200)
-                && !(segments[0] == 0x2001 && segments[1] == 0x0db8)
-                && segments[0] != 0x2002
-                && segments[0] != 0x3ffe
-                && !(segments[0] == 0x3fff && segments[1] & 0xf000 == 0)
-        }
-    }
-}
-
-fn curl_arguments(
-    url: &Url,
-    destination: &Path,
-    maximum_bytes: u64,
-    endpoint: &PublicEndpoint,
-) -> Vec<String> {
-    let resolve_address = match endpoint.address {
-        IpAddr::V4(address) => address.to_string(),
-        IpAddr::V6(address) => format!("[{address}]"),
-    };
-    vec![
-        "--fail".to_owned(),
-        "--proto".to_owned(),
-        "=https".to_owned(),
-        "--tlsv1.3".to_owned(),
-        "--max-redirs".to_owned(),
-        "0".to_owned(),
-        "--max-filesize".to_owned(),
-        maximum_bytes.to_string(),
-        "--resolve".to_owned(),
-        format!(
-            "{}:{}:{}",
-            endpoint.hostname, endpoint.port, resolve_address
-        ),
-        "--connect-timeout".to_owned(),
-        "15".to_owned(),
-        "--retry".to_owned(),
-        "3".to_owned(),
-        "--retry-all-errors".to_owned(),
-        "--write-out".to_owned(),
-        "%{http_code}\t%{redirect_url}\n".to_owned(),
-        "--output".to_owned(),
-        destination.display().to_string(),
-        url.as_str().to_owned(),
-    ]
-}
-
-fn validate_curl_config(path: &Path) -> Result<(), OciError> {
-    let metadata = fs::symlink_metadata(path)?;
-    let effective_uid = rustix::process::geteuid().as_raw();
-    if !metadata.file_type().is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.len() > 4096
-        || !matches!(metadata.uid(), 0) && metadata.uid() != effective_uid
-        || metadata.permissions().mode() & 0o077 != 0
-    {
-        return Err(OciError::Artifact);
-    }
+fn sync_parent(parent: &Path) -> Result<(), OciError> {
+    File::open(parent)?.sync_all()?;
     Ok(())
 }
 
-fn sha256_file(path: &Path) -> Result<String, OciError> {
-    let mut file = File::open(path)?;
+struct TemporaryArtifact {
+    path: PathBuf,
+    retained: bool,
+}
+
+impl TemporaryArtifact {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            retained: false,
+        }
+    }
+
+    fn retain(&mut self) {
+        self.retained = true;
+    }
+}
+
+impl Drop for TemporaryArtifact {
+    fn drop(&mut self) {
+        if !self.retained {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn sha256_open_file(file: &mut File, before: &fs::Metadata) -> Result<String, OciError> {
+    #[cfg(test)]
+    SHA256_OPEN_FILE_CALLS.with(|calls| calls.set(calls.get() + 1));
+    file.seek(SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -2006,7 +1501,240 @@ fn sha256_file(path: &Path) -> Result<String, OciError> {
         }
         hasher.update(&buffer[..read]);
     }
+    let after = file.metadata()?;
+    if !trusted_model_file(file, &after, before.len()) || !metadata_stable(before, &after) {
+        return Err(OciError::Artifact);
+    }
     Ok(hex::encode(hasher.finalize()))
+}
+
+fn metadata_stable(before: &fs::Metadata, after: &fs::Metadata) -> bool {
+    before.dev() == after.dev()
+        && before.ino() == after.ino()
+        && before.len() == after.len()
+        && timestamp_ns(before.mtime(), before.mtime_nsec())
+            == timestamp_ns(after.mtime(), after.mtime_nsec())
+        && timestamp_ns(before.ctime(), before.ctime_nsec())
+            == timestamp_ns(after.ctime(), after.ctime_nsec())
+}
+
+#[cfg(test)]
+thread_local! {
+    static SHA256_OPEN_FILE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn test_sha256_open_file_call_count() -> usize {
+    SHA256_OPEN_FILE_CALLS.with(|calls| calls.get())
+}
+
+fn write_installation_metadata(
+    installation: &Path,
+    plan: &CompiledExecutionPlan,
+) -> Result<(), OciError> {
+    let models = installation.join("models");
+    let unique_artifacts = unique_plan_artifacts(plan);
+    let mut entries = Vec::with_capacity(unique_artifacts.len());
+    for artifact in unique_artifacts {
+        let path = models.join(&artifact.selection_id).join(&artifact.path);
+        let metadata = fs::symlink_metadata(&path)?;
+        if !trusted_model_metadata(&metadata, artifact.size_bytes) {
+            return Err(OciError::Artifact);
+        }
+        entries.push(installation_metadata_entry(artifact, &metadata));
+    }
+    entries.sort();
+    atomic_write(
+        installation,
+        INSTALLATION_METADATA_FILE,
+        &serde_json::to_vec(&InstallationMetadataReceipt {
+            schema_version: INSTALLATION_METADATA_SCHEMA_VERSION,
+            entries,
+        })?,
+    )?;
+    Ok(())
+}
+
+fn read_installation_metadata(
+    installation: &Path,
+) -> Result<Option<InstallationMetadataReceipt>, OciError> {
+    let path = installation.join(INSTALLATION_METADATA_FILE);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    if !trusted_receipt_metadata(&metadata) || metadata.len() > MAX_COMPILED_DOCUMENT_BYTES {
+        return Ok(None);
+    }
+    let value = match read_regular_file(&path, MAX_COMPILED_DOCUMENT_BYTES) {
+        Ok(value) => value,
+        Err(OciError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(None);
+        }
+        Err(_) => return Ok(None),
+    };
+    let receipt = match serde_json::from_slice(&value) {
+        Ok(receipt) => receipt,
+        Err(_) => return Ok(None),
+    };
+    Ok(Some(receipt))
+}
+
+fn receipt_matches_plan(
+    receipt: &InstallationMetadataReceipt,
+    plan: &CompiledExecutionPlan,
+) -> bool {
+    let unique_artifacts = unique_plan_artifacts(plan);
+    if receipt.schema_version != INSTALLATION_METADATA_SCHEMA_VERSION
+        || receipt.entries.len() != unique_artifacts.len()
+    {
+        return false;
+    }
+    let mut observed = BTreeMap::new();
+    for entry in &receipt.entries {
+        if observed
+            .insert(
+                (entry.selection_id.as_str(), entry.path.as_str()),
+                (&entry.sha256, entry.size_bytes),
+            )
+            .is_some()
+        {
+            return false;
+        }
+    }
+    unique_artifacts.iter().all(|artifact| {
+        observed.get(&(artifact.selection_id.as_str(), artifact.path.as_str()))
+            == Some(&(&artifact.sha256, artifact.size_bytes))
+    })
+}
+
+fn unique_plan_artifacts(
+    plan: &CompiledExecutionPlan,
+) -> Vec<&crate::workloads::CompiledModelArtifact> {
+    let mut seen = BTreeSet::new();
+    plan.artifacts
+        .iter()
+        .filter(|artifact| seen.insert((artifact.selection_id.as_str(), artifact.path.as_str())))
+        .collect()
+}
+
+fn installation_metadata_entry(
+    artifact: &crate::workloads::CompiledModelArtifact,
+    metadata: &fs::Metadata,
+) -> InstallationMetadataEntry {
+    InstallationMetadataEntry {
+        selection_id: artifact.selection_id.clone(),
+        path: artifact.path.clone(),
+        sha256: artifact.sha256.clone(),
+        size_bytes: artifact.size_bytes,
+        dev: metadata.dev(),
+        ino: metadata.ino(),
+        mtime_ns: timestamp_ns(metadata.mtime(), metadata.mtime_nsec()),
+        ctime_ns: timestamp_ns(metadata.ctime(), metadata.ctime_nsec()),
+    }
+}
+
+fn metadata_matches_receipt(metadata: &fs::Metadata, receipt: &InstallationMetadataEntry) -> bool {
+    metadata.dev() == receipt.dev
+        && metadata.ino() == receipt.ino
+        && metadata.len() == receipt.size_bytes
+        && timestamp_ns(metadata.mtime(), metadata.mtime_nsec()) == receipt.mtime_ns
+        && timestamp_ns(metadata.ctime(), metadata.ctime_nsec()) == receipt.ctime_ns
+}
+
+fn trusted_model_metadata(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
+    trusted_model_shape(metadata, expected_bytes) && metadata.mode() & 0o777 == 0o600
+}
+
+fn trusted_model_shape(metadata: &fs::Metadata, expected_bytes: u64) -> bool {
+    metadata.file_type().is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata.nlink() == 1
+        && metadata.uid() == rustix::process::geteuid().as_raw()
+        && metadata.len() == expected_bytes
+}
+
+fn trusted_model_file(file: &File, metadata: &fs::Metadata, expected_bytes: u64) -> bool {
+    if !trusted_model_shape(metadata, expected_bytes) {
+        return false;
+    }
+    match metadata.mode() & 0o777 {
+        0o600 => true,
+        0o640 => exact_runtime_file_acl(file),
+        _ => false,
+    }
+}
+
+fn exact_runtime_file_acl(file: &File) -> bool {
+    const ACL_VERSION: u32 = 0x0002;
+    const USER_OBJ: u16 = 0x0001;
+    const USER: u16 = 0x0002;
+    const GROUP_OBJ: u16 = 0x0004;
+    const MASK: u16 = 0x0010;
+    const OTHER: u16 = 0x0020;
+    let mut value = [0_u8; 4 + 5 * 8];
+    let Ok(length) = rustix::fs::fgetxattr(file, "system.posix_acl_access", &mut value) else {
+        return false;
+    };
+    if length != value.len() || u32::from_le_bytes(value[..4].try_into().unwrap()) != ACL_VERSION {
+        return false;
+    }
+    let mut user_object = false;
+    let mut runtime_user = false;
+    let mut group_object = false;
+    let mut mask = false;
+    let mut other = false;
+    for entry in value[4..].chunks_exact(8) {
+        let tag = u16::from_le_bytes(entry[..2].try_into().unwrap());
+        let permissions = u16::from_le_bytes(entry[2..4].try_into().unwrap());
+        let identifier = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+        match tag {
+            USER_OBJ if identifier == u32::MAX => user_object = permissions == 0o6,
+            USER if identifier == TRUSTED_RUNTIME_UID => runtime_user = permissions == 0o4,
+            GROUP_OBJ if identifier == u32::MAX => group_object = permissions == 0,
+            MASK if identifier == u32::MAX => mask = permissions == 0o4,
+            OTHER if identifier == u32::MAX => other = permissions == 0,
+            _ => return false,
+        }
+    }
+    user_object && runtime_user && group_object && mask && other
+}
+
+fn open_trusted_model_file(
+    path: &Path,
+    expected_bytes: u64,
+) -> Result<(File, fs::Metadata), OciError> {
+    let path_metadata = fs::symlink_metadata(path)?;
+    if !trusted_model_shape(&path_metadata, expected_bytes) {
+        return Err(OciError::Artifact);
+    }
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags((rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32)
+        .open(path)?;
+    let opened_metadata = file.metadata()?;
+    if !trusted_model_file(&file, &opened_metadata, expected_bytes)
+        || opened_metadata.dev() != path_metadata.dev()
+        || opened_metadata.ino() != path_metadata.ino()
+    {
+        return Err(OciError::Artifact);
+    }
+    Ok((file, opened_metadata))
+}
+
+fn trusted_receipt_metadata(metadata: &fs::Metadata) -> bool {
+    metadata.file_type().is_file()
+        && !metadata.file_type().is_symlink()
+        && metadata.nlink() == 1
+        && metadata.uid() == rustix::process::geteuid().as_raw()
+        && metadata.mode() & 0o777 == 0o600
+}
+
+fn timestamp_ns(seconds: i64, nanoseconds: i64) -> i128 {
+    i128::from(seconds)
+        .saturating_mul(1_000_000_000)
+        .saturating_add(i128::from(nanoseconds))
 }
 
 fn hook_arguments(main: &[String], image: &str, hook: &[String]) -> Result<Vec<String>, OciError> {
@@ -2034,37 +1762,178 @@ fn hook_arguments(main: &[String], image: &str, hook: &[String]) -> Result<Vec<S
     Ok(arguments)
 }
 
+fn materialize_compiled_models(
+    data_root: &Path,
+    plan: &CompiledExecutionPlan,
+    installation_id: &str,
+) -> Result<Vec<PathBuf>, OciError> {
+    if !data_root.is_absolute() {
+        return Err(OciError::Artifact);
+    }
+    plan.validate()?;
+    let installation = managed_path(data_root, "installations", installation_id)?;
+    let destination_root = installation.join("models");
+    fs::create_dir_all(&installation)?;
+    fs::set_permissions(&installation, fs::Permissions::from_mode(0o700))?;
+    fs::create_dir_all(&destination_root)?;
+    fs::set_permissions(&destination_root, fs::Permissions::from_mode(0o700))?;
+
+    let model_root = data_root.join("distribution").join("models");
+    let model_metadata = fs::symlink_metadata(&model_root)?;
+    if model_metadata.file_type().is_symlink() || !model_metadata.is_dir() {
+        return Err(OciError::Artifact);
+    }
+    let receipt_index = read_installation_metadata(&installation)?
+        .filter(|receipt| receipt_matches_plan(receipt, plan))
+        .map(|receipt| {
+            receipt
+                .entries
+                .into_iter()
+                .map(|entry| ((entry.selection_id.clone(), entry.path.clone()), entry))
+                .collect::<BTreeMap<_, _>>()
+        });
+    let mut materialized = Vec::with_capacity(plan.artifacts.len());
+    let mut physical_by_path: BTreeMap<(String, String), PhysicalMaterialization> = BTreeMap::new();
+    for artifact in &plan.artifacts {
+        let physical_key = (artifact.selection_id.clone(), artifact.path.clone());
+        let destination = destination_root
+            .join(&artifact.selection_id)
+            .join(&artifact.path);
+        let physical = (
+            artifact.file_id.clone(),
+            artifact.sha256.clone(),
+            artifact.size_bytes,
+            artifact.model.publisher.clone(),
+            artifact.model.slug.clone(),
+            artifact.model.content_sha256.clone(),
+            artifact.distribution_object.name.clone(),
+            artifact.distribution_object.sha256.clone(),
+            artifact.distribution_object.bytes,
+            artifact.distribution_object.kind.clone(),
+        );
+        if let Some((_, previous)) = physical_by_path.get(&physical_key) {
+            if previous != &physical {
+                return Err(OciError::Workload(WorkloadError::Invalid(
+                    "compiled model artifact physical identity",
+                )));
+            }
+            // The workload validator proved this is the same receipt-bound
+            // physical object. Its first projection performed the only source
+            // and destination hash verification; this projection only adds a
+            // second OCI mount intent.
+            continue;
+        }
+        if !destination.starts_with(&destination_root) {
+            return Err(OciError::Artifact);
+        }
+        let parent = destination.parent().ok_or(OciError::Artifact)?;
+        fs::create_dir_all(parent)?;
+        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        if let Ok(metadata) = fs::symlink_metadata(&destination) {
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(OciError::Artifact);
+            }
+            let reusable = receipt_index.as_ref().and_then(|index| {
+                index
+                    .get(&(artifact.selection_id.clone(), artifact.path.clone()))
+                    .filter(|entry| metadata_matches_receipt(&metadata, entry))
+            });
+            if let Some(entry) = reusable {
+                let (_, opened_metadata) =
+                    open_trusted_model_file(&destination, artifact.size_bytes)?;
+                if metadata_matches_receipt(&opened_metadata, entry) {
+                    physical_by_path.insert(physical_key, (destination.clone(), physical));
+                    materialized.push(destination);
+                    continue;
+                }
+            }
+        }
+        let source = model_root.join(&artifact.sha256);
+        if !source.starts_with(&model_root) {
+            return Err(OciError::Artifact);
+        }
+        let (mut source_file, source_metadata) =
+            open_trusted_model_file(&source, artifact.size_bytes)?;
+        if sha256_open_file(&mut source_file, &source_metadata)? != artifact.sha256 {
+            return Err(OciError::Artifact);
+        }
+        source_file.seek(SeekFrom::Start(0))?;
+        let temporary = destination.with_extension(format!(
+            "{}.{}.{}.partial",
+            std::process::id(),
+            uuid::Uuid::new_v4(),
+            artifact.file_id
+        ));
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC).bits() as i32,
+            )
+            .open(&temporary)?;
+        let mut temporary_guard = TemporaryArtifact::new(temporary.clone());
+        let copied = std::io::copy(&mut source_file, &mut output)?;
+        output.sync_all()?;
+        let source_after = source_file.metadata()?;
+        let output_metadata = output.metadata()?;
+        if copied != artifact.size_bytes
+            || !trusted_model_file(&source_file, &source_after, artifact.size_bytes)
+            || !metadata_stable(&source_metadata, &source_after)
+            || !trusted_model_metadata(&output_metadata, artifact.size_bytes)
+        {
+            drop(output);
+            let _ = fs::remove_file(&temporary);
+            return Err(OciError::Artifact);
+        }
+        drop(output);
+        fs::rename(&temporary, &destination)?;
+        temporary_guard.retain();
+        sync_parent(parent)?;
+        physical_by_path.insert(physical_key, (destination.clone(), physical));
+        materialized.push(destination);
+    }
+    File::open(&destination_root)?.sync_all()?;
+    Ok(materialized)
+}
+
+fn spec_references_model(spec: &CompiledExecutionPlan, model_content_sha256: &str) -> bool {
+    spec.artifacts
+        .iter()
+        .any(|artifact| artifact.model.content_sha256 == model_content_sha256)
+}
+
 fn lower_hex(value: &str, length: usize) -> bool {
     value.len() == length
         && value
             .bytes()
-            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn artifact_key(artifact: &crate::workloads::ArtifactSpec) -> Result<String, OciError> {
-    Ok(hex::encode(Sha256::digest(serde_json::to_vec(artifact)?)))
-}
-
-fn spec_references_model(spec: &WorkloadSpec, model_version_sha256: &str) -> bool {
-    spec.identity.model_version_sha256 == model_version_sha256
-        || spec
-            .model_dependencies
-            .iter()
-            .any(|dependency| dependency.content_sha256 == model_version_sha256)
-}
-
-fn create_manifest(root: &Path) -> Result<ArtifactManifest, OciError> {
-    let mut files = BTreeMap::new();
-    let mut total = 0_u64;
-    visit_files(root, root, &mut files, &mut total)?;
-    if files.is_empty() {
+fn materialized_model_bytes(
+    data_root: &Path,
+    installation_id: &str,
+    spec: &CompiledExecutionPlan,
+) -> Result<u64, OciError> {
+    let models = managed_path(data_root, "installations", installation_id)?.join("models");
+    let metadata = match fs::symlink_metadata(&models) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
         return Err(OciError::Artifact);
     }
-    Ok(ArtifactManifest {
-        schema_version: 1,
-        files,
-        total_bytes: total,
-    })
+    unique_plan_artifacts(spec)
+        .into_iter()
+        .try_fold(0_u64, |total, artifact| {
+            let path = models.join(&artifact.selection_id).join(&artifact.path);
+            let metadata = fs::symlink_metadata(path)?;
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(OciError::Artifact);
+            }
+            total.checked_add(metadata.len()).ok_or(OciError::Artifact)
+        })
 }
 
 fn visit_files(
@@ -2089,9 +1958,6 @@ fn visit_files(
                 .to_str()
                 .ok_or(OciError::Artifact)?
                 .replace('\\', "/");
-            if name == ".vonk-manifest.json" {
-                continue;
-            }
             if name.contains("..") {
                 return Err(OciError::Artifact);
             }
@@ -2114,27 +1980,6 @@ fn visit_files(
     Ok(())
 }
 
-fn verify_manifest(root: &Path) -> Result<(), OciError> {
-    let expected = read_manifest(root)?;
-    let observed = create_manifest(root)?;
-    if expected.files != observed.files || expected.total_bytes != observed.total_bytes {
-        return Err(OciError::Artifact);
-    }
-    Ok(())
-}
-
-fn read_manifest(root: &Path) -> Result<ArtifactManifest, OciError> {
-    let raw = fs::read(root.join(".vonk-manifest.json"))?;
-    if raw.len() > 64 * 1024 {
-        return Err(OciError::Artifact);
-    }
-    let manifest: ArtifactManifest = serde_json::from_slice(&raw)?;
-    if manifest.schema_version != 1 {
-        return Err(OciError::Artifact);
-    }
-    Ok(manifest)
-}
-
 fn atomic_write(root: &Path, name: &str, value: &[u8]) -> Result<(), OciError> {
     let temporary: PathBuf = root.join(format!(".{name}.{}.tmp", std::process::id()));
     let mut file = OpenOptions::new()
@@ -2145,6 +1990,38 @@ fn atomic_write(root: &Path, name: &str, value: &[u8]) -> Result<(), OciError> {
     file.write_all(value)?;
     file.sync_all()?;
     fs::rename(temporary, root.join(name))?;
+    Ok(())
+}
+
+/// Reset the per-run temporary tree before handing the writable output mount
+/// to the container. The helper grants the compiled runtime UID access to this
+/// tree, while the agent owns its lifecycle and ensures stale temporary files
+/// cannot survive a retained or retried start. The persistent cache remains a
+/// separate bind mount and is deliberately untouched.
+fn reset_runtime_tmp(outputs: &Path) -> Result<(), OciError> {
+    let output_metadata = fs::symlink_metadata(outputs)?;
+    if output_metadata.file_type().is_symlink() || !output_metadata.is_dir() {
+        return Err(OciError::Artifact);
+    }
+    let temporary = outputs.join("tmp");
+    match fs::symlink_metadata(&temporary) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(OciError::Artifact);
+            }
+            fs::remove_dir_all(&temporary)?;
+            fs::create_dir(&temporary)?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(&temporary)?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o700))?;
+    let metadata = fs::symlink_metadata(&temporary)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() || metadata.mode() & 0o077 != 0 {
+        return Err(OciError::Artifact);
+    }
     Ok(())
 }
 
@@ -2173,36 +2050,720 @@ fn canonical_uuid(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{OciError, is_public_ip, public_https_endpoint_with};
-    use std::{cell::RefCell, collections::VecDeque, net::IpAddr};
-    use url::Url;
+    use super::{
+        OciError, OciRuntime, SHA256_OPEN_FILE_CALLS, materialize_compiled_models,
+        read_installation_metadata, reset_runtime_tmp, unique_plan_artifacts,
+        write_installation_metadata,
+    };
+    use crate::process::{ProcessError, ProcessOutput, ProcessRunner, Program};
+    use serde_json::{Value, json};
+    use sha2::Digest;
+    use std::{
+        fs,
+        os::unix::fs::{MetadataExt, PermissionsExt, symlink},
+        path::{Path, PathBuf},
+        time::Duration,
+    };
+    use tempfile::tempdir;
 
-    #[test]
-    fn only_globally_routable_ipv6_is_public() {
-        for value in [
-            "::1",
-            "fe80::1",
-            "fec0::1",
-            "fc00::1",
-            "2001:db8::1",
-            "3ffe::1",
-        ] {
-            assert!(!is_public_ip(value.parse::<IpAddr>().unwrap()), "{value}");
+    struct NoProcess;
+
+    impl ProcessRunner for NoProcess {
+        fn run(
+            &self,
+            _: Program,
+            _: &[String],
+            _: Duration,
+        ) -> Result<ProcessOutput, ProcessError> {
+            panic!("OCI verification tests must not launch a process");
         }
-        assert!(is_public_ip("2606:4700:4700::1111".parse().unwrap()));
+    }
+
+    fn digest(value: &[u8]) -> String {
+        hex::encode(sha2::Sha256::digest(value))
+    }
+
+    fn compiled_plan() -> Value {
+        let primary = digest(b"primary");
+        let secondary = digest(b"secondary");
+        json!({
+            "schema_version": 2,
+            "identity": {
+                "recipe_revision_sha256": "a".repeat(64),
+                "execution_sha256": "b".repeat(64),
+                "harness_sha256": "c".repeat(64),
+                "build_input_sha256": null,
+                "model_artifact_set_sha256": "d".repeat(64),
+                "model_artifact_bytes": 16
+            },
+            "runtime": {
+                "executable": "/opt/vonk/bin/vllm",
+                "argv": ["serve", "/models"],
+                "env": [],
+                "image_digest": format!("sha256:{}", "1".repeat(64)),
+                "placement": {
+                    "endpoint_address": null,
+                    "rank": 0,
+                    "role": "entrypoint",
+                    "world_size": 1,
+                    "local_address": null,
+                    "master_address": null,
+                    "master_port": null,
+                    "port": 8000,
+                    "reserved_memory_bytes": 4096
+                }
+            },
+            "artifacts": [
+                {
+                    "selection_id": "primary",
+                    "file_id": "config-primary",
+                    "path": "config.json",
+                    "sha256": primary,
+                    "size_bytes": 7,
+                    "roles": ["entrypoint"],
+                    "mount": {"target": "/models", "read_only": true},
+                    "model": {"publisher": "vonk-forge", "slug": "primary-model", "content_sha256": "e".repeat(64)},
+                    "distribution_object": {"name": "config.json", "sha256": primary, "bytes": 7, "kind": "model"}
+                },
+                {
+                    "selection_id": "secondary",
+                    "file_id": "config-secondary",
+                    "path": "config.json",
+                    "sha256": secondary,
+                    "size_bytes": 9,
+                    "roles": ["entrypoint"],
+                    "mount": {"target": "/models/secondary", "read_only": true},
+                    "model": {"publisher": "vonk-forge", "slug": "secondary-model", "content_sha256": "f".repeat(64)},
+                    "distribution_object": {"name": "config.json", "sha256": secondary, "bytes": 9, "kind": "model"}
+                }
+            ],
+            "runtime_image": {
+                "image_digest": format!("sha256:{}", "1".repeat(64)),
+                "registry_manifest_digest": format!("sha256:{}", "3".repeat(64)),
+                "platform_manifest_digest": format!("sha256:{}", "1".repeat(64)),
+                "local_image_config_id": format!("sha256:{}", "4".repeat(64)),
+                "local_image_reference": format!("localhost/vonk/compiled-runtime-{}@sha256:{}", "2".repeat(64), "1".repeat(64)),
+                "runtime_interface_label": "v1",
+                "oci_layout_sha256": "2".repeat(64),
+                "image_bytes": 4096,
+                "architecture": "linux-arm64",
+                "runtime_interface": "vonk.runtime.v1",
+                "source": "published",
+                "build_id": null,
+                "distribution_object": {"name": "image.oci.tar", "sha256": "2".repeat(64), "bytes": 4096, "kind": "oci-archive"}
+            },
+            "security": {
+                "devices": [], "capabilities": [], "host_network": false,
+                "network_mode": "none",
+                "privileged": false, "user": "10001:10001",
+                "mounts": [
+                    {"source": "model", "target": "/models", "read_only": true},
+                    {"source": "outputs", "target": "/outputs", "read_only": false}
+                ],
+                "read_only_root": true, "no_new_privileges": true
+            },
+            "topology": {
+                "name": "solo", "mode": "single", "backend": "local",
+                "node_count": 1, "world_size": 1, "rank": 0, "role": "entrypoint"
+            },
+            "lifecycle": {"pre_start": [], "post_stop": [], "stop_timeout_seconds": 30},
+            "endpoint": {
+                "protocol": "openai", "port": 8000,
+                "model_aliases": ["primary"], "health_path": "/v1/models"
+            },
+            "job": null
+        })
+    }
+
+    fn large_plan() -> crate::workloads::CompiledExecutionPlan {
+        let mut value = compiled_plan();
+        let artifacts = value["artifacts"].as_array_mut().unwrap();
+        let template = artifacts[0].clone();
+        for index in 2..751 {
+            let mut artifact = template.clone();
+            artifact["selection_id"] = json!(format!("model-{index:04}"));
+            artifact["file_id"] = json!(format!("config-{index:04}"));
+            artifact["model"]["slug"] = json!(format!("primary-model-{index:04}"));
+            artifact["mount"]["target"] = json!(format!("/models/model-{index:04}"));
+            artifacts.push(artifact);
+        }
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn persisted_installation(
+        data: &Path,
+    ) -> (String, PathBuf, crate::workloads::CompiledExecutionPlan) {
+        let installation_id = "cb555393-764b-4eb6-8f15-b416d289428f".to_owned();
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        persisted_plan_installation(data, installation_id, plan)
+    }
+
+    fn persisted_plan_installation(
+        data: &Path,
+        installation_id: String,
+        plan: crate::workloads::CompiledExecutionPlan,
+    ) -> (String, PathBuf, crate::workloads::CompiledExecutionPlan) {
+        let installation = data.join("installations").join(&installation_id);
+        for artifact in unique_plan_artifacts(&plan) {
+            let path = installation
+                .join("models")
+                .join(&artifact.selection_id)
+                .join(&artifact.path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(
+                &path,
+                if artifact.size_bytes == 7 {
+                    b"primary".as_slice()
+                } else {
+                    b"secondary".as_slice()
+                },
+            )
+            .unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        fs::write(
+            installation.join("spec.json"),
+            serde_json::to_vec(&plan).unwrap(),
+        )
+        .unwrap();
+        write_installation_metadata(&installation, &plan).unwrap();
+        (installation_id, installation, plan)
+    }
+
+    fn runtime<'a>(data: &'a Path, runner: &'a NoProcess) -> OciRuntime<'a, NoProcess> {
+        OciRuntime {
+            runner,
+            data_root: data,
+            huggingface_curl_config: None,
+        }
+    }
+
+    fn authorize_installation(installation: &Path, recipe_digest: &str) {
+        fs::write(installation.join("recipe-content.sha256"), recipe_digest).unwrap();
     }
 
     #[test]
-    fn endpoint_validation_rejects_private_and_changed_dns_answers() {
-        let url = Url::parse("https://models.example/weights").unwrap();
-        let answers = RefCell::new(VecDeque::from([
-            vec!["93.184.216.34".parse().unwrap()],
-            vec!["127.0.0.1".parse().unwrap()],
-        ]));
-        let resolve = |_: &str, _: u16| answers.borrow_mut().pop_front().ok_or(OciError::Artifact);
+    fn explicit_model_cleanup_removes_materialized_install_and_retains_shared_cache() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        let recipe_digest = "1".repeat(64);
+        authorize_installation(&installation, &recipe_digest);
 
-        let endpoint = public_https_endpoint_with(&url, resolve).unwrap();
-        assert_eq!(endpoint.address, "93.184.216.34".parse::<IpAddr>().unwrap());
-        assert!(public_https_endpoint_with(&url, resolve).is_err());
+        let cached = data.path().join("distribution").join("models");
+        fs::create_dir_all(&cached).unwrap();
+        fs::write(cached.join(&plan.artifacts[0].sha256), b"primary").unwrap();
+        fs::write(cached.join(&plan.artifacts[1].sha256), b"secondary").unwrap();
+
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let removed = runtime
+            .uninstall_model(&[(installation_id.clone(), recipe_digest)], &"e".repeat(64))
+            .unwrap();
+
+        assert_eq!(removed, 16);
+        assert!(!installation.exists());
+        assert_eq!(
+            fs::read(cached.join(&plan.artifacts[0].sha256)).unwrap(),
+            b"primary"
+        );
+        assert_eq!(
+            fs::read(cached.join(&plan.artifacts[1].sha256)).unwrap(),
+            b"secondary"
+        );
+    }
+
+    #[test]
+    fn explicit_auxiliary_model_cleanup_removes_selected_install_and_retains_shared_other_install()
+    {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        let recipe_digest = "3".repeat(64);
+        authorize_installation(&installation, &recipe_digest);
+
+        let mut other_value = compiled_plan();
+        other_value["identity"]["model_artifact_bytes"] = json!(7);
+        other_value["artifacts"] = json!([other_value["artifacts"][0].clone()]);
+        let other_plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(other_value).unwrap();
+        let other_id = "cb555393-764b-4eb6-8f15-b416d2894290".to_owned();
+        let (_, other_installation, _) =
+            persisted_plan_installation(data.path(), other_id.clone(), other_plan);
+        authorize_installation(&other_installation, &"4".repeat(64));
+
+        let cached = data.path().join("distribution").join("models");
+        fs::create_dir_all(&cached).unwrap();
+        fs::write(cached.join(&plan.artifacts[0].sha256), b"primary").unwrap();
+        fs::write(cached.join(&plan.artifacts[1].sha256), b"secondary").unwrap();
+
+        let runner = NoProcess;
+        let removed = runtime(data.path(), &runner)
+            .uninstall_model(&[(installation_id, recipe_digest)], &"f".repeat(64))
+            .unwrap();
+
+        assert_eq!(removed, 16);
+        assert!(!installation.exists());
+        assert!(other_installation.exists());
+        assert_eq!(
+            fs::read(cached.join(&plan.artifacts[0].sha256)).unwrap(),
+            b"primary"
+        );
+        assert_eq!(
+            fs::read(cached.join(&plan.artifacts[1].sha256)).unwrap(),
+            b"secondary"
+        );
+    }
+
+    #[test]
+    fn routine_recipe_uninstall_retains_shared_model_cache() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, plan) = persisted_installation(data.path());
+        let recipe_digest = "2".repeat(64);
+        authorize_installation(&installation, &recipe_digest);
+        let cached = data
+            .path()
+            .join("distribution")
+            .join("models")
+            .join(&plan.artifacts[0].sha256);
+        fs::create_dir_all(cached.parent().unwrap()).unwrap();
+        fs::write(&cached, b"primary").unwrap();
+
+        let runner = NoProcess;
+        runtime(data.path(), &runner)
+            .uninstall(&installation_id, &recipe_digest)
+            .unwrap();
+
+        assert!(!installation.exists());
+        assert_eq!(fs::read(cached).unwrap(), b"primary");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn apply_acl(path: &Path, entries: &[(u16, u16, u32)]) {
+        let mut value = Vec::with_capacity(4 + entries.len() * 8);
+        value.extend_from_slice(&0x0002_u32.to_le_bytes());
+        for &(tag, permissions, identifier) in entries {
+            value.extend_from_slice(&tag.to_le_bytes());
+            value.extend_from_slice(&permissions.to_le_bytes());
+            value.extend_from_slice(&identifier.to_le_bytes());
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        rustix::fs::fsetxattr(
+            &file,
+            "system.posix_acl_access",
+            &value,
+            rustix::fs::XattrFlags::empty(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn trusted_installation_verification_reuses_unchanged_metadata_receipt() {
+        let data = tempdir().unwrap();
+        let (installation_id, _, _) = persisted_installation(data.path());
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+
+        runtime.verify_installation(&installation_id).unwrap();
+
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    fn installation_metadata_deduplicates_physical_projection_entries() {
+        let data = tempdir().unwrap();
+        let mut value = compiled_plan();
+        value["identity"]["model_artifact_bytes"] = json!(7);
+        let first = value["artifacts"][0].clone();
+        let mut second = first.clone();
+        second["mount"]["target"] = json!("/models/target");
+        value["artifacts"] = json!([first, second]);
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let (installation_id, installation, plan) = persisted_plan_installation(
+            data.path(),
+            "cb555393-764b-4eb6-8f15-b416d2894291".to_owned(),
+            plan,
+        );
+        assert_eq!(plan.artifacts.len(), 2);
+        assert_eq!(
+            read_installation_metadata(&installation)
+                .unwrap()
+                .unwrap()
+                .entries
+                .len(),
+            1
+        );
+
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
+
+        std::thread::sleep(Duration::from_millis(2));
+        fs::write(installation.join("models/primary/config.json"), b"primary").unwrap();
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before + 1);
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before + 1);
+    }
+
+    #[test]
+    fn trusted_installation_verification_reuses_751_entry_receipt_without_hashing() {
+        let data = tempdir().unwrap();
+        let plan = large_plan();
+        let (installation_id, _, _) = persisted_plan_installation(
+            data.path(),
+            "cb555393-764b-4eb6-8f15-b416d2894290".to_owned(),
+            plan,
+        );
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+
+        runtime.verify_installation(&installation_id).unwrap();
+
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        assert_eq!(after, before);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn trusted_installation_verification_reuses_exact_runtime_acl_receipt_after_metadata_refresh() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, _) = persisted_installation(data.path());
+        let primary = installation.join("models/primary/config.json");
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
+
+        apply_acl(
+            &primary,
+            &[
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o4, 10_001),
+                (0x0004, 0, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0, u32::MAX),
+            ],
+        );
+        runtime.verify_installation(&installation_id).unwrap();
+        let after_acl = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        assert_eq!(after_acl, before + 1);
+
+        runtime.verify_installation(&installation_id).unwrap();
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), after_acl);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn trusted_installation_verification_rejects_unauthorized_runtime_acls() {
+        for entries in [
+            vec![
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o4, 10_001),
+                (0x0004, 0o4, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0, u32::MAX),
+            ],
+            vec![
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o4, 10_001),
+                (0x0004, 0, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0o4, u32::MAX),
+            ],
+            vec![
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o4, 10_001),
+                (0x0002, 0o4, 10_002),
+                (0x0004, 0, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0, u32::MAX),
+            ],
+            vec![
+                (0x0001, 0o6, u32::MAX),
+                (0x0002, 0o6, 10_001),
+                (0x0004, 0, u32::MAX),
+                (0x0010, 0o4, u32::MAX),
+                (0x0020, 0, u32::MAX),
+            ],
+        ] {
+            let data = tempdir().unwrap();
+            let (installation_id, installation, _) = persisted_installation(data.path());
+            let primary = installation.join("models/primary/config.json");
+            apply_acl(&primary, &entries);
+            let runner = NoProcess;
+            let runtime = runtime(data.path(), &runner);
+            assert!(
+                matches!(
+                    runtime.verify_installation(&installation_id),
+                    Err(OciError::Artifact)
+                ),
+                "entries {entries:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn trusted_installation_verification_hashes_and_rejects_same_size_mutation() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, _) = persisted_installation(data.path());
+        let primary = installation.join("models/primary/config.json");
+        fs::write(&primary, b"mutated").unwrap();
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+
+        assert!(matches!(
+            runtime.verify_installation(&installation_id),
+            Err(OciError::Artifact)
+        ));
+
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        assert_eq!(after, before + 1);
+    }
+
+    #[test]
+    fn trusted_installation_verification_refreshes_after_metadata_only_change() {
+        let data = tempdir().unwrap();
+        let (installation_id, installation, _) = persisted_installation(data.path());
+        let primary = installation.join("models/primary/config.json");
+        std::thread::sleep(Duration::from_millis(2));
+        fs::write(&primary, b"primary").unwrap();
+        let runner = NoProcess;
+        let runtime = runtime(data.path(), &runner);
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+
+        runtime.verify_installation(&installation_id).unwrap();
+
+        let after = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        assert_eq!(after, before + 1);
+        runtime.verify_installation(&installation_id).unwrap();
+        let final_count = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        assert_eq!(final_count, after);
+    }
+
+    #[test]
+    fn trusted_installation_verification_rejects_invalid_file_metadata() {
+        let cases = ["size", "symlink", "directory", "mode", "nlink", "owner"];
+        for case in cases {
+            let data = tempdir().unwrap();
+            let (installation_id, installation, _) = persisted_installation(data.path());
+            let primary = installation.join("models/primary/config.json");
+            match case {
+                "size" => fs::write(&primary, b"short").unwrap(),
+                "symlink" => {
+                    fs::remove_file(&primary).unwrap();
+                    symlink(installation.join("models/secondary/config.json"), &primary).unwrap();
+                }
+                "directory" => {
+                    fs::remove_file(&primary).unwrap();
+                    fs::create_dir(&primary).unwrap();
+                }
+                "mode" => fs::set_permissions(&primary, fs::Permissions::from_mode(0o644)).unwrap(),
+                "nlink" => fs::hard_link(
+                    &primary,
+                    installation.join("models/primary/config-link.json"),
+                )
+                .unwrap(),
+                "owner" => {
+                    if rustix::process::geteuid().as_raw() != 0 {
+                        continue;
+                    }
+                    rustix::fs::chown(&primary, Some(rustix::process::Uid::from_raw(65_534)), None)
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let runner = NoProcess;
+            let runtime = runtime(data.path(), &runner);
+            assert!(
+                matches!(
+                    runtime.verify_installation(&installation_id),
+                    Err(OciError::Artifact)
+                ),
+                "case {case}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_tmp_is_reset_and_kept_private_between_starts() {
+        let data = tempdir().unwrap();
+        let outputs = data.path().join("outputs");
+        fs::create_dir_all(outputs.join("tmp")).unwrap();
+        fs::write(outputs.join("tmp").join("stale.marker"), b"stale").unwrap();
+
+        reset_runtime_tmp(&outputs).unwrap();
+
+        let temporary = outputs.join("tmp");
+        assert!(!temporary.join("stale.marker").exists());
+        let metadata = fs::symlink_metadata(temporary).unwrap();
+        assert!(metadata.is_dir());
+        assert!(!metadata.file_type().is_symlink());
+        assert_eq!(metadata.mode() & 0o777, 0o700);
+    }
+
+    #[test]
+    fn runtime_tmp_refuses_symlink_replacement_targets() {
+        let data = tempdir().unwrap();
+        let outputs = data.path().join("outputs");
+        fs::create_dir(&outputs).unwrap();
+        let target = data.path().join("outside");
+        fs::create_dir(&target).unwrap();
+        symlink(&target, outputs.join("tmp")).unwrap();
+
+        assert!(matches!(
+            reset_runtime_tmp(&outputs),
+            Err(OciError::Artifact)
+        ));
+        assert!(target.is_dir());
+    }
+
+    #[test]
+    fn model_materialization_temp_cleanup_is_task_owned() {
+        let data = tempdir().unwrap();
+        let temporary = data.path().join("model.partial");
+        fs::write(&temporary, b"incomplete").unwrap();
+        {
+            let _guard = super::TemporaryArtifact::new(temporary.clone());
+        }
+        assert!(!temporary.exists());
+
+        fs::write(&temporary, b"published").unwrap();
+        {
+            let mut guard = super::TemporaryArtifact::new(temporary.clone());
+            guard.retain();
+        }
+        assert_eq!(fs::read(temporary).unwrap(), b"published");
+    }
+
+    #[test]
+    fn compiled_models_materialize_selection_scoped_colliding_paths() {
+        let plan: crate::workloads::CompiledExecutionPlan =
+            serde_json::from_value(compiled_plan()).unwrap();
+        plan.validate().unwrap();
+        let data = tempdir().unwrap();
+        let root = data.path().join("distribution").join("models");
+        fs::create_dir_all(&root).unwrap();
+        for (artifact, bytes) in [
+            (&plan.artifacts[0], b"primary".as_slice()),
+            (&plan.artifacts[1], b"secondary".as_slice()),
+        ] {
+            let path = root.join(&artifact.sha256);
+            fs::write(&path, bytes).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        let paths =
+            materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
+                .unwrap();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(
+            fs::read(data.path().join(
+                "installations/cb555393-764b-4eb6-8f15-b416d289428f/models/primary/config.json"
+            ))
+            .unwrap(),
+            b"primary"
+        );
+        assert_eq!(
+            fs::read(data.path().join(
+                "installations/cb555393-764b-4eb6-8f15-b416d289428f/models/secondary/config.json"
+            ))
+            .unwrap(),
+            b"secondary"
+        );
+    }
+
+    #[test]
+    fn compiled_models_materialize_valid_empty_support_files() {
+        let mut value = compiled_plan();
+        value["identity"]["model_artifact_bytes"] = json!(0);
+        let artifact = &mut value["artifacts"][0];
+        artifact["selection_id"] = json!("primary");
+        artifact["file_id"] = json!("tokenizer-config");
+        artifact["path"] = json!("tokenizer_config.json");
+        artifact["sha256"] = json!(crate::workloads::EMPTY_SHA256);
+        artifact["size_bytes"] = json!(0);
+        artifact["roles"] = json!(["tokenizer"]);
+        artifact["distribution_object"] = json!({
+            "name": "tokenizer_config.json",
+            "sha256": crate::workloads::EMPTY_SHA256,
+            "bytes": 0,
+            "kind": "model"
+        });
+        value["artifacts"] = json!([artifact.clone()]);
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let data = tempdir().unwrap();
+        let source = data.path().join("distribution").join("models");
+        fs::create_dir_all(&source).unwrap();
+        let source_file = source.join(&plan.artifacts[0].sha256);
+        fs::write(&source_file, []).unwrap();
+        fs::set_permissions(&source_file, fs::Permissions::from_mode(0o600)).unwrap();
+        materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
+            .unwrap();
+        assert_eq!(
+            fs::metadata(data.path().join("installations/cb555393-764b-4eb6-8f15-b416d289428f/models/primary/tokenizer_config.json")).unwrap().len(),
+            0
+        );
+    }
+
+    #[test]
+    fn compiled_models_reject_duplicate_final_target() {
+        let mut value = compiled_plan();
+        let duplicate = value["artifacts"][0].clone();
+        value["artifacts"] = json!([duplicate.clone(), duplicate]);
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let result = materialize_compiled_models(
+            Path::new("/tmp/vonk-agent-test-data"),
+            &plan,
+            "cb555393-764b-4eb6-8f15-b416d289428f",
+        );
+        assert!(matches!(result, Err(OciError::Workload(_))));
+    }
+
+    #[test]
+    fn compiled_models_materialize_one_source_for_two_mount_projections() {
+        let mut value = compiled_plan();
+        value["identity"]["model_artifact_bytes"] = json!(7);
+        let mut projection = value["artifacts"][0].clone();
+        projection["mount"]["target"] = json!("/models/target");
+        value["artifacts"] = json!([value["artifacts"][0].clone(), projection]);
+        let plan: crate::workloads::CompiledExecutionPlan = serde_json::from_value(value).unwrap();
+        let data = tempdir().unwrap();
+        let source = data.path().join("distribution").join("models");
+        fs::create_dir_all(&source).unwrap();
+        let source_file = source.join(&plan.artifacts[0].sha256);
+        fs::write(&source_file, b"primary").unwrap();
+        fs::set_permissions(&source_file, fs::Permissions::from_mode(0o600)).unwrap();
+        let paths =
+            materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
+                .unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(
+            paths[0],
+            data.path().join(
+                "installations/cb555393-764b-4eb6-8f15-b416d289428f/models/primary/config.json"
+            )
+        );
+        let installation = data
+            .path()
+            .join("installations/cb555393-764b-4eb6-8f15-b416d289428f");
+        write_installation_metadata(&installation, &plan).unwrap();
+        let before = SHA256_OPEN_FILE_CALLS.with(|calls| calls.get());
+        let repeated =
+            materialize_compiled_models(data.path(), &plan, "cb555393-764b-4eb6-8f15-b416d289428f")
+                .unwrap();
+        assert_eq!(repeated.len(), 1);
+        assert_eq!(SHA256_OPEN_FILE_CALLS.with(|calls| calls.get()), before);
+        assert_eq!(plan.artifacts.len(), 2);
     }
 }

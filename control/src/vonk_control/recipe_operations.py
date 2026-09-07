@@ -14,10 +14,24 @@ from typing import Protocol
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    RecipeInstallPayload,
+    RecipeStartPayload,
+    canonical_message,
+    format_model_identity,
+)
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from .cluster_mappings import ClusterMappingPlan, ClusterMappingService
-from .distributed_lifecycle import DistributedLifecycleError
+from .compiled_execution_plan import (
+    MAX_COMPILED_EXECUTION_PLAN_BYTES,
+    CompiledExecutionPlanError,
+    validate_compiled_launch_payload,
+)
+from .distributed_lifecycle import (
+    DistributedLifecycleError,
+    canonical_distributed_readiness,
+)
 from .distributed_recovery import enforce_recovery_deadline, recovery_start_plan
 from .install_admission import InstallAdmissionService, InstallPlan
 from .models import (
@@ -25,9 +39,9 @@ from .models import (
     AgentOperation,
     AgentPresence,
     ArtifactJob,
+    CatalogDocumentRevision,
     InstallationNode,
     Job,
-    LocalRecipeRevision,
     NodeArtifact,
     RecipeBuild,
     RecipeInstallation,
@@ -49,10 +63,35 @@ from .recipe_action_plans import (
     uninstall_plan,
 )
 from .recipe_builds import RecipeBuildPlan, RecipeBuildService
-from .recipe_contract import recipe_topology
 from .recipe_routes import RecipeRouteService, route_publication_transaction
-from .run_admission import RunAdmissionService, RunPlan
+from .recipe_runtime_specs import recipe_topology
+from .recipe_start_payloads import (
+    RecipeStartPayloadError,
+    RecipeStartPlacement,
+    build_recipe_start_payload,
+)
+from .run_admission import RunAdmissionService, RunNodePlan, RunPlan
 from .source_policy import SourcePolicyReport
+
+
+def _active_recipe_revision(
+    session: Session,
+    revision_id: str | None,
+    *,
+    for_update: bool = False,
+) -> CatalogDocumentRevision | None:
+    """Load only an active canonical Recipe revision by stable id."""
+
+    if not isinstance(revision_id, str) or not revision_id:
+        return None
+    statement = select(CatalogDocumentRevision).where(
+        CatalogDocumentRevision.id == revision_id,
+        CatalogDocumentRevision.kind == "recipe",
+        CatalogDocumentRevision.state == "active",
+    )
+    if for_update:
+        statement = statement.with_for_update(of=CatalogDocumentRevision)
+    return session.scalar(statement)
 
 
 class AgentJobQueue(Protocol):
@@ -214,8 +253,13 @@ class RecipeOperationService:
         build_input_sha256: str,
         actor: str,
         request_id: str,
+        force: bool = False,
     ) -> RecipeOperationView:
-        existing = self._idempotent(request_id, "recipe.build.v1", build_input_sha256)
+        existing = (
+            None
+            if force
+            else self._idempotent(request_id, "recipe.build.v1", build_input_sha256)
+        )
         if existing is not None:
             if existing.state != "succeeded":
                 with self._sessions() as session:
@@ -235,6 +279,7 @@ class RecipeOperationService:
             if (
                 build is not None
                 and build.state == "succeeded"
+                and not force
                 and build.build_input_sha256 == plan.build_input_sha256
                 and build.builder_node_id == plan.builder_node_id
             ):
@@ -270,7 +315,42 @@ class RecipeOperationService:
                 or build.builder_node_id != plan.builder_node_id
             ):
                 raise RecipeOperationConflict("recipe build preview is stale")
-            if build.state == "failed":
+            if force and build.state == "succeeded":
+                active = session.scalar(
+                    select(Job)
+                    .where(
+                        Job.kind == "recipe.build.v1",
+                        Job.state.in_(("queued", "running")),
+                        Job.payload["owner_id"].as_string() == build.id,
+                        Job.payload["plan_digest"].as_string()
+                        == build.build_input_sha256,
+                    )
+                    .order_by(Job.updated_at.desc())
+                    .limit(1)
+                )
+                if active is not None:
+                    return self._view(active)
+                if self._builds is None:
+                    raise RecipeOperationConflict("recipe build service is unavailable")
+                self._release(session, "recipe-build", build.id, now)
+                self._builds.reserve_in_session(session, plan, now=now)
+                build.state = "building"
+                build.error = None
+                build.updated_at = now
+                job = self._queue_in_session(
+                    session,
+                    kind="recipe.build.v1",
+                    owner_kind="recipe-build",
+                    owner_id=build.id,
+                    plan_digest=plan.build_input_sha256,
+                    actor=actor,
+                    request_id=request_id,
+                    node_payloads=((plan.builder_node_id, plan.agent_payload),),
+                    authority_digest=plan.build_input_sha256,
+                    now=now,
+                    job_context={"force_rebuild": True},
+                )
+            elif build.state == "failed":
                 previous = session.scalar(
                     select(Job)
                     .where(
@@ -294,7 +374,7 @@ class RecipeOperationService:
                     request_id=request_id,
                     now=now,
                 )
-            else:
+            elif build.state == "planned":
                 if build.state != "planned":
                     raise RecipeOperationConflict("recipe build preview is stale")
                 if self._builds is None:
@@ -314,6 +394,8 @@ class RecipeOperationService:
                     authority_digest=plan.build_input_sha256,
                     now=now,
                 )
+            else:
+                raise RecipeOperationConflict("recipe build preview is stale")
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
@@ -334,10 +416,199 @@ class RecipeOperationService:
         )
         return job if job is not None and isinstance(job.result, Mapping) else None
 
-    def preview_install(self, mapping_id: str, recipe_build_id: str) -> InstallPlan:
+    def preview_install(
+        self, mapping_id: str, recipe_build_id: str | None
+    ) -> InstallPlan:
         return self._install_admission.plan_install(
             mapping_id, recipe_build_id, now=self._clock()
         )
+
+    def prepare_installation(
+        self,
+        plan: InstallPlan,
+        *,
+        actor: str,
+    ) -> str:
+        """Persist an admitted installation without starting Spark work.
+
+        Run/Switch has to compile and persist the exact launch document before
+        it copies model/image bytes to a target.  The regular ``install``
+        method intentionally queues the agent child immediately, so this
+        small lifecycle primitive stops at the durable Controller boundary.
+        Reusing a matching installation makes the phase safe to replay after a
+        process crash between the database commit and high-level progress
+        checkpoint.
+        """
+
+        if not plan.allowed:
+            reasons = list(
+                dict.fromkeys(
+                    f"{reason.code}: {reason.detail}"[:200]
+                    for node in plan.nodes
+                    for reason in node.blockers
+                )
+            )
+            raise RecipeOperationConflict(
+                "install plan is blocked: " + "; ".join(reasons[:3])
+            )
+        now = self._clock()
+        with self._sessions.begin() as session:
+            existing = session.scalar(
+                select(RecipeInstallation)
+                .where(
+                    RecipeInstallation.mapping_id == plan.mapping_id,
+                    RecipeInstallation.mapping_generation == plan.mapping_generation,
+                    RecipeInstallation.recipe_build_id == plan.recipe_build_id,
+                    RecipeInstallation.plan_digest == plan.plan_digest,
+                    RecipeInstallation.state.in_(
+                        ("planned", "installing", "partial", "installed")
+                    ),
+                )
+                .order_by(RecipeInstallation.created_at.desc())
+                .limit(1)
+            )
+            if existing is not None:
+                stored_plans = (
+                    existing.plan.get("compiled_execution_plans")
+                    if isinstance(existing.plan, Mapping)
+                    else None
+                )
+                if not isinstance(stored_plans, Mapping):
+                    raise RecipeOperationConflict(
+                        "stored installation has no compiled execution plan"
+                    )
+                return existing.id
+            try:
+                installation_id = self._install_admission.accept_install_in_session(
+                    session, plan, actor=actor, now=now
+                )
+            except (RuntimeError, ValueError) as error:
+                raise RecipeOperationConflict(str(error)) from error
+            installation = session.get(RecipeInstallation, installation_id)
+            assert installation is not None
+            if not isinstance(installation.plan, Mapping) or not isinstance(
+                installation.plan.get("compiled_execution_plans"), Mapping
+            ):
+                raise RecipeOperationConflict(
+                    "compiled execution plan was not persisted"
+                )
+            return installation_id
+
+    def start_installation(
+        self,
+        installation_id: str,
+        *,
+        actor: str,
+        request_id: str,
+    ) -> RecipeOperationView:
+        """Queue the already prepared installation after target verification."""
+
+        now = self._clock()
+        with self._sessions.begin() as session:
+            installation = session.get(
+                RecipeInstallation, installation_id, with_for_update=True
+            )
+            if installation is None:
+                raise RecipeOperationConflict("recipe installation is unavailable")
+            existing = self._idempotent_in_session(
+                session,
+                request_id,
+                "recipe.install",
+                installation.plan_digest,
+                owner_kind="installation",
+                owner_id=installation_id,
+            )
+            if existing is not None:
+                return existing
+            if installation.state == "installed":
+                completed = session.scalar(
+                    select(Job)
+                    .where(
+                        Job.kind == "recipe.install",
+                        Job.state == "succeeded",
+                        Job.payload["owner_id"].as_string() == installation_id,
+                        Job.payload["plan_digest"].as_string()
+                        == installation.plan_digest,
+                    )
+                    .order_by(Job.updated_at.desc())
+                    .limit(1)
+                )
+                if completed is not None:
+                    return self._view(completed)
+                raise RecipeOperationConflict(
+                    "recipe installation is already complete without an operation"
+                )
+            active = session.scalar(
+                select(Job)
+                .where(
+                    Job.kind == "recipe.install",
+                    Job.state.in_(("queued", "running")),
+                    Job.payload["owner_id"].as_string() == installation_id,
+                    Job.payload["plan_digest"].as_string() == installation.plan_digest,
+                )
+                .order_by(Job.updated_at.desc(), Job.id)
+                .limit(1)
+            )
+            if active is not None:
+                return self._view(active)
+            if installation.state not in {"planned", "partial", "failed", "installing"}:
+                raise RecipeOperationConflict("recipe installation is not launchable")
+            raw_plans = (
+                installation.plan.get("compiled_execution_plans")
+                if isinstance(installation.plan, Mapping)
+                else None
+            )
+            if not isinstance(raw_plans, Mapping):
+                raise RecipeOperationConflict("compiled execution plan is unavailable")
+            nodes = tuple(
+                session.scalars(
+                    select(InstallationNode)
+                    .where(InstallationNode.installation_id == installation_id)
+                    .order_by(InstallationNode.rank, InstallationNode.node_id)
+                )
+            )
+            if not nodes or any(
+                not isinstance(raw_plans.get(node.node_id), Mapping) for node in nodes
+            ):
+                raise RecipeOperationConflict(
+                    "compiled execution plan is missing for one or more nodes"
+                )
+            revision = _active_recipe_revision(session, installation.recipe_revision_id)
+            if revision is None or revision.content_digest is None:
+                raise RecipeOperationConflict("recipe revision is unavailable")
+            installation.state = "installing"
+            installation.updated_at = now
+            for node in nodes:
+                node.state = "planned"
+                node.updated_at = now
+            job = self._queue_in_session(
+                session,
+                kind="recipe.install",
+                owner_kind="installation",
+                owner_id=installation_id,
+                plan_digest=installation.plan_digest,
+                actor=actor,
+                request_id=request_id,
+                node_payloads=tuple(
+                    (
+                        node.node_id,
+                        {
+                            "schema_version": 2,
+                            "installation_id": installation_id,
+                            "plan_digest": installation.plan_digest,
+                            "rank": node.rank,
+                            "role": node.role,
+                            "expected_bytes": node.required_bytes,
+                            "compiled_execution_plan": raw_plans[node.node_id],
+                        },
+                    )
+                    for node in nodes
+                ),
+                authority_digest=revision.content_digest,
+                now=now,
+            )
+        self._agent_jobs.notify_available()
+        return self.get(job.id)
 
     def preview_image_distribution(
         self,
@@ -530,6 +801,11 @@ class RecipeOperationService:
             assert installation is not None
             installation.state = "installing"
             installation.updated_at = now
+            compiled_plans = plan.compiled_plan_by_node
+            if set(compiled_plans) != {node.node_id for node in plan.nodes}:
+                raise RecipeOperationConflict(
+                    "compiled execution plan is missing for one or more mapped nodes"
+                )
             job = self._queue_in_session(
                 session,
                 kind="recipe.install",
@@ -542,18 +818,13 @@ class RecipeOperationService:
                     (
                         node.node_id,
                         {
-                            "schema_version": 1,
+                            "schema_version": 2,
                             "installation_id": installation_id,
-                            "recipe_revision_id": plan.recipe_revision_id,
-                            "recipe_content_sha256": plan.recipe_content_sha256,
-                            "mapping_id": plan.mapping_id,
-                            "mapping_generation": plan.mapping_generation,
-                            "recipe_build_id": plan.recipe_build_id,
-                            "image_digest": plan.image_digest,
                             "plan_digest": plan.plan_digest,
                             "rank": node.rank,
                             "role": node.role,
                             "expected_bytes": node.required_bytes,
+                            "compiled_execution_plan": compiled_plans[node.node_id],
                         },
                     )
                     for node in plan.nodes
@@ -646,12 +917,29 @@ class RecipeOperationService:
             except (RuntimeError, ValueError) as error:
                 raise RecipeOperationConflict(str(error)) from error
             run = session.get(RecipeRun, run_id)
-            revision = session.get(LocalRecipeRevision, plan.recipe_revision_id)
+            revision = _active_recipe_revision(session, plan.recipe_revision_id)
             installation = session.get(RecipeInstallation, plan.installation_id)
             assert run is not None and revision is not None and installation is not None
+            compiled_plans = installation.plan.get("compiled_execution_plans")
+            if not isinstance(compiled_plans, Mapping):
+                raise RecipeOperationConflict(
+                    "compiled execution plan is unavailable for the installed recipe"
+                )
+            if any(
+                not isinstance(compiled_plans.get(node.node_id), Mapping)
+                for node in plan.nodes
+            ):
+                raise RecipeOperationConflict(
+                    "compiled execution plan is missing for one or more run ranks"
+                )
             start_order = _topology_order(revision.document, "start_order")
             topology = recipe_topology(revision.document)
-            two_phase_start = world_size > 1 and topology.get("mode") == "distributed"
+            distributed_readiness = _canonical_distributed_readiness(revision.document)
+            two_phase_start = (
+                world_size > 1
+                and topology.get("mode") == "distributed"
+                and distributed_readiness is not None
+            )
             start_deadline = (
                 _distributed_start_deadline(revision.document, now=now)
                 if two_phase_start
@@ -681,50 +969,55 @@ class RecipeOperationService:
                     )
             run.state = "starting"
             run.updated_at = now
-            recipe_digest = revision.content_sha256
+            recipe_digest = revision.content_digest
             assert recipe_digest is not None
-            start_payloads = tuple(
-                (
-                    node.node_id,
-                    {
-                        "schema_version": 1,
-                        "run_id": run_id,
-                        "installation_id": plan.installation_id,
-                        "recipe_revision_id": plan.recipe_revision_id,
-                        "recipe_content_sha256": recipe_digest,
-                        "mapping_id": plan.mapping_id,
-                        "mapping_generation": plan.mapping_generation,
-                        "image_digest": installation.image_digest,
-                        "plan_digest": plan.plan_digest,
-                        "alias": plan.alias,
-                        "rank": node.rank,
-                        "role": node.role,
-                        "port": node.port,
-                        "reserved_memory_bytes": node.required_memory_bytes,
-                        "endpoint_address": (
-                            presences[node.node_id]
-                            if node.endpoint_owner
+
+            def start_payload(node: RunNodePlan) -> tuple[str, Mapping[str, object]]:
+                endpoint_owner = node.endpoint_owner
+                node_id = node.node_id
+                try:
+                    payload = build_recipe_start_payload(
+                        run_id=run_id,
+                        installation_id=plan.installation_id,
+                        recipe_revision_id=plan.recipe_revision_id,
+                        recipe_content_sha256=recipe_digest,
+                        mapping_id=run.mapping_id,
+                        mapping_generation=run.mapping_generation,
+                        run_generation=run.run_generation,
+                        image_digest=installation.image_digest,
+                        plan_digest=plan.plan_digest,
+                        alias=plan.alias,
+                        placement=RecipeStartPlacement(
+                            node_id,
+                            node.rank,
+                            node.role,
+                            node.port,
+                            node.required_memory_bytes,
+                            node.fabric_address,
+                        ),
+                        endpoint_address=(
+                            presences[node_id]
+                            if endpoint_owner
                             else node.fabric_address
                         ),
-                        "world_size": world_size,
-                        "local_address": (
-                            node.fabric_address if world_size > 1 else None
+                        compiled_endpoint_address=(
+                            presences[node_id] if endpoint_owner else None
                         ),
-                        "master_address": master_address,
-                        "master_port": master_port,
-                        **(
-                            {
-                                "phase": "rank-launch",
-                                "start_deadline": start_deadline,
-                                "run_generation": run.run_generation,
-                            }
-                            if start_deadline is not None
-                            else {}
-                        ),
-                    },
-                )
-                for node in plan.nodes
-            )
+                        world_size=world_size,
+                        compiled_execution_plan=compiled_plans[node_id],
+                        local_address=(node.fabric_address if world_size > 1 else None),
+                        master_address=master_address,
+                        master_port=master_port,
+                        phase="rank-launch" if start_deadline is not None else None,
+                        start_deadline=start_deadline,
+                    )
+                except (KeyError, RecipeStartPayloadError) as error:
+                    raise RecipeOperationConflict(
+                        "recipe start payload is invalid"
+                    ) from error
+                return node_id, payload
+
+            start_payloads = tuple(start_payload(node) for node in plan.nodes)
             role_phases = _role_phases(start_order, start_payloads)
             phases = role_phases
             if start_deadline is not None:
@@ -828,7 +1121,7 @@ class RecipeOperationService:
         with self._sessions.begin() as session:
             installation = session.get(RecipeInstallation, plan.installation_id)
             revision = (
-                session.get(LocalRecipeRevision, installation.recipe_revision_id)
+                _active_recipe_revision(session, installation.recipe_revision_id)
                 if installation is not None
                 else None
             )
@@ -897,7 +1190,7 @@ class RecipeOperationService:
                 kind="recipe.job.activate.v1",
                 state="succeeded",
                 actor=actor,
-                authority_revision=revision.content_sha256 or "",
+                authority_revision=revision.content_digest or "",
                 targets=sorted(node.node_id for node in nodes),
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
@@ -968,7 +1261,7 @@ class RecipeOperationService:
                 )
                 run = session.get(RecipeRun, run_id)
                 assert run is not None
-                revision = session.get(LocalRecipeRevision, admitted.recipe_revision_id)
+                revision = _active_recipe_revision(session, admitted.recipe_revision_id)
                 if revision is None:
                     raise RecipeOperationConflict("recipe run topology is unavailable")
                 stop_order = _topology_order(revision.document, "stop_order")
@@ -1102,8 +1395,8 @@ class RecipeOperationService:
                                     plan.installation_authority_digest
                                 ),
                                 "plan_digest": plan.original_plan_digest,
-                                "cleanup_model_version_sha256": (
-                                    plan.model_impact.model_version_sha256
+                                "cleanup_model_content_sha256": (
+                                    plan.model_impact.model_content_sha256
                                     if node.node_id
                                     in plan.model_impact.cleanup_node_ids
                                     else None
@@ -1131,15 +1424,15 @@ class RecipeOperationService:
         self._agent_jobs.notify_available()
         return self.get(job.id)
 
-    def preview_model_deletion(self, model_version_sha256: str) -> ModelDeletionPlan:
+    def preview_model_deletion(self, model_content_sha256: str) -> ModelDeletionPlan:
         with self._sessions() as session:
             return self._model_deletion_plan_in_session(
-                session, model_version_sha256, lock=False
+                session, model_content_sha256, lock=False
             )
 
     def delete_model(
         self,
-        model_version_sha256: str,
+        model_content_sha256: str,
         *,
         plan_digest: str,
         actor: str,
@@ -1150,8 +1443,8 @@ class RecipeOperationService:
             request_id,
             kind,
             plan_digest,
-            owner_kind="model-version",
-            owner_id=model_version_sha256,
+            owner_kind="model",
+            owner_id=model_content_sha256,
         )
         if existing is not None:
             return existing
@@ -1159,15 +1452,15 @@ class RecipeOperationService:
         try:
             with self._sessions.begin() as session:
                 plan = self._model_deletion_plan_in_session(
-                    session, model_version_sha256, lock=True
+                    session, model_content_sha256, lock=True
                 )
                 existing = self._idempotent_in_session(
                     session,
                     request_id,
                     kind,
                     plan_digest,
-                    owner_kind="model-version",
-                    owner_id=model_version_sha256,
+                    owner_kind="model",
+                    owner_id=model_content_sha256,
                 )
                 if existing is not None:
                     return existing
@@ -1185,7 +1478,7 @@ class RecipeOperationService:
                             node.node_id,
                             {
                                 "schema_version": 1,
-                                "model_version_sha256": model_version_sha256,
+                                "model_content_sha256": model_content_sha256,
                                 "plan_digest": plan.plan_digest,
                                 "installations": [
                                     {
@@ -1202,13 +1495,13 @@ class RecipeOperationService:
                 job = self._queue_in_session(
                     session,
                     kind=kind,
-                    owner_kind="model-version",
-                    owner_id=model_version_sha256,
+                    owner_kind="model",
+                    owner_id=model_content_sha256,
                     plan_digest=plan.plan_digest,
                     actor=actor,
                     request_id=request_id,
                     node_payloads=tuple(node_payloads),
-                    authority_digest=model_version_sha256,
+                    authority_digest=model_content_sha256,
                     now=now,
                     job_context={
                         "installation_ids": sorted(installations),
@@ -1219,8 +1512,8 @@ class RecipeOperationService:
                 request_id,
                 kind,
                 plan_digest,
-                owner_kind="model-version",
-                owner_id=model_version_sha256,
+                owner_kind="model",
+                owner_id=model_content_sha256,
             )
             if raced is not None:
                 return raced
@@ -1358,7 +1651,6 @@ class RecipeOperationService:
         installation = session.get(RecipeInstallation, owner_id, with_for_update=True)
         if installation is None or installation.state not in {"partial", "failed"}:
             raise RecipeOperationConflict("recipe installation is not retryable")
-        recipe_revision_id = installation.recipe_revision_id
         nodes = tuple(
             session.scalars(
                 select(InstallationNode)
@@ -1366,9 +1658,25 @@ class RecipeOperationService:
                 .order_by(InstallationNode.node_id)
             )
         )
-        revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
-        assert revision is not None and revision.content_sha256 is not None
-        recipe_digest = revision.content_sha256
+        revision = _active_recipe_revision(session, installation.recipe_revision_id)
+        assert revision is not None and revision.content_digest is not None
+        recipe_digest = revision.content_digest
+        compiled_plans = (
+            installation.plan.get("compiled_execution_plans")
+            if isinstance(installation.plan, Mapping)
+            else None
+        )
+        if (
+            not isinstance(compiled_plans, Mapping)
+            or not nodes
+            or any(
+                not isinstance(compiled_plans.get(node.node_id), Mapping)
+                for node in nodes
+            )
+        ):
+            raise RecipeOperationConflict(
+                "stored compiled execution plan is missing for install retry"
+            )
         installation.state = "installing"
         installation.updated_at = now
         for node in nodes:
@@ -1385,18 +1693,13 @@ class RecipeOperationService:
                 (
                     node.node_id,
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "installation_id": owner_id,
-                        "recipe_revision_id": recipe_revision_id,
-                        "recipe_content_sha256": recipe_digest,
-                        "mapping_id": installation.mapping_id,
-                        "mapping_generation": installation.mapping_generation,
-                        "recipe_build_id": installation.recipe_build_id,
-                        "image_digest": installation.image_digest,
                         "plan_digest": previous_plan_digest,
                         "rank": node.rank,
                         "role": node.role,
                         "expected_bytes": node.required_bytes,
+                        "compiled_execution_plan": compiled_plans[node.node_id],
                     },
                 )
                 for node in nodes
@@ -1577,10 +1880,21 @@ class RecipeOperationService:
             build = session.get(RecipeBuild, owner_id, with_for_update=True)
             if build is None or build.builder_node_id != node_id:
                 raise RecipeOperationConflict("recipe build authority is invalid")
+            force_rebuild = job.payload.get("force_rebuild") is True
             if succeeded:
-                _record_build_evidence(session, build, evidence, now=now)
+                _record_build_evidence(
+                    session,
+                    build,
+                    evidence,
+                    now=now,
+                    replace_existing=force_rebuild,
+                )
             else:
-                build.state = "failed"
+                # A forced rebuild is an attempt to replace a still-valid
+                # receipt.  Keep that receipt authoritative if the new
+                # attempt fails; the availability operation itself reports
+                # the failed attempt and remains retryable.
+                build.state = "succeeded" if force_rebuild else "failed"
                 build.error = str(evidence.get("reason", "agent build failed"))[:512]
                 build.updated_at = now
         elif job.kind == "recipe.image.import.v1":
@@ -1769,9 +2083,7 @@ class RecipeOperationService:
                     for operation_id, _node_id, _payload in phases[phase_index]
                 }
                 phase_children = tuple(
-                    child
-                    for child in children
-                    if child.id in phase_operations
+                    child for child in children if child.id in phase_operations
                 )
                 if any(
                     child.state not in _TERMINAL_JOB_STATES for child in phase_children
@@ -1871,8 +2183,8 @@ class RecipeOperationService:
                             RecipeInstallation, run.installation_id
                         )
                         revision = (
-                            session.get(
-                                LocalRecipeRevision, installation.recipe_revision_id
+                            _active_recipe_revision(
+                                session, installation.recipe_revision_id
                             )
                             if installation is not None
                             else None
@@ -1938,13 +2250,13 @@ class RecipeOperationService:
                     phases, marker = recovery
                     installation = session.get(RecipeInstallation, run.installation_id)
                     revision = (
-                        session.get(
-                            LocalRecipeRevision, installation.recipe_revision_id
+                        _active_recipe_revision(
+                            session, installation.recipe_revision_id
                         )
                         if installation is not None
                         else None
                     )
-                    if revision is None or revision.content_sha256 is None:
+                    if revision is None or revision.content_digest is None:
                         raise RecipeOperationConflict(
                             "distributed recovery authority is unavailable"
                         )
@@ -1970,7 +2282,7 @@ class RecipeOperationService:
                         ),
                         node_payloads=unique_payloads,
                         phases=phases,
-                        authority_digest=revision.content_sha256,
+                        authority_digest=revision.content_digest,
                         now=now,
                         job_context={
                             "recovery": marker,
@@ -2141,11 +2453,11 @@ class RecipeOperationService:
                 raise RecipeOperationConflict("stop plan is stale or blocked")
             installation = session.get(RecipeInstallation, run.installation_id)
             revision = (
-                session.get(LocalRecipeRevision, installation.recipe_revision_id)
+                _active_recipe_revision(session, installation.recipe_revision_id)
                 if installation is not None
                 else None
             )
-            if revision is None or revision.content_sha256 is None:
+            if revision is None or revision.content_digest is None:
                 raise RecipeOperationConflict("recipe revision is unavailable")
             nodes = tuple(
                 session.scalars(
@@ -2175,7 +2487,7 @@ class RecipeOperationService:
                 kind="recipe.stop",
                 state="succeeded",
                 actor=actor,
-                authority_revision=revision.content_sha256,
+                authority_revision=revision.content_digest,
                 targets=sorted(node.node_id for node in nodes),
                 payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
                 payload=payload,
@@ -2230,14 +2542,9 @@ class RecipeOperationService:
         if installation is None:
             raise RecipeOperationConflict("recipe installation does not exist")
 
-        revision_statement = select(LocalRecipeRevision).where(
-            LocalRecipeRevision.id == installation.recipe_revision_id
+        revision = _active_recipe_revision(
+            session, installation.recipe_revision_id, for_update=lock
         )
-        if lock:
-            revision_statement = revision_statement.with_for_update(
-                of=LocalRecipeRevision
-            )
-        revision = session.scalar(revision_statement)
         if revision is None:
             raise RecipeOperationConflict("recipe revision does not exist")
 
@@ -2367,17 +2674,12 @@ class RecipeOperationService:
         if installation is None:
             raise RecipeOperationConflict("recipe installation does not exist")
 
-        revision_statement = select(LocalRecipeRevision).where(
-            LocalRecipeRevision.id == installation.recipe_revision_id
+        revision = _active_recipe_revision(
+            session, installation.recipe_revision_id, for_update=lock
         )
-        if lock:
-            revision_statement = revision_statement.with_for_update(
-                of=LocalRecipeRevision
-            )
-        revision = session.scalar(revision_statement)
         if (
             revision is None
-            or revision.content_sha256 is None
+            or revision.content_digest is None
             or not isinstance(revision.document, Mapping)
         ):
             raise RecipeOperationConflict("recipe revision authority is unavailable")
@@ -2455,24 +2757,24 @@ class RecipeOperationService:
             == installation.mapping_generation
             and installation.plan.get("recipe_revision_id") == revision.id
             and installation.plan.get("recipe_content_sha256")
-            == revision.content_sha256
+            == revision.content_digest
             and installation.plan.get("plan_digest") == installation.plan_digest
         )
-        model_version_sha256, model_title = _primary_model_identity(revision.document)
-        if installation.model_version_sha256 not in {None, model_version_sha256}:
+        model_content_sha256, model_title = _primary_model_identity(revision.document)
+        if installation.model_content_sha256 not in {None, model_content_sha256}:
             raise RecipeOperationConflict("installation model authority is invalid")
         dependent_recipe_ids_by_node = self._model_dependents_on_nodes(
             session,
-            model_version_sha256,
+            model_content_sha256,
             {node.node_id for node in nodes},
             exclude_installation_id=installation.id,
             lock=lock,
         )
         return uninstall_plan(
             installation_id=installation.id,
-            recipe_id=revision.recipe_id,
+            recipe_id=revision.document_id,
             recipe_revision_id=revision.id,
-            recipe_content_sha256=revision.content_sha256,
+            recipe_content_sha256=revision.content_digest,
             recipe_content=revision.document,
             original_plan_digest=installation.plan_digest,
             installation_state=installation.state,
@@ -2501,7 +2803,7 @@ class RecipeOperationService:
             active_run_count=active_count,
             active_runs_truncated=active_count > _MAX_ACTIVE_RUNS,
             active_operation=active_operation,
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             model_title=model_title,
             dependent_recipe_ids_by_node=dependent_recipe_ids_by_node,
         )
@@ -2509,7 +2811,7 @@ class RecipeOperationService:
     def _model_dependents_on_nodes(
         self,
         session: Session,
-        model_version_sha256: str,
+        model_content_sha256: str,
         node_ids: set[str],
         *,
         exclude_installation_id: str | None,
@@ -2544,52 +2846,52 @@ class RecipeOperationService:
             member_nodes = memberships.get(installation.id)
             if not member_nodes:
                 continue
-            revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
+            revision = _active_recipe_revision(session, installation.recipe_revision_id)
             if revision is None:
                 raise RecipeOperationConflict(
                     "dependent recipe authority is unavailable"
                 )
             primary_digest, _title = _primary_model_identity(revision.document)
-            if installation.model_version_sha256 not in {None, primary_digest}:
+            if installation.model_content_sha256 not in {None, primary_digest}:
                 raise RecipeOperationConflict("dependent model authority is invalid")
             if any(
-                digest == model_version_sha256
-                for digest, _title in _recipe_model_identities(revision.document)
+                digest == model_content_sha256
+                for digest, _title in _recipe_model_identities(session, revision.document)
             ):
                 for node_id in member_nodes:
-                    dependent_recipe_ids[node_id].add(revision.recipe_id)
+                    dependent_recipe_ids[node_id].add(revision.document_id)
         return {
             node_id: tuple(sorted(recipe_ids))
             for node_id, recipe_ids in sorted(dependent_recipe_ids.items())
         }
 
     def _model_deletion_plan_in_session(
-        self, session: Session, model_version_sha256: str, *, lock: bool
+        self, session: Session, model_content_sha256: str, *, lock: bool
     ) -> ModelDeletionPlan:
-        if not _lower_hex_digest(model_version_sha256):
-            raise RecipeOperationConflict("model version identity is invalid")
+        if not _lower_hex_digest(model_content_sha256):
+            raise RecipeOperationConflict("model content identity is invalid")
         statement = select(RecipeInstallation).where(
             RecipeInstallation.state != "uninstalled"
         )
         if lock:
             statement = statement.with_for_update(of=RecipeInstallation)
         candidates = tuple(session.scalars(statement))
-        selected: list[tuple[RecipeInstallation, LocalRecipeRevision, str]] = []
-        model_title = model_version_sha256[:12]
+        selected: list[tuple[RecipeInstallation, CatalogDocumentRevision, str]] = []
+        model_title = model_content_sha256[:12]
         for installation in candidates:
-            revision = session.get(LocalRecipeRevision, installation.recipe_revision_id)
-            if revision is None or revision.content_sha256 is None:
+            revision = _active_recipe_revision(session, installation.recipe_revision_id)
+            if revision is None or revision.content_digest is None:
                 raise RecipeOperationConflict(
                     "recipe revision authority is unavailable"
                 )
             primary_digest, _primary_title = _primary_model_identity(revision.document)
-            if installation.model_version_sha256 not in {None, primary_digest}:
+            if installation.model_content_sha256 not in {None, primary_digest}:
                 raise RecipeOperationConflict("installation model authority is invalid")
             matched_title = next(
                 (
                     title
-                    for digest, title in _recipe_model_identities(revision.document)
-                    if digest == model_version_sha256
+                    for digest, title in _recipe_model_identities(session, revision.document)
+                    if digest == model_content_sha256
                 ),
                 None,
             )
@@ -2628,7 +2930,7 @@ class RecipeOperationService:
             .where(
                 Job.kind == "recipe.model-uninstall.v1",
                 Job.state.in_({"queued", "running"}),
-                Job.payload["owner_id"].as_string() == model_version_sha256,
+                Job.payload["owner_id"].as_string() == model_content_sha256,
             )
             .limit(1)
         )
@@ -2668,9 +2970,9 @@ class RecipeOperationService:
             installation_impacts.append(
                 ModelDeletionInstallationImpact(
                     installation_id=installation.id,
-                    recipe_id=revision.recipe_id,
+                    recipe_id=revision.document_id,
                     recipe_revision_id=revision.id,
-                    recipe_content_sha256=revision.content_sha256,
+                    recipe_content_sha256=revision.content_digest,
                     node_ids=tuple(node.node_id for node in nodes),
                     installed_bytes=sum(node.installed_bytes or 0 for node in nodes),
                 )
@@ -2681,7 +2983,7 @@ class RecipeOperationService:
                     {"installation_ids": [], "recipe_ids": set(), "bytes": 0},
                 )
                 item["installation_ids"].append(installation.id)  # type: ignore[union-attr]
-                item["recipe_ids"].add(revision.recipe_id)  # type: ignore[union-attr]
+                item["recipe_ids"].add(revision.document_id)  # type: ignore[union-attr]
                 item["bytes"] += node.installed_bytes  # type: ignore[operator]
         node_impacts = tuple(
             ModelDeletionNodeImpact(
@@ -2693,7 +2995,7 @@ class RecipeOperationService:
             for node_id, value in sorted(by_node.items())
         )
         return model_deletion_plan(
-            model_version_sha256=model_version_sha256,
+            model_content_sha256=model_content_sha256,
             model_title=model_title,
             installations=installation_impacts,
             nodes=node_impacts,
@@ -2804,6 +3106,17 @@ class RecipeOperationService:
     ) -> Job:
         if not node_payloads:
             raise RecipeOperationConflict("operation group has no target nodes")
+        if kind in {"recipe.install", "recipe.start"}:
+            payload_model = (
+                RecipeInstallPayload if kind == "recipe.install" else RecipeStartPayload
+            )
+            try:
+                for _node_id, payload in node_payloads:
+                    payload_model.model_validate(payload)
+            except Exception as error:
+                raise RecipeOperationConflict(
+                    f"{kind} payload does not satisfy schema 2"
+                ) from error
         if session.scalar(select(Job.id).where(Job.request_id == request_id)):
             raise RecipeOperationConflict("request key was already used differently")
         job_id = str(uuid.uuid4())
@@ -2852,6 +3165,23 @@ class RecipeOperationService:
             if set(job_context) & set(job_payload):
                 raise RecipeOperationConflict("operation context is invalid")
             job_payload.update(json.loads(canonical_message(job_context)))
+        if kind in {"recipe.install", "recipe.start"}:
+            try:
+                for _node_id, payload in flattened:
+                    compiled_plan = payload.get("compiled_execution_plan")
+                    if not isinstance(compiled_plan, Mapping):
+                        raise CompiledExecutionPlanError(
+                            "compiled execution plan is missing"
+                        )
+                    validate_compiled_launch_payload(compiled_plan)
+            except (CompiledExecutionPlanError, TypeError, ValueError) as error:
+                raise RecipeOperationConflict(
+                    f"compiled execution plan is invalid: {error}"
+                ) from None
+            if len(canonical_message(job_payload)) > MAX_COMPILED_EXECUTION_PLAN_BYTES:
+                raise RecipeOperationConflict(
+                    "recipe operation job payload is too large"
+                )
         job = Job(
             id=job_id,
             request_id=request_id,
@@ -2921,7 +3251,15 @@ def _lower_hex_digest(value: object) -> bool:
 
 
 def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str]:
-    model = document.get("model")
+    selections = document.get("models")
+    selection = (
+        selections[0]
+        if isinstance(selections, Sequence)
+        and not isinstance(selections, (str, bytes))
+        and selections
+        else None
+    )
+    model = selection.get("model") if isinstance(selection, Mapping) else None
     if not isinstance(model, Mapping):
         raise RecipeOperationConflict("recipe model authority is unavailable")
     digest = model.get("content_sha256")
@@ -2939,29 +3277,43 @@ def _primary_model_identity(document: Mapping[str, object]) -> tuple[str, str]:
 
 
 def _recipe_model_identities(
+    session: Session,
     document: Mapping[str, object],
 ) -> tuple[tuple[str, str], ...]:
-    primary = _primary_model_identity(document)
-    dependencies = document.get("dependencies", [])
-    if not isinstance(dependencies, list):
+    try:
+        recipe = RecipeDefinition.model_validate(document)
+    except (TypeError, ValueError) as error:
+        raise RecipeOperationConflict("recipe model dependencies are invalid") from error
+    if not recipe.models:
         raise RecipeOperationConflict("recipe model dependencies are invalid")
-    result = [primary]
-    for dependency in dependencies:
-        if not isinstance(dependency, Mapping):
-            raise RecipeOperationConflict("recipe model dependency is invalid")
-        digest = dependency.get("content_sha256")
-        publisher = dependency.get("publisher")
-        slug = dependency.get("slug")
-        if (
-            dependency.get("kind") != "model-version"
-            or not _lower_hex_digest(digest)
-            or not isinstance(publisher, str)
-            or not publisher
-            or not isinstance(slug, str)
-            or not slug
-        ):
-            raise RecipeOperationConflict("recipe model dependency is invalid")
-        result.append((digest, f"{publisher}/{slug}"))
+    result: list[tuple[str, str]] = []
+    pending = [selection.model for selection in recipe.models]
+    seen: set[tuple[str, str, str]] = set()
+    while pending:
+        reference = pending.pop(0)
+        key = (reference.publisher, reference.slug, reference.content_sha256)
+        if key in seen:
+            continue
+        seen.add(key)
+        revision = session.scalar(
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "model",
+                CatalogDocumentRevision.publisher == reference.publisher,
+                CatalogDocumentRevision.slug == reference.slug,
+                CatalogDocumentRevision.content_digest == reference.content_sha256,
+                CatalogDocumentRevision.state == "active",
+            )
+            .limit(1)
+        )
+        if revision is None or not isinstance(revision.document, Mapping):
+            raise RecipeOperationConflict("recipe model reference is unavailable")
+        try:
+            model = ModelDefinition.model_validate(revision.document)
+        except (TypeError, ValueError) as error:
+            raise RecipeOperationConflict("recipe model reference is invalid") from error
+        result.append((reference.content_sha256, f"{reference.publisher}/{reference.slug}"))
+        pending.extend(model.dependencies)
     if len({digest for digest, _title in result}) != len(result):
         raise RecipeOperationConflict("recipe model dependencies are duplicated")
     return tuple(result)
@@ -2981,15 +3333,31 @@ def _topology_order(document: Mapping[str, object], key: str) -> tuple[str, ...]
 def _distributed_start_deadline(
     document: Mapping[str, object], *, now: datetime
 ) -> str:
+    readiness = _canonical_distributed_readiness(document)
+    if readiness is None:
+        raise RecipeOperationConflict("distributed readiness policy is unavailable")
+    timeout = readiness["timeout_seconds"]
+    assert type(timeout) is int
+    return (_aware(now) + timedelta(seconds=timeout)).isoformat()
+
+
+def _canonical_distributed_readiness(
+    document: Mapping[str, object],
+) -> dict[str, object] | None:
     runtime = document.get("runtime")
     lifecycle = runtime.get("lifecycle") if isinstance(runtime, Mapping) else None
-    readiness = lifecycle.get("readiness") if isinstance(lifecycle, Mapping) else None
-    timeout = (
-        readiness.get("timeout_seconds") if isinstance(readiness, Mapping) else None
-    )
-    if type(timeout) is not int or not 1 <= timeout <= 3600:
+    interfaces = document.get("interfaces")
+    if not isinstance(lifecycle, Mapping) or not isinstance(interfaces, Sequence):
         raise RecipeOperationConflict("distributed readiness timeout is invalid")
-    return (_aware(now) + timedelta(seconds=timeout)).isoformat()
+    try:
+        readiness = canonical_distributed_readiness(
+            topology=recipe_topology(document),
+            interfaces=interfaces,
+            lifecycle=lifecycle,
+        )
+    except DistributedLifecycleError as error:
+        raise RecipeOperationConflict(str(error)) from error
+    return readiness
 
 
 def _enforce_start_deadline(payload: Mapping[str, object], *, now: datetime) -> bool:
@@ -3074,8 +3442,7 @@ def _current_phase_index(
     child_operations = {child.id for child in children}
     for index in range(len(phases) - 1, -1, -1):
         phase_operations = {
-            operation_id
-            for operation_id, _node_id, _payload in phases[index]
+            operation_id for operation_id, _node_id, _payload in phases[index]
         }
         if phase_operations <= child_operations:
             return index
@@ -3124,6 +3491,7 @@ def _record_build_evidence(
     evidence: Mapping[str, object],
     *,
     now: datetime,
+    replace_existing: bool = False,
 ) -> None:
     # A retried build may already be present in this transaction's identity map
     # with the previous attempt's upload fields. Refresh under the row lock so
@@ -3160,9 +3528,12 @@ def _record_build_evidence(
         or not isinstance(findings, (list, tuple))
         or bool(findings)
         or policy.get("dockerfile") != build.plan.get("dockerfile")
-        or build.image_digest not in {None, image_digest}
-        or build.oci_layout_sha256 not in {None, layout_digest}
-        or build.image_bytes not in {None, image_bytes}
+        or (not replace_existing and build.image_digest not in {None, image_digest})
+        or (
+            not replace_existing
+            and build.oci_layout_sha256 not in {None, layout_digest}
+        )
+        or (not replace_existing and build.image_bytes not in {None, image_bytes})
     ):
         raise RecipeOperationConflict("recipe build evidence is invalid")
     build.state = "succeeded"
@@ -3274,23 +3645,36 @@ def _validate_rank_launch_evidence(
         else None
     )
     revision = (
-        session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        _active_recipe_revision(session, installation.recipe_revision_id)
         if installation is not None
         else None
     )
     if revision is None or installation is None:
         raise RecipeOperationConflict("start evidence authority is unavailable")
-    artifacts = revision.document.get("artifacts")
-    first = artifacts[0] if isinstance(artifacts, list) and artifacts else None
-    if not isinstance(first, Mapping):
+    selections = revision.document.get("models")
+    selection = (
+        selections[0]
+        if isinstance(selections, Sequence)
+        and not isinstance(selections, (str, bytes))
+        and selections
+        else None
+    )
+    model = selection.get("model") if isinstance(selection, Mapping) else None
+    if not isinstance(model, Mapping):
         raise RecipeOperationConflict("start evidence authority is invalid")
+    try:
+        model_identity = format_model_identity(
+            model["publisher"], model["slug"], model["content_sha256"]
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise RecipeOperationConflict("start evidence authority is invalid") from error
     comparisons = {
         "phase": "rank-launch",
         "run_id": run_id,
         "recipe_revision_id": operation.payload.get("recipe_revision_id"),
         "recipe_content_sha256": operation.payload.get("recipe_content_sha256"),
         "image_digest": installation.image_digest.removeprefix("sha256:"),
-        "model_identity": f"{first.get('repository')}@{first.get('revision')}",
+        "model_identity": model_identity,
         "rank": operation.payload.get("rank"),
         "role": operation.payload.get("role"),
         "world_size": operation.payload.get("world_size"),
@@ -3372,18 +3756,30 @@ def _validate_start_evidence(
         else None
     )
     revision = (
-        session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        _active_recipe_revision(session, installation.recipe_revision_id)
         if installation is not None
         else None
     )
     if revision is None:
         raise RecipeOperationConflict("start evidence authority is unavailable")
-    artifacts = revision.document.get("artifacts")
-    first = artifacts[0] if isinstance(artifacts, list) and artifacts else None
-    if not isinstance(first, Mapping):
+    selections = revision.document.get("models")
+    selection = (
+        selections[0]
+        if isinstance(selections, Sequence)
+        and not isinstance(selections, (str, bytes))
+        and selections
+        else None
+    )
+    model = selection.get("model") if isinstance(selection, Mapping) else None
+    if not isinstance(model, Mapping):
         raise RecipeOperationConflict("start evidence authority is invalid")
     image_digest = installation.image_digest.removeprefix("sha256:")
-    model_identity = f"{first.get('repository')}@{first.get('revision')}"
+    try:
+        model_identity = format_model_identity(
+            model["publisher"], model["slug"], model["content_sha256"]
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise RecipeOperationConflict("start evidence authority is invalid") from error
     endpoint_address = operation.payload.get("endpoint_address")
     port = operation.payload.get("port")
     try:

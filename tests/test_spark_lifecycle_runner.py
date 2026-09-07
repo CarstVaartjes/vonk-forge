@@ -3,8 +3,9 @@ from __future__ import annotations
 import base64
 import importlib.util
 import json
+import os
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -139,11 +140,10 @@ def test_acceptance_controller_configuration_is_short_lived_and_generation_bound
     assert "{http.request.remote.host}" not in caddy_path.read_text()
 
 
-def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
+def test_synthetic_device_fixture_supports_the_arm64_spark_runner() -> None:
     lifecycle = _module()
 
     arm64_raw, arm64_digest = lifecycle._synthetic_device_fixture("linux-arm64")
-    amd64_raw, amd64_digest = lifecycle._synthetic_device_fixture("linux-amd64")
 
     document = json.loads(arm64_raw)
     assert document["kind"] == "nvidia.com/gpu"
@@ -153,11 +153,57 @@ def test_synthetic_device_fixture_supports_each_native_package_runner() -> None:
             "name": "all",
         }
     ]
-    assert amd64_raw == arm64_raw
     assert len(arm64_digest) == 64
-    assert amd64_digest == arm64_digest
-    with pytest.raises(lifecycle.LifecycleError, match="platform"):
-        lifecycle._synthetic_device_fixture("linux-riscv64")
+    for platform in ("linux-amd64", "linux-riscv64"):
+        with pytest.raises(lifecycle.LifecycleError, match="platform"):
+            lifecycle._synthetic_device_fixture(platform)
+
+
+def test_canonical_canary_package_ancestors_are_traversable_with_private_umask(
+    tmp_path: Path,
+) -> None:
+    lifecycle = _module()
+    bundle = tmp_path / "bundle"
+    (bundle / "secrets/runtime-configs").mkdir(parents=True)
+    (bundle / "secrets/runtime-configs/caddyfile").write_text(
+        "header_up X-Vonk-Agent-Source {http.request.remote.host}\n"
+    )
+    (bundle / "docker-compose.yaml").write_text(
+        "services:\n"
+        "  control-api:\n"
+        "    environment: {}\n"
+        "  caddy:\n"
+        "    configs:\n"
+        "      - source: caddyfile\n"
+        "        target: /etc/caddy/Caddyfile\n"
+    )
+    fixture = lifecycle.CanonicalCanaryFixture(
+        index_path=Path("index.json"),
+        index_bytes=b"{}",
+        package_path=PurePosixPath(
+            "tests/fixtures/canonical-synthetic-canary/package/canary.tar.gz"
+        ),
+        package_bytes=b"package",
+        source_commit="a" * 40,
+        publisher="vonk-forge-test",
+        slug="canonical-synthetic-canary",
+        recipe_content_sha256="b" * 64,
+        model_content_sha256="c" * 64,
+        role="entrypoint",
+        serving_check={},
+        recipe={},
+    )
+    previous_umask = os.umask(0o077)
+    try:
+        lifecycle._configure_canonical_canary_library(bundle, fixture)
+    finally:
+        os.umask(previous_umask)
+
+    serving_root = bundle / "secrets/synthetic-recipe-library"
+    package_target = serving_root / Path(*fixture.package_path.parts)
+    for directory in package_target.parents:
+        if directory.is_relative_to(serving_root):
+            assert directory.stat().st_mode & 0o777 == 0o755
 
 
 def test_synthetic_device_is_resolved_by_the_native_docker_daemon(
@@ -211,14 +257,6 @@ def test_synthetic_device_is_resolved_by_the_native_docker_daemon(
     ] in observed
 
 
-def test_embedded_development_runner_reuses_the_shared_client_exception() -> None:
-    lifecycle = _module()
-
-    runner = lifecycle._load_development_runner()
-
-    assert runner.SliceError is lifecycle.SliceError
-
-
 def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
@@ -227,7 +265,9 @@ def test_synthetic_controller_accepts_the_reported_fabric_subnet() -> None:
     replacements = run._controller_response_replacements()
 
     assert replacements["Trusted Spark management CIDRs: "] == "172.16.0.0/12"
-    assert replacements["Direct GPU fabric CIDRs []: "] == "198.19.42.0/24"
+    assert replacements[
+        "Direct GPU fabric CIDRs [192.168.100.0/24,192.168.101.0/24]: "
+    ] == "198.19.42.0/24"
 
 
 def test_synthetic_firewall_preparation_only_supplies_installer_inputs(
@@ -410,7 +450,7 @@ def test_local_browser_port_is_discovered_from_the_isolated_project(
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.bundle = tmp_path
-    run.project = "vonk-spark-42-amd64"
+    run.project = "vonk-spark-42-arm64"
     observed: list[list[str]] = []
 
     def command(argv, *, cwd, timeout=300):
@@ -426,7 +466,7 @@ def test_local_browser_port_is_discovered_from_the_isolated_project(
             "docker",
             "compose",
             "--project-name",
-            "vonk-spark-42-amd64",
+            "vonk-spark-42-arm64",
             "port",
             "caddy",
             "8080",
@@ -486,17 +526,15 @@ def test_parallel_spark_controller_start_cannot_create_tailscale_services() -> N
     assert not lifecycle.TAILSCALE_CONTROLLER_SERVICES & set(command)
 
 
-def test_parallel_spark_architectures_have_distinct_compose_projects() -> None:
+def test_spark_project_identity_is_arm64_only() -> None:
     lifecycle = _module()
 
-    amd64 = lifecycle._spark_project_identity(42, "linux-amd64")
     arm64 = lifecycle._spark_project_identity(42, "linux-arm64")
 
-    assert amd64 == "vonk-spark-42-amd64"
     assert arm64 == "vonk-spark-42-arm64"
-    assert amd64 != arm64
-    with pytest.raises(lifecycle.LifecycleError, match="project identity"):
-        lifecycle._spark_project_identity(42, "linux-unknown")
+    for platform in ("linux-amd64", "linux-unknown"):
+        with pytest.raises(lifecycle.LifecycleError, match="project identity"):
+            lifecycle._spark_project_identity(42, platform)
 
 
 def test_enrollment_grant_requires_the_installer_route_metadata() -> None:
@@ -701,7 +739,7 @@ def test_installer_error_survives_bounded_controller_diagnostics(
     lifecycle = _module()
     run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
     run.bundle = tmp_path
-    run.project = "vonk-spark-42-amd64"
+    run.project = "vonk-spark-42-arm64"
     run._diagnostic_command = lambda command: subprocess.CompletedProcess(
         command,
         0,
@@ -813,3 +851,36 @@ def test_openssl_ed25519_probe_key_conversion_is_strict() -> None:
         lifecycle._openssl_compatible_ed25519_private_key(
             source.replace(b"PRIVATE KEY", b"RSA PRIVATE KEY")
         )
+
+
+@pytest.mark.parametrize("observed", ("sha256:expected", "sha256:different"))
+def test_running_channel_alias_must_match_the_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, observed: str
+) -> None:
+    lifecycle = _module()
+    run = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    run.bundle = tmp_path
+    run.project = "vonk-channel-test"
+    run.arguments = SimpleNamespace(candidate_release=tmp_path / "release.json")
+    monkeypatch.setattr(lifecycle, "COMPOSE_IMAGE_ROLES", {"api": "control-api"})
+    monkeypatch.setattr(
+        lifecycle,
+        "_read_canonical_document",
+        lambda *args: {"images": {"api": "ghcr.io/carstvaartjes/vonk-forge-api@sha256:candidate"}},
+    )
+
+    def command(argv, **kwargs):
+        if argv[:2] == ["docker", "inspect"]:
+            output = observed
+        elif argv[:3] == ["docker", "image", "inspect"]:
+            output = "sha256:expected"
+        else:
+            output = "container-id"
+        return subprocess.CompletedProcess(argv, 0, output + "\n", "")
+
+    run._run_command = command
+    if observed == "sha256:expected":
+        run._assert_running_publication_images()
+    else:
+        with pytest.raises(lifecycle.LifecycleError, match="differs from publication"):
+            run._assert_running_publication_images()

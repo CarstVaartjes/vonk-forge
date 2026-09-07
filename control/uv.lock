@@ -1238,17 +1238,21 @@ version = "2.2.0"
 source = { path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" }
 dependencies = [
     { name = "jsonschema" },
+    { name = "pydantic" },
 ]
 wheels = [
-    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:57c7423b49f79eec764d895affb05a03dc5e890174a1ef5af8a9abc1561af4f3" },
+    { filename = "vonk_agent_protocol-2.2.0-py3-none-any.whl", hash = "sha256:044dec99674a16bdf00658f719325a48798c7da717eb05217208c020f90c1cd3" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "jsonschema", specifier = "==4.25.1" }]
+requires-dist = [
+    { name = "jsonschema", specifier = "==4.25.1" },
+    { name = "pydantic", specifier = "==2.13.4" },
+]
 
 [[package]]
 name = "vonk-cluster-profiles"
-version = "0.1.0"
+version = "0.1.1"
 source = { directory = "../" }
 dependencies = [
     { name = "argon2-cffi" },
@@ -1282,7 +1286,7 @@ dev = [
 
 [[package]]
 name = "vonk-control"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
@@ -1299,6 +1303,7 @@ dependencies = [
     { name = "uvicorn" },
     { name = "vonk-agent-protocol" },
     { name = "vonk-cluster-profiles" },
+    { name = "vonk-forge-public-contracts" },
 ]
 
 [package.dev-dependencies]
@@ -1323,10 +1328,19 @@ requires-dist = [
     { name = "uvicorn", specifier = "==0.35.0" },
     { name = "vonk-agent-protocol", path = "../inventory/wheels/vonk_agent_protocol-2.2.0-py3-none-any.whl" },
     { name = "vonk-cluster-profiles", directory = "../" },
+    { name = "vonk-forge-public-contracts", git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "openapi-python-client", specifier = "==0.26.2" },
     { name = "pytest", specifier = "==9.1.1" },
+]
+
+[[package]]
+name = "vonk-forge-public-contracts"
+version = "0.1.0"
+source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&branch=main#d55389b5cc144d0483cf89b95770198c6125cb15" }
+dependencies = [
+    { name = "pydantic" },
 ]

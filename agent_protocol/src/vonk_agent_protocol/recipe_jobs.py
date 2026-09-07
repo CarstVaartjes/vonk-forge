@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -40,7 +41,12 @@ _INTERFACES = frozenset(
     {"audio-job", "video-job", "image-job", "mesh-job", "artifact-job"}
 )
 _UNSAFE_PARAMETER_KEY = re.compile(
-    r"password|secret|token|authorization|private.?key|command|shell|environment|"
+    r"^(?:apikey|passwordhash)$|"
+    r"(?:^|[_-])(?:password|secret|authorization|command|shell|environment)"
+    r"(?:$|[_-])|"
+    r"(?:^|[_-])(?:api|access|auth|bearer|github|hf|huggingface)[_-]?token$|"
+    r"(?:^|[_-])private[_-]?key$|"
+    r"^token$|"
     r"(?:^|[_-])(?:path|file|filename|filepath|directory|folder)(?:$|[_-])",
     re.IGNORECASE,
 )
@@ -222,6 +228,8 @@ def _parameters(value: object, *, depth: int = 0) -> object:
     if value is None or isinstance(value, bool):
         return value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and not math.isfinite(value):
+            raise AgentProtocolError("job parameter number is not finite")
         return value
     if isinstance(value, str):
         if "\x00" in value or len(value.encode("utf-8")) > 4096:

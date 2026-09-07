@@ -1,7 +1,9 @@
 import hashlib
 import json
+import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,7 @@ def _copy(tmp_path: Path) -> Path:
     target = tmp_path / "repo"
     for path in (
         ".github/workflows/ci.yml",
+        "scripts/select-ci-areas",
         ".github/workflows/agent-apt-development.yml",
         ".github/workflows/agent-release.yml",
         ".github/actions/agent-package-build/action.yml",
@@ -21,6 +24,7 @@ def _copy(tmp_path: Path) -> Path:
         ".github/actions/agent-package-security/action.yml",
         ".github/actions/agent-apt-publish/action.yml",
         ".github/workflows/dev-images.yml",
+        ".github/workflows/installer-publication-source.yml",
         ".github/workflows/installer-publication.yml",
         ".github/workflows/installer-setups.yml",
         ".github/workflows/workload-artifacts.yml",
@@ -32,15 +36,16 @@ def _copy(tmp_path: Path) -> Path:
         "schemas/install-release-manifest.schema.json",
         "schemas/workload-artifact-build.schema.json",
         "schemas/global/catalog-entity-v1.schema.json",
-        "schemas/global/recipe-v1.schema.json",
         "schemas/global/harness-evidence-v1.schema.json",
         "agent_protocol/pyproject.toml",
         ".dockerignore",
         "agent_protocol/uv.lock",
         "control/pyproject.toml",
         "control/uv.lock",
+        "control/packaging/public-contracts.lock",
+        "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
+        ".github/workflows/validate-recipe-library.yml",
         "control/src/vonk_control/catalog_contract.py",
-        "control/src/vonk_control/recipe_contract.py",
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
         "control/src/vonk_control/catalog_api.py",
@@ -48,6 +53,44 @@ def _copy(tmp_path: Path) -> Path:
         "control/src/vonk_control/library_contract.py",
         "control/src/vonk_control/recipe_routes.py",
         "control/src/vonk_control/models.py",
+        "control/src/vonk_control/api.py",
+        "control/src/vonk_control/worker.py",
+        "control/src/vonk_control/library_api.py",
+        "control/src/vonk_control/recipe_api.py",
+        "control/src/vonk_control/recipe_library_types.py",
+        "control/src/vonk_control/recipe_packages.py",
+        "control/src/vonk_control/catalog_sync.py",
+        "control/src/vonk_control/catalog_repository.py",
+        "control/src/vonk_control/recipe_runtime_specs.py",
+        "control/src/vonk_control/strict_json.py",
+        "src/cluster_profiles/control_client.py",
+        "src/cluster_profiles/schemas/control-openapi.json",
+        "scripts/generate-control-clients",
+        "control/src/vonk_control/compiled_execution_plan.py",
+        "control/src/vonk_control/execution_plan_service.py",
+        "control/src/vonk_control/install_admission.py",
+        "control/src/vonk_control/run_admission.py",
+        "control/src/vonk_control/run_switch_contract.py",
+        "control/src/vonk_control/run_switch_api.py",
+        "control/src/vonk_control/run_switch_operations.py",
+        "control/src/vonk_control/distribution_executor.py",
+        "control/src/vonk_control/runtime_image_preparation.py",
+        "control/src/vonk_control/cached_file_verification.py",
+        "control/src/vonk_control/recipe_operation_worker.py",
+        "control/src/vonk_control/availability_production.py",
+        "control/src/vonk_control/model_cache.py",
+        "control/src/vonk_control/model_cache_api.py",
+        "control/src/vonk_control/model_cache_contract.py",
+        "control/src/vonk_control/recipe_builds.py",
+        "control/src/vonk_control/recipe_operations.py",
+        "control/src/vonk_control/recipe_image_availability.py",
+        "control/src/vonk_control/recipe_image_availability_api.py",
+        "control/src/vonk_control/operation_contract.py",
+        "control/src/vonk_control/operation_api.py",
+        "control/src/vonk_control/settings.py",
+        "control/src/vonk_control/logging.py",
+        "src/cluster_profiles/serving_execution.py",
+        "control/migrations/versions/0000_canonical_catalog_baseline.py",
         "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/migrations/versions/0002_fleet_node_profile_events.py",
         "control/migrations/versions/0003_agent_reenrollment_grants.py",
@@ -69,6 +112,7 @@ def _copy(tmp_path: Path) -> Path:
         "deploy/compose/hermes-agent/compose.yaml",
         "deploy/compose/hermes-agent/Dockerfile",
         "deploy/compose/hermes-agent/entrypoint.sh",
+        "deploy/compose/litellm/Dockerfile",
         "deploy/compose/litellm/config.yaml",
         "deploy/compose/litellm/config_supervisor.py",
         "deploy/compose/litellm/entrypoint.sh",
@@ -106,10 +150,9 @@ def _copy(tmp_path: Path) -> Path:
         "scripts/verify-agent-binaries",
         "scripts/verify-agent-systemd",
         "scripts/verify-supply-chain",
-        "scripts/accept-recipe",
-        "scripts/run-development-slices",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/qualify-recipe",
-        "scripts/import-recipe-library",
         "scripts/validate-recipe-library",
         "scripts/workload-artifact-metadata",
         "config/recipe-library-manifest.json",
@@ -124,10 +167,12 @@ def _copy(tmp_path: Path) -> Path:
         "config/execution-harnesses",
         "config/runtime-distributions",
         "config/patch-bundles",
-        "config/recipes",
-        "config/model-targets",
     ):
         shutil.copytree(ROOT / directory, target / directory)
+    shutil.copytree(
+        ROOT / "control/src/vonk_control/harnesses",
+        target / "control/src/vonk_control/harnesses",
+    )
     shutil.copytree(
         ROOT / "agent_protocol/src",
         target / "agent_protocol/src",
@@ -220,10 +265,48 @@ def test_supply_chain_manifest_binds_installer_publication_contract(
 
 
 @pytest.mark.parametrize(
+    ("field", "replacement", "expected"),
+    (
+        (
+            "revision",
+            "0" * 40,
+            "control lock does not resolve the reviewed public contract",
+        ),
+        (
+            "sha256",
+            "0" * 64,
+            "public contract wheel does not match its reviewed lock",
+        ),
+    ),
+)
+def test_verifier_rejects_public_contract_lock_identity_drift(
+    tmp_path: Path, field: str, replacement: str, expected: str
+) -> None:
+    repository = _copy(tmp_path)
+    lock_path = repository / "control/packaging/public-contracts.lock"
+    lock = lock_path.read_text()
+    lock_path.write_text(
+        re.sub(rf'(?m)^{field} = "[0-9a-f]+"$', f'{field} = "{replacement}"', lock)
+    )
+
+    result = subprocess.run(
+        [SCRIPT, "--root", repository, "--json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert expected in " ".join(json.loads(result.stdout)["errors"])
+
+
+@pytest.mark.parametrize(
     "path",
     (
         ".github/workflows/workload-artifacts.yml",
         "schemas/workload-artifact-build.schema.json",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/workload-artifact-metadata",
     ),
 )
@@ -235,6 +318,8 @@ def test_supply_chain_manifest_binds_workload_artifact_publication_contract(
     for required in (
         ".github/workflows/workload-artifacts.yml",
         "schemas/workload-artifact-build.schema.json",
+        "scripts/select-workload-runtime-manifest",
+        "scripts/validate-workload-dockerfile",
         "scripts/workload-artifact-metadata",
     ):
         candidate = repository / required
@@ -297,7 +382,7 @@ def test_supply_chain_manifest_binds_agent_package_channel_authority(
     assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
 
 
-def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
+def test_supply_chain_manifest_binds_canonical_recipe_execution_supply_chain(
     tmp_path: Path,
 ) -> None:
     repository = _copy(tmp_path)
@@ -305,23 +390,42 @@ def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
 
     for path in (
         "schemas/global/catalog-entity-v1.schema.json",
-        "schemas/global/recipe-v1.schema.json",
         "control/src/vonk_control/catalog_contract.py",
-        "control/src/vonk_control/recipe_contract.py",
+        "control/src/vonk_control/recipe_runtime_specs.py",
+        "control/src/vonk_control/strict_json.py",
+        "src/cluster_profiles/control_client.py",
+        "src/cluster_profiles/schemas/control-openapi.json",
+        "scripts/generate-control-clients",
         "control/src/vonk_control/catalog_api.py",
         "control/src/vonk_control/auth.py",
         "control/src/vonk_control/recipe_routes.py",
         "control/src/vonk_control/models.py",
+        "control/src/vonk_control/api.py",
+        "control/src/vonk_control/worker.py",
+        "control/packaging/public-contracts.lock",
+        "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
+        "control/src/vonk_control/recipe_library_types.py",
+        "control/src/vonk_control/recipe_packages.py",
+        "control/src/vonk_control/catalog_sync.py",
+        "control/src/vonk_control/compiled_execution_plan.py",
+        "control/src/vonk_control/harnesses/canonical.py",
+        "control/src/vonk_control/install_admission.py",
+        "control/src/vonk_control/run_admission.py",
+        "control/src/vonk_control/run_switch_contract.py",
+        "control/src/vonk_control/run_switch_api.py",
+        "control/src/vonk_control/run_switch_operations.py",
+        "control/migrations/versions/0000_canonical_catalog_baseline.py",
         "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/migrations/versions/0002_fleet_node_profile_events.py",
         "control/migrations/versions/0003_agent_reenrollment_grants.py",
-        "scripts/accept-recipe",
-        "scripts/run-development-slices",
         "scripts/qualify-recipe",
-        "scripts/import-recipe-library",
         "config/recipe-library-manifest.json",
     ):
         assert path in manifest["inputs"]
+
+    assert "scripts/accept-recipe" not in manifest["inputs"]
+    assert "scripts/run-development-slices" not in manifest["inputs"]
+    assert not any(path.startswith("config/recipes/") for path in manifest["inputs"])
 
 
 @pytest.mark.parametrize(
@@ -334,14 +438,38 @@ def test_supply_chain_manifest_binds_v1_recipe_catalog_authority(
         "control/migrations/versions/0001_fleet_library_baseline.py",
         "control/migrations/versions/0002_fleet_node_profile_events.py",
         "control/migrations/versions/0003_agent_reenrollment_grants.py",
+        "control/migrations/versions/0000_canonical_catalog_baseline.py",
+        "control/packaging/public-contracts.lock",
+        "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl",
+        "control/src/vonk_control/api.py",
+        "control/src/vonk_control/worker.py",
+        "control/src/vonk_control/recipe_library_types.py",
+        "control/src/vonk_control/recipe_packages.py",
+        "control/src/vonk_control/catalog_sync.py",
+        "control/src/vonk_control/recipe_runtime_specs.py",
+        "control/src/vonk_control/strict_json.py",
+        "src/cluster_profiles/control_client.py",
+        "src/cluster_profiles/schemas/control-openapi.json",
+        "scripts/generate-control-clients",
+        "control/src/vonk_control/compiled_execution_plan.py",
+        "control/src/vonk_control/harnesses/vllm.py",
+        "control/src/vonk_control/availability_production.py",
+        "control/src/vonk_control/model_cache.py",
+        "control/src/vonk_control/recipe_image_availability.py",
+        "control/src/vonk_control/recipe_image_availability_api.py",
+        "control/src/vonk_control/install_admission.py",
+        "control/src/vonk_control/run_admission.py",
+        "control/src/vonk_control/run_switch_contract.py",
+        "control/src/vonk_control/run_switch_api.py",
+        "control/src/vonk_control/run_switch_operations.py",
     ),
 )
-def test_supply_chain_manifest_binds_recipe_authority_edges(
+def test_supply_chain_manifest_binds_recipe_execution_edges(
     tmp_path: Path, path: str
 ) -> None:
     repository = _copy(tmp_path)
     candidate = repository / path
-    candidate.write_bytes(candidate.read_bytes() + b"\n# recipe authority drift\n")
+    candidate.write_bytes(candidate.read_bytes() + b"\n# recipe execution drift\n")
 
     result = subprocess.run(
         [SCRIPT, "--root", repository, "--json"],
@@ -351,7 +479,11 @@ def test_supply_chain_manifest_binds_recipe_authority_edges(
     )
 
     assert result.returncode != 0
-    assert "manifest" in " ".join(json.loads(result.stdout)["errors"]).lower()
+    errors = " ".join(json.loads(result.stdout)["errors"]).lower()
+    if path == "inventory/wheels/vonk_forge_public_contracts-0.1.0-py3-none-any.whl":
+        assert "public contract wheel does not match its reviewed lock" in errors
+    else:
+        assert "manifest" in errors
 
 
 def test_verifier_does_not_require_cluster_profiles_to_be_installed(
@@ -360,7 +492,7 @@ def test_verifier_does_not_require_cluster_profiles_to_be_installed(
     repository = _copy(tmp_path)
 
     result = subprocess.run(
-        ["/usr/bin/python3", SCRIPT, "--root", repository, "--json"],
+        [sys.executable, "-I", SCRIPT, "--root", repository, "--json"],
         capture_output=True,
         text=True,
         check=False,
@@ -461,10 +593,15 @@ def test_image_lock_contains_the_pinned_hermes_build_base() -> None:
         "f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a"
     )
     assert "hermes-agent" not in lock["images"]
+    assert lock["build_bases"]["litellm"] == (
+        "ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:"
+        "f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2"
+    )
+    assert "litellm" not in lock["images"]
     assert not any("ai-devbox" in name for name in lock["build_bases"])
 
 
-def test_image_lock_declares_all_three_release_artifacts() -> None:
+def test_image_lock_declares_all_four_release_artifacts() -> None:
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
 
     assert lock["release_images"] == [
@@ -491,6 +628,14 @@ def test_image_lock_declares_all_three_release_artifacts() -> None:
             "package": "vonk-forge-hermes",
             "required": True,
             "target": "managed",
+        },
+        {
+            "context": "deploy/compose/litellm",
+            "dockerfile": "deploy/compose/litellm/Dockerfile",
+            "environment": "LITELLM_IMAGE",
+            "package": "vonk-forge-litellm",
+            "required": True,
+            "target": "runtime",
         },
     ]
 

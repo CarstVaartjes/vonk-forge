@@ -1,4 +1,7 @@
-# Execution Harness Foundation Implementation Plan
+# Retired: Execution Harness Foundation Implementation Plan
+
+> Historical plan retained for provenance. WorkloadRun source authoring and
+> import assumptions are no longer active.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

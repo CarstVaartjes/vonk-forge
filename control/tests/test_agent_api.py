@@ -10,6 +10,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from pathlib import Path
 from threading import Event
 
@@ -20,9 +21,16 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import (
+    HostHelperOperation,
+    HostOperationKind,
+    SignedHostHelperGrant,
+    SignedPackageHelperGrant,
+    SignedPackageObjectReceipt,
+    canonical_message,
+)
 from vonk_control.agent_api import (
     AgentApiServices,
     EnrollmentRateLimiter,
@@ -34,10 +42,9 @@ from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
 from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import Actor, TokenCodec
-from vonk_control.catalog_contract import catalog_content_sha256
-from vonk_control.catalog_service import CatalogService
 from vonk_control.enrollment import EnrollmentDenied, EnrollmentService
 from vonk_control.enrollment_bootstrap import EnrollmentBootstrapConfig
+from vonk_control.host_helper_authority import HostHelperGrantIssuer
 from vonk_control.metrics import MetricsRegistry, OperationalMetricsCollector
 from vonk_control.models import (
     AgentCertificate,
@@ -49,12 +56,12 @@ from vonk_control.models import (
     AgentOperationAttempt,
     AgentPresence,
     Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
     Job,
-    LocalRecipe,
-    LocalRecipeRevision,
     NodeInventorySnapshot,
     NodeTelemetrySample,
     Observation,
@@ -65,15 +72,18 @@ from vonk_control.models import (
     Reconciliation,
     RoutePublication,
     RunNode,
+    RuntimeImageAuthorization,
+    RuntimeImageReceipt,
 )
 from vonk_control.pki import CertificateAuthority, IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-from vonk_control.recipe_contract import recipe_content_sha256
 from vonk_control.route_runtime import RECIPE_ROUTE_AUTHORITY_ID
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
-
-from .test_catalog_entities import execution_harness, patch_bundle, runtime_distribution
-from .test_catalog_service import _resolve_entity, _seed_recipe_dependencies
+from vonk_control.workload_helper_authority import (
+    WorkloadHelperGrantIssuer,
+    WorkloadObjectReceiptIssuer,
+)
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -96,6 +106,42 @@ PACKAGED_RUNTIME_IDENTITY = {
     "semantic_version": "1.2.3",
     "self_test_passed": True,
 }
+
+
+def _canonical_recipe_fixture(
+    slug: str, *, source: str = "published"
+) -> tuple[dict[str, object], str]:
+    example = (
+        "recipe-source-build.json"
+        if source == "controller-build"
+        else "recipe-image.json"
+    )
+    raw = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", example)
+        .read_text(encoding="utf-8")
+    )
+    raw["identity"]["slug"] = slug
+    recipe = RecipeDefinition.model_validate(raw)
+    document = recipe.model_dump(mode="json")
+    return document, content_sha256(recipe)
+
+
+def _compiled_plan_fixture(
+    recipe_digest: str, *, source: str = "published", build_id: str | None = None
+) -> dict[str, object]:
+    payload = json.loads(
+        (Path(__file__).parent / "fixtures/compiled_workload_v2.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    payload["identity"]["recipe_revision_sha256"] = recipe_digest
+    runtime_image = payload["runtime_image"]
+    runtime_image["source"] = source
+    runtime_image["build_id"] = build_id
+    if source == "controller-build":
+        runtime_image["registry_manifest_digest"] = None
+    return payload
 
 
 def _controller_ca() -> tuple[str, str]:
@@ -365,10 +411,13 @@ def chunked_asgi_telemetry(
     *,
     extra_headers: tuple[tuple[bytes, bytes], ...],
 ) -> tuple[int, int]:
+    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+
     async def request() -> tuple[int, int]:
         chunks = [
-            b'{"schema_version":1,"samples":[],"padding":"' + b"x" * (40 * 1024),
-            b"x" * (40 * 1024),
+            b'{"schema_version":1,"samples":[],"padding":"'
+            + b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
+            b"x" * (MAX_TELEMETRY_REPORT_BYTES // 2),
             b'"}',
         ]
         reads = 0
@@ -420,6 +469,68 @@ def chunked_asgi_telemetry(
         return int(start["status"]), reads
 
     return asyncio.run(request())
+
+
+@pytest.mark.parametrize("series_count", [143, 512])
+def test_large_valid_telemetry_preserves_all_metrics_through_api_and_storage(
+    agent_system,
+    series_count: int,
+) -> None:
+    from vonk_agent_protocol import TelemetryReport
+    from vonk_agent_protocol.telemetry import MAX_TELEMETRY_REPORT_BYTES
+
+    client, services, _, clock = agent_system
+    payload = telemetry_payload(clock)
+    sampled = payload["samples"][0]
+    series = [
+        {
+            "key": f"device.metric_{index}",
+            "scope": "node",
+            "process_name": "測" * 128,
+            "value": "測" * 256,
+            "unit": "state",
+            "source": "native-collector",
+            "measurement_kind": "measured",
+            "observed_at": sampled["observed_at"],
+            "freshness": "fresh",
+            "freshness_threshold_seconds": 6.0,
+            "support_status": "available",
+            "aggregation": "last",
+        }
+        for index in range(series_count)
+    ]
+    sampled["metrics"] = {
+        "schema_version": 2,
+        "series": series,
+        "capabilities": [],
+        "runtimes": [],
+        "workloads": [],
+        "provenance": {
+            "collector": "native-collector",
+            "collector_version": "2",
+            "host_uptime_seconds": 1,
+            "source_observed_at": sampled["observed_at"],
+        },
+    }
+    encoded = canonical_message(payload)
+    assert 64 * 1024 < len(encoded) < MAX_TELEMETRY_REPORT_BYTES
+    assert (
+        len(TelemetryReport.parse(payload).samples[0]["metrics"]["series"])
+        == series_count
+    )
+    response = client.post(
+        "/agent/v1/telemetry",
+        headers=agent_headers(NODE_A, "serial-a"),
+        content=encoded,
+    )
+    assert response.status_code == 204, response.text
+    with services.sessions() as session:
+        row = session.scalar(select(NodeTelemetrySample))
+        assert row is not None
+        assert [item["key"] for item in row.metrics["series"]] == [
+            item["key"] for item in series
+        ]
+        assert all(item["value"] == "測" * 256 for item in row.metrics["series"])
 
 
 def test_agent_posts_authenticated_telemetry_for_certificate_node(
@@ -646,6 +757,229 @@ def test_agent_posts_authenticated_runtime_and_fabric_inventory(agent_system) ->
     )
 
 
+def test_helper_json_routes_use_strict_wire_models_and_canonical_signed_outputs(
+    agent_system,
+) -> None:
+    client, services, _, clock = agent_system
+    request_id = "00000000-0000-4000-8000-000000000005"
+    job_id = "00000000-0000-4000-8000-000000000002"
+    operation_id = "00000000-0000-4000-8000-000000000003"
+    fence = "00000000-0000-4000-8000-000000000004"
+
+    host_issuer = HostHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.generate(),
+        clock=clock,
+        request_id_factory=lambda: uuid.UUID(request_id),
+    )
+    package_issuer = WorkloadHelperGrantIssuer(
+        ed25519.Ed25519PrivateKey.generate(),
+        clock=clock,
+        request_id_factory=lambda: uuid.UUID(request_id),
+    )
+    receipt_issuer = WorkloadObjectReceiptIssuer(
+        ed25519.Ed25519PrivateKey.generate()
+    )
+
+    class RecordingHostAuthority:
+        def __init__(self) -> None:
+            self.grant_calls: list[dict[str, object]] = []
+            self.upgrade_calls: list[dict[str, object]] = []
+
+        def issue_grant(self, **kwargs: object) -> object:
+            self.grant_calls.append(kwargs)
+            operation = HostHelperOperation(
+                HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST,
+                {
+                    "action": kwargs["action"].value,
+                    "job_id": kwargs["job_id"],
+                    "operation_id": kwargs["operation_id"],
+                    "attempt": kwargs["attempt"],
+                    "fence": kwargs["fence"],
+                    "request_sha256": kwargs["request_sha256"],
+                },
+            )
+            return host_issuer.issue_grant(
+                node_id=kwargs["node_id"],
+                operation=operation,
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+        def issue_agent_upgrade_grant(self, **kwargs: object) -> object:
+            self.upgrade_calls.append(kwargs)
+            operation = HostHelperOperation(
+                HostOperationKind.INSTALL_VONK_DEB,
+                {
+                    "package_sha256": kwargs["package_sha256"],
+                    "package_signature": kwargs["package_signature"],
+                },
+            )
+            return host_issuer.issue_grant(
+                node_id=kwargs["node_id"],
+                operation=operation,
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+    class RecordingPackageAuthority:
+        def __init__(self) -> None:
+            self.grant_calls: list[dict[str, object]] = []
+            self.receipt_calls: list[dict[str, object]] = []
+
+        def issue_grant(self, **kwargs: object) -> object:
+            self.grant_calls.append(kwargs)
+            return package_issuer.issue_grant(
+                request_id=kwargs["request_id"],
+                node_id=kwargs["node_id"],
+                job_id=kwargs["job_id"],
+                operation_id=kwargs["operation_id"],
+                attempt=kwargs["attempt"],
+                fence=kwargs["fence"],
+                release_digest=kwargs["release_digest"],
+                generation=kwargs["generation"],
+                operation=kwargs["operation"],
+                request_digest=kwargs["request_digest"],
+                expires_in_seconds=kwargs["expires_in_seconds"],
+            )
+
+        def issue_receipts(self, **kwargs: object) -> tuple[object, ...]:
+            self.receipt_calls.append(kwargs)
+            return tuple(
+                receipt_issuer.issue_object_receipt(
+                    object_digest=item["object_digest"], size=item["size"]
+                )
+                for item in kwargs["objects"]
+            )
+
+    host = RecordingHostAuthority()
+    package = RecordingPackageAuthority()
+    object.__setattr__(services, "host_runtime_authority", host)
+    object.__setattr__(services, "workload_helper_authority", package)
+    headers = agent_headers(NODE_A, "serial-a")
+    common = {
+        "node_id": NODE_A,
+        "job_id": job_id,
+        "operation_id": operation_id,
+        "attempt": 1,
+        "fence": fence,
+        "expires_in_seconds": 30,
+    }
+
+    host_response = client.post(
+        "/agent/v1/host-runtime/grant",
+        headers=headers,
+        json=common | {"action": "start", "request_sha256": "a" * 64},
+    )
+    assert host_response.status_code == 200
+    assert isinstance(SignedHostHelperGrant.parse(host_response.json()["grant"]), SignedHostHelperGrant)
+    assert host.grant_calls[0]["job_id"] == job_id
+
+    upgrade_response = client.post(
+        "/agent/v1/agent-upgrade/grant",
+        headers=headers,
+        json=common
+        | {
+            "package_sha256": "b" * 64,
+            "package_signature": "c" * 128,
+        },
+    )
+    assert upgrade_response.status_code == 200
+    assert isinstance(
+        SignedHostHelperGrant.parse(upgrade_response.json()["grant"]),
+        SignedHostHelperGrant,
+    )
+
+    receipt_response = client.post(
+        "/agent/v1/package-helper/receipts",
+        headers=headers,
+        json={key: value for key, value in common.items() if key != "expires_in_seconds"}
+        | {
+            "release_digest": "d" * 64,
+            "objects": [{"object_digest": "e" * 64, "size": 17}],
+        },
+    )
+    assert receipt_response.status_code == 200
+    assert isinstance(
+        SignedPackageObjectReceipt.parse(receipt_response.json()["receipts"][0]),
+        SignedPackageObjectReceipt,
+    )
+    assert package.receipt_calls[0]["objects"] == [
+        {"object_digest": "e" * 64, "size": 17}
+    ]
+
+    grant_body = common | {
+        "request_id": request_id,
+        "release_digest": "d" * 64,
+        "generation": "gen-future-stack-001",
+        "operation": "health",
+        "request_digest": "f" * 64,
+    }
+    grant_response = client.post(
+        "/agent/v1/package-helper/grant", headers=headers, json=grant_body
+    )
+    assert grant_response.status_code == 200
+    assert isinstance(
+        SignedPackageHelperGrant.parse(grant_response.json()["grant"]),
+        SignedPackageHelperGrant,
+    )
+    assert package.grant_calls[0]["generation"] == "gen-future-stack-001"
+
+    assert (
+        client.post(
+            "/agent/v1/package-helper/grant",
+            headers=headers,
+            json=grant_body | {"generation": 7},
+        ).status_code
+        == 422
+    )
+    assert len(package.grant_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/package-helper/receipts",
+            headers=headers,
+            json={
+                key: value
+                for key, value in common.items()
+                if key != "expires_in_seconds"
+            }
+            | {
+                "release_digest": "d" * 64,
+                "objects": [
+                    {"object_digest": "e" * 64, "size": 17, "extra": True}
+                ],
+            },
+        ).status_code
+        == 422
+    )
+    assert len(package.receipt_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/host-runtime/grant",
+            headers=headers,
+            json=common
+            | {
+                "job_id": "00000000-0000-5000-8000-000000000002",
+                "action": "start",
+                "request_sha256": "a" * 64,
+            },
+        ).status_code
+        == 422
+    )
+    assert len(host.grant_calls) == 1
+    assert (
+        client.post(
+            "/agent/v1/agent-upgrade/grant",
+            headers=headers,
+            json=common
+            | {
+                "attempt": "1",
+                "package_sha256": "b" * 64,
+                "package_signature": "c" * 128,
+            },
+        ).status_code
+        == 422
+    )
+    assert len(host.upgrade_calls) == 1
+
+
 def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
     agent_system,
 ) -> None:
@@ -692,28 +1026,32 @@ def test_builder_can_download_only_its_authorized_canonical_source_bundle(
     stored = services.source_bundles.put(bundle.sha256, io.BytesIO(bundle.archive))
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
+    document, digest = _canonical_recipe_fixture("bundle-download")
     with services.sessions.begin() as session:
         session.add(
-            LocalRecipe(
+            CatalogDocument(
                 id=recipe_id,
+                kind="recipe",
+                publisher="vonk-forge",
                 slug="bundle-download",
-                title="Bundle download",
-                description="Agent source authorization fixture",
-                source_kind="local",
+                title=document["metadata"]["title"],
                 created_by="administrator",
                 created_at=clock.now,
                 updated_at=clock.now,
             )
         )
         session.add(
-            LocalRecipeRevision(
+            CatalogDocumentRevision(
                 id=revision_id,
-                recipe_id=recipe_id,
+                document_id=recipe_id,
+                kind="recipe",
+                publisher="vonk-forge",
+                slug="bundle-download",
                 revision_number=1,
-                lifecycle="resolved",
-                schema_version=1,
-                document={},
-                content_sha256="c" * 64,
+                schema_version=2,
+                state="active",
+                document=document,
+                content_digest=digest,
                 created_by="administrator",
                 created_at=clock.now,
             )
@@ -771,28 +1109,32 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     payload = b"exact docker archive"
     layout_digest = hashlib.sha256(payload).hexdigest()
     image_digest = "sha256:" + "d" * 64
+    document, digest = _canonical_recipe_fixture("image-upload")
     with services.sessions.begin() as session:
         session.add(
-            LocalRecipe(
+            CatalogDocument(
                 id=recipe_id,
+                kind="recipe",
+                publisher="vonk-forge",
                 slug="image-upload",
-                title="Image upload",
-                description="Exact Docker archive upload fixture",
-                source_kind="local",
+                title=document["metadata"]["title"],
                 created_by="administrator",
                 created_at=clock.now,
                 updated_at=clock.now,
             )
         )
         session.add(
-            LocalRecipeRevision(
+            CatalogDocumentRevision(
                 id=revision_id,
-                recipe_id=recipe_id,
+                document_id=recipe_id,
+                kind="recipe",
+                publisher="vonk-forge",
+                slug="image-upload",
                 revision_number=1,
-                lifecycle="resolved",
-                schema_version=1,
-                document={},
-                content_sha256="c" * 64,
+                schema_version=2,
+                state="active",
+                document=document,
+                content_digest=digest,
                 created_by="administrator",
                 created_at=clock.now,
             )
@@ -831,7 +1173,11 @@ def test_builder_uploads_digest_verified_docker_archive_without_a_registry(
     )
 
     assert response.status_code == 204
-    assert (services.artifact_root / layout_digest).read_bytes() == payload
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    assert storage.verify_existing(layout_digest, len(payload)).read_bytes() == payload
+    assert not (services.artifact_root / layout_digest).exists()
     with services.sessions() as session:
         build = session.get(RecipeBuild, build_id)
         assert build.image_digest == image_digest
@@ -861,28 +1207,32 @@ def test_recipe_image_fsync_does_not_block_concurrent_agent_requests(
     build_id = str(uuid.uuid4())
     payload = b"exact docker archive"
     layout_digest = hashlib.sha256(payload).hexdigest()
+    document, digest = _canonical_recipe_fixture("nonblocking-image-upload")
     with services.sessions.begin() as session:
         session.add(
-            LocalRecipe(
+            CatalogDocument(
                 id=recipe_id,
+                kind="recipe",
+                publisher="vonk-forge",
                 slug="nonblocking-image-upload",
-                title="Nonblocking image upload",
-                description="Concurrent heartbeat fixture",
-                source_kind="local",
+                title=document["metadata"]["title"],
                 created_by="administrator",
                 created_at=clock.now,
                 updated_at=clock.now,
             )
         )
         session.add(
-            LocalRecipeRevision(
+            CatalogDocumentRevision(
                 id=revision_id,
-                recipe_id=recipe_id,
+                document_id=recipe_id,
+                kind="recipe",
+                publisher="vonk-forge",
+                slug="nonblocking-image-upload",
                 revision_number=1,
-                lifecycle="resolved",
-                schema_version=1,
-                document={},
-                content_sha256="c" * 64,
+                schema_version=2,
+                state="active",
+                document=document,
+                content_digest=digest,
                 created_by="administrator",
                 created_at=clock.now,
             )
@@ -1013,6 +1363,7 @@ def valid_enrollment_body(token: str) -> bytes:
                 "hardware_fingerprint": "hardware",
                 "agent_digest": "a" * 64,
                 "boot_id": "boot",
+                "observation_receipt_public_key": "d" * 64,
             },
         }
     ).encode("utf-8")
@@ -1515,34 +1866,59 @@ def test_unknown_claim_capability_is_ignored_while_known_capabilities_negotiate(
         assert node.protocol_version == 3
 
 
-def test_newer_claim_fields_and_runtime_attestations_are_forward_compatible(
+@pytest.mark.parametrize(
+    ("field", "nested"),
+    (("future_claim_field", False), ("future_attestation", True)),
+)
+def test_claim_rejects_unknown_structural_fields(
     agent_system,
+    field: str,
+    nested: bool,
 ) -> None:
-    client, services, _, _clock = agent_system
+    client, _services, _, _clock = agent_system
+    payload = {
+        "capabilities": CAPABILITIES,
+        "lease_seconds": 30,
+        "node_id": NODE_A,
+        "protocol_version": 3,
+        "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
+    }
+    if nested:
+        payload["runtime_identity"] = {
+            **PACKAGED_RUNTIME_IDENTITY,
+            field: {"format": "v2"},
+        }
+    else:
+        payload[field] = {"version": 4}
 
+    response = client.post(
+        "/agent/v1/claim",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("field", ("lease_seconds", "wait_seconds"))
+def test_claim_rejects_string_encoded_numeric_fields(
+    agent_system,
+    field: str,
+) -> None:
+    client, _services, _, _clock = agent_system
     response = client.post(
         "/agent/v1/claim",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
             "capabilities": CAPABILITIES,
-            "lease_seconds": 30,
             "node_id": NODE_A,
             "protocol_version": 3,
-            "future_claim_field": {"version": 4},
-            "runtime_identity": {
-                **PACKAGED_RUNTIME_IDENTITY,
-                "future_attestation": {"format": "v2"},
-            },
+            "runtime_identity": PACKAGED_RUNTIME_IDENTITY,
+            field: "30",
         },
     )
 
-    assert response.status_code == 204
-    with services.sessions() as session:
-        node = session.get(AgentNode, NODE_A)
-        assert node is not None
-        assert node.semantic_version == PACKAGED_RUNTIME_IDENTITY["semantic_version"]
-        assert node.last_seen_at is not None
-        assert session.get(AgentPresence, NODE_A) is not None
+    assert response.status_code == 422
 
 
 def test_authenticated_heartbeat_preserves_claim_advertised_protocol_after_exact_fence_validation(
@@ -2484,77 +2860,45 @@ def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(
     assert body["grant_token"] not in repr(event)
 
 
-def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
-    agent_system,
+@pytest.mark.parametrize("source", ["published", "controller-build"])
+def test_agent_runtime_spec_binds_canonical_plan_and_image_receipt(
+    agent_system, source: str
 ) -> None:
     client, services, _, clock = agent_system
-    document = json.loads(
-        (Path(__file__).parent / "fixtures/global/recipe-v1-minimal.json").read_text()
-    )
-    harness_document = json.loads(
-        (Path(__file__).parents[2] / "config/execution-harnesses/vllm.json").read_text()
-    )
-    harness_digest = catalog_content_sha256(harness_document)
-    distribution_document = runtime_distribution(
-        harness_digest,
-        slug="vllm-arm64",
-        harness_slug="vllm",
-    )
-    distribution_digest = catalog_content_sha256(distribution_document)
-    document["execution"]["harness"] = {
-        "kind": "execution-harness",
-        "publisher": "vonk-forge",
-        "slug": "vllm",
-        "content_sha256": harness_digest,
-    }
-    document["runtime"]["distribution"] = {
-        "kind": "runtime-distribution",
-        "publisher": "vonk-forge",
-        "slug": "vllm-arm64",
-        "content_sha256": distribution_digest,
-    }
-    document["runtime"]["entrypoint"] = [
-        "/opt/vonk/bin/vllm",
-        "serve",
-        "/models",
-    ]
-    document["runtime"]["arguments"].append(
-        {"name": "tensor-parallel-size", "value": 1}
-    )
-    document["runtime"]["security"]["mounts"] = [
-        {"source": "model", "target": "/models", "read_only": True},
-        {"source": "outputs", "target": "/outputs", "read_only": False},
-    ]
-    digest = recipe_content_sha256(document)
+    document, digest = _canonical_recipe_fixture(f"agent-spec-{source}", source=source)
     recipe_id = str(uuid.uuid4())
     revision_id = str(uuid.uuid4())
     mapping_id = str(uuid.uuid4())
-    build_id = str(uuid.uuid4())
     installation_id = str(uuid.uuid4())
-    image_digest = "sha256:" + "d" * 64
-    parameters = {item["name"]: item["default"] for item in document["parameters"]}
+    build_id = str(uuid.uuid4()) if source == "controller-build" else None
+    payload = _compiled_plan_fixture(digest, source=source, build_id=build_id)
+    image = payload["runtime_image"]
+    image_digest = image["image_digest"]
     with services.sessions.begin() as session:
         session.add(
-            LocalRecipe(
+            CatalogDocument(
                 id=recipe_id,
-                slug="agent-spec",
-                title="Agent spec",
-                description="Digest-bound agent fixture",
-                source_kind="local",
+                kind="recipe",
+                publisher="vonk-forge",
+                slug=document["identity"]["slug"],
+                title=document["metadata"]["title"],
                 created_by="administrator",
                 created_at=clock.now,
                 updated_at=clock.now,
             )
         )
         session.add(
-            LocalRecipeRevision(
+            CatalogDocumentRevision(
                 id=revision_id,
-                recipe_id=recipe_id,
+                document_id=recipe_id,
+                kind="recipe",
+                publisher="vonk-forge",
+                slug=document["identity"]["slug"],
                 revision_number=1,
-                lifecycle="resolved",
-                schema_version=1,
+                schema_version=2,
+                state="active",
                 document=document,
-                content_sha256=digest,
+                content_digest=digest,
                 created_by="administrator",
                 created_at=clock.now,
             )
@@ -2567,7 +2911,7 @@ def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
                 generation=1,
                 node_count=1,
                 state="ready",
-                parameters=parameters,
+                parameters={},
                 placement_digest="e" * 64,
                 endpoint_owner_node_id=NODE_A,
                 created_by="administrator",
@@ -2585,23 +2929,24 @@ def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
                 created_at=clock.now,
             )
         )
-        session.add(
-            RecipeBuild(
-                id=build_id,
-                recipe_revision_id=revision_id,
-                builder_node_id=NODE_A,
-                source_bundle_sha256=document["build"]["context"]["sha256"],
-                build_input_sha256="f" * 64,
-                state="succeeded",
-                policy_report={"passed": True},
-                plan={},
-                image_digest=image_digest,
-                oci_layout_sha256="a" * 64,
-                image_bytes=1024,
-                created_at=clock.now,
-                updated_at=clock.now,
+        if build_id is not None:
+            session.add(
+                RecipeBuild(
+                    id=build_id,
+                    recipe_revision_id=revision_id,
+                    builder_node_id=NODE_A,
+                    source_bundle_sha256="a" * 64,
+                    build_input_sha256="f" * 64,
+                    state="succeeded",
+                    policy_report={"passed": True},
+                    plan={"schema_version": 2},
+                    image_digest=image_digest,
+                    oci_layout_sha256=image["oci_layout_sha256"],
+                    image_bytes=image["image_bytes"],
+                    created_at=clock.now,
+                    updated_at=clock.now,
+                )
             )
-        )
         session.add(
             RecipeInstallation(
                 id=installation_id,
@@ -2611,7 +2956,7 @@ def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
                 recipe_build_id=build_id,
                 image_digest=image_digest,
                 plan_digest="b" * 64,
-                plan={},
+                plan={"compiled_execution_plans": {NODE_A: payload}},
                 state="installing",
                 actor="administrator",
                 created_at=clock.now,
@@ -2631,174 +2976,87 @@ def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
             )
         )
 
-    response = client.get(
-        f"/agent/v1/recipe-installations/{installation_id}/spec",
-        headers=agent_headers(NODE_A, "serial-a"),
+    endpoint = f"/agent/v1/recipe-installations/{installation_id}/spec"
+    response = client.get(endpoint, headers=agent_headers(NODE_A, "serial-a"))
+    assert response.status_code == 409
+    assert (
+        response.json()["detail"] == "recipe specification execution receipts are stale"
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "recipe specification dependencies are stale"
-    catalog = CatalogService(
-        services.sessions,
-        clock=lambda: clock.now,
-        cursors=TokenCodec(b"c" * 32).cursor_codec(),
-    )
-    _seed_recipe_dependencies(catalog, document)
-    resolved_harness = _resolve_entity(catalog, harness_document)
-    resolved_distribution = _resolve_entity(catalog, distribution_document)
-    document["execution"]["harness"] = {
-        "kind": "execution-harness",
-        "publisher": "vonk-forge",
-        "slug": "vllm",
-        "content_sha256": resolved_harness.content_sha256,
-    }
-    document["runtime"]["distribution"] = {
-        "kind": "runtime-distribution",
-        "publisher": "vonk-forge",
-        "slug": "vllm-arm64",
-        "content_sha256": resolved_distribution.content_sha256,
-    }
+    receipt_id = str(uuid.uuid4())
     with services.sessions.begin() as session:
-        session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision_id)
-            .values(
-                document=document,
-                content_sha256=recipe_content_sha256(document),
+        session.add(
+            RuntimeImageReceipt(
+                id=receipt_id,
+                recipe_revision_id=revision_id,
+                source=source,
+                original_content_digest=digest,
+                effective_execution_key=payload["identity"]["execution_sha256"],
+                registry_manifest_digest=image["registry_manifest_digest"],
+                platform_manifest_digest=image["platform_manifest_digest"],
+                local_image_config_id=image["local_image_config_id"],
+                oci_archive_sha256=image["oci_layout_sha256"],
+                image_bytes=image["image_bytes"],
+                architecture=image["architecture"],
+                runtime_interface=image["runtime_interface"],
+                runtime_interface_label=image["runtime_interface_label"],
+                build_id=build_id,
+                verified_at=clock.now,
+                state="verified",
             )
         )
-    resolved = client.get(
-        f"/agent/v1/recipe-installations/{installation_id}/spec",
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
+        session.add(
+            RuntimeImageAuthorization(
+                recipe_revision_id=revision_id,
+                receipt_id=receipt_id,
+                source=source,
+                original_content_digest=digest,
+                effective_execution_key=payload["identity"]["execution_sha256"],
+                registry_manifest_digest=image["registry_manifest_digest"],
+                platform_manifest_digest=image["platform_manifest_digest"],
+                local_image_config_id=image["local_image_config_id"],
+                oci_archive_sha256=image["oci_layout_sha256"],
+                image_bytes=image["image_bytes"],
+                build_id=build_id,
+                authorized_at=clock.now,
+                state="authorized",
+            )
+        )
+
+    resolved = client.get(endpoint, headers=agent_headers(NODE_A, "serial-a"))
     assert resolved.status_code == 200
-    assert set(resolved.json()) == {
-        "identity",
-        "model_dependencies",
-        "runtime",
-        "artifacts",
-        "endpoint",
-        "security",
-        "lifecycle",
-        "topology",
-    }
-    assert resolved.json()["runtime"]["entrypoint"] == [
-        "/opt/vonk/bin/vllm",
-        "serve",
-        "/models",
-        "--max-model-len",
-        "32768",
-        "--tensor-parallel-size",
-        "1",
-        "--host",
-        "0.0.0.0",
-        "--port",
-        "8000",
-    ]
-    assert resolved.json()["runtime"]["arguments"] == []
-    shell_authority = copy.deepcopy(document)
-    shell_authority["runtime"]["entrypoint"] = [
-        "/bin/sh",
-        "-c",
-        "/tmp/recipe-authored-payload",
-    ]
+    assert resolved.json() == payload
+    assert resolved.json()["schema_version"] == 2
+
+    tampered = copy.deepcopy(payload)
+    tampered["runtime_image"]["local_image_config_id"] = "sha256:" + "0" * 64
     with services.sessions.begin() as session:
-        session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision_id)
-            .values(
-                document=shell_authority,
-                content_sha256=recipe_content_sha256(shell_authority),
-            )
-        )
-    rejected_shell = client.get(
-        f"/agent/v1/recipe-installations/{installation_id}/spec",
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
-    assert rejected_shell.status_code == 409
-    assert "entrypoint" in rejected_shell.json()["detail"]
-    with services.sessions.begin() as session:
-        session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision_id)
-            .values(
-                document=document,
-                content_sha256=recipe_content_sha256(document),
-            )
-        )
-    incompatible_harness = _resolve_entity(
-        catalog, execution_harness("different-harness", source_sha256="c" * 64)
-    )
-    incompatible_distribution = _resolve_entity(
-        catalog,
-        runtime_distribution(
-            incompatible_harness.content_sha256,
-            slug="different-runtime",
-            harness_slug="different-harness",
-        ),
-    )
-    distribution_mismatch = copy.deepcopy(document)
-    distribution_mismatch["runtime"]["distribution"] = {
-        "kind": "runtime-distribution",
-        "publisher": "vonk-forge",
-        "slug": "different-runtime",
-        "content_sha256": incompatible_distribution.content_sha256,
-    }
-    with services.sessions.begin() as session:
-        session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision_id)
-            .values(
-                document=distribution_mismatch,
-                content_sha256=recipe_content_sha256(distribution_mismatch),
-            )
-        )
-    rejected_distribution = client.get(
-        f"/agent/v1/recipe-installations/{installation_id}/spec",
-        headers=agent_headers(NODE_A, "serial-a"),
-    )
-    assert rejected_distribution.status_code == 409
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
+        installation.plan = {"compiled_execution_plans": {NODE_A: tampered}}
+    rejected = client.get(endpoint, headers=agent_headers(NODE_A, "serial-a"))
+    assert rejected.status_code == 409
     assert (
-        rejected_distribution.json()["detail"]
-        == "recipe specification distribution-harness binding is invalid"
+        rejected.json()["detail"] == "recipe specification execution receipts are stale"
     )
-    selected_distribution = document["runtime"]["distribution"]
-    assert isinstance(selected_distribution, dict)
-    other_distribution = _resolve_entity(
-        catalog,
-        runtime_distribution(
-            str(document["execution"]["harness"]["content_sha256"]),
-            slug="other-runtime",
-            harness_slug="vllm",
-        ),
-    )
-    incompatible_patch = _resolve_entity(
-        catalog, patch_bundle("other-runtime", other_distribution.content_sha256)
-    )
-    patch_mismatch = copy.deepcopy(document)
-    patch_mismatch["execution"]["patch_bundle"] = {
-        "kind": "patch-bundle",
-        "publisher": "vonk-forge",
-        "slug": "vllm-fix",
-        "content_sha256": incompatible_patch.content_sha256,
-    }
+
     with services.sessions.begin() as session:
-        session.execute(
-            update(LocalRecipeRevision)
-            .where(LocalRecipeRevision.id == revision_id)
-            .values(
-                document=patch_mismatch,
-                content_sha256=recipe_content_sha256(patch_mismatch),
-            )
-        )
-    rejected_patch = client.get(
-        f"/agent/v1/recipe-installations/{installation_id}/spec",
-        headers=agent_headers(NODE_A, "serial-a"),
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
+        installation.plan = {"compiled_execution_plans": {NODE_A: payload}}
+        if build_id is not None:
+            build = session.get(RecipeBuild, build_id)
+            assert build is not None
+            build.image_bytes = 999
+        else:
+            installation.recipe_build_id = str(uuid.uuid4())
+    rejected_build_authority = client.get(
+        endpoint, headers=agent_headers(NODE_A, "serial-a")
     )
-    assert rejected_patch.status_code == 409
+    assert rejected_build_authority.status_code == 409
     assert (
-        rejected_patch.json()["detail"]
-        == "recipe specification patch-distribution binding is invalid"
+        rejected_build_authority.json()["detail"]
+        == "recipe specification execution receipts are stale"
     )
     assert (
         client.get(
@@ -2808,16 +3066,10 @@ def test_agent_runtime_spec_requires_exact_dependencies_and_registry_projection(
         == 404
     )
     assert (
-        client.get(
-            f"/agent/v1/recipe-installations/{installation_id}/spec",
-            headers=agent_headers(NODE_B, "serial-b"),
-        ).status_code
+        client.get(endpoint, headers=agent_headers(NODE_B, "serial-b")).status_code
         == 404
     )
-    assert (
-        client.get(f"/agent/v1/recipe-installations/{installation_id}/spec").status_code
-        == 401
-    )
+    assert client.get(endpoint).status_code == 401
 
 
 def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
@@ -2862,6 +3114,7 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
             "hardware_fingerprint": "hardware",
             "agent_digest": "a" * 64,
             "boot_id": "boot",
+            "observation_receipt_public_key": "d" * 64,
         },
     }
     issued = client.post("/agent/v1/enroll", json=body)
@@ -2906,6 +3159,7 @@ def test_human_enrollment_mutations_audit_only_grant_and_revocation(
                 "hardware_fingerprint": "hardware-c",
                 "agent_digest": "c" * 64,
                 "boot_id": "boot-c",
+                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -3462,6 +3716,18 @@ def test_enrollment_rejects_malformed_observation_receipt_public_key(
     assert_grant_consumed(services, token)
 
 
+def test_enrollment_rejects_receipt_less_evidence(agent_system) -> None:
+    client, services, _, _ = agent_system
+    token = enrollment_grant(services)
+    body = json.loads(valid_enrollment_body(token))
+    body["evidence"].pop("observation_receipt_public_key")
+
+    response = client.post("/agent/v1/enroll", json=body)
+
+    assert response.status_code == 403
+    assert_grant_consumed(services, token)
+
+
 def test_artifact_access_is_owned_content_addressed_and_range_bounded(
     agent_system,
 ) -> None:
@@ -3511,7 +3777,10 @@ def test_recipe_image_range_does_not_snapshot_the_complete_archive(
     client, services, _, clock = agent_system
     payload = b"accepted recipe image archive"
     digest = hashlib.sha256(payload).hexdigest()
-    (services.artifact_root / digest).write_bytes(payload)
+    from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+
+    storage = FilesystemRuntimeImageStorage(services.artifact_root)
+    (storage.root / digest).write_bytes(payload)
     services.operations.enqueue(
         parent(services.sessions, clock).id,
         NODE_A,

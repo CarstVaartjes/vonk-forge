@@ -10,6 +10,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfilePlanStep,
     FleetProfilePlanSummary,
     FleetProfilePreview,
+    FleetProfileScopePreview,
 )
 from vonk_control.library_placement_contract import (
     LibraryPlacementApplyRequest,
@@ -106,6 +107,7 @@ class Profiles:
             profile_digest="a" * 64,
             generated_at=NOW,
             allowed=True,
+            scope=FleetProfileScopePreview(node_ids=[NODE_A]),
             summary=FleetProfilePlanSummary(
                 already_correct=0,
                 placements=1,

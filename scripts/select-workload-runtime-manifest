@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Select and validate one runnable manifest from a bounded OCI index."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+from pathlib import Path
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if key in document:
+            raise ValueError(f"duplicate JSON key in OCI index: {key}")
+        document[key] = value
+    return document
+
+
+def select(path: Path, platform: str, index_digest: str) -> str:
+    expected = index_digest.removeprefix("sha256:")
+    if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise ValueError("OCI index digest is not canonical")
+    raw = path.read_bytes()
+    candidates = (raw, raw[:-1]) if raw.endswith(b"\n") else (raw,)
+    for candidate in candidates:
+        if hashlib.sha256(candidate).hexdigest() == expected:
+            raw = candidate
+            path.write_bytes(candidate)
+            break
+    else:
+        raise ValueError("raw OCI index does not match build digest")
+
+    document = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+    requested = platform.split("/")
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"schemaVersion", "mediaType", "manifests"}
+        or type(document.get("schemaVersion")) is not int
+        or document.get("schemaVersion") != 2
+        or document.get("mediaType")
+        != "application/vnd.oci.image.index.v1+json"
+    ):
+        raise ValueError("OCI index metadata is invalid")
+    manifests = document["manifests"]
+    if len(requested) != 2 or not all(requested) or not isinstance(manifests, list):
+        raise ValueError(
+            "OCI index must contain exactly one executable manifest for the requested platform"
+        )
+
+    executable: list[dict[str, object]] = []
+    attestations: list[dict[str, object]] = []
+    for descriptor in manifests:
+        if not isinstance(descriptor, dict):
+            raise TypeError("OCI index descriptor is invalid")
+        descriptor_platform = descriptor.get("platform")
+        digest = descriptor.get("digest")
+        size = descriptor.get("size")
+        if (
+            not isinstance(descriptor_platform, dict)
+            or set(descriptor_platform) != {"os", "architecture"}
+            or not all(
+                isinstance(descriptor_platform.get(key), str)
+                for key in descriptor_platform
+            )
+        ):
+            raise ValueError("OCI index descriptor is invalid")
+        is_attestation = descriptor_platform == {
+            "os": "unknown",
+            "architecture": "unknown",
+        }
+        descriptor_error = (
+            "BuildKit attestation descriptor is invalid"
+            if is_attestation
+            else "OCI index descriptor is invalid"
+        )
+        if (
+            descriptor.get("mediaType")
+            != "application/vnd.oci.image.manifest.v1+json"
+            or not isinstance(digest, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size <= 0
+        ):
+            raise ValueError(descriptor_error)
+        if is_attestation:
+            attestations.append(descriptor)
+            continue
+        if set(descriptor) != {"mediaType", "digest", "size", "platform"}:
+            raise ValueError("OCI executable descriptor is invalid")
+        executable.append(descriptor)
+
+    if (
+        len(executable) != 1
+        or executable[0]["platform"].get("os") != requested[0]  # type: ignore[union-attr]
+        or executable[0]["platform"].get("architecture") != requested[1]  # type: ignore[union-attr]
+    ):
+        raise ValueError(
+            "OCI index must contain exactly one executable manifest for the requested platform"
+        )
+    runtime_digest = executable[0]["digest"]
+    if len(attestations) != 1:
+        raise ValueError("BuildKit attestation descriptor is invalid")
+    attestation = attestations[0]
+    if (
+        set(attestation)
+        != {"mediaType", "digest", "size", "annotations", "platform"}
+        or attestation.get("annotations")
+        != {
+            "vnd.docker.reference.digest": runtime_digest,
+            "vnd.docker.reference.type": "attestation-manifest",
+        }
+    ):
+        raise ValueError("BuildKit attestation descriptor is invalid")
+    assert isinstance(runtime_digest, str)
+    return runtime_digest
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("index", type=Path)
+    parser.add_argument("platform")
+    parser.add_argument("index_digest")
+    arguments = parser.parse_args()
+    try:
+        print(select(arguments.index, arguments.platform, arguments.index_digest))
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        parser.exit(2, f"{error}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -79,6 +79,7 @@ class ComfyUiHarnessCompiler:
             recipe,
             distribution,
             frozenset({"COMFYUI_DISABLE_TELEMETRY", "HF_HUB_OFFLINE"}),
+            engine_slug=self.slug,
         )
         return projection(
             slug=self.slug,

@@ -17,11 +17,12 @@ from typing import Any
 
 SCHEMA = "vonk-forge.dev-image-acceptance.v3"
 ROLE_SCHEMA = "vonk-forge.dev-image-role-acceptance.v3"
-ROLES = ("api", "worker", "hermes")
+ROLES = ("api", "worker", "hermes", "litellm")
 IMAGES = {
     "api": "ghcr.io/carstvaartjes/vonk-forge-api",
     "worker": "ghcr.io/carstvaartjes/vonk-forge-worker",
     "hermes": "ghcr.io/carstvaartjes/vonk-forge-hermes",
+    "litellm": "ghcr.io/carstvaartjes/vonk-forge-litellm",
 }
 COMPOSE_FILES = ("docker-compose.dev.yml", "docker-compose.pinned.yml")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")

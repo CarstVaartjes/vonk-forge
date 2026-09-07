@@ -407,8 +407,22 @@ def test_active_legacy_helper_bridge_blocks_retry_until_full_budget(
             second_deadline = second_deadline.replace(tzinfo=UTC)
         assert second_deadline == clock() + timedelta(seconds=240)
         assert [attempt.result for attempt in attempts] == [
-            {"reason": "agent upgrade request is invalid"},
-            {"reason": "agent upgrade request is invalid"},
+            {
+                "error_code": "operation_failed",
+                "reason": "agent upgrade request is invalid",
+                "recovery": "retry-or-inspect",
+                "status": "failed",
+                "summary": "agent upgrade request is invalid",
+                "uncertain": False,
+            },
+            {
+                "error_code": "operation_failed",
+                "reason": "agent upgrade request is invalid",
+                "recovery": "retry-or-inspect",
+                "status": "failed",
+                "summary": "agent upgrade request is invalid",
+                "uncertain": False,
+            },
         ]
     assert _operation_nodes(sessions, job.id) == [NODE_A]
 
@@ -1302,7 +1316,14 @@ def test_exact_identity_after_legacy_retry_continues_to_second_target(tmp_path) 
             )
         )
         assert failed_retry is not None and failed_retry.state == "failed"
-        assert failed_retry.result == {"reason": "agent upgrade helper is unavailable"}
+        assert failed_retry.result == {
+            "error_code": "operation_failed",
+            "reason": "agent upgrade helper is unavailable",
+            "recovery": "retry-or-inspect",
+            "status": "failed",
+            "summary": "agent upgrade helper is unavailable",
+            "uncertain": False,
+        }
     next_claim = _claim_upgrade(operations, NODE_B, "serial-b", OLD_IDENTITY)
     assert next_claim.attempt == 1
 

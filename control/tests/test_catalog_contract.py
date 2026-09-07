@@ -111,6 +111,58 @@ def test_model_version_requires_a_model_reference() -> None:
         validate_catalog_document(document)
 
 
+def test_model_capability_authority_is_bounded_external_and_ordered() -> None:
+    document = json.loads(MODEL_VERSION_FIXTURE.read_text())
+    document["capabilities"] = {
+        "schema_version": 2,
+        "facts": [
+            {
+                "capability": "image-understanding",
+                "support": "supported",
+                "evidence_status": "tested",
+                "evidence_digest": "b" * 64,
+            },
+            {
+                "capability": "image-understanding",
+                "support": "unknown",
+                "evidence_status": "unknown",
+                "evidence_digest": None,
+            },
+        ],
+        "provenance": {
+            "source_url": "https://example.test/evidence/model.json",
+            "source_revision": "0123456789abcdef0123456789abcdef01234567",
+            "evidence_digest": "c" * 64,
+        },
+    }
+    validate_catalog_document(document)
+
+    invalid = json.loads(json.dumps(document))
+    invalid["capabilities"]["facts"][0]["capability"] = "vision"
+    with pytest.raises(CatalogContractError, match="enum"):
+        validate_catalog_document(invalid)
+
+    invalid = json.loads(json.dumps(document))
+    invalid["capabilities"]["facts"][0]["evidence_digest"] = None
+    with pytest.raises(CatalogContractError, match="require an evidence digest"):
+        validate_catalog_document(invalid)
+
+    invalid = json.loads(json.dumps(document))
+    invalid["capabilities"]["facts"][1]["support"] = "supported"
+    with pytest.raises(CatalogContractError, match="cannot claim support"):
+        validate_catalog_document(invalid)
+
+    invalid = json.loads(json.dumps(document))
+    invalid["capabilities"]["facts"].reverse()
+    with pytest.raises(CatalogContractError, match="stable lexical ordering"):
+        validate_catalog_document(invalid)
+
+    invalid = json.loads(json.dumps(document))
+    invalid["capabilities"]["provenance"]["source_url"] = "http://example.test/evidence"
+    with pytest.raises(CatalogContractError, match="format"):
+        validate_catalog_document(invalid)
+
+
 def test_model_version_accepts_exact_zero_byte_files_but_rejects_negative_sizes() -> (
     None
 ):

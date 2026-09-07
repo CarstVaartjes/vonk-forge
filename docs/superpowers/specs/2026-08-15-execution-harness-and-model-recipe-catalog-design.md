@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-15
 
-**Status:** Approved in operator design review
+**Status:** Approved historical design; recipe documents now live in the
+separate `vonk-forge-recipes` checkout.
 
 ## Outcome
 
@@ -181,7 +182,7 @@ config/model-versions/
 config/execution-harnesses/
 config/runtime-distributions/
 config/patch-bundles/
-config/recipes/
+../vonk-forge-recipes/recipes/
 config/model-targets/
 ```
 

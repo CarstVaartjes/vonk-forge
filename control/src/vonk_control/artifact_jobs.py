@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import uuid
 from collections.abc import AsyncIterable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
+from pydantic import ConfigDict, Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
@@ -25,6 +28,7 @@ from vonk_agent_protocol import (
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
+from vonk_forge_contracts import RecipeDefinition, content_sha256
 
 from .artifact_blob_store import (
     ArtifactBlobStore,
@@ -36,27 +40,178 @@ from .models import (
     ArtifactJob,
     ArtifactJobBlob,
     ArtifactJobFile,
+    CatalogDocumentRevision,
     Job,
-    LocalRecipeRevision,
     RecipeInstallation,
     RecipeRun,
     RunNode,
 )
 from .recipe_operations import RecipeOperationConflict, RecipeOperationService
+from .strict_json import StrictJSONModel
 
 MAX_INPUT_FILES = 32
 MAX_INPUT_FILE_BYTES = 512 * 1024**2
 MAX_INPUT_TOTAL_BYTES = 1024**3
 _SLOT_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")
 _EXTENSION = re.compile(r"\.[a-z0-9][a-z0-9._-]{0,15}\Z")
+_PARAMETER_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
+_UNSAFE_PARAMETER_KEY = re.compile(
+    r"^(?:apikey|passwordhash)$|"
+    r"(?:^|[_-])(?:password|secret|authorization|command|shell|environment)"
+    r"(?:$|[_-])|"
+    r"(?:^|[_-])(?:api|access|auth|bearer|github|hf|huggingface)[_-]?token$|"
+    r"(?:^|[_-])private[_-]?key$|"
+    r"^token$|"
+    r"(?:^|[_-])(?:path|file|filename|filepath|directory|folder)(?:$|[_-])",
+    re.IGNORECASE,
+)
 
 
 class ArtifactJobError(ValueError):
     pass
 
 
+def _active_recipe_revision(
+    session: Session, revision_id: str
+) -> tuple[CatalogDocumentRevision, RecipeDefinition] | None:
+    revision = session.get(CatalogDocumentRevision, revision_id)
+    if (
+        revision is None
+        or revision.kind != "recipe"
+        or revision.schema_version != 2
+        or revision.state != "active"
+    ):
+        return None
+    try:
+        recipe = RecipeDefinition.model_validate(revision.document)
+    except (TypeError, ValueError):
+        return None
+    if content_sha256(recipe) != revision.content_digest:
+        return None
+    return revision, recipe
+
+
+class ArtifactJobContractModel(StrictJSONModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class ArtifactFileDeclaration(ArtifactJobContractModel):
+    slot: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
+    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    media_type: str = Field(
+        pattern=r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/"
+        r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
+    )
+    size_bytes: int = Field(ge=0, le=MAX_INPUT_FILE_BYTES)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ArtifactOutputFile(ArtifactJobContractModel):
+    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    media_type: str = Field(
+        pattern=r"^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/"
+        r"[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$"
+    )
+    size_bytes: int = Field(ge=0, le=1024**3)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class OutputLimits(ArtifactJobContractModel):
+    max_files: int = Field(ge=1, le=32)
+    max_file_bytes: int = Field(ge=1, le=1024**3)
+    max_total_bytes: int = Field(ge=1, le=2 * 1024**3)
+    allowed_media_types: list[str] = Field(min_length=1, max_length=16)
+
+
+class ArtifactJobResultEvidence(ArtifactJobContractModel):
+    """Known evidence fields with room for engine-specific evidence keys."""
+
+    model_config = ConfigDict(extra="allow", strict=True)
+
+    elapsed_milliseconds: int | None = Field(default=None, ge=0)
+    peak_memory_bytes: int | None = Field(default=None, ge=0)
+
+
+class ArtifactJobResponse(ArtifactJobContractModel):
+    model_config = ConfigDict(extra="forbid", strict=True, from_attributes=True)
+
+    id: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
+    run_id: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
+    operation_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    )
+    interface: Literal[
+        "audio-job", "video-job", "image-job", "mesh-job", "artifact-job"
+    ]
+    state: Literal[
+        "draft",
+        "ready",
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelling",
+        "cancelled",
+        "waiting-for-operator",
+    ]
+    contract_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    compiled_contract: dict[str, object]
+    input_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    input_total_bytes: int = Field(ge=0)
+    input_declarations: tuple[ArtifactFileDeclaration, ...]
+    input_files: tuple[ArtifactFileDeclaration, ...]
+    output_limits: OutputLimits
+    output_manifest_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    output_files: tuple[ArtifactOutputFile, ...]
+    result_evidence: ArtifactJobResultEvidence | None = None
+    status_reason: str | None = Field(default=None, max_length=512)
+    timeout_seconds: int = Field(ge=1, le=3_600)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ArtifactJobListResponse(ArtifactJobContractModel):
+    jobs: list[ArtifactJobResponse] = Field(max_length=100)
+
+
+class ArtifactJobTransportCapabilities(ArtifactJobContractModel):
+    max_input_files: int = Field(ge=1, le=32)
+    max_input_file_bytes: int = Field(ge=1, le=MAX_INPUT_FILE_BYTES)
+    max_input_total_bytes: int = Field(ge=1, le=1024**3)
+    max_output_files: int = Field(ge=1, le=32)
+    max_output_file_bytes: int = Field(ge=1, le=1024**3)
+    max_output_total_bytes: int = Field(ge=1, le=2 * 1024**3)
+    max_timeout_seconds: int = Field(ge=1, le=3_600)
+    reserved_input_names: list[str] = Field(min_length=1, max_length=32)
+
+
+class ArtifactJobStorageCapabilities(ArtifactJobContractModel):
+    max_stored_bytes: int = Field(ge=1)
+    used_bytes: int = Field(ge=0)
+    reserved_bytes: int = Field(ge=0)
+    in_flight_uploads: int = Field(ge=0)
+    remaining_bytes: int = Field(ge=0)
+
+
+class ArtifactJobCapabilitiesResponse(ArtifactJobContractModel):
+    schema_version: Literal[1] = 1
+    transport: ArtifactJobTransportCapabilities
+    storage: ArtifactJobStorageCapabilities
+
+
+
 @dataclass(frozen=True, slots=True)
 class ArtifactJobView:
+    """Internal lifecycle projection; HTTP routes validate it at the boundary."""
+
     id: str
     run_id: str
     operation_id: str | None
@@ -96,6 +251,122 @@ def _recipe_interface(document: Mapping[str, object]) -> str:
     if len(artifact_interfaces) != 1 or not isinstance(artifact_interfaces[0], str):
         raise ArtifactJobError("recipe interface is unavailable")
     return artifact_interfaces[0]
+
+
+def _finite_parameter_number(value: object) -> bool:
+    return (
+        (isinstance(value, float) and math.isfinite(value))
+        or (isinstance(value, int) and not isinstance(value, bool))
+    )
+
+
+def _settings_parameters(document: Mapping[str, object]) -> list[dict[str, object]]:
+    settings = document.get("settings")
+    knobs = settings.get("knobs") if isinstance(settings, Mapping) else None
+    if knobs is None:
+        return []
+    if not isinstance(knobs, Mapping) or len(knobs) > 64:
+        raise ArtifactJobError("artifact parameter contract is invalid")
+    parameters: list[dict[str, object]] = []
+    for name, setting in knobs.items():
+        if not isinstance(name, str) or not isinstance(setting, Mapping):
+            raise ArtifactJobError("artifact parameter contract is invalid")
+        value = setting.get("value")
+        if isinstance(value, bool):
+            kind = "boolean"
+        elif isinstance(value, int):
+            kind = "integer"
+        elif isinstance(value, float):
+            kind = "float"
+        elif isinstance(value, str):
+            kind = "string"
+        else:
+            raise ArtifactJobError("artifact parameter contract is invalid")
+        parameters.append(
+            {
+                "name": name,
+                "type": kind,
+                "default": value,
+                "minimum": None,
+                "maximum": None,
+            }
+        )
+    return parameters
+
+
+def _validate_parameter_definition(raw: Mapping[str, object]) -> dict[str, object]:
+    name = raw.get("name")
+    kind = raw.get("type")
+    if (
+        not isinstance(name, str)
+        or _PARAMETER_NAME.fullmatch(name) is None
+        or _UNSAFE_PARAMETER_KEY.search(name)
+        or kind not in {"string", "integer", "float", "boolean", "enum"}
+    ):
+        raise ArtifactJobError("artifact parameter contract is invalid")
+    default = raw.get("default")
+    minimum = raw.get("minimum")
+    maximum = raw.get("maximum")
+    if kind == "string":
+        valid = (
+            isinstance(default, str)
+            and "\x00" not in default
+            and len(default.encode("utf-8")) <= 4096
+            and minimum is None
+            and maximum is None
+        )
+    elif kind == "integer":
+        valid = (
+            type(default) is int
+            and type(minimum) in (int, type(None))
+            and type(maximum) in (int, type(None))
+        )
+    elif kind == "float":
+        valid = (
+            _finite_parameter_number(default)
+            and type(minimum) in (int, float, type(None))
+            and type(maximum) in (int, float, type(None))
+            and (minimum is None or _finite_parameter_number(minimum))
+            and (maximum is None or _finite_parameter_number(maximum))
+        )
+    elif kind == "boolean":
+        valid = type(default) is bool and minimum is None and maximum is None
+    else:
+        allowed = raw.get("allowed_values")
+        valid = (
+            isinstance(allowed, list)
+            and 1 <= len(allowed) <= 128
+            and all(
+                isinstance(item, (str, int, float, bool))
+                and not (isinstance(item, float) and not math.isfinite(item))
+                for item in allowed
+            )
+            and default in allowed
+            and minimum is None
+            and maximum is None
+        )
+    if not valid or (
+        minimum is not None
+        and maximum is not None
+        and minimum > maximum
+    ):
+        raise ArtifactJobError("artifact parameter contract is invalid")
+    pattern = raw.get("pattern")
+    if pattern is not None and (
+        not isinstance(pattern, str)
+        or "\x00" in pattern
+        or len(pattern) > 256
+    ):
+        raise ArtifactJobError("artifact parameter contract is invalid")
+    return {
+        "name": name,
+        "type": kind,
+        "default": default,
+        "minimum": minimum,
+        "maximum": maximum,
+        "allowed_values": list(raw.get("allowed_values", [])),
+        "pattern": pattern,
+    }
 
 
 def _compile_contract(
@@ -230,33 +501,12 @@ def _compile_contract(
         }
     else:
         raise ArtifactJobError("artifact input contract is invalid")
-    raw_parameters = document.get("parameters", [])
-    if not isinstance(raw_parameters, list) or len(raw_parameters) > 128:
-        raise ArtifactJobError("artifact parameter contract is invalid")
+    raw_parameters = _settings_parameters(document)
     parameters: list[dict[str, object]] = []
     for raw in raw_parameters:
         if not isinstance(raw, Mapping):
             raise ArtifactJobError("artifact parameter contract is invalid")
-        name = raw.get("name")
-        kind = raw.get("type")
-        if not isinstance(name, str) or kind not in {
-            "string",
-            "integer",
-            "boolean",
-            "enum",
-        }:
-            raise ArtifactJobError("artifact parameter contract is invalid")
-        parameters.append(
-            {
-                "name": name,
-                "type": kind,
-                "default": raw.get("default"),
-                "minimum": raw.get("minimum"),
-                "maximum": raw.get("maximum"),
-                "allowed_values": list(raw.get("allowed_values", [])),
-                "pattern": raw.get("pattern"),
-            }
-        )
+        parameters.append(_validate_parameter_definition(raw))
     raw_output = interface.get("output")
     if not isinstance(raw_output, Mapping) or raw_output.get("path") != "/outputs":
         raise ArtifactJobError("artifact output contract is unavailable")
@@ -548,9 +798,13 @@ def _effective_parameters(
         valid_type = (
             kind == "string"
             and isinstance(value, str)
+            and "\x00" not in value
+            and len(value.encode("utf-8")) <= 4096
             or kind == "integer"
             and isinstance(value, int)
             and not isinstance(value, bool)
+            or kind == "float"
+            and _finite_parameter_number(value)
             or kind == "boolean"
             and isinstance(value, bool)
             or kind == "enum"
@@ -561,12 +815,12 @@ def _effective_parameters(
         minimum = definition.get("minimum")
         maximum = definition.get("maximum")
         if (
-            isinstance(value, int)
+            isinstance(value, (int, float))
             and not isinstance(value, bool)
             and (
-                isinstance(minimum, int)
+                isinstance(minimum, (int, float))
                 and value < minimum
-                or isinstance(maximum, int)
+                or isinstance(maximum, (int, float))
                 and value > maximum
             )
         ):
@@ -785,19 +1039,21 @@ class ArtifactJobService:
         if run is None or existing is None and run.state != "running":
             raise ArtifactJobError("recipe run is not accepting jobs")
         installation = session.get(RecipeInstallation, run.installation_id)
-        revision = (
-            session.get(LocalRecipeRevision, installation.recipe_revision_id)
+        resolved = (
+            _active_recipe_revision(session, installation.recipe_revision_id)
             if installation is not None
             else None
         )
-        if revision is None or revision.lifecycle != "resolved":
+        if resolved is None:
             raise ArtifactJobError("recipe revision is unavailable")
-        if _recipe_interface(revision.document) != interface or interface == "openai":
+        _revision, recipe = resolved
+        document = recipe.model_dump(mode="json")
+        if _recipe_interface(document) != interface or interface == "openai":
             if existing is not None:
                 raise ArtifactJobError("request key was already used differently")
             raise ArtifactJobError("artifact job interface does not match the run")
         try:
-            contract = _compile_contract(revision.document, interface)
+            contract = _compile_contract(document, interface)
             contract_digest = _contract_sha256(contract)
             parameters_copy = _effective_parameters(contract, supplied_parameters)
             limits = _effective_output_limits(contract, output_limits)
@@ -1023,17 +1279,17 @@ class ArtifactJobService:
                     "another artifact job already owns this run reservation"
                 )
             installation = session.get(RecipeInstallation, run.installation_id)
-            revision = (
-                session.get(LocalRecipeRevision, installation.recipe_revision_id)
+            resolved = (
+                _active_recipe_revision(session, installation.recipe_revision_id)
                 if installation is not None
                 else None
             )
             if (
                 installation is None
-                or revision is None
-                or revision.content_sha256 is None
+                or resolved is None
             ):
                 raise ArtifactJobError("recipe job workload identity is unavailable")
+            revision, _recipe = resolved
             node = self._job_node_in_session(session, run)
             raw_files = artifact_job.input_manifest["files"]
             payload = {
@@ -1042,7 +1298,7 @@ class ArtifactJobService:
                 "run_id": run.id,
                 "installation_id": installation.id,
                 "recipe_revision_id": revision.id,
-                "recipe_content_sha256": revision.content_sha256,
+                "recipe_content_sha256": revision.content_digest,
                 "image_digest": installation.image_digest,
                 "plan_digest": run.plan_digest,
                 "interface": artifact_job.interface,
@@ -1067,7 +1323,7 @@ class ArtifactJobService:
                 payload=payload,
                 actor=actor,
                 request_id=request_id,
-                authority_digest=revision.content_sha256,
+                authority_digest=revision.content_digest,
                 now=now,
             )
             artifact_job.operation_id = operation.id
@@ -1659,7 +1915,11 @@ class ArtifactJobService:
 
 __all__ = [
     "MAX_INPUT_FILE_BYTES",
+    "ArtifactFileDeclaration",
+    "ArtifactJobCapabilitiesResponse",
     "ArtifactJobError",
+    "ArtifactJobResponse",
     "ArtifactJobService",
     "ArtifactJobView",
+    "OutputLimits",
 ]

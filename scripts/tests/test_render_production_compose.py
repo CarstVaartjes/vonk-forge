@@ -15,9 +15,19 @@ DIGEST = "a" * 64
 API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3@sha256:{DIGEST}"
 WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3@sha256:{DIGEST}"
 HERMES_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3@sha256:{DIGEST}"
-DEV_API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'b' * 40}@sha256:{DIGEST}"
-DEV_WORKER_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'b' * 40}@sha256:{DIGEST}"
-DEV_HERMES_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'b' * 40}@sha256:{DIGEST}"
+LITELLM_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3@sha256:{DIGEST}"
+DEV_API_IMAGE = (
+    f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'b' * 40}@sha256:{DIGEST}"
+)
+DEV_WORKER_IMAGE = (
+    f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'b' * 40}@sha256:{DIGEST}"
+)
+DEV_HERMES_IMAGE = (
+    f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'b' * 40}@sha256:{DIGEST}"
+)
+DEV_LITELLM_IMAGE = (
+    f"ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-{'b' * 40}@sha256:{DIGEST}"
+)
 
 
 def _run_production(
@@ -26,6 +36,7 @@ def _run_production(
     api_image: str = API_IMAGE,
     worker_image: str = WORKER_IMAGE,
     hermes_image: str = HERMES_IMAGE,
+    litellm_image: str = LITELLM_IMAGE,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
@@ -41,6 +52,8 @@ def _run_production(
             worker_image,
             "--hermes-image",
             hermes_image,
+            "--litellm-image",
+            litellm_image,
         ],
         cwd=ROOT,
         text=True,
@@ -83,6 +96,8 @@ def test_production_and_development_render_the_same_resolved_runtime_model(
             DEV_WORKER_IMAGE,
             "--hermes-image",
             DEV_HERMES_IMAGE,
+            "--litellm-image",
+            DEV_LITELLM_IMAGE,
             "--channel",
             "dev",
         ],
@@ -99,9 +114,10 @@ def test_production_and_development_render_the_same_resolved_runtime_model(
     development_model = _replace(
         development_model,
         {
-            DEV_API_IMAGE: API_IMAGE,
-            DEV_WORKER_IMAGE: WORKER_IMAGE,
-            DEV_HERMES_IMAGE: HERMES_IMAGE,
+            "ghcr.io/carstvaartjes/vonk-forge-api:dev": "ghcr.io/carstvaartjes/vonk-forge-api:latest",
+            "ghcr.io/carstvaartjes/vonk-forge-worker:dev": "ghcr.io/carstvaartjes/vonk-forge-worker:latest",
+            "ghcr.io/carstvaartjes/vonk-forge-hermes:dev": "ghcr.io/carstvaartjes/vonk-forge-hermes:latest",
+            "ghcr.io/carstvaartjes/vonk-forge-litellm:dev": "ghcr.io/carstvaartjes/vonk-forge-litellm:latest",
         },
     )
 
@@ -119,13 +135,28 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
     assert result.returncode == 0, result.stderr
     text = output.read_text(encoding="utf-8")
     document = yaml.safe_load(text)
-    assert document["services"]["control-api"]["image"] == API_IMAGE
-    assert document["services"]["control-worker"]["image"] == WORKER_IMAGE
-    assert document["services"]["hermes-agent"]["image"] == HERMES_IMAGE
+    assert (
+        document["services"]["control-api"]["image"]
+        == "ghcr.io/carstvaartjes/vonk-forge-api:latest"
+    )
+    assert (
+        document["services"]["control-worker"]["image"]
+        == "ghcr.io/carstvaartjes/vonk-forge-worker:latest"
+    )
+    assert (
+        document["services"]["hermes-agent"]["image"]
+        == "ghcr.io/carstvaartjes/vonk-forge-hermes:latest"
+    )
+    assert (
+        document["services"]["litellm"]["image"]
+        == "ghcr.io/carstvaartjes/vonk-forge-litellm:latest"
+    )
     assert all(
         isinstance(service, dict)
         and isinstance(service.get("image"), str)
-        and "@sha256:" in service["image"]
+        and service["image"].endswith(":latest")
+        and "@" not in service["image"]
+        and service["pull_policy"] == "always"
         and "${" not in service["image"]
         for service in document["services"].values()
     )

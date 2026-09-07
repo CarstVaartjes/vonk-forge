@@ -32,6 +32,24 @@ use vonk_agent::{
     },
 };
 
+const CLAIM_CAPABILITIES: &[&str] = &[
+    "agent.runtime.rust.v1",
+    "runtime.vonk.v1",
+    "agent.upgrade.v1",
+    "artifact.distribution.v1",
+    "recipe.build.v1",
+    "recipe.image.import.v1",
+    "recipe.job.run.v1",
+    "recipe.install",
+    "recipe.start",
+    "recipe.start.two-phase.v1",
+    "recipe.run.inspect.exact.v1",
+    "recipe.run.inspect.receipt.v1",
+    "recipe.stop",
+    "recipe.uninstall",
+    "recipe.model-uninstall.v1",
+];
+
 #[derive(Parser)]
 #[command(
     name = "vonk-agent",
@@ -47,6 +65,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    Capabilities,
     Run,
     SelfTest,
     VerifyReadiness {
@@ -71,6 +90,9 @@ enum Command {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Capabilities => {
+            println!("{}", serde_json::to_string(CLAIM_CAPABILITIES)?);
+        }
         Command::Run => run_agent(&AgentConfig::load(&cli.config)?).await?,
         Command::SelfTest => {
             let config = AgentConfig::load(&cli.config)?;
@@ -183,22 +205,6 @@ async fn run_control_lane(
     client_updates: tokio::sync::watch::Sender<AgentHttpClient>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runner = SystemProcessRunner;
-    let capabilities = [
-        "agent.runtime.rust.v1",
-        "runtime.vonk.v1",
-        "agent.upgrade.v1",
-        "recipe.build.v1",
-        "recipe.image.import.v1",
-        "recipe.job.run.v1",
-        "recipe.install",
-        "recipe.start",
-        "recipe.start.two-phase.v1",
-        "recipe.run.inspect.exact.v1",
-        "recipe.run.inspect.receipt.v1",
-        "recipe.stop",
-        "recipe.uninstall",
-        "recipe.model-uninstall.v1",
-    ];
     let mut failures = 0_u32;
     let mut observation_failures = 0_u32;
     let mut next_inventory = tokio::time::Instant::now();
@@ -310,7 +316,7 @@ async fn run_control_lane(
                 &client,
                 &mut state,
                 &executor,
-                &capabilities,
+                CLAIM_CAPABILITIES,
                 wait_seconds,
                 Some(&runtime_identity),
                 || {
@@ -367,9 +373,14 @@ async fn run_telemetry_lane(
         TelemetryPaths {
             stat: PathBuf::from("/proc/stat"),
             loadavg: PathBuf::from("/proc/loadavg"),
+            uptime: PathBuf::from("/proc/uptime"),
             meminfo: PathBuf::from("/proc/meminfo"),
             net_dev: PathBuf::from("/proc/net/dev"),
             store: data_dir,
+            sys_block: PathBuf::from("/sys/block"),
+            sys_class_net: PathBuf::from("/sys/class/net"),
+            thermal: PathBuf::from("/sys/class/thermal"),
+            powercap: PathBuf::from("/sys/class/powercap"),
         },
         boot_id,
     );

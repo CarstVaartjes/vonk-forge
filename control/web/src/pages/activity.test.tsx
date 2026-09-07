@@ -21,7 +21,7 @@ const visualFleet = {
 };
 
 const emptyLibrary = {
-  schema_version: 1 as const,
+  schema_version: 2 as const,
   generated_at: "2026-08-15T12:00:00Z",
   freshness_policy: {inventory_fresh_seconds: 300, telemetry_live_seconds: 6, telemetry_delayed_seconds: 20},
   models: [],

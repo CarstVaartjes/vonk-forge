@@ -3,7 +3,6 @@
   "images": {
     "caddy": "caddy:2.11.4@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9",
     "grafana": "grafana/grafana:13.2.0@sha256:3fd54ae1214669f8355f065ec9f6445d5279a3d77095ab048ca045685272429b",
-    "litellm": "ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2",
     "postgres": "postgres:18.6@sha256:06cad38a5d9f5d24b4d83d86def30795d5e4b757fedbf5281172b576dedcd941",
     "prometheus": "prom/prometheus:v3.14.0@sha256:5ce7540c3c00ef4ab0c9d2c995c6a5b9c421f44b4a115d97a2c7af3b1c21cbb0",
     "registry": "registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33",
@@ -11,6 +10,7 @@
   },
   "build_bases": {
     "hermes": "nousresearch/hermes-agent:v2026.7.20@sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a",
+    "litellm": "ghcr.io/berriai/litellm:v1.83.14-stable.patch.3@sha256:f12d528d4a05add56cb09e54c5126088f2edc6bdf3a2f943bcd3a32b08769da2",
     "node": "node:24-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7",
     "python": "python:3.12-slim-bookworm@sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b"
   },
@@ -38,6 +38,14 @@
       "package": "vonk-forge-hermes",
       "required": true,
       "target": "managed"
+    },
+    {
+      "context": "deploy/compose/litellm",
+      "dockerfile": "deploy/compose/litellm/Dockerfile",
+      "environment": "LITELLM_IMAGE",
+      "package": "vonk-forge-litellm",
+      "required": true,
+      "target": "runtime"
     }
   ],
   "signatures": {

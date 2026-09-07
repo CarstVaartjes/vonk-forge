@@ -24,12 +24,14 @@ class RecipeParallelism:
             data (int):
             pipeline (int):
             tensor (int):
+            world_size (int):
      """
 
     backend: str
     data: int
     pipeline: int
     tensor: int
+    world_size: int
 
 
 
@@ -44,6 +46,8 @@ class RecipeParallelism:
 
         tensor = self.tensor
 
+        world_size = self.world_size
+
 
         field_dict: dict[str, Any] = {}
 
@@ -52,6 +56,7 @@ class RecipeParallelism:
             "data": data,
             "pipeline": pipeline,
             "tensor": tensor,
+            "world_size": world_size,
         })
 
         return field_dict
@@ -69,11 +74,14 @@ class RecipeParallelism:
 
         tensor = d.pop("tensor")
 
+        world_size = d.pop("world_size")
+
         recipe_parallelism = cls(
             backend=backend,
             data=data,
             pipeline=pipeline,
             tensor=tensor,
+            world_size=world_size,
         )
 
         return recipe_parallelism

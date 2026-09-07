@@ -165,6 +165,18 @@ fn build_payload_is_closed_and_declarative() {
 }
 
 #[test]
+fn build_payload_rejects_every_sys_capability() {
+    for capability in ["SYS_ADMIN", "SYS_CHROOT", "SYS_PTRACE"] {
+        let mut payload = build_payload();
+        payload["capabilities"] = json!([capability]);
+        assert!(
+            RecipeOperationRequest::parse(&claim("recipe.build.v1", payload)).is_err(),
+            "{capability} must never cross the recipe build contract"
+        );
+    }
+}
+
+#[test]
 fn build_network_requires_a_consistent_mode_and_host_declaration() {
     let mut payload = build_payload();
     payload["network"] = json!({"mode": "none", "hosts": ["pypi.org"]});

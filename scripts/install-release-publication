@@ -31,7 +31,7 @@ NAS_PLATFORMS = (
     "darwin-amd64",
     "darwin-arm64",
 )
-SPARK_PLATFORMS = ("linux-amd64", "linux-arm64")
+SPARK_PLATFORMS = ("linux-arm64",)
 PHASE_ORDER = {"immutable": 0, "endpoint": 1, "pointer": 2}
 MUTABLE_TAGS = frozenset({"edge", "latest", "main", "dev"})
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -56,7 +56,6 @@ ACCEPTANCE_GATES = {
     "compose_hermes",
     "nas_site_secret_preservation",
     "nas_workstation",
-    "spark_amd64",
     "spark_arm64",
     "spark_job",
     "spark_pairing",
@@ -164,7 +163,11 @@ def _validate_origin(origin: str) -> str:
 
 
 def _validate_image(
-    reference: str, role: str, channel: str, version: str, source_sha: str
+    reference: str,
+    role: str,
+    channel: str,
+    version: str,
+    images_source_sha: str,
 ) -> None:
     match = IMAGE.fullmatch(reference)
     if match is None:
@@ -176,7 +179,7 @@ def _validate_image(
         expected = version if role == "hermes" else f"v{version}"
         if tag != expected:
             raise PublicationError(f"{role} image version is inconsistent")
-    elif tag != f"dev-sha-{source_sha}":
+    elif tag != f"dev-sha-{images_source_sha}":
         raise PublicationError(f"{role} image version is inconsistent")
 
 
@@ -508,7 +511,12 @@ def assemble(arguments: argparse.Namespace) -> str:
     channel = arguments.channel
     version = arguments.version
     source_sha = arguments.source_sha
-    if VERSION.fullmatch(version) is None or SOURCE_SHA.fullmatch(source_sha) is None:
+    images_source_sha = arguments.images_source_sha
+    if (
+        VERSION.fullmatch(version) is None
+        or SOURCE_SHA.fullmatch(source_sha) is None
+        or SOURCE_SHA.fullmatch(images_source_sha) is None
+    ):
         raise PublicationError("release identity is invalid")
     if channel == "stable" and SEMVER.fullmatch(version) is None:
         raise PublicationError("stable version is invalid")
@@ -521,9 +529,10 @@ def assemble(arguments: argparse.Namespace) -> str:
         "api": arguments.api_image,
         "worker": arguments.worker_image,
         "hermes": arguments.hermes_image,
+        "litellm": arguments.litellm_image,
     }
     for role, reference in images.items():
-        _validate_image(reference, role, channel, version, source_sha)
+        _validate_image(reference, role, channel, version, images_source_sha)
     nas = _pairs(arguments.nas_setup, "NAS setup")
     spark = _pairs(arguments.spark_setup, "Spark setup")
     packages = _pairs(arguments.agent_package, "agent package")
@@ -973,10 +982,7 @@ def accept(arguments: argparse.Namespace) -> None:
                 ) from error
             observed_spark_platforms.add(platform)
         observed.update(gates)
-    if observed != ACCEPTANCE_GATES or observed_spark_platforms != {
-        "linux-amd64",
-        "linux-arm64",
-    }:
+    if observed != ACCEPTANCE_GATES or observed_spark_platforms != {"linux-arm64"}:
         raise PublicationError("behavioral acceptance gates are incomplete")
 
     receipt = {
@@ -1621,6 +1627,19 @@ def promote(arguments: argparse.Namespace) -> None:
     _verify_candidate_objects(entries, filesystem, remote)
     _validate_existing_pointer(plan, release_public_key, filesystem, remote)
 
+    if arguments.preflight_only:
+        print(
+            json.dumps(
+                {
+                    "channel": plan["channel"],
+                    "generation": plan["generation"],
+                    "phase": "preflight",
+                },
+                sort_keys=True,
+            )
+        )
+        return
+
     prefix = f"artifacts/{plan['channel']}/releases/{plan['generation']}/acceptance"
     acceptance_objects = (
         (
@@ -1658,9 +1677,7 @@ def quarantine_dev_pointer(arguments: argparse.Namespace) -> None:
         raise PublicationError("expected pointer digest is invalid")
     filesystem, remote = _destination(arguments)
     pointer_key = "artifacts/dev/current.manifest"
-    retired_key = (
-        f"artifacts/dev/retired-pointers/{arguments.expected_sha256}.manifest"
-    )
+    retired_key = f"artifacts/dev/retired-pointers/{arguments.expected_sha256}.manifest"
     if filesystem is not None:
         pointer_path = filesystem / pointer_key
         retired_path = filesystem / retired_key
@@ -1677,9 +1694,7 @@ def quarantine_dev_pointer(arguments: argparse.Namespace) -> None:
             else:
                 raise PublicationError("dev channel pointer is unavailable")
         else:
-            current = _safe_bytes(
-                pointer_path, "dev channel pointer", 64 * 1024
-            )
+            current = _safe_bytes(pointer_path, "dev channel pointer", 64 * 1024)
             if hashlib.sha256(current).hexdigest() != arguments.expected_sha256:
                 raise PublicationError("dev channel pointer digest changed")
             with tempfile.TemporaryDirectory(
@@ -1690,9 +1705,13 @@ def quarantine_dev_pointer(arguments: argparse.Namespace) -> None:
                 _atomic_local_copy(source, retired_path, True)
             pointer_path.unlink()
             already_quarantined = False
-        if pointer_path.exists() or hashlib.sha256(
-            _safe_bytes(retired_path, "retired channel manifest", 64 * 1024)
-        ).hexdigest() != arguments.expected_sha256:
+        if (
+            pointer_path.exists()
+            or hashlib.sha256(
+                _safe_bytes(retired_path, "retired channel manifest", 64 * 1024)
+            ).hexdigest()
+            != arguments.expected_sha256
+        ):
             raise PublicationError("dev channel pointer quarantine is incomplete")
     else:
         assert remote is not None
@@ -1724,9 +1743,10 @@ def quarantine_dev_pointer(arguments: argparse.Namespace) -> None:
             if result.returncode != 0:
                 raise PublicationError("dev channel pointer removal failed")
             already_quarantined = False
-        if _rclone_object_exists(remote, pointer_key) or _rclone_digest(
-            remote, retired_key
-        ) != arguments.expected_sha256:
+        if (
+            _rclone_object_exists(remote, pointer_key)
+            or _rclone_digest(remote, retired_key) != arguments.expected_sha256
+        ):
             raise PublicationError("dev channel pointer quarantine is incomplete")
     print(
         json.dumps(
@@ -1874,6 +1894,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--channel", choices=("dev", "stable"), required=True)
     build.add_argument("--version", required=True)
     build.add_argument("--source-sha", required=True)
+    build.add_argument("--images-source-sha", required=True)
     build.add_argument("--origin", required=True)
     build.add_argument("--expires-at", required=True, type=int)
     build.add_argument("--signing-key", required=True, type=Path)
@@ -1881,6 +1902,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--api-image", required=True)
     build.add_argument("--worker-image", required=True)
     build.add_argument("--hermes-image", required=True)
+    build.add_argument("--litellm-image", required=True)
     build.add_argument("--nas-setup", action="append", default=[])
     build.add_argument("--spark-setup", action="append", default=[])
     build.add_argument("--agent-package", action="append", default=[])
@@ -1920,6 +1942,11 @@ def parser() -> argparse.ArgumentParser:
     promotion.add_argument("--accepted-evidence-signature", type=Path, required=True)
     promotion.add_argument("--acceptance-public-key", type=Path, required=True)
     promotion.add_argument("--acceptance-public-key-sha256", required=True)
+    promotion.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="validate the candidate and pointer without writing publication objects",
+    )
     promotion_destinations = promotion.add_mutually_exclusive_group(required=True)
     promotion_destinations.add_argument("--filesystem", type=Path)
     promotion_destinations.add_argument("--rclone-remote")

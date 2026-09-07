@@ -2,8 +2,7 @@
 
 Date: 2026-08-06
 
-Status: architecture approved; implementation requires separate plans for the
-local product and global service
+Status: Retired historical design; implementation assumptions are not active.
 
 > **Recipe-model update (2026-08-07):** The source-first recipe specification
 > in [2026-08-07-source-first-recipe-design.md](2026-08-07-source-first-recipe-design.md)

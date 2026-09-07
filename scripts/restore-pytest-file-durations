@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Restore the latest usable pytest file timing artifact, failing open."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+import subprocess
+import tempfile
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+SCHEMA_VERSION = 1
+MAX_RUNS = 10
+MAX_ARTIFACTS = 10
+MAX_REPORT_BYTES = 1_000_000
+MAX_AGE = timedelta(days=30)
+
+
+def _gh(*args: str) -> Any:
+    result = subprocess.run(
+        ["gh", *args], check=True, capture_output=True, text=True, timeout=30
+    )
+    return json.loads(result.stdout)
+
+
+def _valid_files(payload: Any, *, now: datetime) -> dict[str, float]:
+    if not isinstance(payload, dict) or payload.get("schema_version") != SCHEMA_VERSION:
+        return {}
+    try:
+        generated = datetime.fromisoformat(str(payload["generated_at"]))
+    except (KeyError, TypeError, ValueError):
+        return {}
+    if generated.tzinfo is None or now - generated > MAX_AGE:
+        return {}
+    files = payload.get("files")
+    if not isinstance(files, dict):
+        return {}
+    valid: dict[str, float] = {}
+    for name, value in files.items():
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(name, str) and name and math.isfinite(seconds) and seconds > 0:
+            valid[name] = seconds
+    return valid
+
+
+def _artifact_names(run_id: str, suite: str, repo: str) -> list[str]:
+    prefix = f"pytest-file-durations-{suite}-"
+    artifacts = _gh("api", f"repos/{repo}/actions/runs/{run_id}/artifacts")
+    names = []
+    for artifact in artifacts.get("artifacts", []):
+        name = artifact.get("name") if isinstance(artifact, dict) else None
+        if isinstance(name, str) and name.startswith(prefix) and "/" not in name:
+            names.append(name)
+    return sorted(names)[:MAX_ARTIFACTS]
+
+
+def restore(
+    suite: str,
+    destination: str | Path,
+    *,
+    repo: str,
+    current_run_id: str | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Write a timing document and return whether at least one file was restored."""
+    reference = now or datetime.now(UTC)
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": reference.isoformat().replace("+00:00", "Z"),
+        "source": "github-actions-artifact",
+        "files": {},
+    }
+    try:
+        runs = _gh(
+            "run",
+            "list",
+            "--repo",
+            repo,
+            "--workflow",
+            ".github/workflows/ci.yml",
+            "--event",
+            "pull_request",
+            "--status",
+            "success",
+            "--limit",
+            str(MAX_RUNS + 1),
+            "--json",
+            "databaseId",
+        )
+        with tempfile.TemporaryDirectory(prefix="pytest-duration-") as temp:
+            for run in runs[:MAX_RUNS]:
+                run_id = str(run.get("databaseId", ""))
+                if not run_id or run_id == current_run_id:
+                    continue
+                try:
+                    names = _artifact_names(run_id, suite, repo)
+                except (
+                    OSError,
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    json.JSONDecodeError,
+                    subprocess.CalledProcessError,
+                    subprocess.TimeoutExpired,
+                ):
+                    continue
+                if not names:
+                    continue
+                merged: dict[str, float] = {}
+                for name in names:
+                    artifact_dir = Path(temp) / name
+                    try:
+                        subprocess.run(
+                            [
+                                "gh",
+                                "run",
+                                "download",
+                                "--repo",
+                                repo,
+                                run_id,
+                                "--name",
+                                name,
+                                "--dir",
+                                str(artifact_dir),
+                            ],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                            timeout=120,
+                        )
+                        for report in artifact_dir.rglob("*.json"):
+                            if report.stat().st_size > MAX_REPORT_BYTES:
+                                continue
+                            candidate = _valid_files(
+                                json.loads(report.read_text()), now=reference
+                            )
+                            for file_name, seconds in candidate.items():
+                                merged[file_name] = merged.get(file_name, 0.0) + seconds
+                    except (
+                        OSError,
+                        ValueError,
+                        TypeError,
+                        KeyError,
+                        json.JSONDecodeError,
+                        subprocess.CalledProcessError,
+                        subprocess.TimeoutExpired,
+                    ):
+                        continue
+                if merged:
+                    payload["files"] = dict(sorted(merged.items()))
+                    break
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        json.JSONDecodeError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):
+        pass
+    Path(destination).write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + os.linesep
+    )
+    return bool(payload["files"])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--suite", choices=("repository", "control"), required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
+    parser.add_argument("--current-run-id", default=os.environ.get("GITHUB_RUN_ID"))
+    args = parser.parse_args()
+    restore(args.suite, args.output, repo=args.repo, current_run_id=args.current_run_id)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

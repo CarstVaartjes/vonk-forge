@@ -1,8 +1,8 @@
 from typing import Literal, cast
 
-GetNodeTelemetryHistoryResolution = Literal['fifteen-minute', 'minute', 'raw']
+GetNodeTelemetryHistoryResolution = Literal['daily', 'fifteen-minute', 'minute', 'raw']
 
-GET_NODE_TELEMETRY_HISTORY_RESOLUTION_VALUES: set[GetNodeTelemetryHistoryResolution] = { 'fifteen-minute', 'minute', 'raw',  }
+GET_NODE_TELEMETRY_HISTORY_RESOLUTION_VALUES: set[GetNodeTelemetryHistoryResolution] = { 'daily', 'fifteen-minute', 'minute', 'raw',  }
 
 def check_get_node_telemetry_history_resolution(value: str) -> GetNodeTelemetryHistoryResolution:
     if value in GET_NODE_TELEMETRY_HISTORY_RESOLUTION_VALUES:

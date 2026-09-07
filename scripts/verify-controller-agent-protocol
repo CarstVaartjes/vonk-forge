@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 CONTROLLER_IMAGE" >&2
+  exit 2
+fi
+
+docker run --rm --interactive \
+  --read-only \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,size=64m \
+  --user 10001:10001 \
+  --entrypoint python \
+  "$1" \
+  - <<'PY'
+import pathlib
+from vonk_agent_protocol import (
+    AgentProtocolError,
+    RecipeJobRunRequest,
+    recipe_job_manifest_sha256,
+)
+
+module_path = pathlib.Path(__import__("vonk_agent_protocol").__file__).resolve()
+assert "site-packages" in module_path.as_posix(), module_path
+zero_digest = "0" * 64
+payload = {
+    "schema_version": 1,
+    "job_id": "00000000-0000-4000-8000-000000000001",
+    "run_id": "00000000-0000-4000-8000-000000000002",
+    "installation_id": "00000000-0000-4000-8000-000000000003",
+    "recipe_revision_id": "00000000-0000-4000-8000-000000000004",
+    "recipe_content_sha256": zero_digest,
+    "image_digest": f"sha256:{zero_digest}",
+    "plan_digest": zero_digest,
+    "interface": "artifact-job",
+    "rank": 0,
+    "role": "worker",
+    "reserved_memory_bytes": 1,
+    "contract_sha256": zero_digest,
+    "input_manifest_sha256": recipe_job_manifest_sha256(()),
+    "input_total_bytes": 0,
+    "inputs": [],
+    "parameters": {},
+    "output_mappings": [
+        {
+            "slot": "output",
+            "media_type": "application/octet-stream",
+            "extensions": [".bin"],
+        }
+    ],
+    "output_limits": {
+        "max_files": 1,
+        "max_file_bytes": 1,
+        "max_total_bytes": 1,
+        "allowed_media_types": ["application/octet-stream"],
+    },
+    "timeout_seconds": 1,
+}
+for name in ("max_tokens", "token_budget", "tokenizer"):
+    candidate = {**payload, "parameters": {name: 1}}
+    assert RecipeJobRunRequest.parse(candidate).parameters[name] == 1
+for name in ("apiKey", "accessToken", "github_token", "hf_token"):
+    candidate = {**payload, "parameters": {name: "secret"}}
+    try:
+        RecipeJobRunRequest.parse(candidate)
+    except AgentProtocolError:
+        pass
+    else:
+        raise AssertionError(f"credential parameter was accepted: {name}")
+print(f"module={module_path}")
+print("recipe_job_checks=ok")
+PY

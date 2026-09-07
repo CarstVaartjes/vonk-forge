@@ -152,10 +152,11 @@ function RejectedEvidence({group, policy}: {group: Group; policy: FreshnessPolic
   </article>;
 }
 
-export function LibraryPlacement({actionsDisabled = false, detail, onReview, policy, preferredNodeId}: {
+export function LibraryPlacement({actionsDisabled = false, detail, onReview, onRun, policy, preferredNodeId}: {
   actionsDisabled?: boolean;
   detail: LibraryRecipeDetail;
   onReview?(target: LibraryActionTarget, trigger: HTMLButtonElement, evidence?: LibraryPlacementGroup): void;
+  onRun?(evidence: LibraryPlacementGroup): void;
   policy: FreshnessPolicy;
   preferredNodeId?: string;
 }) {
@@ -199,8 +200,8 @@ export function LibraryPlacement({actionsDisabled = false, detail, onReview, pol
               className="button"
               disabled={actionsDisabled}
               key={`${target.kind}:${index}`}
-              onClick={(event: MouseEvent<HTMLButtonElement>) => onReview?.(target, event.currentTarget, group)}
-            >Review {actionName(target)}</button>)}
+              onClick={(event: MouseEvent<HTMLButtonElement>) => target.kind === "run" && onRun ? onRun(group) : onReview?.(target, event.currentTarget, group)}
+            >{target.kind === "run" && onRun ? "Run" : `Review ${actionName(target)}`}</button>)}
           </div>}
           <details className="placement-evidence-disclosure" role="group" aria-label="Capacity and placement evidence">
             <summary><span>Capacity and placement evidence</span><small>{group.nodes.length} ranks · {formatBytes(Math.min(...group.nodes.map(node => node.disk_free_after_bytes)))} minimum disk after</small></summary>

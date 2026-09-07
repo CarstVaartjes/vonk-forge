@@ -8,6 +8,7 @@ import logging as stdlib_logging
 import re
 import uuid
 from datetime import UTC, datetime
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,14 +18,37 @@ _AUTHORIZATION = re.compile(r"(?i)authorization\s*:\s*(?:bearer|basic)\s+[^\s,;]
 _BEARER = re.compile(r"(?i)\b(?:bearer|basic)\s+[^\s,;]+")
 _ASSIGNMENT = re.compile(r"(?i)\b(password|secret|token|api[_-]?key)\s*[:=]\s*[^\s,;]+")
 _PRIVATE_BLOCK = re.compile(r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----", re.DOTALL)
+_HTTP_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _MAX_FIELD = 4096
 _MAX_LOG_INPUT = 1_048_576
 
 
+def _redact_url(match: re.Match[str]) -> str:
+    # Download redirects often carry credentials under provider-specific query
+    # names. Keep the source useful for diagnosis without guessing those names.
+    value = match.group(0)
+    url = value.rstrip(".,;)]}")
+    suffix = value[len(url):]
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return "<redacted-url>" + suffix
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc.rsplit("@", 1)[-1],
+            parts.path,
+            "<redacted>" if parts.query else "",
+            "<redacted>" if parts.fragment else "",
+        )
+    ) + suffix
+
+
 def redact_text(value: object) -> str:
     text = str(value).replace("\x00", "")
     text = _PRIVATE_BLOCK.sub("<redacted>", text)
+    text = _HTTP_URL.sub(_redact_url, text)
     text = _AUTHORIZATION.sub("Authorization: <redacted>", text)
     text = _BEARER.sub("<redacted>", text)
     text = _ASSIGNMENT.sub(lambda match: f"{match.group(1)}=<redacted>", text)

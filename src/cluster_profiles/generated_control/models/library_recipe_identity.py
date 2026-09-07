@@ -6,9 +6,6 @@ from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
-from ..models.library_recipe_identity_source_kind import check_library_recipe_identity_source_kind
-from ..models.library_recipe_identity_source_kind import LibraryRecipeIdentitySourceKind
-from typing import cast
 
 
 
@@ -23,17 +20,21 @@ T = TypeVar("T", bound="LibraryRecipeIdentity")
 class LibraryRecipeIdentity:
     """
         Attributes:
+            content_sha256 (str):
             description (str):
+            publisher (str):
             recipe_id (str):
+            recipe_revision_id (str):
             slug (str):
-            source_kind (LibraryRecipeIdentitySourceKind):
             title (str):
      """
 
+    content_sha256: str
     description: str
+    publisher: str
     recipe_id: str
+    recipe_revision_id: str
     slug: str
-    source_kind: LibraryRecipeIdentitySourceKind
     title: str
 
 
@@ -41,13 +42,17 @@ class LibraryRecipeIdentity:
 
 
     def to_dict(self) -> dict[str, Any]:
+        content_sha256 = self.content_sha256
+
         description = self.description
+
+        publisher = self.publisher
 
         recipe_id = self.recipe_id
 
-        slug = self.slug
+        recipe_revision_id = self.recipe_revision_id
 
-        source_kind: str = self.source_kind
+        slug = self.slug
 
         title = self.title
 
@@ -55,10 +60,12 @@ class LibraryRecipeIdentity:
         field_dict: dict[str, Any] = {}
 
         field_dict.update({
+            "content_sha256": content_sha256,
             "description": description,
+            "publisher": publisher,
             "recipe_id": recipe_id,
+            "recipe_revision_id": recipe_revision_id,
             "slug": slug,
-            "source_kind": source_kind,
             "title": title,
         })
 
@@ -69,24 +76,27 @@ class LibraryRecipeIdentity:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
+        content_sha256 = d.pop("content_sha256")
+
         description = d.pop("description")
+
+        publisher = d.pop("publisher")
 
         recipe_id = d.pop("recipe_id")
 
+        recipe_revision_id = d.pop("recipe_revision_id")
+
         slug = d.pop("slug")
-
-        source_kind = check_library_recipe_identity_source_kind(d.pop("source_kind"))
-
-
-
 
         title = d.pop("title")
 
         library_recipe_identity = cls(
+            content_sha256=content_sha256,
             description=description,
+            publisher=publisher,
             recipe_id=recipe_id,
+            recipe_revision_id=recipe_revision_id,
             slug=slug,
-            source_kind=source_kind,
             title=title,
         )
 

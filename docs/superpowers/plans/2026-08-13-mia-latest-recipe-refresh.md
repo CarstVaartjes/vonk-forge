@@ -1,5 +1,8 @@
 # Latest Mia Two-Spark Recipe Implementation Plan
 
+> Historical plan retained for provenance. Recipe documents and source
+> contexts are authored in the sibling `vonk-forge-recipes` checkout.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use
 > superpowers:executing-plans or superpowers:subagent-driven-development.
 
