@@ -62,6 +62,11 @@ recipe revision, runtime compiler, or harness configuration changes.
   through the agent's shared result builders, and consumes those results back
   into persisted Controller state. It covers single-node starts and distributed
   rank-launch/collective-readiness starts.
+  The same required job runs the complete `agent_protocol/tests` suite,
+  including schema-derived required-field, type, nullable, unknown-field and
+  vocabulary checks through the Rust parser. These cover the declared fields
+  in the tested endpoint, job, image-source and distributed variants; custom
+  cross-field rules still need behavioral cases.
 
 A failing check blocks the CI gate. A new required field must be carried through
 its producer, parser, stored document, and response before the change can pass.
