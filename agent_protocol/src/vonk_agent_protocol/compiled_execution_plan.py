@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     StrictBool,
+    StrictInt,
+    StrictStr,
     StringConstraints,
     field_validator,
     model_validator,
@@ -433,19 +435,91 @@ class CompiledEndpoint(_Strict):
         return _safe_path(value, absolute=True)
 
 
+class CompiledJobInputSlot(_Strict):
+    """Agent-side parity model for the public ``RecipeInputSlot`` contract.
+
+    The agent protocol wheel intentionally cannot import the public recipe
+    contracts wheel.  Keep this fixed wire structure in lockstep with that
+    source contract; engine-specific job parameters remain elsewhere in the
+    job request and are deliberately extensible.
+    """
+
+    id: Annotated[StrictStr, Field(pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")]
+    label: StrictStr = Field(min_length=1, max_length=64)
+    description: StrictStr = Field(min_length=1, max_length=256)
+    media_types: list[StrictStr] = Field(min_length=1, max_length=16)
+    extensions: list[StrictStr] = Field(max_length=16)
+    min_files: StrictInt = Field(ge=0, le=32)
+    max_files: StrictInt = Field(ge=1, le=32)
+    max_file_bytes: StrictInt = Field(ge=1, le=512 * 1024**2)
+    max_total_bytes: StrictInt = Field(ge=1, le=1024**3)
+
+    @model_validator(mode="after")
+    def limits_are_consistent(self) -> CompiledJobInputSlot:
+        if self.min_files > self.max_files:
+            raise ValueError("job input slot file count limits are inconsistent")
+        if self.max_file_bytes > self.max_total_bytes:
+            raise ValueError("job input slot byte limits are inconsistent")
+        if len(self.media_types) != len(set(self.media_types)):
+            raise ValueError("job input slot media types must be unique")
+        if len(self.extensions) != len(set(self.extensions)):
+            raise ValueError("job input slot extensions must be unique")
+        if any(
+            re.fullmatch(r"\.[a-z0-9][a-z0-9._-]{0,15}", extension) is None
+            for extension in self.extensions
+        ):
+            raise ValueError("job input slot extension is invalid")
+        return self
+
+
+class CompiledJobInput(_Strict):
+    """Typed compiled form of the public ``RecipeJobInput`` declaration."""
+
+    path: Literal["/inputs"]
+    required: StrictBool
+    media_types: list[StrictStr] = Field(min_length=1, max_length=16)
+    max_bytes: StrictInt = Field(ge=1, le=1024**3)
+    slots: list[CompiledJobInputSlot] | None = Field(
+        default=None, min_length=1, max_length=32
+    )
+
+    @field_validator("media_types")
+    @classmethod
+    def media_types_are_canonical(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("job input media types must be unique")
+        if any(
+            re.fullmatch(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+", media_type)
+            is None
+            for media_type in value
+        ):
+            raise ValueError("job input media type is invalid")
+        return value
+
+    @model_validator(mode="after")
+    def slots_match_contract(self) -> CompiledJobInput:
+        if self.slots is None:
+            return self
+        identifiers = [slot.id for slot in self.slots]
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("job input slot IDs must be unique")
+        allowed_media_types = set(self.media_types)
+        if any(
+            not set(slot.media_types) <= allowed_media_types
+            or slot.max_total_bytes > self.max_bytes
+            for slot in self.slots
+        ):
+            raise ValueError("job input slot exceeds the input contract")
+        return self
+
+
 class CompiledJob(_Strict):
     interface: Literal[
         "image-job", "audio-job", "video-job", "mesh-job", "artifact-job"
     ]
-    input: dict[str, Any] | None
+    input: CompiledJobInput | None
     output_path: Literal["/outputs"]
     timeout_seconds: int = Field(ge=1, le=3600)
-
-    @model_validator(mode="after")
-    def input_path_is_bound(self) -> CompiledJob:
-        if self.input is not None and self.input.get("path") != "/inputs":
-            raise ValueError("job input path is invalid")
-        return self
 
 
 class CompiledExecutionPlan(_Strict):
@@ -566,6 +640,8 @@ __all__ = [
     "CompiledExecutionPlanError",
     "CompiledIdentity",
     "CompiledJob",
+    "CompiledJobInput",
+    "CompiledJobInputSlot",
     "CompiledLifecycle",
     "CompiledModelIdentity",
     "CompiledPlacement",

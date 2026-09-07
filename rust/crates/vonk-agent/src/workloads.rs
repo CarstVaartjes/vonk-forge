@@ -253,10 +253,34 @@ pub struct CompiledEndpoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct CompiledJobInputSlot {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub media_types: Vec<String>,
+    pub extensions: Vec<String>,
+    pub min_files: u32,
+    pub max_files: u32,
+    pub max_file_bytes: u64,
+    pub max_total_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CompiledJobInput {
+    pub path: String,
+    pub required: bool,
+    pub media_types: Vec<String>,
+    pub max_bytes: u64,
+    pub slots: Option<Vec<CompiledJobInputSlot>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct CompiledJob {
     pub interface: String,
     #[serde(deserialize_with = "deserialize_required_nullable")]
-    pub input: Option<serde_json::Value>,
+    pub input: Option<CompiledJobInput>,
     pub output_path: String,
     pub timeout_seconds: u16,
 }
@@ -550,6 +574,70 @@ impl CompiledEndpoint {
     }
 }
 
+impl CompiledJobInputSlot {
+    fn validate(&self, input_media_types: &BTreeSet<&str>, max_bytes: u64) -> bool {
+        let mut media_types = BTreeSet::new();
+        let mut extensions = BTreeSet::new();
+        self.id.len() <= 32
+            && valid_job_slot_id(&self.id)
+            && !self.label.is_empty()
+            && self.label.chars().count() <= 64
+            && !self.description.is_empty()
+            && self.description.chars().count() <= 256
+            && (1..=16).contains(&self.media_types.len())
+            && self.media_types.iter().all(|media_type| {
+                valid_job_media_type(media_type)
+                    && input_media_types.contains(media_type.as_str())
+                    && media_types.insert(media_type.as_str())
+            })
+            && self.extensions.len() <= 16
+            && self.extensions.iter().all(|extension| {
+                valid_job_extension(extension) && extensions.insert(extension.as_str())
+            })
+            && self.min_files <= self.max_files
+            && (1..=32).contains(&self.max_files)
+            && self.max_file_bytes > 0
+            && self.max_file_bytes <= 512 * 1024 * 1024
+            && self.max_total_bytes >= self.max_file_bytes
+            && self.max_total_bytes <= max_bytes
+    }
+}
+
+impl CompiledJobInput {
+    fn validate(&self) -> Result<(), WorkloadError> {
+        let media_types = self
+            .media_types
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        if self.path != "/inputs"
+            || !(1..=16).contains(&self.media_types.len())
+            || media_types.len() != self.media_types.len()
+            || self
+                .media_types
+                .iter()
+                .any(|value| !valid_job_media_type(value))
+            || self.max_bytes == 0
+            || self.max_bytes > 1024 * 1024 * 1024
+            || self.slots.as_ref().is_some_and(|slots| {
+                !(1..=32).contains(&slots.len())
+                    || slots
+                        .iter()
+                        .map(|slot| slot.id.as_str())
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        != slots.len()
+                    || slots
+                        .iter()
+                        .any(|slot| !slot.validate(&media_types, self.max_bytes))
+            })
+        {
+            return Err(WorkloadError::Invalid("compiled job input"));
+        }
+        Ok(())
+    }
+}
+
 impl CompiledJob {
     fn validate(&self) -> Result<(), WorkloadError> {
         if !matches!(
@@ -557,12 +645,11 @@ impl CompiledJob {
             "image-job" | "audio-job" | "video-job" | "mesh-job" | "artifact-job"
         ) || self.output_path != "/outputs"
             || !(1..=3600).contains(&self.timeout_seconds)
-            || self.input.as_ref().is_some_and(|input| {
-                !input.is_object()
-                    || input.get("path").and_then(serde_json::Value::as_str) != Some("/inputs")
-            })
         {
             return Err(WorkloadError::Invalid("compiled job"));
+        }
+        if let Some(input) = &self.input {
+            input.validate()?;
         }
         Ok(())
     }
@@ -731,6 +818,47 @@ fn valid_role(value: &str) -> bool {
             } else {
                 byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-')
             }
+        })
+}
+
+fn valid_job_slot_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 32
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if index == 0 {
+                byte.is_ascii_alphabetic()
+            } else {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
+            }
+        })
+}
+
+fn valid_job_media_type(value: &str) -> bool {
+    let mut parts = value.split('/');
+    let valid_token = |token: &str| {
+        !token.is_empty()
+            && token.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(
+                        byte,
+                        b'!' | b'#' | b'$' | b'&' | b'^' | b'_' | b'.' | b'+' | b'-'
+                    )
+            })
+    };
+    valid_token(parts.next().unwrap_or_default())
+        && valid_token(parts.next().unwrap_or_default())
+        && parts.next().is_none()
+}
+
+fn valid_job_extension(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 2
+        && bytes.len() <= 17
+        && bytes[0] == b'.'
+        && (bytes[1].is_ascii_lowercase() || bytes[1].is_ascii_digit())
+        && bytes[2..].iter().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'_' | b'-')
         })
 }
 

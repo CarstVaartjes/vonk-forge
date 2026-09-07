@@ -149,7 +149,25 @@ def _job_plan() -> dict[str, Any]:
     plan["runtime"]["placement"]["port"] = None
     plan["job"] = {
         "interface": "artifact-job",
-        "input": {"path": "/inputs", "declared_content": {"vendor": "free-form"}},
+        "input": {
+            "path": "/inputs",
+            "required": True,
+            "media_types": ["application/json"],
+            "max_bytes": 1024,
+            "slots": [
+                {
+                    "id": "document",
+                    "label": "Document",
+                    "description": "A JSON document to process",
+                    "media_types": ["application/json"],
+                    "extensions": [".json"],
+                    "min_files": 1,
+                    "max_files": 1,
+                    "max_file_bytes": 1024,
+                    "max_total_bytes": 1024,
+                }
+            ],
+        },
         "output_path": "/outputs",
         "timeout_seconds": 60,
     }

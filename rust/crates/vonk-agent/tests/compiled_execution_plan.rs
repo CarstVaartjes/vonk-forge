@@ -87,6 +87,57 @@ fn endpoint_and_job_are_required_one_of_wire_keys() {
 }
 
 #[test]
+fn compiled_job_input_round_trips_as_a_fixed_nested_contract() {
+    let mut value = fixture();
+    value["endpoint"] = Value::Null;
+    value["runtime"]["placement"]["port"] = Value::Null;
+    value["job"] = json!({
+        "interface": "artifact-job",
+        "input": {
+            "path": "/inputs",
+            "required": true,
+            "media_types": ["application/json"],
+            "max_bytes": 1024,
+            "slots": [{
+                "id": "document",
+                "label": "Document",
+                "description": "A JSON document to process",
+                "media_types": ["application/json"],
+                "extensions": [".7z"],
+                "min_files": 1,
+                "max_files": 1,
+                "max_file_bytes": 1024,
+                "max_total_bytes": 1024
+            }]
+        },
+        "output_path": "/outputs",
+        "timeout_seconds": 60
+    });
+    let plan: CompiledExecutionPlan = serde_json::from_value(value.clone()).unwrap();
+    plan.validate().unwrap();
+    assert_eq!(serde_json::to_value(plan).unwrap(), value);
+
+    for mutation in [
+        ("unknown", json!({"vendor": "free-form"})),
+        ("missing", Value::Null),
+        ("zero_max_files", json!(0)),
+    ] {
+        let mut invalid = value.clone();
+        if mutation.0 == "unknown" {
+            invalid["job"]["input"]["declared_content"] = mutation.1;
+        } else if mutation.0 == "missing" {
+            invalid["job"]["input"]
+                .as_object_mut()
+                .unwrap()
+                .remove("required");
+        } else {
+            invalid["job"]["input"]["slots"][0]["max_files"] = mutation.1;
+        }
+        assert!(serde_json::from_value::<CompiledExecutionPlan>(invalid).is_err());
+    }
+}
+
+#[test]
 fn materialized_paths_remain_selection_scoped() {
     let plan: CompiledExecutionPlan = serde_json::from_value(fixture()).unwrap();
     let primary =
