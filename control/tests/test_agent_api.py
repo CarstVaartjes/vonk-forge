@@ -1363,6 +1363,7 @@ def valid_enrollment_body(token: str) -> bytes:
                 "hardware_fingerprint": "hardware",
                 "agent_digest": "a" * 64,
                 "boot_id": "boot",
+                "observation_receipt_public_key": "d" * 64,
             },
         }
     ).encode("utf-8")
@@ -3113,6 +3114,7 @@ def test_exact_enrollment_replay_returns_certificate_and_mismatch_is_denied(
             "hardware_fingerprint": "hardware",
             "agent_digest": "a" * 64,
             "boot_id": "boot",
+            "observation_receipt_public_key": "d" * 64,
         },
     }
     issued = client.post("/agent/v1/enroll", json=body)
@@ -3157,6 +3159,7 @@ def test_human_enrollment_mutations_audit_only_grant_and_revocation(
                 "hardware_fingerprint": "hardware-c",
                 "agent_digest": "c" * 64,
                 "boot_id": "boot-c",
+                "observation_receipt_public_key": "d" * 64,
             },
         },
     )
@@ -3706,6 +3709,18 @@ def test_enrollment_rejects_malformed_observation_receipt_public_key(
     token = enrollment_grant(services)
     body = json.loads(valid_enrollment_body(token))
     body["evidence"]["observation_receipt_public_key"] = "not-lower-hex"
+
+    response = client.post("/agent/v1/enroll", json=body)
+
+    assert response.status_code == 403
+    assert_grant_consumed(services, token)
+
+
+def test_enrollment_rejects_receipt_less_evidence(agent_system) -> None:
+    client, services, _, _ = agent_system
+    token = enrollment_grant(services)
+    body = json.loads(valid_enrollment_body(token))
+    body["evidence"].pop("observation_receipt_public_key")
 
     response = client.post("/agent/v1/enroll", json=body)
 

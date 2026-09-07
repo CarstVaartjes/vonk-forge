@@ -39,27 +39,6 @@ def source_policy_recipe() -> dict[str, Any]:
     )
 
 
-def artifact_size_document() -> dict[str, Any]:
-    """Return only the internal artifact-size fields still consumed by the resolver."""
-
-    recipe = canonical_recipe()
-    model = canonical_model()
-    model_file = model.files[0]
-    topology = recipe.topology.model_dump(mode="json")
-    topology["roles"][0]["artifacts"] = [model_file.id]
-    return {
-        "artifacts": [
-            {
-                "id": model_file.id,
-                "repository": model.source.repository,
-                "revision": model.source.revision,
-                "installed_bytes": model_file.size_bytes,
-            }
-        ],
-        "topology": topology,
-    }
-
-
 def topology_document() -> dict[str, Any]:
     """Return a complete canonical recipe document for topology tests."""
 

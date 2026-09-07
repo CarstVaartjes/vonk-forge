@@ -160,7 +160,11 @@ fn rich_number(sample: &vonk_agent::telemetry::TelemetrySample, key: &str) -> Op
 }
 
 fn claim() -> AgentClaim {
-    let payload = json!({});
+    let payload = json!({
+        "plan_digest": "a".repeat(64),
+        "run_id": "00000000-0000-4000-8000-000000000003",
+        "schema_version": 1,
+    });
     AgentClaim {
         attempt: 1,
         authority_revision: "b".repeat(64),
@@ -168,7 +172,7 @@ fn claim() -> AgentClaim {
         fence: Uuid::parse_str("44d4e914-34df-4962-a802-d1f7dcd928aa").unwrap(),
         job_id: Uuid::parse_str("84ddf214-f067-4bbf-917e-95df32a07fd8").unwrap(),
         node_id: NODE_ID.to_owned(),
-        operation: "node.probe".to_owned(),
+        operation: "recipe.stop".to_owned(),
         operation_id: Uuid::parse_str("f450b5ac-5a78-4af5-9670-e874f735e3ee").unwrap(),
         payload_digest: hex_sha256(&canonical_json(&payload).unwrap()),
         payload,

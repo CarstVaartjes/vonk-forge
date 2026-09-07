@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .logging import redact_text
 
@@ -167,7 +167,7 @@ class OperationProgress(BaseModel):
 class OperationFailureEvidence(BaseModel):
     """Small, sanitized operator evidence safe to expose in status responses."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     error_code: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
     summary: str = Field(min_length=1, max_length=256)
@@ -191,7 +191,7 @@ class AvailabilityRecoveryAction(StrEnum):
 class AvailabilityOperationFailure(BaseModel):
     """Shared failure wire contract for model and image availability."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     code: str = Field(pattern=r"^[a-z][a-z0-9_.:-]{0,95}$")
     detail: str = Field(min_length=1, max_length=512)
@@ -203,6 +203,28 @@ class AvailabilityOperationFailure(BaseModel):
     required_bytes: int | None = Field(default=None, ge=0)
     free_bytes: int | None = Field(default=None, ge=0)
     shortfall_bytes: int | None = Field(default=None, ge=0)
+
+    @field_validator("recovery_actions", mode="before")
+    @classmethod
+    def parse_recovery_actions(cls, value: object) -> object:
+        """Accept the enum's string wire representation in Python mappings.
+
+        Strict validation still rejects numeric and boolean values.  The
+        explicit conversion only bridges FastAPI's decoded request mapping and
+        the same canonical strings accepted by JSON-mode validation.
+        """
+
+        if not isinstance(value, (list, tuple)):
+            return value
+        try:
+            return [
+                item
+                if isinstance(item, AvailabilityRecoveryAction)
+                else AvailabilityRecoveryAction(item)
+                for item in value
+            ]
+        except (TypeError, ValueError) as error:
+            raise ValueError("recovery_actions contains an invalid action") from error
 
     @model_validator(mode="after")
     def validate_retry_and_capacity(self) -> AvailabilityOperationFailure:
@@ -233,7 +255,7 @@ class AvailabilityOperationFailure(BaseModel):
 
 
 class OperationEvidenceProvenance(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     source: str = Field(min_length=1, max_length=128)
     collected_at: str | None = Field(default=None, max_length=64)
@@ -242,7 +264,7 @@ class OperationEvidenceProvenance(BaseModel):
 
 
 class OperationEvidenceDownload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     media_type: str = Field(min_length=1, max_length=128)
     size_bytes: int = Field(ge=0)
@@ -251,7 +273,7 @@ class OperationEvidenceDownload(BaseModel):
 
 
 class OperationRecovery(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     uncertain: bool = False
     actions: list[OperationRecoveryAction] = Field(default_factory=list, max_length=4)

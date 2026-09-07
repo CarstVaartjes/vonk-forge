@@ -16,7 +16,6 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 from vonk_control.agent_api import AgentApiServices
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.api import create_app
@@ -24,11 +23,11 @@ from vonk_control.audit import MemoryAuditStore
 from vonk_control.auth import TokenCodec
 from vonk_control.compiled_execution_plan import (
     EMPTY_SHA256,
+    MAX_COMPILED_EXECUTION_PLAN_BYTES,
     CompiledExecutionPlan,
     CompiledExecutionPlanError,
     CompiledModelArtifact,
     DistributionObjectReceipt,
-    MAX_COMPILED_EXECUTION_PLAN_BYTES,
     compile_verified_execution_plan,
     execution_identity_sha256,
     materialized_model_path,
@@ -53,9 +52,13 @@ from vonk_control.models import (
     RuntimeImageReceipt,
 )
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-from vonk_control.recipe_operations import _compiled_plan_for_start
 from vonk_control.recipe_runtime_specs import compile_runtime_spec
+from vonk_control.recipe_start_payloads import (
+    RecipeStartPlacement,
+    _bind_compiled_execution_plan,
+)
 from vonk_control.source_bundles import SourceBundleStore
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, content_sha256
 
 from tests.recipe_library_source import recipe_library_root
 
@@ -213,7 +216,8 @@ def _compile(
         selected_spec = dict(selected_spec)
         selected_spec["runtime"] = {
             **runtime,
-            "image": "localhost/vonk/recipe-build@" + str(selected_image["image_digest"]),
+            "image": "localhost/vonk/recipe-build@"
+            + str(selected_image["image_digest"]),
         }
         identity = selected_spec.get("identity")
         if isinstance(identity, dict):
@@ -380,7 +384,6 @@ def test_controller_produces_real_751_artifact_plan() -> None:
     assert len(encoded) > 500 * 1024
 
 
-
 def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() -> None:
     plan = _compile()
     payload = plan.to_compiled_launch_payload(
@@ -408,7 +411,9 @@ def test_compiled_launch_payload_requires_both_interface_keys_with_one_null() ->
         validate_compiled_launch_payload(both)
 
 
-def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt() -> None:
+def test_compiled_launch_payload_rejects_retired_authority_or_mismatched_receipt() -> (
+    None
+):
     plan = _compile()
     payload = plan.to_compiled_launch_payload(
         _spec(),
@@ -462,7 +467,9 @@ def test_compiled_launch_payload_rejects_non_isolated_network_mode() -> None:
         validate_compiled_launch_payload(polluted)
 
 
-def test_start_claim_binds_live_rank_placement_without_reintroducing_authority() -> None:
+def test_start_claim_binds_live_rank_placement_without_reintroducing_authority() -> (
+    None
+):
     plan = _compile()
     payload = plan.to_compiled_launch_payload(
         _spec(),
@@ -478,14 +485,14 @@ def test_start_claim_binds_live_rank_placement_without_reintroducing_authority()
             "reserved_memory_bytes": 1,
         },
     )
-    started = _compiled_plan_for_start(
+    started = _bind_compiled_execution_plan(
         payload,
-        node=SimpleNamespace(
+        placement=RecipeStartPlacement(
             node_id="spk_" + "a" * 32,
             rank=0,
             role="entrypoint",
             port=8000,
-            required_memory_bytes=4096,
+            reserved_memory_bytes=4096,
             fabric_address=None,
         ),
         endpoint_address="192.0.2.10",
@@ -834,6 +841,7 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         oci_layout_sha256="f" * 64,
         image_bytes=4096,
     )
+
     def runtime_receipt(
         _document, image_digest: str, _runtime_spec: dict[str, object]
     ) -> dict[str, object]:
@@ -867,7 +875,9 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
         mapping_nodes=(node,),
         parameters={},
         resolved_entities={
-            "models": (SimpleNamespace(document=model_document, content_digest=model_digest),)
+            "models": (
+                SimpleNamespace(document=model_document, content_digest=model_digest),
+            )
         },
     )
 
@@ -895,7 +905,9 @@ def test_controller_built_receipt_and_pulled_receipt_share_reusable_identity() -
     assert editorial.reusable_identity_sha256 == prebuilt.reusable_identity_sha256
 
 
-def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> None:
+def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and_isolation() -> (
+    None
+):
     fixture = json.loads(
         (Path(__file__).parent / "fixtures" / "compiled_workload_v2.json").read_text(
             encoding="utf-8"
@@ -928,7 +940,10 @@ def test_generated_schema_two_fixture_preserves_scoped_collisions_empty_file_and
     assert validated["security"]["network_mode"] == "none"
     assert validated["security"]["host_network"] is False
     runtime_image = validated["runtime_image"]
-    assert runtime_image["registry_manifest_digest"] != runtime_image["platform_manifest_digest"]
+    assert (
+        runtime_image["registry_manifest_digest"]
+        != runtime_image["platform_manifest_digest"]
+    )
     assert runtime_image["platform_manifest_digest"] == runtime_image["image_digest"]
     assert runtime_image["local_image_config_id"] != runtime_image["image_digest"]
     assert runtime_image["local_image_reference"] == (
@@ -1221,9 +1236,7 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
     model_slug = recipe_document["models"][0]["model"]["slug"]
     model = ModelDefinition.model_validate(
         json.loads(
-            (library_root / "models" / f"{model_slug}.json").read_text(
-                encoding="utf-8"
-            )
+            (library_root / "models" / f"{model_slug}.json").read_text(encoding="utf-8")
         )
     )
     model_selection = recipe.models[0]
@@ -1298,7 +1311,9 @@ def test_production_ltx_compiler_preserves_filtered_snapshot_projections(
         for artifact in plan.artifacts
     ] == [("primary", "filtered-snapshot", "filtered-snapshot")] * 2
     assert plan.artifacts[0].model == plan.artifacts[1].model
-    assert plan.artifacts[0].distribution_object == plan.artifacts[1].distribution_object
+    assert (
+        plan.artifacts[0].distribution_object == plan.artifacts[1].distribution_object
+    )
     assert plan.artifacts[0].sha256 == plan.artifacts[1].sha256 == physical.sha256
 
 

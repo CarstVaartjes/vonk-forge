@@ -10,14 +10,16 @@ from vonk_agent_protocol import (
 from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.models import (
     AgentOperation as StoredAgentOperation,
+)
+from vonk_control.models import (
     Job,
     RecipeInstallation,
     RecipeRun,
 )
 
-from test_recipe_operations import (
-    ConcurrentPublisher,
+from .test_recipe_operations import (
     NOW,
+    ConcurrentPublisher,
     bind_route_publications,
     mark_current_exact_observations,
     record_exact_empty_snapshot,
@@ -93,15 +95,10 @@ def _queued_recovery_restart(tmp_path: Path):
         )
     assert stop_job is not None
     produced_phases = tuple(
-        tuple(
-            (item["node_id"], item["payload"])
-            for item in group
-        )
+        tuple((item["node_id"], item["payload"]) for item in group)
         for group in stop_job.payload["recovery"]["start_phases"]
     )
-    for _node_id, payload in (
-        item for group in produced_phases for item in group
-    ):
+    for _node_id, payload in (item for group in produced_phases for item in group):
         RecipeOperationRequest.parse(AgentOperation.RECIPE_START, payload)
     service.record_node_result(stop_job.id, nodes[0], succeeded=True, evidence={})
     service.record_node_result(stop_job.id, nodes[1], succeeded=True, evidence={})
@@ -149,7 +146,9 @@ def test_recovery_start_children_are_canonical_schema2_payloads(
         (operation.node_id, operation.payload["phase"]): operation.payload
         for operation in rank_launches
     } == {
-        key: payload for key, payload in produced.items() if payload["phase"] == "rank-launch"
+        key: payload
+        for key, payload in produced.items()
+        if payload["phase"] == "rank-launch"
     }
 
     for operation in rank_launches:

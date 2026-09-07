@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .auth import CursorCodec
 from .operation_contract import (
@@ -23,7 +23,7 @@ from .recipe_image_availability import (
 
 
 class RecipeImageAvailabilityStart(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     request_key: str = Field(min_length=1, max_length=36)
     recipe_revision_id: str = Field(min_length=1, max_length=128)
@@ -31,13 +31,13 @@ class RecipeImageAvailabilityStart(BaseModel):
 
 
 class RecipeImageAvailabilityRetry(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     request_key: str = Field(min_length=1, max_length=36)
 
 
 class RecipeImageAvailabilityArtifact(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     key: str = Field(min_length=1, max_length=256)
     id: str = Field(min_length=1, max_length=256)
@@ -53,7 +53,7 @@ class RecipeImageAvailabilityArtifact(BaseModel):
 
 
 class RecipeImageAvailabilityChild(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     kind: Literal["model-cache", "runtime-image"]
     id: str
@@ -68,13 +68,23 @@ class RecipeImageAvailabilityChild(BaseModel):
 
 
 class RecipeImageAvailabilityAction(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     key: AvailabilityRecoveryAction
 
+    @field_validator("key", mode="before")
+    @classmethod
+    def parse_key(cls, value: object) -> object:
+        if isinstance(value, AvailabilityRecoveryAction):
+            return value
+        try:
+            return AvailabilityRecoveryAction(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError("key contains an invalid action") from error
+
 
 class RecipeImageAvailabilityResult(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
     recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -94,7 +104,7 @@ class RecipeImageAvailabilityResult(BaseModel):
 
 
 class RecipeImageAvailabilityResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
     id: str = Field(min_length=1, max_length=128)
@@ -114,7 +124,7 @@ class RecipeImageAvailabilityResponse(BaseModel):
 
 
 class RecipeImageAvailabilityListResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
     operations: list[RecipeImageAvailabilityResponse]
@@ -123,7 +133,7 @@ class RecipeImageAvailabilityListResponse(BaseModel):
 
 
 class RecipeImageAvailabilityErrorResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
     schema_version: Literal[2] = 2
     failure: AvailabilityOperationFailure

@@ -470,14 +470,7 @@ impl CompiledSecurity {
                 .any(|value| value != "nvidia.com/gpu=all")
             || !numeric_non_root_user(&self.user)
             || self.mounts.len() > MAX_COMPILED_EXECUTION_PLAN_MOUNTS
-            || self.mounts.iter().any(|mount| {
-                !mount.read_only && mount.target != "/outputs"
-                    || mount.read_only
-                        && !(mount.target == "/inputs"
-                            || mount.target == "/models"
-                            || mount.target.starts_with("/models/"))
-                    || !matches!(mount.source.as_str(), "model" | "inputs" | "outputs")
-            })
+            || self.mounts.iter().any(|mount| !valid_mount_policy(mount))
             || self
                 .mounts
                 .iter()
@@ -666,6 +659,17 @@ fn valid_mount_target(value: &str) -> bool {
             .split('/')
             .skip(1)
             .all(|part| !part.is_empty() && !matches!(part, "." | ".."))
+}
+
+fn valid_mount_policy(mount: &MountSpec) -> bool {
+    match mount.source.as_str() {
+        "model" => {
+            mount.read_only && (mount.target == "/models" || mount.target.starts_with("/models/"))
+        }
+        "inputs" => mount.read_only && mount.target == "/inputs",
+        "outputs" => !mount.read_only && mount.target == "/outputs",
+        _ => false,
+    }
 }
 
 impl Placement {
