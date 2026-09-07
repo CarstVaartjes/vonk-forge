@@ -262,12 +262,18 @@ async fn run_control_lane(
             exact_observation_count,
             readiness_published,
         );
+        let fingerprint = vonk_agent::runtime_preflight::host_fingerprint(
+            &runner, &runtime_identity.build_digest, &config.data_dir,
+            Path::new("/run/vonk-forge-agent"),
+        ).ok().map(|value| format!("runtime.preflight.fingerprint.{value}"));
+        let mut claim_capabilities = CLAIM_CAPABILITIES.to_vec();
+        if let Some(value) = &fingerprint { claim_capabilities.push(value.as_str()); }
         let operation = async {
             run_once_with_claim_hook(
                 &client,
                 &mut state,
                 &executor,
-                CLAIM_CAPABILITIES,
+                &claim_capabilities,
                 wait_seconds,
                 Some(&runtime_identity),
                 || {

@@ -179,6 +179,7 @@ class HostRuntimeAuthorityService:
     """Bind a narrow host-runtime grant to one live agent attempt."""
 
     _ACTION_KINDS: ClassVar[dict[ContainerRuntimeAction, frozenset[str]]] = {
+        ContainerRuntimeAction.RUNTIME_PREFLIGHT: frozenset({"runtime.preflight.v1"}),
         ContainerRuntimeAction.IMAGE_IMPORT: frozenset(
             {"recipe.image.import.v1", "artifact.distribution.v1"}
         ),

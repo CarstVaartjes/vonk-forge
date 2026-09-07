@@ -1,4 +1,6 @@
 #![forbid(unsafe_code)]
+pub mod runtime_preflight;
+
 
 pub mod operation_progress;
 pub use operation_progress::{
@@ -43,6 +45,7 @@ pub enum HostHelperRestartUnit {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostHelperContainerRuntimeAction {
+    RuntimePreflight,
     ImageImport,
     ImageInspect,
     RunInspect,
@@ -196,6 +199,7 @@ where
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum HostRuntimeAction {
+    RuntimePreflight,
     ImageImport,
     ImageInspect,
     RunInspect,
@@ -221,7 +225,7 @@ impl HostRuntimeRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
             || self.attempt == 0
-            || self.arguments.is_empty()
+            || (self.arguments.is_empty() != (self.action == HostRuntimeAction::RuntimePreflight))
             || self.arguments.len() > MAX_HOST_RUNTIME_ARGUMENTS
             || self.arguments.iter().any(|value| {
                 value.is_empty() || value.len() > 4096 || value.contains(['\0', '\r', '\n'])
@@ -501,6 +505,7 @@ impl AgentClaim {
         if !matches!(
             self.operation.as_str(),
             "agent.upgrade.v1"
+                | "runtime.preflight.v1"
                 | "artifact.distribution.v1"
                 | "recipe.build.v1"
                 | "recipe.image.import.v1"
@@ -898,6 +903,7 @@ impl EnrollmentEvidence {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecipeOperationRequest {
+    RuntimePreflight(runtime_preflight::RuntimePreflightRequest),
     Build(Box<RecipeBuildRequest>),
     ImageImport(RecipeImageImportRequest),
     JobRun(RecipeJobRunRequest),
@@ -1356,6 +1362,7 @@ impl RecipeOperationRequest {
     pub fn parse(claim: &AgentClaim) -> Result<Self, ProtocolError> {
         claim.validate()?;
         let request = match claim.operation.as_str() {
+            "runtime.preflight.v1" => Self::RuntimePreflight(serde_json::from_value(claim.payload.clone())?),
             "recipe.build.v1" => {
                 validate_build_wire(&claim.payload)?;
                 Self::Build(Box::new(serde_json::from_value(claim.payload.clone())?))
@@ -1383,6 +1390,7 @@ impl RecipeOperationRequest {
     fn validate(&self) -> Result<(), ProtocolError> {
         let valid_common = |version: u8, plan: &str| version == 1 && lower_hex(plan, 64);
         let valid = match self {
+            Self::RuntimePreflight(value) => value.validate().is_ok(),
             Self::Build(value) => validate_build(value),
             Self::ImageImport(value) => {
                 value.schema_version == 1

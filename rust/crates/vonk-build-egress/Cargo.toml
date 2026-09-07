@@ -8,3 +8,7 @@ rust-version.workspace = true
 [[bin]]
 name = "vonk-build-egress"
 path = "src/main.rs"
+
+[[bin]]
+name = "vonk-runtime-probe"
+path = "src/runtime_probe.rs"

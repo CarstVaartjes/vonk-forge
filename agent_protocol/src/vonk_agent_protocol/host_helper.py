@@ -47,6 +47,7 @@ class RestartUnit(StrEnum):
 
 
 class ContainerRuntimeAction(StrEnum):
+    RUNTIME_PREFLIGHT = "runtime-preflight"
     IMAGE_IMPORT = "image-import"
     IMAGE_INSPECT = "image-inspect"
     RUN_INSPECT = "run-inspect"
@@ -98,7 +99,7 @@ class ScheduleRebootOperation(_HostOperation):
 
 class ExecuteContainerRuntimeRequestOperation(_HostOperation):
     type: Literal["execute-container-runtime-request"]
-    action: Literal["image-import", "image-inspect", "run-inspect", "start", "stop"]
+    action: Literal["runtime-preflight", "image-import", "image-inspect", "run-inspect", "start", "stop"]
     job_id: Uuid4Text
     operation_id: Uuid4Text
     attempt: int = Field(ge=1, le=2**31 - 1, strict=True)

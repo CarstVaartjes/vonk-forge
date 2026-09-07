@@ -192,14 +192,14 @@ pub struct RecipeBuilder<'a, R> {
     pub egress_binary: &'a Path,
 }
 
-struct PodmanBuildStaging(TempDir);
+pub(crate) struct PodmanBuildStaging(TempDir);
 
 impl PodmanBuildStaging {
-    fn create(root: &Path) -> std::io::Result<Self> {
+    pub(crate) fn create(root: &Path) -> std::io::Result<Self> {
         Builder::new().prefix("source-").tempdir_in(root).map(Self)
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         self.0.path()
     }
 }
@@ -739,7 +739,7 @@ fn podman_import_diagnostic(output: &crate::process::ProcessOutput) -> PodmanImp
     }
 }
 
-fn podman_build_diagnostic(output: &crate::process::ProcessOutput) -> PodmanBuildDiagnostic {
+pub(crate) fn podman_build_diagnostic(output: &crate::process::ProcessOutput) -> PodmanBuildDiagnostic {
     let mut evidence = Vec::with_capacity(output.stdout.len() + output.stderr.len() + 1);
     evidence.extend_from_slice(&output.stdout);
     evidence.push(b'\n');
@@ -1106,7 +1106,7 @@ fn podman_storage_arguments(storage: &Path, runroot: &Path) -> Vec<String> {
     podman_storage_arguments_with_cgroup_manager(storage, runroot, "systemd")
 }
 
-fn podman_storage_arguments_with_cgroup_manager(
+pub(crate) fn podman_storage_arguments_with_cgroup_manager(
     storage: &Path,
     runroot: &Path,
     cgroup_manager: &str,

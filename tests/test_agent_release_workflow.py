@@ -171,7 +171,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
     build_digest = "sha256:" + "b" * 64
     binaries = tmp_path / "binaries"
     binaries.mkdir()
-    for name in ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "oras"):
+    for name in ("vonk-agent", "vonk-agent-helper", "vonk-build-egress", "vonk-runtime-probe", "oras"):
         raw = bytearray(384)
         raw[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
         struct.pack_into("<H", raw, 18, 183)
@@ -179,7 +179,7 @@ def test_built_agent_package_contains_no_site_configuration(tmp_path: Path) -> N
         raw[128 : 128 + len(marker)] = marker
         semantic_marker = b"VONK_AGENT_SEMANTIC_VERSION=0.1.1"
         raw[256 : 256 + len(semantic_marker)] = semantic_marker
-        if name == "vonk-build-egress":
+        if name in {"vonk-build-egress", "vonk-runtime-probe"}:
             struct.pack_into("<Q", raw, 32, 320)
             struct.pack_into("<H", raw, 54, 56)
             struct.pack_into("<H", raw, 56, 1)
